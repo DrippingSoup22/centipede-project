@@ -1,0 +1,64 @@
+<mujoco model="centipede_1">
+  <!-- Isolated trunk review; edit configs/segment.json. -->
+  <compiler angle="degree" autolimits="true" />
+  <option timestep="0.0001" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" tolerance="1e-10" cone="elliptic" />
+  <size nuser_geom="2" nuser_actuator="1" />
+  <statistic center="0 0 0.003" extent="0.035" />
+  <custom>
+    <text name="model_config" data="{&quot;segments&quot;:1,&quot;body&quot;:{&quot;shape&quot;:&quot;rounded_trunk&quot;,&quot;width_m&quot;:0.008,&quot;length_m&quot;:0.0044,&quot;height_m&quot;:0.0034,&quot;mass_kg&quot;:7e-05,&quot;shoulder_y_m&quot;:0.0039,&quot;shoulder_z_m&quot;:-0.0006},&quot;leg&quot;:{&quot;upper_length_m&quot;:0.0046,&quot;lower_length_m&quot;:0.0058,&quot;upper_radius_m&quot;:0.0003,&quot;lower_radius_m&quot;:0.00022,&quot;foot_radius_m&quot;:0.00032,&quot;upper_mass_kg&quot;:3e-06,&quot;lower_mass_kg&quot;:2e-06,&quot;foot_mass_kg&quot;:2e-07,&quot;upper_down_deg&quot;:10,&quot;lower_down_deg&quot;:35,&quot;sweep_range_deg&quot;:[-35,35],&quot;lift_range_deg&quot;:[-25,40],&quot;knee_range_deg&quot;:[-20,50],&quot;torque_nm&quot;:2e-05,&quot;damping_nms&quot;:5e-07,&quot;armature_kgm2&quot;:1e-10},&quot;physics&quot;:{&quot;timestep_s&quot;:0.0001,&quot;gravity_m_s2&quot;:9.81,&quot;friction&quot;:[0.8,0.0001,1e-05],&quot;contact_timeconst_s&quot;:0.0004,&quot;limit_timeconst_s&quot;:0.001,&quot;contact_dampratio&quot;:1.0,&quot;spawn_gap_m&quot;:5e-05}}" />
+  </custom>
+  <default>
+    <joint limited="true" damping="5e-07" armature="1e-10" solreflimit="0.001 1" solimplimit="0.95 0.99 0.001" />
+    <geom friction="0.8 0.0001 1e-05" condim="3" solref="0.0004 1" solimp="0.95 0.99 0.0001" margin="0" contype="1" conaffinity="1" />
+  </default>
+  <visual>
+    <global offwidth="1200" offheight="900" />
+    <map znear="0.005" zfar="30" />
+    <scale jointlength="0.3" jointwidth="0.015" />
+  </visual>
+  <asset>
+    <mesh name="trunk_envelope" inertia="convex" vertex="-0.0022 0 0.00136 -0.0022 0.001296 0.0012682 -0.0022 0.002448 0.0009316 -0.0022 0.00324 0.0003808 -0.0022 0.0036 -0.0003536 -0.0022 0.0036 -0.0009656 -0.0022 0.003312 -0.0014552 -0.0022 0.00252 -0.0017 -0.0022 -0.00252 -0.0017 -0.0022 -0.003312 -0.0014552 -0.0022 -0.0036 -0.0009656 -0.0022 -0.0036 -0.0003536 -0.0022 -0.00324 0.0003808 -0.0022 -0.002448 0.0009316 -0.0022 -0.001296 0.0012682 -0.001848 0 0.0017 -0.001848 0.00144 0.001598 -0.001848 0.00272 0.001224 -0.001848 0.0036 0.000612 -0.001848 0.004 -0.000204 -0.001848 0.004 -0.000884 -0.001848 0.00368 -0.001428 -0.001848 0.0028 -0.0017 -0.001848 -0.0028 -0.0017 -0.001848 -0.00368 -0.001428 -0.001848 -0.004 -0.000884 -0.001848 -0.004 -0.000204 -0.001848 -0.0036 0.000612 -0.001848 -0.00272 0.001224 -0.001848 -0.00144 0.001598 0.001848 0 0.0017 0.001848 0.00144 0.001598 0.001848 0.00272 0.001224 0.001848 0.0036 0.000612 0.001848 0.004 -0.000204 0.001848 0.004 -0.000884 0.001848 0.00368 -0.001428 0.001848 0.0028 -0.0017 0.001848 -0.0028 -0.0017 0.001848 -0.00368 -0.001428 0.001848 -0.004 -0.000884 0.001848 -0.004 -0.000204 0.001848 -0.0036 0.000612 0.001848 -0.00272 0.001224 0.001848 -0.00144 0.001598 0.0022 0 0.00136 0.0022 0.001296 0.0012682 0.0022 0.002448 0.0009316 0.0022 0.00324 0.0003808 0.0022 0.0036 -0.0003536 0.0022 0.0036 -0.0009656 0.0022 0.003312 -0.0014552 0.0022 0.00252 -0.0017 0.0022 -0.00252 -0.0017 0.0022 -0.003312 -0.0014552 0.0022 -0.0036 -0.0009656 0.0022 -0.0036 -0.0003536 0.0022 -0.00324 0.0003808 0.0022 -0.002448 0.0009316 0.0022 -0.001296 0.0012682" smoothnormal="true" />
+    <texture type="skybox" builtin="gradient" width="256" height="1536" rgb1="0.10 0.15 0.20" rgb2="0.35 0.40 0.44" />
+    <texture name="ground" type="2d" builtin="checker" width="512" height="512" rgb1="0.16 0.20 0.23" rgb2="0.20 0.24 0.27" />
+    <material name="ground" texture="ground" texrepeat="80 80" reflectance="0" />
+  </asset>
+  <worldbody>
+    <light pos="0.02 -0.02 0.1" dir="0 0 -1" diffuse="0.9 0.9 0.9" directional="true" castshadow="false" />
+    <geom name="floor" type="plane" size="0.5 0.5 0.001" material="ground" user="-1 0" />
+    <body name="segment_00" pos="0 0 0.0050955249481">
+      <freejoint name="root" />
+      <geom name="segment_00_body" type="mesh" pos="0 0 0" mass="7e-05" rgba="0.34 0.13 0.05 1" user="0 1" mesh="trunk_envelope" />
+      <site name="segment_00_center" pos="0 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+      <body name="segment_00_left_upper" pos="0 0.0039 -0.0006">
+        <joint name="segment_00_left_sweep" type="hinge" axis="0 0 -1" range="-35 35" />
+        <joint name="segment_00_left_lift" type="hinge" axis="1 0 0" range="-25 40" />
+        <geom name="segment_00_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="3e-06" rgba="0.72 0.30 0.07 1" user="0 2" />
+        <body name="segment_00_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+          <joint name="segment_00_left_knee" type="hinge" axis="-1 0 0" range="-20 50" />
+          <geom name="segment_00_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="2e-06" rgba="0.90 0.46 0.10 1" user="0 2" />
+          <geom name="segment_00_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="2e-07" rgba="0.26 0.11 0.035 1" user="0 3" />
+          <site name="segment_00_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+        </body>
+      </body>
+      <body name="segment_00_right_upper" pos="0 -0.0039 -0.0006">
+        <joint name="segment_00_right_sweep" type="hinge" axis="0 0 1" range="-35 35" />
+        <joint name="segment_00_right_lift" type="hinge" axis="-1 0 0" range="-25 40" />
+        <geom name="segment_00_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="3e-06" rgba="0.72 0.30 0.07 1" user="0 2" />
+        <body name="segment_00_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+          <joint name="segment_00_right_knee" type="hinge" axis="1 0 0" range="-20 50" />
+          <geom name="segment_00_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="2e-06" rgba="0.90 0.46 0.10 1" user="0 2" />
+          <geom name="segment_00_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="2e-07" rgba="0.26 0.11 0.035 1" user="0 3" />
+          <site name="segment_00_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="segment_00_left_sweep_motor" joint="segment_00_left_sweep" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_left_lift_motor" joint="segment_00_left_lift" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_left_knee_motor" joint="segment_00_left_knee" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_sweep_motor" joint="segment_00_right_sweep" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_lift_motor" joint="segment_00_right_lift" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_knee_motor" joint="segment_00_right_knee" gear="2e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+  </actuator>
+</mujoco>
