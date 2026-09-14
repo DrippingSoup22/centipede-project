@@ -3,6 +3,7 @@
 .ruff_cache/
 __pycache__/
 *.py[cod]
+*.egg-info/
 
 # Generated experiment outputs stay local unless deliberately archived.
 /runs/

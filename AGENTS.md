@@ -5,7 +5,8 @@
 - Read this file before making changes. Use `README.md` for the project goals,
   current status, folder layout, and documentation index.
 - Read the relevant design documents before working on their areas:
-  `docs/model.md`, `docs/control.md`, and `docs/environment.md`.
+  `docs/plan.md`, `docs/model.md`, `docs/control.md`, and
+  `docs/environment.md`.
 - Keep this file limited to working instructions and project boundaries.
   Put model, agent/network, environment, reward, and experiment design in the
   appropriate document, not here.
@@ -30,37 +31,51 @@
   making changes. Wait for the user to explicitly request each commit and push so
   the project can be reviewed and cleaned first.
 
+## Authorship and university review
+
+- The user owns and writes the core reinforcement-learning implementation. Focus
+  on discussing designs, explaining tradeoffs, reviewing the user's work, and
+  helping with small, explicitly requested edits. Do not implement substantial
+  environment, training, agent, or experiment components unless the user clearly
+  asks for that exception.
+- The completed MuJoCo model is an accepted exception because physical-model
+  construction is supporting work rather than the academic focus of the project.
+  Do not use that exception as precedent for generating the learning system.
+- Treat current design documents as working references. The user plans to rewrite
+  the final university-facing documentation in their own voice. Help organize,
+  check, and refine it without silently replacing the user's authorship.
+- Documentation intended for the repository must be complete, readable without
+  conversation history, visually orderly, and written in natural human prose.
+  Prefer a few clearly owned documents over fragmented notes, and keep accepted
+  decisions distinct from proposals and unresolved questions.
+- Minor Codex-created scripts, drafts, or diagnostics are temporary unless the
+  user accepts them as project deliverables. After they serve their purpose, move
+  meaningful ones to the ignored local `archive/` and remove disposable ones
+  during the pre-commit cleanup review.
+
 ## Decisions and documentation
 
 - Work incrementally within the user's current request. Do not implement future
   stages simply because they appear in a plan or the project goals.
-- The eight-unit active-yaw assembly is frozen as the v1 flat-ground physical
-  baseline. Its canonical active artifact is `models/assembly.xml`. The isolated
-  head/trunk XML models remain as model references. Generators, source
-  configurations, tests, and validation evidence are preserved under `archive/`
-  and are inactive unless the user explicitly reopens model development.
-- Do not change v1 morphology, mass, inertia, contacts, joint physics, timestep,
-  or actuator set during environment or learning work. A necessary physical
-  change must become a separately named version with new validation artifacts.
+- Treat `models/assembly.xml` as the frozen v1 physical baseline described in
+  `docs/model.md`. Do not change it during environment or learning work. A
+  necessary physical change must become a separately named version with new
+  validation artifacts and explicit user agreement.
+- Let experiment configuration select the accepted model file. The simulation
+  loads that file once during construction and derives and caches its model
+  dimensions, controlled segment IDs, and named mappings from the compiled
+  MuJoCo model. Keep eight segments as the v1 configuration, not an immovable
+  assumption inside the reusable simulation class.
+- When an accepted model version changes a named joint, actuator, body, geometry,
+  or site used by the environment, update its semantic mapping, documentation,
+  and schema tests in the same reviewed change. Never let environment mappings
+  silently refer to an earlier XML contract.
 - For model revisions, review a small visual/geometry prototype with the user
   before adopting the shape and doing broader physics tuning. Passing mechanical
   checks alone does not settle appearance or biological resemblance.
-- A fully passive-yaw spine is a possible later comparison, not an unresolved v1
-  requirement. Do not change the v1 actuator set in place.
-- In the first learning stage, keep all spine-yaw motor commands at zero and do
-  not expose spine actions or state to the agents. This disables learned spine
-  control while retaining the frozen XML's passive joint physics. Later active
-  spine control is an environment/policy version change.
-- Fix the initial neighbor observation radius at one. Include only existing
-  immediate chain neighbors; do not add padding or masks for missing end
-  neighbors. Independent agent networks may use different observation sizes.
-- Keep leg-leg collisions enabled. Do not shrink joint ranges, add collision
-  exclusions, or impose coupled action clamps solely to prevent legs touching;
-  coordination must remain part of the agents' problem. Any contact reward is a
-  separate environment decision and must not be hidden in model mechanics.
-- Expose one leg-leg contact flag per segment and apply an agreed local penalty
-  to each participating segment learner. Contact aggregation and penalty weight
-  remain unresolved environment decisions.
+- Treat `docs/control.md` and `docs/environment.md` as the authoritative sources
+  for accepted first-version interfaces and unresolved choices. Do not copy their
+  detailed constants into this file or implement later variants early.
 - Distinguish confirmed requirements, proposals, assumptions, and measured results.
   Discuss consequential design choices before implementing them. Do not silently
   turn recommendations or general approval of a plan into fixed parameter choices.
@@ -74,6 +89,36 @@
 ## Implementation and verification
 
 - Check library compatibility before selecting an implementation approach.
+- Base the simulation layer on Gymnasium's `MujocoEnv` and expose simultaneous
+  segment interaction through PettingZoo's `ParallelEnv`. Use Ant as a reference,
+  but do not subclass `AntEnv`: its single-agent observation, reward, and health
+  semantics do not match this project.
+- Compose one public `ParallelEnv` around one small internal `MujocoEnv`; do not
+  combine the framework classes through multiple inheritance. Let `MujocoEnv`
+  own XML loading, model/data state, stepping, frame skipping, rendering, and
+  cleanup. Keep targets, partial observations, per-agent rewards, and task episode
+  rules in the parallel environment or its pure helpers.
+- Use Gymnasium `Box` spaces for every segment's action and observation space.
+  Validate the public task with PettingZoo's parallel API test and the internal
+  simulation with focused physics tests. Do not invent a duplicate single-agent
+  task contract merely to run Gymnasium's full environment checker. MaMuJoCo is
+  a composition reference, not an initial dependency.
+- Implement identifiers, spaces, action ordering, actuator mapping, and control
+  timing from the accepted contract in `docs/control.md`; never infer the policy
+  mapping from XML order or silently clip public actions.
+- Validate each input or invariant once at its owning boundary, then pass a
+  trusted internal representation downstream. Do not duplicate public action,
+  XML mapping, configuration, observation, or reward checks across components.
+  Fail at the owner instead of silently repairing invalid values later.
+- Keep controlled fixtures, invalid-input cases, focused simulation checks, and
+  PettingZoo API tests under `tests/`. Production modules must never import test
+  or diagnostic helpers. The runner should trust the public environment contract,
+  while the parallel environment trusts the initialized simulation mapping after
+  its one-time schema validation.
+- Follow the state and data ownership table in `docs/plan.md`. In particular,
+  keep episode rules in the environment, PPO-window cutoffs in the coordinator,
+  learner normalization in `RL_lib`, and configuration/run artifacts in the
+  experiment application.
 - Treat `../RL_lib/src/rl_lib` as the reusable library boundary. Reuse its public
   algorithms, data types, models, policies, normalization, and generic utilities;
   do not import application code from `../RL_lib/experiments`.

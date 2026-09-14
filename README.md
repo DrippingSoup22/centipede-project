@@ -1,7 +1,8 @@
 # Centipede
 
-A cooperative reinforcement-learning project using MuJoCo for simulation and
-the shared `../RL_lib` project for learning algorithms.
+A cooperative reinforcement-learning project using Gymnasium and MuJoCo for
+simulation, PettingZoo for the parallel multi-agent interface, and the shared
+`../RL_lib` project for learning algorithms.
 
 ## Goals
 
@@ -30,17 +31,24 @@ V1 has:
 
 The frozen XML SHA-256 is
 `92143cf54b030856e436a1de6f4333c327ffb9a5f812a0e4a0b4c4aed107d50e`.
-The RL_lib compatibility audit is complete. Its continuous PPO core already
-provides the generic learning operations needed by eight independent segment
-learners. Centipede must now define its own environment and experiment runner;
-no learned policy exists yet.
+The RL_lib compatibility audit and the Stage 1 environment contract are complete.
+Stage 2 is also complete: the internal MuJoCo simulation and public PettingZoo
+parallel environment are implemented and covered by focused tests. Stage 3 will
+validate the observation and reward behavior more deeply; no learned policy
+exists yet.
+
+The agreed environment stack uses a small internal Gymnasium `MujocoEnv` for the
+physical simulation and rendering. A public PettingZoo `ParallelEnv` wraps it to
+expose simultaneous actions, partial observations, and separate rewards for the
+eight segment agents. MaMuJoCo is retained only as a design reference.
 
 ## Documentation
 
-The active design is intentionally limited to three documents:
+The active design is intentionally limited to four documents:
 
 | File | Owns |
 | --- | --- |
+| [`docs/plan.md`](docs/plan.md) | Development stages, component boundaries, and completion gates |
 | [`docs/model.md`](docs/model.md) | Frozen body, joints, mass, contacts, simulation settings, and validation |
 | [`docs/control.md`](docs/control.md) | Segment agents, observations, action ownership, networks, and training architecture |
 | [`docs/environment.md`](docs/environment.md) | Targets, episodes, rewards, curriculum, and evaluation |
@@ -51,17 +59,30 @@ The active design is intentionally limited to three documents:
 
 ```text
 Centipede/
-|-- docs/       The three active design documents
+|-- configs/    Versioned experiment configurations
+|-- docs/       The four active design documents
 |-- models/     Frozen MuJoCo XML models
+|-- src/        Installable Centipede Python package
+|-- tests/      Public behavior and boundary checks
 |-- tools/      Small project utilities
+|-- runs/       Ignored training and evaluation outputs
+|-- pyproject.toml  Package, dependency, and tool configuration
 |-- .gitignore  Local and generated-file exclusions
 |-- AGENTS.md   Working instructions for Codex
 `-- README.md   Project overview
 ```
 
 Reusable RL functionality belongs in `../RL_lib`; centipede-specific code stays
-here. A root-level `runs/` directory will be created when training begins and is
-reserved for training and evaluation results, consistent with `RL_lib`.
+here. The root-level `runs/` directory is reserved for ignored training and
+evaluation results, consistent with `RL_lib`. The local `archive/` directory is
+also ignored and intentionally absent from the published structure.
+
+The sibling RL library is installed separately in editable mode during local
+development because it is not a published package dependency:
+
+```powershell
+python -m pip install -e ..\RL_lib
+```
 
 ## Model files
 

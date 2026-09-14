@@ -25,55 +25,76 @@ the task, rewards, and evaluation considerations.
   navigation target. Target arrival gives a shared reward to all agents.
 - Every segment uses separate policy and value networks and learns only from its
   own rollout samples. Parameter sharing, centralized critics, pooled losses, and
-  direct network communication are prohibited. Allocation of any additional
-  reward terms and detailed optimization settings remain open.
+  direct network communication are prohibited. Detailed optimization settings
+  remain open.
 
-## Initial observation contract
+## First-version observation contract
 
-Define one complete segment-state block containing:
+The observation follows the useful parts of Gymnasium's Ant convention: body
+pose and joint positions form a `qpos`-like group, while body and joint velocities
+form a `qvel`-like group. External contact-force arrays are deliberately omitted.
+MuJoCo uses SI units, and all final observations are flat `float32` arrays.
 
-- Six leg-joint positions and six leg-joint velocities.
-- Body coordinates and orientation relative to the agreed reference frame.
-- Body linear and angular velocity expressed in the segment's local frame.
-- One left-foot and one right-foot ground-contact flag.
-- One main-body ground-contact flag.
-- One leg-to-leg contact flag for the segment.
+### Complete segment block
 
-Each agent receives the **entire block**, including all flags, for itself and for
-every immediate existing neighbor at radius one. Therefore, an interior agent
-observes three complete blocks: ahead, self, and behind. The head and rear each
-observe two complete blocks because they have only one existing neighbor. No
-padding or mask is added. Neighbor joint positions, joint velocities, body
-coordinates, body linear and angular velocities, foot contacts, body contact, and
-leg-leg contact are all observable; neighbor information is not reduced to body
-motion alone.
+Every segment contributes the same 27-value block. Its fields appear in this
+fixed order:
 
-No spine position, velocity, actuator, or contact field is included initially.
-The exact body-coordinate/orientation reference frame and contact sampling
-semantics (instantaneous versus any contact during the preceding control
-interval) still need to be selected before implementation.
+| Range | Size | Meaning | Frame and unit |
+| --- | ---: | --- | --- |
+| `0` | 1 | Main-body height | World vertical position, metres |
+| `1:5` | 4 | Main-body orientation quaternion `(w, x, y, z)` | Body orientation relative to the world |
+| `5:11` | 6 | Leg-joint angles | Radians, in the action order below |
+| `11:14` | 3 | Main-body linear velocity | Segment-local frame, metres per second |
+| `14:17` | 3 | Main-body angular velocity | Segment-local frame, radians per second |
+| `17:23` | 6 | Leg-joint angular velocities | Radians per second, in the action order below |
+| `23` | 1 | Left-foot ground contact | `0.0` or `1.0` |
+| `24` | 1 | Right-foot ground contact | `0.0` or `1.0` |
+| `25` | 1 | Main-body ground contact | `0.0` or `1.0` |
+| `26` | 1 | Leg-to-leg contact involving this segment | `0.0` or `1.0` |
 
-The leg-to-leg flag identifies whether a leg owned by that segment participates
-in a leg-leg collision. It will support a local penalty for that learner. Leg
-collisions remain physically enabled; the flag reports their result rather than
-preventing the action. The penalty weight and whether the flag records contact
-onset, duration, or any contact within one control interval remain open.
+The six joint fields always use left shoulder sweep, left shoulder lift, left
+knee, right shoulder sweep, right shoulder lift, and right knee order. Global
+body `x` and `y` are excluded from policy observations. A quaternion contains one
+orientation represented by four components; its components are not four angles.
 
-## Target observation proposal (not yet finalized)
+Each contact value describes the final MuJoCo state after the completed 20 ms
+environment transition. A contact that persists remains active on every step.
+Leg collisions remain physically enabled. No spine position, velocity, action,
+or contact field is exposed in the first version.
 
-- The user favors giving the head exact target coordinates initially, avoiding
-  the complexity of antenna-like perception. Limited perception remains a
-  possible later extension, not a current implementation requirement.
-- Assistant recommendation: give the head the planar displacement to the target
-  expressed in its heading frame (forward and lateral components). This preserves
-  exact target information relative to the head without requiring it to learn
-  world-coordinate subtraction and rotation. This representation is a proposal.
-- An equivalent alternative is planar distance plus signed bearing. Distance
-  alone is insufficient because it does not tell the head which direction leads
-  to the target.
-- Assistant recommendation: initially provide the target signal only to the head;
-  other agents use agreed local environment observations to support it. Agents do
-  not transmit target information or learned messages through their networks.
+### Visible blocks and dimensions
+
+An observation always begins with the observing segment's own complete block.
+It then contains the immediate existing neighbor ahead and finally the immediate
+existing neighbor behind. Radius one is fixed; absent end neighbors are neither
+padded nor represented by masks.
+
+| Agent | Block order | Additional values | Shape |
+| --- | --- | --- | ---: |
+| Head `0` | self `0`, behind `1` | target forward, target lateral | `(56,)` |
+| Interior `1`-`6` | self `i`, ahead `i-1`, behind `i+1` | none | `(81,)` |
+| Rear `7` | self `7`, ahead `6` | none | `(54,)` |
+
+The declared spaces are unbounded Gymnasium boxes with the corresponding shape
+and `float32` dtype. The environment performs one conversion from MuJoCo's
+internal `float64` values when it assembles each output. Observation scaling and
+normalization belong to the individual learners, not the environment.
+
+### Head target values
+
+Only the head receives target information. The two appended values are the
+planar displacement from the `head_tip` site to the target, rotated into the
+head's yaw frame:
+
+- **forward:** positive in front of the head and negative behind it;
+- **lateral:** positive to the head's left and negative to its right.
+
+Both are measured in metres. They fully locate the target in the head's planar
+frame without prescribing an action or turn. Followers receive no target field,
+target-derived reward, learned message, or other direct target information.
+Distance-only sensing and antenna-like limited perception remain possible later
+experiments, not part of this interface.
 
 ## Network and training architecture
 
@@ -89,10 +110,123 @@ copying the same scalar reward to each independent learner; it does not combine
 their losses or data. Network sizes, recurrence, and observation history remain
 open, but any later choice must preserve independent learning.
 
+The environment emits raw observations in its declared spaces. Observation
+normalization belongs to each independent `RL_lib` learner and is never performed
+by the environment. Evaluation restores each learner's saved normalization state
+and must not update it.
+
 Use the reusable package under `../RL_lib/src/rl_lib` for algorithms, data types,
 models, policies, normalization, and related generic utilities. Do not import or
 adapt the runners under `../RL_lib/experiments`; Centipede owns its complete
 experiment application.
+
+## Parallel environment interface
+
+The public task environment follows PettingZoo's `ParallelEnv` contract. It has
+eight stable integer segment identifiers, `0` through `7`, ordered from head to
+rear and retained for the complete episode. Thus `possible_agents` is
+`[0, 1, 2, 3, 4, 5, 6, 7]`. A call to `step()`
+receives a dictionary containing one six-value action for every segment and
+returns dictionaries of observations, rewards, terminations, truncations, and
+information keyed by the same identifiers. No agent takes a physics step before
+another; the environment assembles all actions and advances the shared model once.
+
+Every per-agent action space is a Gymnasium `Box` with shape `(6,)`, `float32`
+values, and normalized bounds `[-1, 1]`. The public action spaces intentionally
+omit the seven spine-yaw actuators. The internal `MujocoEnv` simulation expands
+the 48 enabled leg commands into the model's 55-value control vector and writes
+zero to each spine actuator.
+
+The six entries for every segment have this fixed order:
+
+| Index | Actuator role |
+| ---: | --- |
+| 0 | Left shoulder sweep |
+| 1 | Left shoulder lift |
+| 2 | Left knee |
+| 3 | Right shoulder sweep |
+| 4 | Right shoulder lift |
+| 5 | Right knee |
+
+### Action validation
+
+Before changing MuJoCo control state, `step()` must validate the complete action
+dictionary:
+
+- Its keys are exactly the eight active segment IDs; missing or unknown agents
+  are errors.
+- Every value is numeric, can be represented as `float32`, and has shape `(6,)`.
+- Every component is finite and lies within the closed interval `[-1, 1]`.
+- Invalid input raises a clear exception before any physics step occurs.
+- Actions are not silently clipped. Clipping would hide policy or runner errors
+  and could make the action executed by MuJoCo differ from the action stored for
+  PPO probability calculations.
+
+This is the only Centipede runtime boundary that validates the eight-agent action
+dictionary. After it succeeds, the environment passes a trusted 48-value leg
+vector inward. The rollout coordinator and reward or observation helpers must not
+repeat these checks. Gymnasium may still enforce its own control-vector shape at
+the library boundary when the simulation receives the assembled 55-value vector.
+
+### Actuator discovery and mapping
+
+Do not depend on actuator order in the XML. At initialization, construct the six
+expected names for each segment using the canonical pattern
+`segment_{id:02d}_{side}_{role}_motor`, resolve each with MuJoCo's name lookup,
+and cache the resulting actuator IDs in the fixed action order above.
+
+Store the leg result as a two-dimensional `(N, 6)` table indexed by
+`[segment_id, action_index]`, where `N` is derived from the controlled segment
+owners in the model loaded at construction. For example, `[3, 4]` means segment
+3's right shoulder-lift actuator. This is the human-facing fixed mapping: the two
+indices keep segment and joint role separate and the role table above gives every
+action index a name. Do not encode both meanings into decimal values such as
+`34`, which would create a second identifier system unrelated to MuJoCo's numeric
+IDs. For the v1 configuration, `N` is eight and the table shape is `(8, 6)`.
+
+Use `model.actuator_user[:, 0]` as an independent ownership check: every resolved
+leg or yaw actuator must contain the same segment ID as its name. Also verify
+that each actuator targets the expected named joint, has a limited `[-1, 1]`
+control range, and occurs exactly once. Initialization fails if an expected
+actuator is missing, duplicated, assigned to another segment, or if any of the
+model's 55 actuators is unclassified. This combines readable semantic names with
+explicit XML ownership metadata and remains safe if XML element order changes.
+
+These model-schema checks run once while `CentipedeSimulation` is initialized.
+They are not repeated on every action. The cached mapping is trusted for the
+lifetime of that loaded model.
+
+Any accepted XML version that changes a name or actuator contract must update
+this mapping and its schema tests in the same reviewed change. Name resolution at
+startup is deliberately retained: 55 one-time lookups have no meaningful cost
+relative to simulation, while they prevent a reordered XML file from silently
+changing policy action ownership.
+
+The joint control vector begins as 55 zeros. The cached mapping fills only the 48
+leg actuator positions. The seven actuators named `segment_01_yaw_motor` through
+`segment_07_yaw_motor` are verified but remain zero.
+
+### Control interval
+
+The accepted first-version `frame_skip` is 200. Gymnasium defines the duration of
+one `MujocoEnv` step as `model.opt.timestep * frame_skip`; therefore the frozen
+`0.0001 s` physics timestep produces a `0.02 s` control interval and a 50 Hz
+agent decision frequency. PettingZoo adds no separate physical-time convention:
+one parallel step is this same joint control transition for all eight agents.
+
+If `render_fps` is declared for the Gymnasium simulation, set it to 50 so it
+matches the control interval. Ordinary training remains unrendered. The 200-step
+choice must receive a deterministic runtime and stability check in Stage 2; any
+later change is an experiment configuration change because it alters control and
+reward timing.
+
+Every observation space is the Gymnasium `Box` defined by the first-version
+observation contract above. The observation builder, rather than the Gymnasium
+simulation class, owns the exact partial-observation layout.
+
+The PettingZoo environment is an application boundary, not a communication
+mechanism between policies. Its dictionaries route independent values by agent;
+they do not imply shared networks, buffers, gradients, or losses.
 
 ## Prototype spine action mapping
 
@@ -108,20 +242,21 @@ without creating another physical model. Spine state is omitted from the first
 observation contract; adding controlled yaw later remains an environment and
 policy-interface change, not an in-place model edit.
 
-The model's 0.1 ms physics timestep is not the future policy decision interval.
-The environment should hold each action for an agreed integer number of physics
-steps and compute elapsed-time reward terms from the resulting control interval.
-That interval remains undecided; do not run neural inference at 10 kHz merely
-because the physics engine integrates at that rate.
+The model's 0.1 ms physics timestep is not the policy decision interval. The
+environment holds each action for 200 physics steps and computes elapsed-time
+reward terms from the resulting 20 ms control interval. Neural inference occurs
+at 50 Hz, not at the 10 kHz physics integration rate.
 
-Each non-head segment owns its connection to the preceding segment as well as
-its six leg motors. This gives 6N + (N-1) motors: 55 for N=8. The head has six
-actions and the other segments seven; passive pitch has no motor.
+At the physical-model level, each non-head segment owns its connection to the
+preceding segment as well as its six leg motors. This gives 6N + (N-1) motors: 55
+for N=8. At the initial policy boundary, however, every segment exposes exactly
+six leg actions and all seven physical spine-yaw motors remain zero. Passive
+pitch has no motor.
 
-`actuator_user[:, 0]` stores the owning segment. The future environment should
-read actuator names, indices, joint coordinates, and torque limits directly from
-the loaded MuJoCo model rather than assume joint indices match action indices. All
-controls are normalized to [-1, 1]; the XML motor gear scales them to physical torque.
+`actuator_user[:, 0]` stores the owning segment. The environment reads actuator
+names, indices, joint coordinates, and torque limits directly from the loaded
+MuJoCo model rather than assuming joint indices match action indices. All controls
+are normalized to [-1, 1]; the XML motor gear scales them to physical torque.
 For the active assembly the hard scales are 8 micro-N m for shoulder sweep,
 18 for shoulder lift, 10 for knee, and 15 for spine yaw. These are physical-model
 parameters documented and validated in `model.md`, not policy output biases.
@@ -197,6 +332,11 @@ samples for that window have been collected. At the boundary, each learner is
 updated from its own buffer. Synchronizing when collection stops and updates
 begin does not share information; it prevents some agents from changing policy
 while other agents are still collecting the same window.
+
+The coordinator may hold these eight buffers in a dictionary keyed by segment ID;
+separate ownership does not require eight custom runner or buffer classes. It
+routes transitions and triggers updates but does not recompute environment
+termination, truncate the episode at a rollout boundary, or implement PPO math.
 
 For a true terminal state, each learner uses zero final value and
 `terminated=True`. At a time limit or ordinary rollout cutoff, each learner uses
