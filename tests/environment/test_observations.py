@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from centipede.observations import (
+from centipede.environment.observations import (
     HEAD_OBSERVATION_SIZE,
     INTERIOR_OBSERVATION_SIZE,
     REAR_OBSERVATION_SIZE,
@@ -19,9 +19,9 @@ from centipede.observations import (
     build_segment_block,
     head_target_displacement,
 )
-from centipede.simulation import CentipedeSimulation, PhysicalSnapshot
+from centipede.environment.simulation import CentipedeSimulation, PhysicalSnapshot
 
-MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "assembly.xml"
+MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "assembly.xml"
 
 
 @pytest.fixture
@@ -44,9 +44,7 @@ def controlled_snapshot() -> PhysicalSnapshot:
         body_ground_contact=np.array(
             [False, False, True, True, False, False, True, True]
         ),
-        leg_leg_contact=np.array(
-            [True, True, False, False, True, True, False, False]
-        ),
+        leg_leg_contact=np.array([True, True, False, False, True, True, False, False]),
         head_tip_position=np.array([300.0, 301.0, 302.0]),
     )
 
@@ -102,9 +100,7 @@ def snapshot_with_head_pose(
 ) -> PhysicalSnapshot:
     """Return a snapshot with a normalized yaw-only head orientation."""
     quaternions = snapshot.body_quaternion.copy()
-    quaternions[0] = np.array(
-        [np.cos(yaw / 2.0), 0.0, 0.0, np.sin(yaw / 2.0)]
-    )
+    quaternions[0] = np.array([np.cos(yaw / 2.0), 0.0, 0.0, np.sin(yaw / 2.0)])
     head_tip = np.array([head_tip_xy[0], head_tip_xy[1], 1.0])
     return replace(snapshot, body_quaternion=quaternions, head_tip_position=head_tip)
 
@@ -159,8 +155,7 @@ def test_build_observations_uses_complete_partial_layout(
     snapshot = snapshot_with_head_pose(controlled_snapshot, yaw=0.0)
     target = np.array([12.0, -1.0])
     blocks = {
-        segment_id: build_segment_block(snapshot, segment_id)
-        for segment_id in range(8)
+        segment_id: build_segment_block(snapshot, segment_id) for segment_id in range(8)
     }
 
     observations = build_observations(snapshot, target)
@@ -188,10 +183,7 @@ def test_build_observations_uses_complete_partial_layout(
 
     expected_shapes = {
         0: (HEAD_OBSERVATION_SIZE,),
-        **{
-            segment_id: (INTERIOR_OBSERVATION_SIZE,)
-            for segment_id in range(1, 7)
-        },
+        **{segment_id: (INTERIOR_OBSERVATION_SIZE,) for segment_id in range(1, 7)},
         7: (REAR_OBSERVATION_SIZE,),
     }
     for segment_id, observation in observations.items():

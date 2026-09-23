@@ -5,6 +5,7 @@ state: agents, spaces, target generation, episode timing, partial observations,
 rewards, endings, and diagnostic information.
 """
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -13,25 +14,31 @@ from gymnasium import spaces
 from numpy.typing import NDArray
 from pettingzoo import ParallelEnv
 
-from centipede.observations import (
+from centipede.environment.observations import (
     SEGMENT_BLOCK_SIZE,
     build_observations,
 )
-from centipede.rewards import (
+from centipede.environment.rewards import (
     DEFAULT_REWARD_CONFIG,
     RewardConfig,
     RewardTerms,
     calculate_reward_terms,
 )
-from centipede.simulation import CentipedeSimulation, PhysicalSnapshot
+from centipede.environment.simulation import CentipedeSimulation, PhysicalSnapshot
 
+# Public PettingZoo types: integer segment IDs and float32 policy arrays.
 AgentID = int
 Observation = NDArray[np.float32]
 Action = NDArray[np.float32]
 
+# Targets begin close to the head and within a narrow forward-facing wedge.
 TARGET_DISTANCE_RANGE_M = (0.010, 0.020)
 TARGET_BEARING_LIMIT_RAD = np.deg2rad(15.0)
+
+# The head reaches a point when it enters this planar tolerance radius.
 ARRIVAL_RADIUS_M = 0.001
+
+# At 50 control transitions per second, 1,000 steps give a 20-second episode.
 DEFAULT_MAX_EPISODE_STEPS = 1_000
 
 
@@ -43,17 +50,20 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
     PettingZoo dictionaries for every active segment.
     """
 
+    # PettingZoo uses this metadata to identify the task and supported rendering.
     metadata = {
         "name": "centipede_v0",
         "render_modes": ["human", "rgb_array", "depth_array"],
         "render_fps": 50,
     }
 
+    # PettingZoo lifecycle and model-derived per-agent interfaces.
     simulation: CentipedeSimulation
     possible_agents: list[AgentID]
     agents: list[AgentID]
     observation_spaces: dict[AgentID, spaces.Space[Observation]]
     action_spaces: dict[AgentID, spaces.Space[Action]]
+    # Task state established by reset and advanced by each public transition.
     target_position: NDArray[np.float64] | None
     previous_snapshot: PhysicalSnapshot | None
     episode_steps: int
@@ -151,8 +161,8 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
         """Begin an episode with independent physical and target randomness.
 
         Reset restores all agents, resets physics, samples one nearby target,
-        records the initial snapshot, and returns observations and empty task
-        information. The same public seed must reproduce the same episode.
+        records the initial snapshot, and returns observations and initial
+        head-target distance. The same seed must reproduce the same episode.
         """
         # PettingZoo permits callers to supply an options dictionary. Version 1
         # defines no option-controlled reset behavior, so accepting it has no
@@ -184,9 +194,13 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
         self.previous_snapshot = snapshot
         self.target_position = target
 
-        # Reset publishes policy observations but no rewards or task diagnostics.
+        # Reset publishes policy observations and the initial navigation distance.
+        # Followers receive no target information, even in diagnostic infos.
         observations = build_observations(snapshot, target)
         infos = {agent: {} for agent in self.agents}
+        infos[self.possible_agents[0]]["target_distance_m"] = float(
+            np.linalg.norm(snapshot.head_tip_position[:2] - target)
+        )
 
         return observations, infos
 
@@ -206,8 +220,7 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
         timeout, calculate every agent's reward, and remove all agents together
         when the episode ends.
         """
-        # A transition needs the state established by reset. Keeping local
-        # references also narrows these optional attributes for type checkers.
+        # A transition needs the target and physical history established by reset.
         previous_snapshot = self.previous_snapshot
         target_position = self.target_position
 
@@ -263,6 +276,12 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
             target_reached=target_reached,
             episode_end=episode_end,
         )
+        infos[self.possible_agents[0]]["head_step_distance_m"] = float(
+            np.linalg.norm(
+                current_snapshot.head_tip_position[:2]
+                - previous_snapshot.head_tip_position[:2]
+            )
+        )
 
         # Retain the final snapshot for inspection and as transition history when
         # the episode continues. Clear agents only after all final outputs exist.
@@ -274,7 +293,7 @@ class CentipedeParallelEnv(ParallelEnv[AgentID, Observation, Action]):
 
     def _validate_actions(
         self,
-        actions: dict[AgentID, Action],
+        actions: Mapping[AgentID, np.ndarray],
     ) -> NDArray[np.float32]:
         """Validate the complete public action dictionary before physics changes.
 

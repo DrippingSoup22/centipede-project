@@ -8,9 +8,14 @@ segment agent is allowed to observe.
 import numpy as np
 from numpy.typing import NDArray
 
-from centipede.simulation import PhysicalSnapshot
+from centipede.environment.simulation import PhysicalSnapshot
 
+# One segment contributes 23 physical values and four contact flags.
 SEGMENT_BLOCK_SIZE = 27
+
+# Observation sizes follow the fixed radius-one visibility rule. The head and
+# rear have one neighbor, interior segments have two, and only the head adds
+# the two-value target displacement.
 HEAD_OBSERVATION_SIZE = 56
 INTERIOR_OBSERVATION_SIZE = 81
 REAR_OBSERVATION_SIZE = 54
@@ -27,6 +32,8 @@ def build_segment_block(
     included because it exists only for task and reward calculations.
     """
 
+    # Contact flags follow the physical values so neighboring agents receive
+    # the same complete block when this segment is visible to them.
     contacts = np.array(
         [
             snapshot.left_foot_ground_contact[segment_id],
@@ -93,6 +100,7 @@ def build_observations(
 
     segment_count = len(snapshot.body_height)
 
+    # Build each segment block once even though adjacent observations reuse it.
     blocks = {
         segment_id: build_segment_block(snapshot, segment_id)
         for segment_id in range(segment_count)

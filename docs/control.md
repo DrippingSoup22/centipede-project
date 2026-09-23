@@ -107,8 +107,8 @@ policy, shared loss, or learned communication channel.
 The agents interact only through the shared MuJoCo dynamics, their permitted
 environment observations, and agreed reward signals. A shared team reward means
 copying the same scalar reward to each independent learner; it does not combine
-their losses or data. Network sizes, recurrence, and observation history remain
-open, but any later choice must preserve independent learning.
+their losses or data. Any later architecture change must preserve independent
+learning.
 
 The environment emits raw observations in its declared spaces. Observation
 normalization belongs to each independent `RL_lib` learner and is never performed
@@ -119,6 +119,47 @@ Use the reusable package under `../RL_lib/src/rl_lib` for algorithms, data types
 models, policies, normalization, and related generic utilities. Do not import or
 adapt the runners under `../RL_lib/experiments`; Centipede owns its complete
 experiment application.
+
+### First PPO integration configuration
+
+The Phase 4 baseline uses separate two-layer `(64, 64)` ReLU actors and critics.
+Each actor is a tanh-squashed Gaussian with six global trainable standard
+deviations initialized to `0.5`. Actor and critic each use an independent Adam
+optimizer with learning rate `3e-4` and no weight decay. No learning-rate
+scheduler is active in Phase 4; cosine decay remains a later training proposal.
+
+Each learner owns a running `ObservationNormalizer` with epsilon `1e-8` and
+output clipping at `10.0`. A raw observation updates only its segment's running
+statistics when it is used to select a training action. Rollouts store the exact
+normalized observation used for sampling. Bootstrap and evaluation observations
+use the saved statistics without updating them.
+
+The first rollout and update settings are:
+
+| Setting | Value |
+| --- | ---: |
+| Steps per environment | `256` |
+| Discount factor | `0.999` |
+| GAE lambda | `0.95` |
+| PPO clip ratio | `0.2` |
+| Update epochs | `4` |
+| Minibatch size | `64` |
+| Maximum gradient norm | `0.5` |
+| Entropy coefficient | `0.001` |
+
+An environment replica is a data collector, not another set of policies. With
+`E` replicas, each segment learner receives `256 * E` samples per update. GAE is
+calculated separately for every uninterrupted environment-agent trajectory
+fragment before fragments from the same segment are concatenated. Samples,
+advantages, normalizers, gradients, and losses are never combined across segment
+IDs.
+
+Phase 4 learner checkpoints contain all eight actors, critics, optimizers,
+normalizers, PPO shuffle states, configurations, dimensions, and training
+counters in one synchronized bundle. They are created only after completed PPO
+updates and exclude rollout samples, live MuJoCo state, targets, and unfinished
+episodes. The initial untrained policies require evaluation metrics, not a routine
+zero-percent checkpoint.
 
 ## Parallel environment interface
 
@@ -301,6 +342,7 @@ smallest project extension here using the library component as its base.
 | Bounded continuous PPO | Implemented with a tanh-squashed diagonal Gaussian and correct latent-action probability evaluation. |
 | Six-value leg actions | Supported by arbitrary fixed-size Gaussian policy outputs and finite per-component bounds. |
 | Independent learners | Supported by constructing eight separate PPO objects with separate models, optimizers, normalizers, seeds, and samples. |
+| Rollout representation | `EpisodeStep` and `rollout_arrays` store and validate normalized observations, environment actions, latent continuous-policy actions, rewards, and the final state. Centipede only adds the frozen log probabilities and values required by PPO. |
 | Partial-rollout updates | Already supported by the algorithm primitives: `PPO.update` accepts arbitrary fixed batches, `PPO.state_value` supplies a boundary bootstrap, and `generalized_advantage_estimates` handles terminal versus nonterminal boundaries. |
 | PPO minibatch reuse | Implemented with frozen old log probabilities and targets, full-batch advantage normalization, shuffled epochs, and minibatches. |
 | Deterministic evaluation actions | Implemented by selecting the bounded Gaussian mean. |
@@ -334,9 +376,12 @@ begin does not share information; it prevents some agents from changing policy
 while other agents are still collecting the same window.
 
 The coordinator may hold these eight buffers in a dictionary keyed by segment ID;
-separate ownership does not require eight custom runner or buffer classes. It
-routes transitions and triggers updates but does not recompute environment
-termination, truncate the episode at a rollout boundary, or implement PPO math.
+separate ownership does not require eight custom runner or buffer classes. Each
+buffer uses RL_lib's `EpisodeStep` and `rollout_arrays`; its thin Centipede wrapper
+stores only the PPO log probabilities and critic values absent from that generic
+rollout type. The coordinator routes transitions and triggers updates but does
+not recompute environment termination, truncate the episode at a rollout
+boundary, or implement PPO math.
 
 For a true terminal state, each learner uses zero final value and
 `terminated=True`. At a time limit or ordinary rollout cutoff, each learner uses

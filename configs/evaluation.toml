@@ -1,0 +1,3 @@
+# Reuse these held-out episodes for comparisons across checkpoints and runs.
+[evaluation]
+seeds = [30001, 30002]

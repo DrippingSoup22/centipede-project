@@ -10,9 +10,11 @@ from gymnasium import spaces
 from gymnasium.envs.mujoco import MujocoEnv
 from numpy.typing import NDArray
 
+# Reset varies only leg joints around the XML pose; the spine and body stay fixed.
 LEG_POSITION_NOISE_LIMIT = np.deg2rad(2.0)
 LEG_VELOCITY_NOISE_STD = 0.05
 
+# Integer categories mirror the two geom_user metadata fields stored in the XML.
 _FLOOR_CATEGORY = 0
 _BODY_CATEGORY = 1
 _LEG_CATEGORY = 2
@@ -20,6 +22,7 @@ _FOOT_CATEGORY = 3
 _DECORATIVE_CATEGORY = 4
 _LEG_CATEGORIES = (_LEG_CATEGORY, _FOOT_CATEGORY)
 
+# This order is the stable six-value policy action contract for every segment.
 LEG_ACTUATOR_ROLES = (
     ("left", "sweep"),
     ("left", "lift"),
@@ -41,6 +44,7 @@ def _readonly_copy(values: np.ndarray) -> np.ndarray:
 class PhysicalSnapshot:
     """Copied physical state and contact flags for every centipede segment."""
 
+    # Pose and motion are ordered by segment ID; leg fields follow action order.
     body_height: NDArray[np.float64]
     body_quaternion: NDArray[np.float64]
     leg_joint_position: NDArray[np.float64]
@@ -48,10 +52,12 @@ class PhysicalSnapshot:
     body_linear_velocity: NDArray[np.float64]
     body_angular_velocity: NDArray[np.float64]
     body_planar_position: NDArray[np.float64]
+    # Contact arrays mark the owning segment in the final transition state.
     left_foot_ground_contact: NDArray[np.bool_]
     right_foot_ground_contact: NDArray[np.bool_]
     body_ground_contact: NDArray[np.bool_]
     leg_leg_contact: NDArray[np.bool_]
+    # The task layer uses this world-space point to place and detect targets.
     head_tip_position: NDArray[np.float64]
 
 
@@ -64,6 +70,7 @@ class CentipedeSimulation(MujocoEnv):
     PettingZoo environment rather than this physical layer.
     """
 
+    # Gymnasium uses this metadata to configure rendering and playback timing.
     metadata = {
         "render_modes": ["human", "rgb_array", "depth_array"],
         "render_fps": 50,
@@ -83,6 +90,8 @@ class CentipedeSimulation(MujocoEnv):
             render_mode=render_mode,
         )
 
+        # MujocoEnv needs a full-state space although policies receive partial
+        # observations assembled later by the public environment.
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -90,10 +99,12 @@ class CentipedeSimulation(MujocoEnv):
             dtype=np.float64,
         )
 
+        # Resolve the XML contract once so stepping requires no name lookups.
         self.segment_ids = self._discover_segment_ids()
         (self.leg_actuator_ids, self.spine_actuator_ids) = self._resolve_actuator_ids()
         self._resolve_physical_ids()
 
+        # Internal actions concatenate every segment's six leg controls.
         self.action_space = spaces.Box(
             low=-1.0,
             high=1.0,
@@ -246,9 +257,7 @@ class CentipedeSimulation(MujocoEnv):
         robot = np.isin(categories, (_BODY_CATEGORY, _LEG_CATEGORY, _FOOT_CATEGORY))
         decorative = categories == _DECORATIVE_CATEGORY
         non_floor = np.arange(self.model.ngeom) != self.floor_geom_id
-        collisions = (self.model.geom_contype != 0) | (
-            self.model.geom_conaffinity != 0
-        )
+        collisions = (self.model.geom_contype != 0) | (self.model.geom_conaffinity != 0)
 
         if np.any(non_floor & ~(robot | decorative)):
             raise ValueError("Every geometry must use a known contact category")
@@ -261,9 +270,7 @@ class CentipedeSimulation(MujocoEnv):
         if np.any(categories[self.segment_body_geom_ids] != _BODY_CATEGORY):
             raise ValueError("Segment body geometries must use the body category")
         expected_foot_owners = np.repeat(segment_ids, 2)
-        if not np.array_equal(
-            owners[self.foot_geom_ids].ravel(), expected_foot_owners
-        ):
+        if not np.array_equal(owners[self.foot_geom_ids].ravel(), expected_foot_owners):
             raise ValueError("Foot geometry ownership does not match segment IDs")
         if np.any(categories[self.foot_geom_ids] != _FOOT_CATEGORY):
             raise ValueError("Segment foot geometries must use the foot category")
@@ -349,10 +356,10 @@ class CentipedeSimulation(MujocoEnv):
         velocities = np.empty((len(self.segment_ids), 6), dtype=np.float64)
 
         for row, site_id in enumerate(self.segment_center_site_ids):
-            mujoco.mj_objectVelocity(
+            mujoco.mj_objectVelocity(  # pyright: ignore[reportAttributeAccessIssue]
                 self.model,
                 self.data,
-                mujoco.mjtObj.mjOBJ_SITE,
+                mujoco.mjtObj.mjOBJ_SITE,  # pyright: ignore[reportAttributeAccessIssue]
                 int(site_id),
                 velocities[row],
                 1,
@@ -380,7 +387,7 @@ class CentipedeSimulation(MujocoEnv):
 
     def snapshot(self) -> PhysicalSnapshot:
         """Copy the current complete state into the environment-facing format."""
-        mujoco.mj_forward(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
         self._validate_physics()
 
         center_positions = self.data.site_xpos[self.segment_center_site_ids]
@@ -394,9 +401,7 @@ class CentipedeSimulation(MujocoEnv):
 
         return PhysicalSnapshot(
             body_height=_readonly_copy(center_positions[:, 2]),
-            body_quaternion=_readonly_copy(
-                self.data.xquat[self.segment_body_ids]
-            ),
+            body_quaternion=_readonly_copy(self.data.xquat[self.segment_body_ids]),
             leg_joint_position=_readonly_copy(self.data.qpos[self.leg_qpos_ids]),
             leg_joint_velocity=_readonly_copy(self.data.qvel[self.leg_qvel_ids]),
             body_linear_velocity=_readonly_copy(local_velocities[:, 3:]),
@@ -446,7 +451,7 @@ class CentipedeSimulation(MujocoEnv):
         """
         control = self._assemble_control(action)
         self.do_simulation(control, self.frame_skip)
-        mujoco.mj_forward(self.model, self.data)
+        mujoco.mj_forward(self.model, self.data)  # pyright: ignore[reportAttributeAccessIssue]
         self._validate_physics()
 
         observation = self._raw_state()

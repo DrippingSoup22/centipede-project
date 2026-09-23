@@ -1,0 +1,21 @@
+# Targeted CPU scaling benchmark built from the ordinary training preset.
+[benchmark]
+training_preset = "train_cpu.toml"
+output_root = "../runs/benchmarks"
+
+# Compare the established 32-environment scale with a 64-environment extreme.
+# Six workers bracket the current eight-worker winner, while sixteen tests CPU
+# oversubscription without changing the training implementation.
+environment_counts = [32, 64]
+worker_counts = [6, 8, 16]
+steps_per_environment = [256]
+
+# Rollout and episode sizes stay fixed because their timing behavior was already
+# established by the first benchmark.
+max_episode_steps = [8192]
+baseline_steps_per_environment = 256
+baseline_max_episode_steps = 8192
+
+# Two consecutive windows reduce startup noise and exercise a repeated update.
+rollout_windows = 2
+repetitions = 1

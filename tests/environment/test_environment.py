@@ -1,10 +1,12 @@
 """Checks for the public PettingZoo environment."""
 
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
+from gymnasium import spaces
 from pettingzoo.test import parallel_api_test
 
 from centipede.environment import (
@@ -12,19 +14,20 @@ from centipede.environment import (
     TARGET_DISTANCE_RANGE_M,
     CentipedeParallelEnv,
 )
-from centipede.observations import (
+from centipede.environment.observations import (
     HEAD_OBSERVATION_SIZE,
     INTERIOR_OBSERVATION_SIZE,
     REAR_OBSERVATION_SIZE,
+    SEGMENT_BLOCK_SIZE,
     head_target_displacement,
 )
-from centipede.rewards import RewardTerms
+from centipede.environment.rewards import RewardTerms
 
-MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "assembly.xml"
+MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "assembly.xml"
 
 
 @pytest.fixture
-def environment() -> CentipedeParallelEnv:
+def environment() -> Iterator[CentipedeParallelEnv]:
     """Construct the public environment and always release MuJoCo resources."""
     instance = CentipedeParallelEnv(model_path=MODEL_PATH)
     try:
@@ -36,7 +39,9 @@ def environment() -> CentipedeParallelEnv:
 def zero_actions(environment: CentipedeParallelEnv) -> dict[int, np.ndarray]:
     """Build one neutral action for every currently active segment."""
     return {
-        agent: np.zeros(environment.action_space(agent).shape, dtype=np.float32)
+        agent: np.zeros(
+            environment.simulation.leg_actuator_ids.shape[1], dtype=np.float32
+        )
         for agent in environment.agents
     }
 
@@ -60,6 +65,7 @@ def test_constructor_caches_action_spaces_from_simulation(
     assert set(environment.action_spaces) == set(environment.possible_agents)
 
     for action_space in environment.action_spaces.values():
+        assert isinstance(action_space, spaces.Box)
         assert action_space.shape == (6,)
         assert action_space.dtype == np.float32
         np.testing.assert_array_equal(action_space.low, -1.0)
@@ -81,6 +87,7 @@ def test_constructor_caches_observation_spaces_by_segment_position(
 
     assert set(environment.observation_spaces) == set(environment.possible_agents)
     for agent, observation_space in environment.observation_spaces.items():
+        assert isinstance(observation_space, spaces.Box)
         assert observation_space.shape == expected_shapes[agent]
         assert observation_space.dtype == np.float32
         assert np.isneginf(observation_space.low).all()
@@ -92,9 +99,10 @@ def test_observation_space_returns_cached_agent_space(
 ) -> None:
     """Return the stable object created for each agent during construction."""
     for agent in environment.possible_agents:
-        assert environment.observation_space(agent) is environment.observation_spaces[
-            agent
-        ]
+        assert (
+            environment.observation_space(agent)
+            is environment.observation_spaces[agent]
+        )
 
 
 def test_action_space_returns_cached_agent_space(
@@ -111,12 +119,14 @@ def test_reset_reproduces_physics_target_and_observations(
     """Make one public seed reproduce both independent reset streams."""
     first_observations, first_infos = environment.reset(seed=23)
     first_snapshot = environment.previous_snapshot
+    assert environment.target_position is not None
     first_target = environment.target_position.copy()
     second_observations, second_infos = environment.reset(seed=23)
     second_snapshot = environment.previous_snapshot
 
     assert first_snapshot is not None
     assert second_snapshot is not None
+    assert environment.target_position is not None
     np.testing.assert_array_equal(
         first_snapshot.leg_joint_position,
         second_snapshot.leg_joint_position,
@@ -131,9 +141,11 @@ def test_reset_reproduces_physics_target_and_observations(
             first_observations[agent],
             second_observations[agent],
         )
-    assert first_infos == second_infos == {
-        agent: {} for agent in environment.possible_agents
-    }
+    assert first_infos == second_infos
+    assert first_infos[0]["target_distance_m"] == pytest.approx(
+        np.linalg.norm(first_snapshot.head_tip_position[:2] - first_target)
+    )
+    assert all(first_infos[agent] == {} for agent in environment.possible_agents[1:])
     assert environment.agents == environment.possible_agents
     assert environment.episode_steps == 0
 
@@ -143,10 +155,45 @@ def test_reset_without_seed_advances_public_random_sequence(
 ) -> None:
     """Continue rather than restart random state on an unseeded reset."""
     environment.reset(seed=23)
+    assert environment.target_position is not None
     first_target = environment.target_position.copy()
     environment.reset()
 
+    assert environment.target_position is not None
     assert not np.array_equal(first_target, environment.target_position)
+
+
+def test_target_sampling_does_not_change_the_seeded_physical_reset(
+    environment: CentipedeParallelEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep target RNG consumption separate from the initial leg configuration."""
+    environment.reset(seed=23)
+    first_snapshot = environment.previous_snapshot
+    assert first_snapshot is not None
+
+    original_sampler = environment._sample_target
+
+    def sample_with_extra_draws(snapshot, random_generator):
+        """Consume extra target randomness before using the normal sampler."""
+        # A future target rule may consume more random numbers. The physical
+        # child seed must have been chosen before any of these draws occur.
+        random_generator.uniform(size=100)
+        return original_sampler(snapshot, random_generator)
+
+    monkeypatch.setattr(environment, "_sample_target", sample_with_extra_draws)
+    environment.reset(seed=23)
+    second_snapshot = environment.previous_snapshot
+    assert second_snapshot is not None
+
+    np.testing.assert_array_equal(
+        first_snapshot.leg_joint_position,
+        second_snapshot.leg_joint_position,
+    )
+    np.testing.assert_array_equal(
+        first_snapshot.leg_joint_velocity,
+        second_snapshot.leg_joint_velocity,
+    )
 
 
 def test_target_sampling_is_reproducible(
@@ -239,6 +286,113 @@ def test_step_validation_failure_does_not_advance_episode(
     assert environment.previous_snapshot is initial_snapshot
 
 
+@pytest.mark.parametrize("contact_owner", [0, 3, 7])
+@pytest.mark.parametrize(
+    ("contact_field", "flag_offset"),
+    [("body_ground_contact", 25), ("leg_leg_contact", 26)],
+)
+def test_step_contact_flag_is_visible_in_permitted_neighbor_blocks(
+    environment: CentipedeParallelEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    contact_owner: int,
+    contact_field: str,
+    flag_offset: int,
+) -> None:
+    """Expose one owner's contact in its block, including adjacent observers."""
+    environment.reset(seed=23)
+    initial_snapshot = environment.previous_snapshot
+    assert initial_snapshot is not None
+    contacts = np.zeros(8, dtype=np.bool_)
+    contacts[contact_owner] = True
+    final_snapshot = replace(initial_snapshot, **{contact_field: contacts})
+
+    # Hold physics still so this check concerns observation routing, not motion.
+    monkeypatch.setattr(environment.simulation, "step", lambda action: None)
+    monkeypatch.setattr(environment.simulation, "snapshot", lambda: final_snapshot)
+
+    observations, _, _, _, _ = environment.step(zero_actions(environment))
+
+    for observer in environment.possible_agents:
+        # The documented order is self, ahead, behind. Only the owner and its
+        # immediate chain neighbors are allowed to contain the active flag.
+        visible_segments = [observer]
+        if observer > 0:
+            visible_segments.append(observer - 1)
+        if observer < environment.possible_agents[-1]:
+            visible_segments.append(observer + 1)
+        for block_index, segment in enumerate(visible_segments):
+            flag_index = block_index * SEGMENT_BLOCK_SIZE + flag_offset
+            assert observations[observer][flag_index] == float(segment == contact_owner)
+
+
+@pytest.mark.parametrize("contact_owner", [0, 3, 7])
+@pytest.mark.parametrize(
+    ("contact_field", "reward_field", "cost"),
+    [
+        ("body_ground_contact", "reward_body_contact", -0.010),
+        ("leg_leg_contact", "reward_leg_contact", -0.005),
+    ],
+)
+def test_step_contact_cost_is_local_to_its_owner(
+    environment: CentipedeParallelEnv,
+    monkeypatch: pytest.MonkeyPatch,
+    contact_owner: int,
+    contact_field: str,
+    reward_field: str,
+    cost: float,
+) -> None:
+    """Charge the contact owner only; normal episode progress still continues."""
+    environment.reset(seed=23)
+    initial_snapshot = environment.previous_snapshot
+    assert initial_snapshot is not None
+    contacts = np.zeros(8, dtype=np.bool_)
+    contacts[contact_owner] = True
+    final_snapshot = replace(initial_snapshot, **{contact_field: contacts})
+
+    # The controlled snapshot isolates reward ownership from contact geometry.
+    monkeypatch.setattr(environment.simulation, "step", lambda action: None)
+    monkeypatch.setattr(environment.simulation, "snapshot", lambda: final_snapshot)
+
+    _, rewards, terminations, truncations, infos = environment.step(
+        zero_actions(environment)
+    )
+
+    for agent in environment.possible_agents:
+        expected_cost = cost if agent == contact_owner else 0.0
+        assert infos[agent][contact_field] is (agent == contact_owner)
+        assert infos[agent][reward_field] == pytest.approx(expected_cost)
+        assert rewards[agent] == pytest.approx(
+            infos[agent]["reward_arrival"]
+            + infos[agent]["reward_efficiency"]
+            + infos[agent]["reward_body_contact"]
+            + infos[agent]["reward_leg_contact"]
+        )
+    assert not any(terminations.values())
+    assert not any(truncations.values())
+
+
+def test_step_numerical_failure_raises_instead_of_ending_the_episode(
+    environment: CentipedeParallelEnv,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Propagate a simulation failure without converting it to task flags."""
+    environment.reset(seed=23)
+    original_snapshot = environment.previous_snapshot
+
+    def fail_physics(action) -> None:
+        """Represent a numerical failure raised by the simulation boundary."""
+        raise RuntimeError("MuJoCo produced a non-finite physical state")
+
+    monkeypatch.setattr(environment.simulation, "step", fail_physics)
+
+    with pytest.raises(RuntimeError, match="non-finite physical state"):
+        environment.step(zero_actions(environment))
+
+    assert environment.episode_steps == 0
+    assert environment.previous_snapshot is original_snapshot
+    assert environment.agents == environment.possible_agents
+
+
 def test_step_arrival_terminates_every_agent_with_final_outputs(
     environment: CentipedeParallelEnv,
     monkeypatch: pytest.MonkeyPatch,
@@ -270,6 +424,7 @@ def test_step_arrival_terminates_every_agent_with_final_outputs(
     assert not any(truncations.values())
     assert all(info["reward_arrival"] == 1.0 for info in infos.values())
     assert infos[0]["target_reached"] is True
+    assert infos[0]["head_step_distance_m"] == 0.0
     assert infos[0]["episode_end"] == "arrival"
     assert environment.previous_snapshot is final_snapshot
     assert environment.agents == []
@@ -283,9 +438,12 @@ def test_step_time_limit_truncates_every_agent(
     environment.reset(seed=23)
     final_snapshot = environment.previous_snapshot
     assert final_snapshot is not None
+    moved_tip = final_snapshot.head_tip_position.copy()
+    moved_tip[1] += 0.002
+    moved_snapshot = replace(final_snapshot, head_tip_position=moved_tip)
     environment.max_episode_steps = 1
     monkeypatch.setattr(environment.simulation, "step", lambda action: None)
-    monkeypatch.setattr(environment.simulation, "snapshot", lambda: final_snapshot)
+    monkeypatch.setattr(environment.simulation, "snapshot", lambda: moved_snapshot)
 
     observations, rewards, terminations, truncations, infos = environment.step(
         zero_actions(environment)
@@ -295,6 +453,7 @@ def test_step_time_limit_truncates_every_agent(
     assert not any(terminations.values())
     assert all(truncations.values())
     assert infos[0]["target_reached"] is False
+    assert infos[0]["head_step_distance_m"] == pytest.approx(0.002)
     assert infos[0]["episode_end"] == "time_limit"
     assert infos[0]["episode_steps"] == 1
     for agent in environment.possible_agents:
@@ -321,9 +480,7 @@ def test_step_arrival_precedes_time_limit_on_final_step(
     monkeypatch.setattr(environment.simulation, "step", lambda action: None)
     monkeypatch.setattr(environment.simulation, "snapshot", lambda: final_snapshot)
 
-    _, _, terminations, truncations, infos = environment.step(
-        zero_actions(environment)
-    )
+    _, _, terminations, truncations, infos = environment.step(zero_actions(environment))
 
     assert all(terminations.values())
     assert not any(truncations.values())
@@ -384,9 +541,7 @@ def test_validate_actions_rejects_invalid_values_before_physics(
 ) -> None:
     """Reject one malformed agent action without advancing simulation time."""
     environment.reset(seed=23)
-    actions = {
-        agent: np.zeros(6, dtype=np.float32) for agent in environment.agents
-    }
+    actions = {agent: np.zeros(6, dtype=np.float32) for agent in environment.agents}
     actions[3] = invalid_action
     initial_time = environment.simulation.data.time
 
@@ -403,9 +558,7 @@ def test_validate_actions_requires_exact_active_agent_keys(
 ) -> None:
     """Reject missing and extra agent keys before inspecting action values."""
     environment.reset(seed=23)
-    actions = {
-        agent: np.zeros(6, dtype=np.float32) for agent in environment.agents
-    }
+    actions = {agent: np.zeros(6, dtype=np.float32) for agent in environment.agents}
     if unknown_agent is None:
         del actions[4]
     else:
@@ -462,9 +615,7 @@ def test_build_infos_exposes_local_diagnostics_and_head_summary(
     assert infos[0]["target_reached"] is True
     assert infos[0]["episode_end"] == "arrival"
     assert infos[0]["episode_steps"] == 7
-    assert infos[0]["episode_time_s"] == pytest.approx(
-        7 * environment.simulation.dt
-    )
+    assert infos[0]["episode_time_s"] == pytest.approx(7 * environment.simulation.dt)
 
     for follower in environment.possible_agents[1:]:
         assert "target_distance_m" not in infos[follower]
@@ -480,6 +631,7 @@ def test_close_delegates_to_simulation(
     close_calls = 0
 
     def record_close() -> None:
+        """Record one delegated resource-release call."""
         nonlocal close_calls
         close_calls += 1
 
@@ -499,6 +651,7 @@ def test_render_delegates_to_simulation(
     render_calls = 0
 
     def render_image() -> np.ndarray:
+        """Return a controlled frame and record the delegated render call."""
         nonlocal render_calls
         render_calls += 1
         return expected_image
@@ -516,6 +669,7 @@ def test_reset_accepts_options_without_changing_seeded_result(
 ) -> None:
     """Keep unused PettingZoo reset options neutral in the first version."""
     first_observations, _ = environment.reset(seed=23)
+    assert environment.target_position is not None
     first_target = environment.target_position.copy()
 
     second_observations, _ = environment.reset(
@@ -523,6 +677,7 @@ def test_reset_accepts_options_without_changing_seeded_result(
         options={"unused": True},
     )
 
+    assert environment.target_position is not None
     np.testing.assert_array_equal(first_target, environment.target_position)
     for agent in environment.possible_agents:
         np.testing.assert_array_equal(

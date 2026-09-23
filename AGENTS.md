@@ -134,8 +134,9 @@
   capability, discuss extending `src/rl_lib` rather than duplicating it here. A
   genuinely Centipede-specific extension may live here and must remain a thin,
   explicit specialization of the library component.
-- Use focused checks and short smoke runs to validate changes. Substantial
-  training and tuning runs require an explicit user request.
+- Run focused automated tests to validate code changes. Never launch a training
+  run or a full experiment/evaluation command on the user's behalf; provide the
+  exact command and let the user execute it, then review the resulting output.
 - Reserve `runs/` for reinforcement-learning training and evaluation outputs,
   following the role it has in `../RL_lib`. Model-development diagnostics and
   review renders belong in `archive/`, while physical model definitions stay in

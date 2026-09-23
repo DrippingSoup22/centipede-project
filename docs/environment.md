@@ -105,8 +105,10 @@ the `head_tip` site to the target. A distance at or below `0.001 m` is arrival;
 vertical distance and head orientation do not affect it. Arrival awards the
 shared reward once and terminates all eight agents.
 
-The first episode lasts at most 1,000 environment steps, or 20 seconds of
-simulated time. Reaching the target on the final allowed step takes precedence:
+The first experiment uses an episode limit of 1,000 environment steps, or 20
+seconds of simulated time. The experiment configuration may choose another
+positive limit without changing the model or reward. Reaching the target on the
+final allowed step takes precedence:
 all agents report termination and not truncation. Otherwise the time limit
 truncates all agents without an additional timeout penalty. The final observation
 is returned in either case.
@@ -240,8 +242,12 @@ Each agent's ordinary information dictionary contains
 `left_foot_ground_contact`, `right_foot_ground_contact`,
 `body_ground_contact`, and `leg_leg_contact`, plus the four scalar components
 `reward_arrival`, `reward_efficiency`, `reward_body_contact`, and
-`reward_leg_contact`. The head additionally reports `target_distance_m` and
-`target_reached`. At episode end, the head also reports `episode_end` as
+`reward_leg_contact`. At reset, only the head receives `target_distance_m` in
+`info`; other reset information dictionaries are empty. Each step, the head
+additionally reports its current `target_distance_m`, planar
+`head_step_distance_m`, and `target_reached`. Summing the step distances gives
+the head's traveled path length; subtracting final from initial target distance
+gives net progress toward the target. At episode end, the head also reports `episode_end` as
 `arrival` or `time_limit`, together with `episode_steps` and `episode_time_s`.
 Raw snapshots and unrestricted MuJoCo state are not published.
 

@@ -5,22 +5,21 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
-from centipede.rewards import (
+from centipede.environment.rewards import (
     DEFAULT_REWARD_CONFIG,
     RewardTerms,
     calculate_reward_terms,
     distance_ratio_cost,
 )
-from centipede.simulation import PhysicalSnapshot
+from centipede.environment.simulation import PhysicalSnapshot
 
 
 @pytest.fixture
 def previous_snapshot() -> PhysicalSnapshot:
     """Create a controlled eight-segment state for reward calculations."""
     segment_count = 8
-    body_positions = np.column_stack(
-        (-0.004 * np.arange(segment_count), np.zeros(segment_count))
-    )
+    body_positions = np.zeros((segment_count, 2), dtype=np.float64)
+    body_positions[:, 0] = -0.004 * np.arange(segment_count)
     return PhysicalSnapshot(
         body_height=np.zeros(segment_count),
         body_quaternion=np.zeros((segment_count, 4)),
@@ -82,18 +81,20 @@ def test_reward_uses_head_target_and_follower_predecessor_paths(
     )
 
     assert set(rewards) == set(range(8))
+    # Expected ratios are written directly from the accepted equation so this
+    # check cannot pass merely because both reward and test call the same helper.
+    coefficient = DEFAULT_REWARD_CONFIG.c_efficiency
+    epsilon = DEFAULT_REWARD_CONFIG.epsilon_ratio
     assert rewards[0].efficiency == pytest.approx(
-        distance_ratio_cost(0.010, 0.005)
+        -coefficient * (epsilon + 0.005) / (epsilon + 0.010)
     )
     assert rewards[1].efficiency == pytest.approx(
-        distance_ratio_cost(0.004, 0.003)
+        -coefficient * (epsilon + 0.003) / (epsilon + 0.004)
     )
     assert rewards[2].efficiency == pytest.approx(
-        distance_ratio_cost(0.004, 0.005)
+        -coefficient * (epsilon + 0.005) / (epsilon + 0.004)
     )
-    assert rewards[3].efficiency == pytest.approx(
-        -DEFAULT_REWARD_CONFIG.c_efficiency
-    )
+    assert rewards[3].efficiency == pytest.approx(-DEFAULT_REWARD_CONFIG.c_efficiency)
 
 
 def test_arrival_is_shared_and_contact_costs_are_local(
@@ -118,8 +119,7 @@ def test_arrival_is_shared_and_contact_costs_are_local(
     )
 
     assert all(
-        terms.arrival == DEFAULT_REWARD_CONFIG.c_arrival
-        for terms in rewards.values()
+        terms.arrival == DEFAULT_REWARD_CONFIG.c_arrival for terms in rewards.values()
     )
     assert rewards[3].body_contact == -DEFAULT_REWARD_CONFIG.c_body
     assert rewards[4].leg_contact == -DEFAULT_REWARD_CONFIG.c_leg

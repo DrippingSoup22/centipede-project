@@ -10,17 +10,19 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from centipede.simulation import PhysicalSnapshot
+from centipede.environment.simulation import PhysicalSnapshot
 
 
 @dataclass(frozen=True)
 class RewardConfig:
     """First-version reward coefficients supplied to the reward calculation."""
 
+    # Arrival is the only positive term; the remaining coefficients scale costs.
     c_arrival: float = 1.0
     c_efficiency: float = 0.003
     c_body: float = 0.010
     c_leg: float = 0.005
+    # This small denominator offset keeps the distance ratio defined at zero.
     epsilon_ratio: float = 0.000001
 
 
@@ -45,14 +47,10 @@ class RewardTerms:
     @property
     def total(self) -> float:
         """Return the scalar reward obtained by summing all four components."""
-        return (
-            self.arrival
-            + self.efficiency
-            + self.body_contact
-            + self.leg_contact
-        )
+        return self.arrival + self.efficiency + self.body_contact + self.leg_contact
 
 
+# Shared immutable baseline used unless an experiment supplies another config.
 DEFAULT_REWARD_CONFIG = RewardConfig()
 
 

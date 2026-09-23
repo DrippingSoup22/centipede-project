@@ -6,13 +6,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from centipede.simulation import (
+from centipede.environment.simulation import (
     LEG_ACTUATOR_ROLES,
     LEG_POSITION_NOISE_LIMIT,
     CentipedeSimulation,
 )
 
-MODEL_PATH = Path(__file__).resolve().parents[1] / "models" / "assembly.xml"
+MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "assembly.xml"
 
 
 @pytest.fixture
@@ -26,6 +26,7 @@ def simulation() -> Iterator[CentipedeSimulation]:
 
 
 def test_relative_model_path_resolves_from_working_directory(monkeypatch) -> None:
+    """Resolve a caller-supplied relative XML path before Gymnasium changes context."""
     monkeypatch.chdir(MODEL_PATH.parents[1])
     instance = CentipedeSimulation(model_path=Path("models/assembly.xml"))
     try:
@@ -37,6 +38,7 @@ def test_relative_model_path_resolves_from_working_directory(monkeypatch) -> Non
 def test_model_loads_with_expected_dimensions(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Preserve the accepted model dimensions and 20 ms control interval."""
     assert simulation.model.nq == 69
     assert simulation.model.nv == 68
     assert simulation.model.nu == 55
@@ -45,6 +47,7 @@ def test_model_loads_with_expected_dimensions(
 
 
 def test_seeded_reset_is_finite(simulation: CentipedeSimulation) -> None:
+    """Return a complete finite raw state from a seeded physical reset."""
     state, info = simulation.reset(seed=0)
 
     assert state.shape == (137,)
@@ -55,6 +58,7 @@ def test_seeded_reset_is_finite(simulation: CentipedeSimulation) -> None:
 def test_reset_randomizes_only_leg_state_reproducibly(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Apply reproducible reset noise only to enabled leg coordinates."""
     first, _ = simulation.reset(seed=17)
     advanced, _ = simulation.reset()
     repeated, _ = simulation.reset(seed=17)
@@ -79,6 +83,7 @@ def test_reset_randomizes_only_leg_state_reproducibly(
 def test_actuator_mapping_is_complete_and_unique(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Map every XML actuator once across enabled legs and disabled spine."""
     assert simulation.leg_actuator_ids.shape == (8, 6)
     assert simulation.spine_actuator_ids.shape == (7,)
 
@@ -92,6 +97,7 @@ def test_actuator_mapping_is_complete_and_unique(
 def test_physical_mapping_has_one_entry_per_segment_and_leg_joint(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Cache the expected physical IDs for all segments and leg joints."""
     assert simulation.leg_qpos_ids.shape == (8, 6)
     assert simulation.leg_qvel_ids.shape == (8, 6)
     assert simulation.segment_body_ids.shape == (8,)
@@ -105,11 +111,10 @@ def test_physical_mapping_has_one_entry_per_segment_and_leg_joint(
 def test_leg_actuator_order_matches_the_contract(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Keep each segment's six policy controls in the documented order."""
     for segment_id in simulation.segment_ids:
         for action_index, (side, role) in enumerate(LEG_ACTUATOR_ROLES):
-            actuator_id = int(
-                simulation.leg_actuator_ids[segment_id, action_index]
-            )
+            actuator_id = int(simulation.leg_actuator_ids[segment_id, action_index])
             actual_name = simulation.model.actuator(actuator_id).name
             expected_name = f"segment_{segment_id:02d}_{side}_{role}_motor"
             assert actual_name == expected_name
@@ -118,6 +123,7 @@ def test_leg_actuator_order_matches_the_contract(
 def test_control_assembly_maps_legs_and_disables_spine(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Place leg commands into MuJoCo control slots while zeroing the spine."""
     leg_controls = np.linspace(
         -1.0,
         1.0,
@@ -136,6 +142,7 @@ def test_control_assembly_maps_legs_and_disables_spine(
 def test_step_advances_one_control_interval(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Advance physics by one interval without adding task-level semantics."""
     simulation.reset(seed=0)
     time_before = simulation.data.time
     action = np.zeros(simulation.leg_actuator_ids.size, dtype=np.float32)
@@ -155,9 +162,37 @@ def test_step_advances_one_control_interval(
     )
 
 
+@pytest.mark.parametrize("action_kind", ["fixed", "seeded_random"])
+def test_short_nonzero_action_runs_remain_finite(
+    simulation: CentipedeSimulation,
+    action_kind: str,
+) -> None:
+    """Exercise nonzero controls briefly without claiming a learned gait."""
+    simulation.reset(seed=0)
+    random_generator = np.random.default_rng(17)
+    # Derive the action length from the validated model mapping.
+    action_size = simulation.leg_actuator_ids.size
+
+    for _ in range(3):
+        if action_kind == "fixed":
+            action = np.full(action_size, 0.1, dtype=np.float32)
+        else:
+            action = random_generator.uniform(-0.1, 0.1, size=action_size).astype(
+                np.float32
+            )
+
+        observation, _, _, _, _ = simulation.step(action)
+
+        assert np.isfinite(observation).all()
+        np.testing.assert_array_equal(
+            simulation.data.ctrl[simulation.spine_actuator_ids], 0.0
+        )
+
+
 def test_snapshot_copies_complete_segment_state(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Expose complete, finite, read-only data with stable per-segment shapes."""
     simulation.reset(seed=3)
     snapshot = simulation.snapshot()
     expected_shapes = {
@@ -189,14 +224,13 @@ def test_snapshot_copies_complete_segment_state(
         snapshot.leg_joint_velocity,
         simulation.data.qvel[simulation.leg_qvel_ids],
     )
-    np.testing.assert_allclose(
-        np.linalg.norm(snapshot.body_quaternion, axis=1), 1.0
-    )
+    np.testing.assert_allclose(np.linalg.norm(snapshot.body_quaternion, axis=1), 1.0)
 
 
 def test_contact_classification_uses_geometry_metadata(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Classify controlled geometry pairs by their XML owner and category."""
     geom_pairs = np.array(
         [
             [simulation.floor_geom_id, simulation.foot_geom_ids[0, 0]],
@@ -228,9 +262,11 @@ def test_contact_classification_uses_geometry_metadata(
 def test_snapshot_reports_contacts_from_the_final_state(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Report actual contacts after a completed physical transition."""
     simulation.reset(seed=0)
     simulation.set_state(simulation.init_qpos, simulation.init_qvel)
-    simulation.step(np.zeros(simulation.action_space.shape, dtype=np.float32))
+    # Use the resolved actuator mapping as the model-owned action length.
+    simulation.step(np.zeros(simulation.leg_actuator_ids.size, dtype=np.float32))
     snapshot = simulation.snapshot()
 
     expected_foot_contacts = np.zeros(8, dtype=np.bool_)
@@ -246,6 +282,7 @@ def test_snapshot_reports_contacts_from_the_final_state(
 def test_numerical_validation_rejects_invalid_state_and_warnings(
     simulation: CentipedeSimulation,
 ) -> None:
+    """Reject non-finite state values and warnings raised by MuJoCo."""
     simulation.reset(seed=0)
     simulation.data.qpos[0] = np.nan
 

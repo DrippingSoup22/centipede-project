@@ -20,12 +20,15 @@ except ModuleNotFoundError as error:
         "  WSL: ~/.venvs/Centipede/bin/python tools/view_model.py"
     ) from None
 
+# Resolve the default model relative to the project rather than the caller's shell.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = PROJECT_ROOT / "models" / "assembly.xml"
+# The viewer is synchronized at a modest fixed rate because physics is paused.
 VIEWER_FPS = 60
 
 
 def parse_args() -> argparse.Namespace:
+    """Read the optional model path used for interactive inspection."""
     parser = argparse.ArgumentParser(
         description="Open a Centipede XML model in MuJoCo's interactive viewer."
     )
@@ -40,6 +43,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """Load the selected XML and keep a centered passive viewer responsive."""
     args = parse_args()
     model_path = args.model.expanduser().resolve()
     if not model_path.is_file():
@@ -51,9 +55,11 @@ def main() -> None:
     print(f"Opening {model_path}")
     print(f"Model dimensions: nq={model.nq}, nv={model.nv}, nu={model.nu}")
     print(
-        "Static inspection mode: drag the camera with the mouse; close the window to exit."
+        "Static inspection mode: drag the camera with the mouse; "
+        "close the window to exit."
     )
 
+    # Passive mode gives this loop explicit ownership of camera setup and refresh.
     with mujoco.viewer.launch_passive(model, data) as viewer:
         with viewer.lock():
             viewer.cam.lookat[:] = model.stat.center

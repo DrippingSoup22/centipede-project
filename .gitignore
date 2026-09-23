@@ -4,6 +4,8 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+/build/
+/dist/
 
 # Generated experiment outputs stay local unless deliberately archived.
 /runs/
