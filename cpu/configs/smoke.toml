@@ -1,0 +1,31 @@
+# Fast infrastructure check: one short training run, without evaluation.
+kind = "training"
+
+[training]
+model_path = "../../models/assembly.xml"
+output_root = "../../runs/smoke"
+training_seed = 2026
+environment_count = 2
+worker_count = 2
+update_cycles = 1
+max_episode_steps = 1000
+
+[learner]
+hidden_sizes = [64, 64]
+initial_standard_deviation = 0.5
+standard_deviation_mode = "global"
+actor_learning_rate = 0.0003
+critic_learning_rate = 0.0003
+clip_ratio = 0.2
+entropy_coefficient = 0.001
+maximum_gradient_norm = 0.5
+normalization_mode = "running"
+normalizer_epsilon = 0.00000001
+normalizer_clip = 10.0
+
+[rollout]
+rollout_window_steps = 256
+discount = 0.999
+gae_lambda = 0.95
+update_epochs = 4
+minibatch_size = 64

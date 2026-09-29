@@ -1,0 +1,35 @@
+# Editable CPU training profile; the new run is evaluated when training ends.
+kind = "training"
+
+[training]
+model_path = "../../models/assembly.xml"
+output_root = "../../runs/train_cpu"
+training_seed = 2026
+environment_count = 4
+worker_count = 4
+update_cycles = 32
+max_episode_steps = 2048
+
+[learner]
+hidden_sizes = [64, 64]
+initial_standard_deviation = 0.5
+standard_deviation_mode = "global"
+actor_learning_rate = 0.0003
+critic_learning_rate = 0.0003
+clip_ratio = 0.2
+entropy_coefficient = 0.001
+maximum_gradient_norm = 0.5
+normalization_mode = "running"
+normalizer_epsilon = 0.00000001
+normalizer_clip = 10.0
+
+[rollout]
+rollout_window_steps = 256
+discount = 0.999
+gae_lambda = 0.95
+update_epochs = 4
+minibatch_size = 64
+
+# Held-out episodes shared by every checkpoint and both baselines.
+[evaluation]
+seeds = [30001, 30002]

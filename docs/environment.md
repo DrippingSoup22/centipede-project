@@ -6,38 +6,31 @@ first-version contract is stated directly; later possibilities are kept separate
 Target sensing and policy observations are defined in [control.md](control.md),
 while physical geometry and contact groups are defined in [model.md](model.md).
 
-## Framework boundary
+## Task boundary
 
-The public task is a PettingZoo `ParallelEnv` containing one small internal
-Gymnasium `MujocoEnv`. The internal simulation owns MuJoCo loading, state, physical
-reset, frame skipping, stepping, rendering, cleanup, and translation of raw model
-data into a trusted snapshot. The public environment owns the target, partial
-observations, rewards, episode clock, arrival, termination, truncation, and task
-information.
+The task meanings in this document apply to both implementations. The
+[CPU plan](../cpu/plan.md) describes the PettingZoo environment that realizes
+them, and the [GPU plan](../gpu/plan.md) describes the batched task over MuJoCo
+Warp worlds.
 
-`reset(seed=...)` is the sole episode-reset entry point. It returns observation
-and information dictionaries for all eight agents. `step(actions)` applies all
-eight accepted actions simultaneously and returns PettingZoo's observation,
-reward, termination, truncation, and information dictionaries. All agents remain
-active together because they control one inseparable physical body.
+The physical simulation owns model loading, physical state, physical reset,
+stepping, and translation of raw model data into the physical state described
+below. The task layer owns the target, partial observations, rewards, episode
+clock, arrival, termination, truncation, and task information. Reset is the sole
+episode-start entry point, and all eight agents act and remain active together
+because they control one inseparable physical body.
 
-The public environment validates an externally supplied action dictionary once,
-before any state change. The simulation separately validates the XML schema once
-at construction. Observation and reward calculations receive trusted data and do
-not repeat either check. Tests own deliberately invalid inputs; production code
-does not import test fixtures.
-
-One public transition holds the joint action for 200 MuJoCo integration steps.
-The frozen `0.0001 s` physics timestep therefore gives a 20 ms environment step
-and 50 Hz agent decision frequency. Episode duration and reported time use this
+One transition holds the joint action for 200 MuJoCo integration steps. The
+frozen `0.0001 s` physics timestep therefore gives a 20 ms environment step and
+50 Hz agent decision frequency. Episode duration and reported time use this
 simulated interval, not wall-clock runtime.
 
 ## Physical snapshot
 
 After physical reset and after every 20 ms transition, the simulation takes one
-snapshot of the complete centipede. This is a temporary, immutable-by-convention
-copy of the values needed by the environment. It is not an image, checkpoint,
-rollout buffer, or separate observation for every agent.
+snapshot of the complete centipede: the physical values needed by the task. It
+is not an image, checkpoint, rollout buffer, or separate observation for every
+agent.
 
 For each segment, the snapshot contains:
 
@@ -52,9 +45,10 @@ The target belongs to the public environment and is not physical snapshot data.
 The observation builder selects only the fields and neighboring blocks each agent
 may see; reward-only planar positions are never added to policy observations.
 
-Snapshot arrays are copied from MuJoCo and retained as `float64` internally. The
-environment keeps only the previous and current snapshot. Every environment
-replica owns its own simulation, snapshots, target, and random state.
+The task keeps only the previous and current snapshot. Every environment replica
+or simulated world has its own physical state, snapshots, target, and random
+state. How a snapshot is stored is an implementation choice described in each
+plan.
 
 Contact flags describe the final MuJoCo state at the snapshot, rather than any
 contact that occurred during one of the 200 internal integration steps. A contact
@@ -63,7 +57,8 @@ The simulation alone interprets MuJoCo geometry contacts and assigns their segme
 owners; reward code does not inspect the raw contact array.
 
 After each transition, the simulation checks the complete physical state and
-snapshot for non-finite values and checks MuJoCo's numerical-instability warnings.
+snapshot for non-finite values and checks the instability or capacity failures
+reported by the physics engine.
 Numerical invalidity raises a clear exception and stops the run. It is not clipped,
 replaced, silently reset, or reported as ordinary termination or truncation. A
 finite fall or contact remains valid task behavior.
@@ -234,21 +229,23 @@ evaluation result rather than a built-in solution.
 
 ## Information returned for diagnostics
 
-`info` is not an observation and is never passed to a policy or PPO update. It
-exposes already-computed task facts so evaluation does not decode observation
-indices or reimplement environment rules.
+Diagnostic information (`info` in the CPU implementation) is not an observation
+and is never passed to a policy or PPO update. It exposes already-computed task
+facts so evaluation does not decode observation indices or reimplement
+environment rules.
 
-Each agent's ordinary information dictionary contains
+Each agent's ordinary diagnostic information contains
 `left_foot_ground_contact`, `right_foot_ground_contact`,
 `body_ground_contact`, and `leg_leg_contact`, plus the four scalar components
 `reward_arrival`, `reward_efficiency`, `reward_body_contact`, and
 `reward_leg_contact`. At reset, only the head receives `target_distance_m` in
-`info`; other reset information dictionaries are empty. Each step, the head
+its diagnostics; other agents receive none at reset. Each step, the head
 additionally reports its current `target_distance_m`, planar
 `head_step_distance_m`, and `target_reached`. Summing the step distances gives
 the head's traveled path length; subtracting final from initial target distance
-gives net progress toward the target. At episode end, the head also reports `episode_end` as
-`arrival` or `time_limit`, together with `episode_steps` and `episode_time_s`.
+gives net progress toward the target. At episode end, the head also reports
+`episode_end` as `arrival` or `time_limit`, together with `episode_steps` and
+`episode_time_s`.
 Raw snapshots and unrestricted MuJoCo state are not published.
 
 ## Later experiments and evaluation
