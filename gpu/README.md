@@ -1,10 +1,10 @@
 # Centipede GPU implementation
 
 The simulation loads the shared XML, validates its mappings, allocates batched
-MuJoCo Warp state, and implements batched leg-control stepping and selective
-resets. Motion validation is blocked on the local MX330 by an MJWarp
-collision-kernel compilation error.
-Physical-state extraction and training remain to be implemented.
+MuJoCo Warp state, and implements batched leg-control stepping, selective
+resets, and physical-state extraction into `physical_state`. Motion validation
+is blocked on the local MX330 by an MJWarp collision-kernel compilation error.
+The task environment and training remain to be implemented.
 
 This implementation will have its own source, tests, configuration, tools, and
 virtual environment. It will use the shared root-level models and scientific
@@ -71,13 +71,27 @@ From the repository root, run:
 & "$HOME\.venvs\Centipede-GPU\Scripts\python.exe" -m pytest -c gpu/pytest.ini gpu/tests -q
 ```
 
-Eight tests cover model dimensions and timing, actuator/joint mappings, real CUDA
-allocation, control placement, two-world physics stepping, selective reset, and
-rejection of invalid physical results. Reset checks exercise the real MJWarp API
-and project noise kernel on the MX330: selected-world state clearing, leg-only
-noise, repeatable independent random sequences, and empty selections. The control
-and invalid-physics tests use the real project GPU kernels but replace MJWarp
-integration with a call counter; they are not evidence of working physics.
+Eleven tests cover model dimensions and timing, actuator/joint mappings, real
+CUDA allocation of the MJWarp state and `physical_state`, control placement,
+two-world physics stepping, selective reset, rejection of invalid physical
+results, extraction, contact classification, and a forward-pass comparison with
+CPU MuJoCo.
+
+Both `mjw.step` and `mjw.forward` run MJWarp's collision code, and every `step()`
+and `reset()` ends with a forward pass. The locally supported tests therefore
+replace both with call counters and exercise the real project kernels and
+`mjw.reset_data` on the MX330; they are not evidence of working physics:
+
+- Reset checks cover selected-world state clearing, leg-only noise, repeatable
+  independent random sequences, and empty selections.
+- The extraction check lets CPU MuJoCo compute positions, orientations, and
+  velocities for two scrambled worlds, copies them into MJWarp's data, and
+  requires the kernel output to match the CPU fields and `mj_objectVelocity`.
+- The contact check classifies a hand-written contact pool covering every flag
+  rule, a repeated contact, and a stale entry beyond `nacon`.
+
+Two tests carry the `physics` marker: two-world stepping, and a comparison of
+MJWarp's refreshed state and contact pairs with CPU MuJoCo at one settled pose.
 
 Constructor arguments and runtime inputs are trusted, so no test supplies invalid
 arguments. Configuration will be validated where it is loaded. The tests use
@@ -90,24 +104,29 @@ deselected**. The physics test was rerun and still fails only with the compiler
 limit above. It remains an ordinary test, not marked as expected to fail. The
 capsule-mesh warning remains visible. No test trains a policy.
 
+On 2026-09-29, after extraction was added, the supported subset had **nine
+passed and two deselected**. The two `physics` tests have not yet run on a
+compatible GPU.
+
 Local development continues with the supported tests. To run that subset:
 
 ```powershell
 & "$HOME\.venvs\Centipede-GPU\Scripts\python.exe" -m pytest -c gpu/pytest.ini gpu/tests -q -m "not physics"
 ```
 
-This intentionally deselects the known failing motion test; it does not validate
-physics. Run the full suite on a compatible Kaggle GPU before substantial
+This intentionally deselects the tests that need MJWarp's collision code; it does
+not validate physics. Run the full suite on a compatible Kaggle GPU before substantial
 training. The [plan](plan.md#local-development-and-validation) records this
 validation split and the next implementation step.
 
 ### Kernel review
 
-The project kernels only place leg commands, initialize random states, add reset
-noise, and flag worlds with non-finite state. MJWarp's public APIs still own
-integration and physical reset. The finiteness kernel follows the same naming
-conventions but was added after the analyzer review below and has not yet been
-analyzed.
+The project kernels place leg commands, initialize random states, add reset
+noise, flag worlds with non-finite state, extract per-segment physical fields,
+and classify contacts. MJWarp's public APIs still own integration, forward
+computation, and physical reset. The finiteness, extraction, and contact kernels
+follow the same naming conventions but were added after the analyzer review
+below and have not yet been analyzed.
 The `physics` marker identifies tests that integrate the complete frozen model;
 the default test command includes them and still exposes the known local failure.
 
@@ -127,5 +146,13 @@ so backward code generation is disabled explicitly. See
 and [kernel settings](https://nvidia.github.io/warp/v1.17/user_guide/configuration.html).
 
 The seven supported tests also passed with Warp debug compilation and CUDA
-error verification enabled. These checks validate the exercised reset/control
-operations on the MX330, not full motion, contacts, or performance on Kaggle.
+error verification enabled. On 2026-09-29 the nine supported tests, including
+extraction and contact classification, passed again in that mode, whose array
+bounds checking was confirmed to stop a deliberate out-of-range read. These
+checks validate the exercised operations on the MX330, not full motion, real
+contacts, or performance on Kaggle.
+
+Each extraction thread writes only its own world and segment. Contact threads
+may write the same flag, but only the value `True`, so their order does not
+matter. The contact pool is launched at its fixed capacity, and threads beyond
+`nacon` exit immediately.
