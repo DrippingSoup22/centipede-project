@@ -2,6 +2,12 @@
 .pytest_cache/
 .ruff_cache/
 __pycache__/
+
+# Type descriptions generated locally for MuJoCo (see README, Setup).
+/typings/
+
+# MuJoCo writes its runtime warnings here when a simulation becomes unstable.
+MUJOCO_LOG.TXT
 *.py[cod]
 *.egg-info/
 build/
@@ -19,5 +25,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Local coding-assistant working rules.
+# Local coding-assistant working rules and the local development plan.
 /AGENTS.md
+/plan.md

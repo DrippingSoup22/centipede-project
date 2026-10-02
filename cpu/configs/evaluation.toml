@@ -1,8 +1,0 @@
-# Evaluate an existing run again, for example after changing evaluation code.
-# Set source to the run directory; its saved training settings are reused.
-kind = "evaluation"
-source = "../../runs/train_cpu/RUN-ID"
-
-# Reuse these held-out episodes for comparisons across checkpoints and runs.
-[evaluation]
-seeds = [30001, 30002]

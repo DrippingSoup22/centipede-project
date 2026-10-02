@@ -1,0 +1,315 @@
+<mujoco model="centipede_8">
+  <!-- Centipede model v2, described in docs/model.md. -->
+  <compiler angle="degree" autolimits="true" />
+  <option timestep="0.0001" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" tolerance="1e-6" cone="elliptic" />
+  <size nuser_geom="2" nuser_actuator="1" />
+  <statistic center="-0.0133 0 0.003" extent="0.035" />
+  <default>
+    <joint limited="true" solreflimit="0.0008 1" solimplimit="0.95 0.99 0.001" />
+    <geom friction="0.8 0.0001 1e-05" condim="3" solref="0.0003 1" solimp="0.95 0.99 0.0001" margin="0" contype="1" conaffinity="1" />
+  </default>
+  <visual>
+    <global offwidth="1200" offheight="900" />
+    <map znear="0.005" zfar="30" />
+    <scale jointlength="0.3" jointwidth="0.015" />
+  </visual>
+  <asset>
+    <mesh name="head_envelope" inertia="convex" vertex="-0.0022 0 0.00136 -0.0022 0.001296 0.0012682 -0.0022 0.002448 0.0009316 -0.0022 0.00324 0.0003808 -0.0022 0.0036 -0.0003536 -0.0022 0.0036 -0.0009656 -0.0022 0.003312 -0.0014552 -0.0022 0.00252 -0.0017 -0.0022 -0.00252 -0.0017 -0.0022 -0.003312 -0.0014552 -0.0022 -0.0036 -0.0009656 -0.0022 -0.0036 -0.0003536 -0.0022 -0.00324 0.0003808 -0.0022 -0.002448 0.0009316 -0.0022 -0.001296 0.0012682 -0.001848 0 0.0017 -0.001848 0.00144 0.001598 -0.001848 0.00272 0.001224 -0.001848 0.0036 0.000612 -0.001848 0.004 -0.000204 -0.001848 0.004 -0.000884 -0.001848 0.00368 -0.001428 -0.001848 0.0028 -0.0017 -0.001848 -0.0028 -0.0017 -0.001848 -0.00368 -0.001428 -0.001848 -0.004 -0.000884 -0.001848 -0.004 -0.000204 -0.001848 -0.0036 0.000612 -0.001848 -0.00272 0.001224 -0.001848 -0.00144 0.001598 0.0022 0 0.0017 0.0022 0.00144 0.001598 0.0022 0.00272 0.001224 0.0022 0.0036 0.000612 0.0022 0.004 -0.000204 0.0022 0.004 -0.000884 0.0022 0.00368 -0.001428 0.0022 0.0028 -0.0017 0.0022 -0.0028 -0.0017 0.0022 -0.00368 -0.001428 0.0022 -0.004 -0.000884 0.0022 -0.004 -0.000204 0.0022 -0.0036 0.000612 0.0022 -0.00272 0.001224 0.0022 -0.00144 0.001598 0.00292469332629 0 0.00164207390469 0.00292469332629 0.00139093318986 0.00154354947041 0.00292469332629 0.00262731824751 0.00118229321138 0.00292469332629 0.00347733297464 0.000591146605689 0.00292469332629 0.00386370330516 -0.000197048868563 0.00292469332629 0.00386370330516 -0.00085387843044 0.00292469332629 0.00355460704074 -0.00137934207994 0.00292469332629 0.00270459231361 -0.00164207390469 0.00292469332629 -0.00270459231361 -0.00164207390469 0.00292469332629 -0.00355460704074 -0.00137934207994 0.00292469332629 -0.00386370330516 -0.00085387843044 0.00292469332629 -0.00386370330516 -0.000197048868563 0.00292469332629 -0.00347733297464 0.000591146605689 0.00292469332629 -0.00262731824751 0.00118229321138 0.00292469332629 -0.00139093318986 0.00154354947041 0.0036 0 0.00147224318643 0.0036 0.00124707658145 0.00138390859525 0.0036 0.00235558909829 0.00106001509423 0.0036 0.00311769145362 0.000530007547116 0.0036 0.00346410161514 -0.000176669182372 0.0036 0.00346410161514 -0.000765566456945 0.0036 0.00318697348593 -0.0012366842766 0.0036 0.0024248711306 -0.00147224318643 0.0036 -0.0024248711306 -0.00147224318643 0.0036 -0.00318697348593 -0.0012366842766 0.0036 -0.00346410161514 -0.000765566456945 0.0036 -0.00346410161514 -0.000176669182372 0.0036 -0.00311769145362 0.000530007547116 0.0036 -0.00235558909829 0.00106001509423 0.0036 -0.00124707658145 0.00138390859525 0.00417989898732 0 0.00120208152802 0.00417989898732 0.00101823376491 0.00112995663634 0.00417989898732 0.00192333044483 0.000865498700172 0.00417989898732 0.00254558441227 0.000432749350086 0.00417989898732 0.00282842712475 -0.000144249783362 0.00417989898732 0.00282842712475 -0.000625082394569 0.00417989898732 0.00260215295477 -0.00100974848353 0.00417989898732 0.00197989898732 -0.00120208152802 0.00417989898732 -0.00197989898732 -0.00120208152802 0.00417989898732 -0.00260215295477 -0.00100974848353 0.00417989898732 -0.00282842712475 -0.000625082394569 0.00417989898732 -0.00282842712475 -0.000144249783362 0.00417989898732 -0.00254558441227 0.000432749350086 0.00417989898732 -0.00192333044483 0.000865498700172 0.00417989898732 -0.00101823376491 0.00112995663634 0.0046248711306 0 0.00085 0.0046248711306 0.00072 0.000799 0.0046248711306 0.00136 0.000612 0.0046248711306 0.0018 0.000306 0.0046248711306 0.002 -0.000102 0.0046248711306 0.002 -0.000442 0.0046248711306 0.00184 -0.000714 0.0046248711306 0.0014 -0.00085 0.0046248711306 -0.0014 -0.00085 0.0046248711306 -0.00184 -0.000714 0.0046248711306 -0.002 -0.000442 0.0046248711306 -0.002 -0.000102 0.0046248711306 -0.0018 0.000306 0.0046248711306 -0.00136 0.000612 0.0046248711306 -0.00072 0.000799 0.00490459231361 0 0.000439992376674 0.00490459231361 0.000372699424948 0.000413592834074 0.00490459231361 0.000703987802679 0.000316794511205 0.00490459231361 0.000931748562369 0.000158397255603 0.00490459231361 0.00103527618041 -5.27990852009e-05 0.00490459231361 0.00103527618041 -0.000228796035871 0.00490459231361 0.000952454085977 -0.000369593596406 0.00490459231361 0.000724693326287 -0.000439992376674 0.00490459231361 -0.000724693326287 -0.000439992376674 0.00490459231361 -0.000952454085977 -0.000369593596406 0.00490459231361 -0.00103527618041 -0.000228796035871 0.00490459231361 -0.00103527618041 -5.27990852009e-05 0.00490459231361 -0.000931748562369 0.000158397255603 0.00490459231361 -0.000703987802679 0.000316794511205 0.00490459231361 -0.000372699424948 0.000413592834074 0.005 0 0" smoothnormal="true" />
+    <mesh name="trunk_envelope" inertia="convex" vertex="-0.0022 0 0.00136 -0.0022 0.001296 0.0012682 -0.0022 0.002448 0.0009316 -0.0022 0.00324 0.0003808 -0.0022 0.0036 -0.0003536 -0.0022 0.0036 -0.0009656 -0.0022 0.003312 -0.0014552 -0.0022 0.00252 -0.0017 -0.0022 -0.00252 -0.0017 -0.0022 -0.003312 -0.0014552 -0.0022 -0.0036 -0.0009656 -0.0022 -0.0036 -0.0003536 -0.0022 -0.00324 0.0003808 -0.0022 -0.002448 0.0009316 -0.0022 -0.001296 0.0012682 -0.001848 0 0.0017 -0.001848 0.00144 0.001598 -0.001848 0.00272 0.001224 -0.001848 0.0036 0.000612 -0.001848 0.004 -0.000204 -0.001848 0.004 -0.000884 -0.001848 0.00368 -0.001428 -0.001848 0.0028 -0.0017 -0.001848 -0.0028 -0.0017 -0.001848 -0.00368 -0.001428 -0.001848 -0.004 -0.000884 -0.001848 -0.004 -0.000204 -0.001848 -0.0036 0.000612 -0.001848 -0.00272 0.001224 -0.001848 -0.00144 0.001598 0.001848 0 0.0017 0.001848 0.00144 0.001598 0.001848 0.00272 0.001224 0.001848 0.0036 0.000612 0.001848 0.004 -0.000204 0.001848 0.004 -0.000884 0.001848 0.00368 -0.001428 0.001848 0.0028 -0.0017 0.001848 -0.0028 -0.0017 0.001848 -0.00368 -0.001428 0.001848 -0.004 -0.000884 0.001848 -0.004 -0.000204 0.001848 -0.0036 0.000612 0.001848 -0.00272 0.001224 0.001848 -0.00144 0.001598 0.0022 0 0.00136 0.0022 0.001296 0.0012682 0.0022 0.002448 0.0009316 0.0022 0.00324 0.0003808 0.0022 0.0036 -0.0003536 0.0022 0.0036 -0.0009656 0.0022 0.003312 -0.0014552 0.0022 0.00252 -0.0017 0.0022 -0.00252 -0.0017 0.0022 -0.003312 -0.0014552 0.0022 -0.0036 -0.0009656 0.0022 -0.0036 -0.0003536 0.0022 -0.00324 0.0003808 0.0022 -0.002448 0.0009316 0.0022 -0.001296 0.0012682" smoothnormal="true" />
+    <texture type="skybox" builtin="gradient" width="256" height="1536" rgb1="0.10 0.15 0.20" rgb2="0.35 0.40 0.44" />
+    <texture name="ground" type="2d" builtin="checker" width="512" height="512" rgb1="0.16 0.20 0.23" rgb2="0.20 0.24 0.27" />
+    <material name="ground" texture="ground" texrepeat="80 80" reflectance="0" />
+  </asset>
+  <worldbody>
+    <light pos="0.02 -0.02 0.1" dir="0 0 -1" diffuse="0.9 0.9 0.9" directional="true" castshadow="false" />
+    <geom name="floor" type="plane" size="0.5 0.5 0.001" material="ground" user="-1 0" friction="0.8 0.0001 1e-05" condim="6" priority="1" />
+    <body name="segment_00" pos="0 0 0.0050955249481">
+      <freejoint name="root" />
+      <geom name="segment_00_body" type="mesh" pos="0 0 0" mass="9e-05" rgba="0.45 0.16 0.055 1" contype="2" conaffinity="1" user="0 1" mesh="head_envelope" />
+      <site name="segment_00_center" pos="0 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+      <site name="head_tip" pos="0.005 0 0" size="0.00025" rgba="0 0 0 0" />
+      <body name="segment_00_left_upper" pos="0 0.0039 -0.0006">
+        <joint name="segment_00_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+        <joint name="segment_00_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+        <geom name="segment_00_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="0 2" />
+        <body name="segment_00_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+          <joint name="segment_00_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+          <geom name="segment_00_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="0 2" />
+          <geom name="segment_00_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="0 3" />
+          <site name="segment_00_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+        </body>
+      </body>
+      <body name="segment_00_right_upper" pos="0 -0.0039 -0.0006">
+        <joint name="segment_00_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+        <joint name="segment_00_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+        <geom name="segment_00_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="0 2" />
+        <body name="segment_00_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+          <joint name="segment_00_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+          <geom name="segment_00_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="0 2" />
+          <geom name="segment_00_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="0 4" />
+          <site name="segment_00_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+        </body>
+      </body>
+      <body name="segment_01" pos="-0.0019 0 0">
+        <joint name="segment_01_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+        <joint name="segment_01_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+        <geom name="segment_01_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.28 0.10 0.045 1" contype="2" conaffinity="1" user="1 1" mesh="trunk_envelope" />
+        <geom name="segment_01_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="1 5" />
+        <site name="segment_01_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+        <body name="segment_01_left_upper" pos="-0.0019 0.0039 -0.0006">
+          <joint name="segment_01_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+          <joint name="segment_01_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+          <geom name="segment_01_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="1 2" />
+          <body name="segment_01_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+            <joint name="segment_01_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+            <geom name="segment_01_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="1 2" />
+            <geom name="segment_01_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="1 3" />
+            <site name="segment_01_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+          </body>
+        </body>
+        <body name="segment_01_right_upper" pos="-0.0019 -0.0039 -0.0006">
+          <joint name="segment_01_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+          <joint name="segment_01_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+          <geom name="segment_01_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="1 2" />
+          <body name="segment_01_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+            <joint name="segment_01_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+            <geom name="segment_01_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="1 2" />
+            <geom name="segment_01_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="1 4" />
+            <site name="segment_01_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+          </body>
+        </body>
+        <body name="segment_02" pos="-0.0038 0 0">
+          <joint name="segment_02_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+          <joint name="segment_02_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+          <geom name="segment_02_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.34 0.13 0.05 1" contype="2" conaffinity="1" user="2 1" mesh="trunk_envelope" />
+          <geom name="segment_02_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="2 5" />
+          <site name="segment_02_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+          <body name="segment_02_left_upper" pos="-0.0019 0.0039 -0.0006">
+            <joint name="segment_02_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+            <joint name="segment_02_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+            <geom name="segment_02_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="2 2" />
+            <body name="segment_02_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+              <joint name="segment_02_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+              <geom name="segment_02_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="2 2" />
+              <geom name="segment_02_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="2 3" />
+              <site name="segment_02_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+            </body>
+          </body>
+          <body name="segment_02_right_upper" pos="-0.0019 -0.0039 -0.0006">
+            <joint name="segment_02_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+            <joint name="segment_02_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+            <geom name="segment_02_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="2 2" />
+            <body name="segment_02_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+              <joint name="segment_02_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+              <geom name="segment_02_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="2 2" />
+              <geom name="segment_02_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="2 4" />
+              <site name="segment_02_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+            </body>
+          </body>
+          <body name="segment_03" pos="-0.0038 0 0">
+            <joint name="segment_03_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+            <joint name="segment_03_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+            <geom name="segment_03_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.28 0.10 0.045 1" contype="2" conaffinity="1" user="3 1" mesh="trunk_envelope" />
+            <geom name="segment_03_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="3 5" />
+            <site name="segment_03_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+            <body name="segment_03_left_upper" pos="-0.0019 0.0039 -0.0006">
+              <joint name="segment_03_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+              <joint name="segment_03_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+              <geom name="segment_03_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="3 2" />
+              <body name="segment_03_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+                <joint name="segment_03_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                <geom name="segment_03_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="3 2" />
+                <geom name="segment_03_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="3 3" />
+                <site name="segment_03_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+              </body>
+            </body>
+            <body name="segment_03_right_upper" pos="-0.0019 -0.0039 -0.0006">
+              <joint name="segment_03_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+              <joint name="segment_03_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+              <geom name="segment_03_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="3 2" />
+              <body name="segment_03_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+                <joint name="segment_03_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                <geom name="segment_03_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="3 2" />
+                <geom name="segment_03_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="3 4" />
+                <site name="segment_03_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+              </body>
+            </body>
+            <body name="segment_04" pos="-0.0038 0 0">
+              <joint name="segment_04_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+              <joint name="segment_04_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+              <geom name="segment_04_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.34 0.13 0.05 1" contype="2" conaffinity="1" user="4 1" mesh="trunk_envelope" />
+              <geom name="segment_04_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="4 5" />
+              <site name="segment_04_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+              <body name="segment_04_left_upper" pos="-0.0019 0.0039 -0.0006">
+                <joint name="segment_04_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+                <joint name="segment_04_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                <geom name="segment_04_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="4 2" />
+                <body name="segment_04_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+                  <joint name="segment_04_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                  <geom name="segment_04_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="4 2" />
+                  <geom name="segment_04_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="4 3" />
+                  <site name="segment_04_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                </body>
+              </body>
+              <body name="segment_04_right_upper" pos="-0.0019 -0.0039 -0.0006">
+                <joint name="segment_04_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+                <joint name="segment_04_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                <geom name="segment_04_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="4 2" />
+                <body name="segment_04_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+                  <joint name="segment_04_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                  <geom name="segment_04_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="4 2" />
+                  <geom name="segment_04_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="4 4" />
+                  <site name="segment_04_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                </body>
+              </body>
+              <body name="segment_05" pos="-0.0038 0 0">
+                <joint name="segment_05_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+                <joint name="segment_05_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+                <geom name="segment_05_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.28 0.10 0.045 1" contype="2" conaffinity="1" user="5 1" mesh="trunk_envelope" />
+                <geom name="segment_05_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="5 5" />
+                <site name="segment_05_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+                <body name="segment_05_left_upper" pos="-0.0019 0.0039 -0.0006">
+                  <joint name="segment_05_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+                  <joint name="segment_05_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                  <geom name="segment_05_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="5 2" />
+                  <body name="segment_05_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+                    <joint name="segment_05_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                    <geom name="segment_05_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="5 2" />
+                    <geom name="segment_05_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="5 3" />
+                    <site name="segment_05_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                  </body>
+                </body>
+                <body name="segment_05_right_upper" pos="-0.0019 -0.0039 -0.0006">
+                  <joint name="segment_05_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+                  <joint name="segment_05_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                  <geom name="segment_05_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="5 2" />
+                  <body name="segment_05_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+                    <joint name="segment_05_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                    <geom name="segment_05_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="5 2" />
+                    <geom name="segment_05_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="5 4" />
+                    <site name="segment_05_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                  </body>
+                </body>
+                <body name="segment_06" pos="-0.0038 0 0">
+                  <joint name="segment_06_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+                  <joint name="segment_06_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+                  <geom name="segment_06_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.34 0.13 0.05 1" contype="2" conaffinity="1" user="6 1" mesh="trunk_envelope" />
+                  <geom name="segment_06_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="6 5" />
+                  <site name="segment_06_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+                  <body name="segment_06_left_upper" pos="-0.0019 0.0039 -0.0006">
+                    <joint name="segment_06_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+                    <joint name="segment_06_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                    <geom name="segment_06_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="6 2" />
+                    <body name="segment_06_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+                      <joint name="segment_06_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                      <geom name="segment_06_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="6 2" />
+                      <geom name="segment_06_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="6 3" />
+                      <site name="segment_06_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                    </body>
+                  </body>
+                  <body name="segment_06_right_upper" pos="-0.0019 -0.0039 -0.0006">
+                    <joint name="segment_06_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+                    <joint name="segment_06_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                    <geom name="segment_06_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="6 2" />
+                    <body name="segment_06_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+                      <joint name="segment_06_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                      <geom name="segment_06_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="6 2" />
+                      <geom name="segment_06_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="6 4" />
+                      <site name="segment_06_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                    </body>
+                  </body>
+                  <body name="segment_07" pos="-0.0038 0 0">
+                    <joint name="segment_07_yaw" type="hinge" axis="0 0 1" range="-15 15" damping="3e-07" armature="2e-11" stiffness="2e-05" springref="0" />
+                    <joint name="segment_07_pitch" type="hinge" axis="0 1 0" range="-8 8" stiffness="0.0001" springref="0" damping="5e-07" armature="2e-11" />
+                    <geom name="segment_07_body" type="mesh" pos="-0.0019 0 0" mass="7.3e-05" rgba="0.28 0.10 0.045 1" contype="2" conaffinity="1" user="7 1" mesh="trunk_envelope" />
+                    <geom name="segment_07_membrane" type="ellipsoid" pos="0 0 0" size="0.00062210476888 0.00368 0.00153" mass="0" contype="0" conaffinity="0" rgba="0.20 0.065 0.025 1" group="2" user="7 5" />
+                    <site name="segment_07_center" pos="-0.0019 0 0" size="0.00015" rgba="0 0 0 0" group="3" />
+                    <body name="segment_07_left_upper" pos="-0.0019 0.0039 -0.0006">
+                      <joint name="segment_07_left_sweep" type="hinge" axis="0 0 -1" range="-40 40" damping="2e-07" armature="2e-11" />
+                      <joint name="segment_07_left_lift" type="hinge" axis="1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                      <geom name="segment_07_left_upper_geom" type="capsule" fromto="0 0 0 0 0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="7 2" />
+                      <body name="segment_07_left_lower" pos="0 0.00453011566386 -0.000798781617268">
+                        <joint name="segment_07_left_knee" type="hinge" axis="-1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                        <geom name="segment_07_left_lower_geom" type="capsule" fromto="0 0 0 0 0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="7 2" />
+                        <geom name="segment_07_left_foot" type="sphere" pos="0 0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="7 3" />
+                        <site name="segment_07_left_tip" pos="0 0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                      </body>
+                    </body>
+                    <body name="segment_07_right_upper" pos="-0.0019 -0.0039 -0.0006">
+                      <joint name="segment_07_right_sweep" type="hinge" axis="0 0 1" range="-40 40" damping="2e-07" armature="2e-11" />
+                      <joint name="segment_07_right_lift" type="hinge" axis="-1 0 0" range="-25 40" damping="2e-07" armature="2e-11" />
+                      <geom name="segment_07_right_upper_geom" type="capsule" fromto="0 0 0 0 -0.00453011566386 -0.000798781617268" size="0.0003" mass="1.5e-06" rgba="0.72 0.30 0.07 1" contype="4" conaffinity="5" user="7 2" />
+                      <body name="segment_07_right_lower" pos="0 -0.00453011566386 -0.000798781617268">
+                        <joint name="segment_07_right_knee" type="hinge" axis="1 0 0" range="-20 50" damping="1e-07" armature="2e-12" />
+                        <geom name="segment_07_right_lower_geom" type="capsule" fromto="0 0 0 0 -0.00475108185688 -0.00332674333084" size="0.00022" mass="1e-06" rgba="0.90 0.46 0.10 1" contype="4" conaffinity="5" user="7 2" />
+                        <geom name="segment_07_right_foot" type="sphere" pos="0 -0.00475108185688 -0.00332674333084" size="0.00032" mass="1.5e-07" rgba="0.26 0.11 0.035 1" contype="4" conaffinity="5" user="7 4" />
+                        <site name="segment_07_right_tip" pos="0 -0.00475108185688 -0.00332674333084" size="0.00015" rgba="0 0 0 0" group="3" />
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+  <actuator>
+    <motor name="segment_00_left_sweep_motor" joint="segment_00_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_left_lift_motor" joint="segment_00_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_left_knee_motor" joint="segment_00_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_sweep_motor" joint="segment_00_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_lift_motor" joint="segment_00_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_00_right_knee_motor" joint="segment_00_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="0" />
+    <motor name="segment_01_yaw_motor" joint="segment_01_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_left_sweep_motor" joint="segment_01_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_left_lift_motor" joint="segment_01_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_left_knee_motor" joint="segment_01_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_right_sweep_motor" joint="segment_01_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_right_lift_motor" joint="segment_01_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_01_right_knee_motor" joint="segment_01_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="1" />
+    <motor name="segment_02_yaw_motor" joint="segment_02_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_left_sweep_motor" joint="segment_02_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_left_lift_motor" joint="segment_02_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_left_knee_motor" joint="segment_02_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_right_sweep_motor" joint="segment_02_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_right_lift_motor" joint="segment_02_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_02_right_knee_motor" joint="segment_02_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="2" />
+    <motor name="segment_03_yaw_motor" joint="segment_03_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_left_sweep_motor" joint="segment_03_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_left_lift_motor" joint="segment_03_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_left_knee_motor" joint="segment_03_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_right_sweep_motor" joint="segment_03_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_right_lift_motor" joint="segment_03_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_03_right_knee_motor" joint="segment_03_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="3" />
+    <motor name="segment_04_yaw_motor" joint="segment_04_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_left_sweep_motor" joint="segment_04_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_left_lift_motor" joint="segment_04_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_left_knee_motor" joint="segment_04_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_right_sweep_motor" joint="segment_04_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_right_lift_motor" joint="segment_04_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_04_right_knee_motor" joint="segment_04_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="4" />
+    <motor name="segment_05_yaw_motor" joint="segment_05_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_left_sweep_motor" joint="segment_05_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_left_lift_motor" joint="segment_05_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_left_knee_motor" joint="segment_05_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_right_sweep_motor" joint="segment_05_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_right_lift_motor" joint="segment_05_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_05_right_knee_motor" joint="segment_05_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="5" />
+    <motor name="segment_06_yaw_motor" joint="segment_06_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_left_sweep_motor" joint="segment_06_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_left_lift_motor" joint="segment_06_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_left_knee_motor" joint="segment_06_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_right_sweep_motor" joint="segment_06_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_right_lift_motor" joint="segment_06_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_06_right_knee_motor" joint="segment_06_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="6" />
+    <motor name="segment_07_yaw_motor" joint="segment_07_yaw" gear="1.5e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_left_sweep_motor" joint="segment_07_left_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_left_lift_motor" joint="segment_07_left_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_left_knee_motor" joint="segment_07_left_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_right_sweep_motor" joint="segment_07_right_sweep" gear="8e-06" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_right_lift_motor" joint="segment_07_right_lift" gear="1.8e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+    <motor name="segment_07_right_knee_motor" joint="segment_07_right_knee" gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="7" />
+  </actuator>
+</mujoco>
