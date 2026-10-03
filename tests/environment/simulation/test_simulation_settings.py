@@ -19,6 +19,7 @@ def test_defaults_fill_everything_but_the_required_keys():
         model_path=Path("models/assembly_v2.xml"),
         backend="cpu",
         world_count=1,
+        gpu_solver="newton",
         contacts_per_world=128,
         constraints_per_world=512,
     )
@@ -35,6 +36,8 @@ def test_required_keys_must_be_present(missing_key):
 def test_section_rules_are_enforced():
     with pytest.raises(SettingsError, match="backend must be one of"):
         SimulationSettings.from_section({**REQUIRED_ONLY, "backend": "tpu"})
+    with pytest.raises(SettingsError, match="gpu_solver must be one of"):
+        SimulationSettings.from_section({**REQUIRED_ONLY, "gpu_solver": "pgs"})
     with pytest.raises(SettingsError, match="world_count must be at least 1"):
         SimulationSettings.from_section({**REQUIRED_ONLY, "world_count": 0})
     with pytest.raises(SettingsError, match="unknown settings: world_cuont"):

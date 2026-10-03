@@ -36,6 +36,7 @@ The environment lives in `src/centipede/environment/`.
 | `simulation/simulation.py` | Front file of the physics simulation: loads the model, chooses the backend, offers `reset()`, `step()`, and the physical state |
 | `simulation/model_mapping.py` | Finding each segment's parts in the model by name, and checking them |
 | `simulation/physical_state.py` | The physical state handed to the environment |
+| `simulation/constants.py` | Fixed values both backends share: physics steps per action, reset noise |
 | `simulation/cpu_backend.py` | Physics on the CPU with MuJoCo |
 | `simulation/gpu_backend.py` | Physics on the GPU with MuJoCo Warp |
 | `simulation/settings.py` | Physics simulation settings |
@@ -302,6 +303,7 @@ These are the keys of the environment sections of the configuration file (see
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
 | `world_count` | 1 | Number of worlds simulated at once |
+| `gpu_solver` | `newton` | Constraint solver, GPU only: `newton`, or `cg` for GPUs older than Volta |
 | `contacts_per_world` | 128 | Reserved contact memory, GPU only |
 | `constraints_per_world` | 512 | Reserved constraint memory, GPU only |
 | **`[environment.target]`** | | |

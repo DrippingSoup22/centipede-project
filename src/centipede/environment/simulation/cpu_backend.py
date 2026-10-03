@@ -3,6 +3,11 @@ import numpy as np
 import torch
 from numpy.random import Generator
 
+from centipede.environment.simulation.constants import (
+    LEG_ANGLE_NOISE_RAD,
+    LEG_SPEED_NOISE_RAD_S,
+    PHYSICS_STEPS_PER_ACTION,
+)
 from centipede.environment.simulation.model_mapping import (
     BODY_CATEGORY,
     FLOOR_CATEGORY,
@@ -11,10 +16,6 @@ from centipede.environment.simulation.model_mapping import (
     ModelMapping,
 )
 from centipede.environment.simulation.physical_state import PhysicalState
-
-PHYSICS_STEPS_PER_ACTION = 200
-LEG_ANGLE_NOISE_RAD = np.deg2rad(2)
-LEG_SPEED_NOISE_RAD_S = 0.05
 
 
 class CPUBackend:

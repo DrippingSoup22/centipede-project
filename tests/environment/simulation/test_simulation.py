@@ -1,6 +1,6 @@
 """Tests for the physics simulation's front file.
 
-The backend's behaviour is tested in test_cpu_backend.py; these tests cover
+The backends' behaviour is tested in their own test files; these tests cover
 only what the front adds: loading, backend choice, and forwarding.
 """
 
@@ -38,6 +38,18 @@ def test_missing_model_file_fails_clearly():
         PhysicsSimulation(settings(model_path="models/no_such_model.xml"))
 
 
-def test_gpu_backend_is_not_available_yet():
-    with pytest.raises(NotImplementedError, match="Stage 7"):
-        PhysicsSimulation(settings(backend="gpu"))
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
+def test_gpu_backend_is_chosen_with_its_settings():
+    """No physics steps: a step takes about 10 s on a pre-Volta GPU."""
+    simulation = PhysicsSimulation(
+        settings(backend="gpu", world_count=2, gpu_solver="cg", contacts_per_world=64)
+    )
+    backend = simulation._backend
+
+    assert type(backend).__name__ == "GPUBackend"
+    assert backend.gpu_data.naconmax == 2 * 64
+    assert simulation.physical_state is backend.physical_state
+    assert simulation.physical_state.body_height.is_cuda
+
+    simulation.reset(seed=1)
+    assert torch.all(simulation.physical_state.body_height > 0)

@@ -9,11 +9,11 @@ import numpy as np
 import pytest
 import torch
 
-from centipede.environment.simulation.cpu_backend import (
+from centipede.environment.simulation.constants import (
     LEG_ANGLE_NOISE_RAD,
     PHYSICS_STEPS_PER_ACTION,
-    CPUBackend,
 )
+from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import (
     LEG_ACTION_ORDER,
     ModelMapping,

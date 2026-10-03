@@ -1,10 +1,8 @@
 import mujoco
 import torch
 
-from centipede.environment.simulation.cpu_backend import (
-    PHYSICS_STEPS_PER_ACTION,
-    CPUBackend,
-)
+from centipede.environment.simulation.constants import PHYSICS_STEPS_PER_ACTION
+from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import ModelMapping
 from centipede.environment.simulation.settings import SimulationSettings
 
@@ -25,8 +23,17 @@ class PhysicsSimulation:
         if settings.backend == "cpu":
             self._backend = CPUBackend(model, mapping, settings.world_count)
         else:
-            raise NotImplementedError(
-                "The GPU backend is not implemented yet (plan Stage 7)"
+            # Imported here so that a CPU-only installation, without the
+            # optional GPU packages, can still use the CPU backend.
+            from centipede.environment.simulation.gpu_backend import GPUBackend
+
+            self._backend = GPUBackend(
+                model,
+                mapping,
+                settings.world_count,
+                settings.gpu_solver,
+                settings.contacts_per_world,
+                settings.constraints_per_world,
             )
 
         self.segment_count = mapping.segment_count
@@ -37,7 +44,7 @@ class PhysicsSimulation:
     def reset(
         self, world_mask: torch.Tensor | None = None, seed: int | None = None
     ) -> None:
-        """Reset the selected worlds (all if no mask); see ``CPUBackend.reset``."""
+        """Reset the selected worlds (all if no mask); see the backends' ``reset``."""
         self._backend.reset(world_mask, seed)
 
     def step(self, leg_actions: torch.Tensor) -> None:

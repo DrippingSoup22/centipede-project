@@ -65,6 +65,7 @@ observation_radius = 1
 model_path = "models/assembly_v2.xml" # required
 backend = "cpu"                       # required: "cpu" or "gpu"
 world_count = 4
+# gpu_solver = "newton"               # GPU only: "newton" or "cg"
 # contacts_per_world = 128            # GPU only
 # constraints_per_world = 512         # GPU only
 

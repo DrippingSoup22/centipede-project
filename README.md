@@ -26,8 +26,10 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 1 complete.** The physics simulation runs batches of worlds on
-  the CPU and is covered by tests. On 2026-10-01 the project was restarted with
+- **Code: Stage 2 in progress.** The physics simulation runs batches of worlds
+  on the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests. The GPU
+  backend passes its tests locally; the check on a Kaggle T4 with MuJoCo Warp's
+  default solver is pending. On 2026-10-01 the project was restarted with
   a new structure. A first implementation reached early learning on the CPU,
   with the rear segments learning to avoid ground contact, but no standing or
   walking. It is preserved in Git history (tag `cpu-stage8`) and in the local
@@ -49,9 +51,10 @@ separately.
 Centipede/
 ├─ docs/             Architecture, model, environment, and agents documents
 ├─ models/           Frozen MuJoCo XML models
-├─ src/centipede/    Program code, one folder per component (not yet written)
+├─ src/centipede/    Program code, one folder per component
 ├─ configs/          Reusable TOML configuration files (not yet written)
-├─ tests/            Automated tests (not yet written)
+├─ notebooks/        Kaggle notebooks that run the project on a cloud GPU
+├─ tests/            Automated tests, one file per component
 └─ runs/             Training and evaluation results; local only
 ```
 
@@ -66,6 +69,7 @@ repository root, in PowerShell:
 
 ```powershell
 python -m venv "$HOME\.venvs\Centipede"
+& "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install "torch==2.14.1+cu126" --index-url https://download.pytorch.org/whl/cu126
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ..\RL_lib
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ".[gpu,dev]"
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pybind11_stubgen mujoco -o typings --ignore-all-errors
@@ -78,9 +82,18 @@ the ignored `typings/` folder, where the editor's type checker finds them.
 In the editor, select `$HOME\.venvs\Centipede\Scripts\python.exe` as the
 Python interpreter.
 
-The `gpu` extra adds NVIDIA Warp (its CUDA 12 build, which still supports older
-GPUs) and MuJoCo Warp. Verified on 2026-10-02 with Python 3.13.15, MuJoCo
-3.12.0, MuJoCo Warp 3.14.0, Warp 1.17.0, PyTorch 2.14.1 (CPU), and NumPy 2.5.3.
+PyTorch is installed first from its CUDA 12.6 build, so that tensors can live on
+the GPU; plain `pip install torch` gives a CPU-only build on Windows. This build
+still supports older GPUs such as the local MX330 (compute capability 6.1). The
+`gpu` extra adds NVIDIA Warp (its CUDA 12 build, for the same reason) and MuJoCo
+Warp. Verified on 2026-10-03 with Python 3.13.15, MuJoCo 3.12.0, MuJoCo Warp
+3.14.0, Warp 1.17.0, PyTorch 2.14.1+cu126, and NumPy 2.5.3: MuJoCo Warp's GPU
+arrays become PyTorch GPU tensors without copying.
+
+To run the tests on a Kaggle T4, import
+[`notebooks/kaggle_gpu_tests.ipynb`](notebooks/kaggle_gpu_tests.ipynb) into
+Kaggle, select the GPU T4 accelerator, turn on internet access, and run all
+cells. The notebook clones this repository, so it tests the latest pushed commit.
 
 ## Archive
 

@@ -11,6 +11,7 @@ class SimulationSettings:
     model_path: Path
     backend: str
     world_count: int
+    gpu_solver: str
     contacts_per_world: int
     constraints_per_world: int
 
@@ -22,6 +23,7 @@ class SimulationSettings:
             model_path=section.path("model_path"),
             backend=section.choice("backend", ("cpu", "gpu")),
             world_count=section.positive_integer("world_count", default=1),
+            gpu_solver=section.choice("gpu_solver", ("newton", "cg"), default="newton"),
             contacts_per_world=section.positive_integer(
                 "contacts_per_world", default=128
             ),
