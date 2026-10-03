@@ -81,7 +81,8 @@ def test_collision_rules_leave_only_fast_pairs(v2):
     so none needs MuJoCo Warp's general convex collision code.
     """
     shape_categories = categories(v2)
-    mesh, plane = mujoco.mjtGeom.mjGEOM_MESH, mujoco.mjtGeom.mjGEOM_PLANE
+    # Plain integers: MuJoCo's enum and NumPy's integers need not hash alike.
+    mesh, plane = int(mujoco.mjtGeom.mjGEOM_MESH), int(mujoco.mjtGeom.mjGEOM_PLANE)
 
     for a in range(v2.ngeom):
         for b in range(a + 1, v2.ngeom):
@@ -89,7 +90,7 @@ def test_collision_rules_leave_only_fast_pairs(v2):
             expected = MEMBRANE not in kinds and (FLOOR in kinds or kinds <= set(LIMBS))
             assert collide(v2, a, b) == expected, (v2.geom(a).name, v2.geom(b).name)
 
-            types = {v2.geom_type[a], v2.geom_type[b]}
+            types = {int(v2.geom_type[a]), int(v2.geom_type[b])}
             if expected and not parent_filtered(v2, a, b) and mesh in types:
                 assert types == {mesh, plane}
 
