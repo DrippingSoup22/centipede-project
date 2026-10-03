@@ -53,6 +53,7 @@ Centipede/
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          Reusable TOML configuration files (not yet written)
 ├─ notebooks/        Kaggle notebooks that run the project on a cloud GPU
+├─ benchmarks/       Speed measurements, such as the physics simulation's
 ├─ tests/            Automated tests, one file per component
 └─ runs/             Training and evaluation results; local only
 ```
@@ -93,6 +94,9 @@ To run the tests on a Kaggle T4, import
 [`notebooks/kaggle_gpu_tests.ipynb`](notebooks/kaggle_gpu_tests.ipynb) into
 Kaggle, select the GPU T4 accelerator, turn on internet access, and run all
 cells. The notebook clones this repository, so it tests the latest pushed commit.
+[`notebooks/kaggle_speed_benchmark.ipynb`](notebooks/kaggle_speed_benchmark.ipynb)
+runs [`benchmarks/simulation_speed.py`](benchmarks/simulation_speed.py) the same
+way, measuring how fast each backend simulates.
 
 ## Archive
 
