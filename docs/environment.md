@@ -131,7 +131,10 @@ same physical state, so nothing outside the simulation can tell which is running
 Known differences of the GPU backend:
 
 - It computes in 32-bit floats instead of 64-bit, so it is compared with the CPU
-  backend within tolerances, not bit for bit.
+  backend within tolerances, not bit for bit. Leg impacts amplify these small
+  differences, so under random actions the two backends drift apart after a
+  single step; they are compared while the body settles with motors off, where
+  positions agree within about 0.03 mm.
 - Memory for contacts and constraints is reserved in advance. MuJoCo Warp's
   defaults (48 contacts, 64 constraint rows per world) are too small: the model
   at rest already reaches 40 contacts and 256 constraint rows.
