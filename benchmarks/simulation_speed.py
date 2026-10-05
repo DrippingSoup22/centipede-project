@@ -6,11 +6,12 @@ transitions per second each backend produces with random actions, the way the
 interaction loop will drive it, and estimates how long a training budget would
 take in physics alone (learning updates come on top).
 
-For the GPU it also splits the time of the 200 physics steps of a transition
-into the time Python needs to queue the GPU work and the time until the GPU has
-finished it. When the two are close, the GPU waits for Python (launch-bound);
-replaying the 200 steps as one recorded CUDA graph shows how much of that wait
-could be removed.
+For the GPU it also times the 200 physics steps of a transition twice: launched
+from Python as usual, and replayed as one recorded CUDA graph. Outside a graph,
+MuJoCo Warp's solver copies its "still solving" flag to the CPU after every
+iteration, so the GPU idles while the CPU reads it and launches the next one.
+The difference between the two times is that waiting, and shows what recording
+the steps as a graph would gain.
 
 Run from the repository root, for example on a Kaggle T4:
 
@@ -68,7 +69,7 @@ def synchronize(device: str) -> None:
 
 
 def gpu_time_split(simulation, repeats) -> dict:
-    """Queue time, finish time, and recorded-graph time of 200 physics steps.
+    """Time of 200 physics steps launched from Python and replayed as a graph.
 
     Reaches into the backend on purpose: this is a diagnostic, not pipeline
     code. The extra steps continue the same worlds with their last actions.
@@ -79,23 +80,14 @@ def gpu_time_split(simulation, repeats) -> dict:
     backend = simulation._backend
     gpu_model, gpu_data = backend.gpu_model, backend.gpu_data
 
-    queue_seconds, finish_seconds = 0.0, 0.0
+    wp.synchronize()
+    start = time.perf_counter()
     for _ in range(repeats):
-        wp.synchronize()
-        start = time.perf_counter()
         for _ in range(PHYSICS_STEPS_PER_ACTION):
             mjw.step(gpu_model, gpu_data)
-        queued = time.perf_counter()
-        wp.synchronize()
-        finished = time.perf_counter()
-        queue_seconds += queued - start
-        finish_seconds += finished - start
+    wp.synchronize()
+    split = {"python": (time.perf_counter() - start) / repeats, "graph": None}
 
-    split = {
-        "queue": queue_seconds / repeats,
-        "finish": finish_seconds / repeats,
-        "graph": None,
-    }
     try:
         with wp.ScopedCapture(device=backend.device) as capture:
             for _ in range(PHYSICS_STEPS_PER_ACTION):
@@ -168,20 +160,20 @@ def report(results) -> None:
 
     gpu_results = [result for result in results if "split" in result]
     if gpu_results:
-        print("\nGPU: 200 physics steps, split into Python queueing and GPU work")
+        print("\nGPU: 200 physics steps launched from Python, and as a graph")
         print(
-            f"{'worlds':>7} {'queue s':>8} {'finish s':>9} {'queue share':>12} "
-            f"{'as graph s':>11} {'graph speed-up':>15}"
+            f"{'worlds':>7} {'python s':>9} {'graph s':>8} {'waiting s':>10} "
+            f"{'waiting share':>14} {'graph speed-up':>15}"
         )
         for result in gpu_results:
-            split = result["split"]
-            graph = split["graph"]
-            graph_text = f"{graph:.3f}" if graph is not None else "failed"
-            speed_up = f"{split['finish'] / graph:.1f}x" if graph else "-"
+            python, graph = result["split"]["python"], result["split"]["graph"]
+            if graph is None:
+                print(f"{result['worlds']:>7} {python:>9.3f} {'failed':>8}")
+                continue
             print(
-                f"{result['worlds']:>7} {split['queue']:>8.3f} "
-                f"{split['finish']:>9.3f} {split['queue'] / split['finish']:>12.0%} "
-                f"{graph_text:>11} {speed_up:>15}"
+                f"{result['worlds']:>7} {python:>9.3f} {graph:>8.3f} "
+                f"{python - graph:>10.3f} {(python - graph) / python:>14.0%} "
+                f"{python / graph:>14.1f}x"
             )
 
     print("\nPhysics time for a training budget, at each measured speed")
