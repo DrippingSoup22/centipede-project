@@ -26,9 +26,10 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 2 complete.** The physics simulation runs batches of worlds on
+- **Code: Stage 3 complete.** The physics simulation runs batches of worlds on
   the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests that pass
-  locally and on a Kaggle T4. On 2026-10-01 the project was restarted with
+  locally and on a Kaggle T4. The environment builds on it: targets, episodes,
+  observations, rewards, and diagnostics, tested locally. On 2026-10-01 the project was restarted with
   a new structure. A first implementation reached early learning on the CPU,
   with the rear segments learning to avoid ground contact, but no standing or
   walking. It is preserved in Git history (tag `cpu-stage8`) and in the local
@@ -43,6 +44,7 @@ separately.
 | [`docs/configuration.md`](docs/configuration.md) | The TOML files that start every run: sections, training and evaluation files |
 | [`docs/environment.md`](docs/environment.md) | The task: physics simulation, actions, observations, targets, episodes, rewards |
 | [`docs/agents.md`](docs/agents.md) | The learners: independent segment agents, networks, PPO settings, checkpoints |
+| [`docs/diagnostics.md`](docs/diagnostics.md) | What each component measures about a run, for the training log and the report |
 
 ## Project folders
 

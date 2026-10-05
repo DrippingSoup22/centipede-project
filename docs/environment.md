@@ -16,12 +16,15 @@ in v1). Everything passed in and out is a PyTorch tensor.
 
 | Operation | Takes | Returns |
 | --- | --- | --- |
-| `reset()` | Nothing | Observations `(W, N, observation_size)` |
-| `step(joint_action)` | Actions `(W, N, 6)` | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)` |
+| `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
+| `step(joint_action)` | Actions `(W, N, 6)` | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
 
 The environment also reports `segment_count` and `observation_size`, which the
 experiment uses to create the agents. When an episode ends in a world, `step`
-returns that world's final observation and then resets the world by itself.
+resets that world by itself: the observations it returns are already the new
+episode's, and the final observations hold, for that world, the observation the
+episode ended with. A seed given to `reset` makes the starting poses and targets
+repeatable.
 
 ## Files
 
@@ -33,6 +36,7 @@ The environment lives in `src/centipede/environment/`.
 | `observation_builder.py` | What each segment observes |
 | `reward_function.py` | Each segment's reward |
 | `settings.py` | Environment settings |
+| `diagnostics.py` | The environment's [diagnostics](diagnostics.md) |
 | `simulation/simulation.py` | Front file of the physics simulation: loads the model, chooses the backend, offers `reset()`, `step()`, and the physical state |
 | `simulation/model_mapping.py` | Finding each segment's parts in the model by name, and checking them |
 | `simulation/physical_state.py` | The physical state handed to the environment |
@@ -50,9 +54,11 @@ other parts in order:
 
 1. Keep the current body positions as the "previous" positions.
 2. The physics simulation applies the actions and advances 20 ms.
-3. The reward function computes each segment's reward.
-4. Each world is checked for arrival or the time limit.
-5. The observation builder builds the next observations.
+3. Each world is checked for arrival or the time limit.
+4. The reward function computes each segment's reward; the arrival reward
+   needs the result of step 3.
+5. The observation builder builds the next observations, and the diagnostics
+   are updated.
 6. Worlds whose episodes ended are reset, get a new target, and get fresh
    observations; their final observations are returned as well.
 
@@ -196,8 +202,8 @@ segments away (`k`, first value 1). Every observation has the same layout:
    into the head's own direction, in metres. **Forward** is positive in front of
    the head; **sideways** is positive to its left.
 
-That is `(2k + 1) × 27 + 2` values, **83** at radius 1, for every segment and any
-number of segments. A neighbour that does not exist is filled with zeros, and
+That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
+every segment and any number of segments. A neighbour that does not exist is filled with zeros, and
 only the head receives real target values:
 
 | Segment | Ahead | Behind | Target values |
@@ -229,6 +235,11 @@ the first step.
 to its tip and direction: distance uniformly between 10 and 20 mm, direction
 uniformly within 15° left or right of straight ahead. The target is a point
 remembered by the environment, not an object in the simulation.
+
+The head's **forward** direction is its body's x axis, which points from its
+centre to its tip, laid flat on the ground; **left** is 90° anticlockwise from
+it, the side of the left legs. Targets are placed, and the two target values
+observed, in these directions.
 
 **End.** An episode ends in one of two ways, always for all segments together:
 
@@ -282,15 +293,11 @@ measure what each segment actually contributes.
 
 ## Diagnostics
 
-The environment also reports facts that evaluation needs, so evaluation never
-recomputes them. Policies never see these.
-
-- For every segment: its four contact flags and its four reward parts.
-- For the head: its distance to the target, how far it moved this step, and
-  whether it arrived. Their sum and difference give the path travelled and net
-  progress.
-- At the end of an episode: arrival or time limit, and its length in steps and
-  seconds.
+The environment measures what happens on every step and how each episode ends:
+reward parts, contacts, each segment's progress, posture, and the head's
+distance and direction to the target. It also passes on the physics
+simulation's measurements. The full list is in [diagnostics.md](diagnostics.md).
+Policies never see these values.
 
 ## Settings
 
@@ -301,7 +308,7 @@ These are the keys of the environment sections of the configuration file (see
 | --- | ---: | --- |
 | **`[environment]`** | | |
 | `max_episode_steps` | 8,192 | Time limit, in 20 ms steps (about 164 s) |
-| `observation_radius` | 1 | Neighbours seen on each side |
+| `observation_radius` | 1 | Neighbours seen on each side; 0 means only itself; must be less than `N` |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
@@ -326,6 +333,12 @@ leave headroom over the 40 contacts and 256 constraint rows measured at rest;
 they are confirmed in motion on the GPU. Reward values are starting points for
 the first experiments, not measured biology. Reward experiments change these
 values or the reward function, and nothing else.
+
+The reward function is a sum of named **terms**, each multiplied by its weight
+from `[environment.rewards]`; a weight of zero switches a term off. To keep
+earlier runs' configurations meaning the same reward, a new term is added with a
+default weight of zero, and a changed formula is added as a new term rather than
+by editing an existing one.
 
 ## Later experiments
 

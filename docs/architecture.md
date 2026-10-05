@@ -45,7 +45,7 @@ What passes along each connection:
 
 | Connection | Going down | Coming back |
 | --- | --- | --- |
-| Experiment ↔ Interaction loop | Settings | Episode statistics, agent state for checkpoints |
+| Experiment ↔ Interaction loop | Settings | Agent state for checkpoints |
 | Interaction loop ↔ Agents | Observations, rewards, episode ends | Joint action |
 | Interaction loop ↔ Environment | Joint action | Observations, rewards, episode ends |
 | Environment ↔ Physics simulation | Leg actions, reset requests | Physical state |
@@ -64,7 +64,9 @@ where simpler.
 The entry point of the program. It reads the TOML configuration, hands each
 component its section, runs training or evaluation through the interaction loop,
 and saves what the run produces. Each run gets its own folder under `runs/`,
-holding the configuration it used, its logs, and its checkpoints.
+holding the configuration it used, its logs, and its checkpoints. The logs and
+the run's report are built from the [diagnostics](diagnostics.md) that every
+component measures about its own work.
 
 Every configuration file has a `mode`. **Train** files start a new run or
 continue an earlier one; smoke tests, probe tests, and full training use the
@@ -83,8 +85,8 @@ configuration files live in `configs/`.
 The exchange between agents and environment. It gives observations to the
 agents, passes their joint action to the environment, and returns the results to
 the agents. It counts steps, tells the agents to learn at the end of every
-collection window (which never resets the environment), and records episode
-statistics such as returns and lengths. It calculates nothing itself. Evaluation
+collection window (which never resets the environment), and measures the time
+spent collecting and learning. It calculates nothing itself. Evaluation
 uses the same loop without recording or learning.
 
 **Files:** `interaction_loop.py` (front file: `train()` and `evaluate()`) and
@@ -108,8 +110,8 @@ The problem the agents must solve. `reset` starts new episodes, and `step` takes
 joint action and returns the next observations, one reward per segment, and which
 episodes ended. Its front file keeps the episode state (targets, step counts,
 previous positions) and coordinates its parts: the observation builder, the
-reward function, and the physics simulation. It does not store data for
-learning.
+reward function, its diagnostics, and the physics simulation. It does not store
+data for learning.
 
 **Details:** [environment.md](environment.md)
 

@@ -114,15 +114,17 @@ class SettingsSection:
 
     # -- Lists ----------------------------------------------------------------
 
-    def number_range(self, key: str, default: Any = REQUIRED) -> tuple[float, float]:
+    def number_range(
+        self, key: str, default: Any = REQUIRED, minimum: float | None = None
+    ) -> tuple[float, float]:
         """A ``[low, high]`` pair of numbers with ``low <= high``."""
         if self._missing(key, default):
             return default
         value = self.values[key]
         if not isinstance(value, list) or len(value) != 2:
             raise self._error(key, "must be a list of two numbers [low, high]", value)
-        low = self._check_number(key, value[0], None, None)
-        high = self._check_number(key, value[1], None, None)
+        low = self._check_number(key, value[0], minimum, None)
+        high = self._check_number(key, value[1], minimum, None)
         if low > high:
             raise self._error(key, "must have low <= high", value)
         return (low, high)
@@ -154,6 +156,21 @@ class SettingsSection:
         if len(set(value)) != len(value):
             raise self._error(key, "must not repeat an option", value)
         return tuple(value)
+
+    # -- Nested tables --------------------------------------------------------
+
+    def table(self, key: str) -> dict[str, Any]:
+        """A nested table, such as ``target`` inside ``[environment]``.
+
+        Returns the table's raw values for its own settings class to read; a
+        missing table is empty, so all of its defaults apply.
+        """
+        if self._missing(key, default={}):
+            return {}
+        value = self.values[key]
+        if not isinstance(value, dict):
+            raise self._error(key, "must be a table", value)
+        return value
 
     # -- Finishing ------------------------------------------------------------
 

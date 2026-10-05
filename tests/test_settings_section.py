@@ -23,6 +23,7 @@ def test_values_are_read_converted_and_defaulted():
             "range": [0.01, 0.02],
             "layers": [64, 64],
             "baselines": ["zero"],
+            "target": {"arrival_radius_m": 0.001},
         }
     )
 
@@ -36,6 +37,8 @@ def test_values_are_read_converted_and_defaulted():
     assert section.number_range("range") == (0.01, 0.02)
     assert section.integer_list("layers", minimum=1) == (64, 64)
     assert section.choice_list("baselines", ("zero", "random")) == ("zero",)
+    assert section.table("target") == {"arrival_radius_m": 0.001}
+    assert section.table("rewards") == {}
     assert section.positive_integer("missing", default=7) == 7
     section.reject_unknown_keys()
 
@@ -63,6 +66,7 @@ def test_missing_required_and_unknown_keys_are_reported():
         ("number_range", (), [0.02, 0.01], "must have low <= high"),
         ("integer_list", (), [64, 6.4], "must be a whole number"),
         ("choice_list", (("zero",),), ["zero", "zero"], "must not repeat"),
+        ("table", (), 5, "must be a table"),
     ],
 )
 def test_invalid_values_name_the_section_and_key(method, arguments, value, problem):
