@@ -84,12 +84,26 @@ step: contacts per world, constraint rows in one world, and solver iterations.
 They show how close a run comes to the memory reserved on the GPU and how hard
 the solver works.
 
-### Learning and timing
+### Learning
 
-These are defined together with the agents and the interaction loop. Likely
-values are, per segment agent, the policy and value losses, entropy, how far the
-policy moved in an update, and the spread of its actions; and, for the loop, the
-time spent collecting and learning and the steps per second.
+Written after each update, one row per segment agent. The first six come from
+RL_lib's update summary; each is averaged over the update's minibatches, except
+the explained variance, which describes the batch before the update.
+
+| Value | Shape | Meaning |
+| --- | --- | --- |
+| `actor_loss` | `(N,)` | Clipped policy loss, including the entropy bonus |
+| `critic_loss` | `(N,)` | Half the mean squared error of the values |
+| `entropy` | `(N,)` | Estimated entropy of the policy: how widely it explores |
+| `approximate_kl` | `(N,)` | How far the update moved the policy |
+| `clip_fraction` | `(N,)` | Share of samples whose probability ratio was clipped |
+| `explained_variance` | `(N,)` | How much of the returns' variation the critic predicted: 1 exactly, 0 nothing |
+| `action_std` | `(N, 6)` | Each action's learned spread, before squashing |
+
+### Timing
+
+Defined together with the interaction loop. Likely values are the time spent
+collecting and learning and the steps per second.
 
 ## Files
 

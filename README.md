@@ -26,10 +26,13 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 3 complete.** The physics simulation runs batches of worlds on
+- **Code: Stage 4 complete.** The physics simulation runs batches of worlds on
   the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests that pass
   locally and on a Kaggle T4. The environment builds on it: targets, episodes,
-  observations, rewards, and diagnostics, tested locally. On 2026-10-01 the project was restarted with
+  observations, rewards, and diagnostics, tested locally. The agents, one
+  independent PPO learner per segment using RL_lib's batched PPO, act, store
+  their data, learn, and save, tested locally; they have not been trained yet.
+  The interaction loop is next. On 2026-10-01 the project was restarted with
   a new structure. A first implementation reached early learning on the CPU,
   with the rear segments learning to avoid ground contact, but no standing or
   walking. It is preserved in Git history (tag `cpu-stage8`) and in the local

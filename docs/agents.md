@@ -7,27 +7,43 @@ directly; the interaction loop passes data between them. The agents know nothing
 about MuJoCo, targets, or how observations and rewards are calculated.
 
 Learning uses **PPO** from the reusable package in `../RL_lib/src/rl_lib`, which
-also provides networks, policies, normalisation, and data types. The experiment
-runners in `../RL_lib/experiments` are not used; this project has its own.
+also provides networks, policies, normalisation, and advantage estimation. The
+experiment runners in `../RL_lib/experiments` are not used; this project has its
+own.
+
+RL_lib's PPO originally handled one observation at a time through NumPy. For
+this project it is extended with a batched, tensor-based form that works on any
+device, as agreed in `../RL_lib/docs/batched-ppo.md`. A second round there gave
+each PPO its own random generator and checkpoint methods, reports how well the
+critic predicted the returns, and removed every point where acting or learning
+made the CPU wait for the GPU. An external library
+such as Stable-Baselines3 was considered and not chosen: its PPO runs its own
+training loop as a single agent, keeps collected data in NumPy on the CPU, clips
+actions to their bounds, and trains actor and critic with one combined loss,
+all of which conflict with this design.
 
 ## Interface
 
 `W` is the number of worlds and `N` the number of segments. Everything passed in
-and out is a PyTorch tensor on the agents' device. The group is created from two
-numbers the environment reports, `segment_count` and `observation_size`, so it
-works for any number of segments.
+and out is a PyTorch tensor on the agents' device. The group is created from
+the environment's `segment_count`, `observation_size`, and `world_count`, the
+interaction loop's `rollout_window_steps`, which sizes the storage, and the
+run's seed. It works for any number of segments.
 
 | Operation | Takes | Returns or does |
 | --- | --- | --- |
-| `act(observations)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`; each segment agent remembers what it needs for learning |
+| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
 | `record(rewards, terminated, truncated, final_observations)` | The environment's results for the step just taken | Each segment agent stores its own part |
 | `update()` | Nothing | Each segment agent learns from its own stored data, then clears it |
-| `save()`, `load()` | — | All segment agents' state, for checkpoints |
+| `state_dict()`, `load_state_dict(state)` | — | All segment agents' state, for checkpoints; the experiment writes it to a file |
 
-During evaluation, `act` chooses actions without recording or learning. For
-comparison, the front file also provides two baselines with the same `act`: one
-that always returns zero actions and one that returns uniformly random
-actions.
+During evaluation, `act` is called with `training` off: each segment agent
+returns its policy's mean action, without changing its normaliser or
+remembering anything, and nothing is recorded or learned. The mean shows what
+the policy has learned, without the exploration noise added in training. For
+comparison, the front file also provides two baselines
+with the same `act`: one that always returns zero actions and one that returns
+uniformly random actions.
 
 ## Files
 
@@ -39,6 +55,7 @@ The agents live in `src/centipede/agents/`.
 | `segment_agent.py` | One segment's networks, optimizers, observation normaliser, and PPO update |
 | `rollout_storage.py` | One segment agent's collected data |
 | `settings.py` | Agent settings |
+| `diagnostics.py` | The learning category of [diagnostics.md](diagnostics.md#learning), filled once after each update |
 
 ## Independence
 
@@ -52,6 +69,16 @@ agent.
 From any one agent's point of view, the others are part of its environment, and
 they keep changing as they learn. This is a known difficulty of independent
 learners and part of what this project studies.
+
+Each segment agent also has its own random generator, inside its PPO, for
+sampling actions and shuffling its data. Its seed, which also sets its starting
+weights, is `seed * segment_count + segment_index`, so a run's seed repeats
+every agent's choices and no two pairs of run seed and segment share a seed.
+
+Each segment agent evaluates its own networks. Evaluating all of them together
+in one operation, keeping separate parameters, was considered: one agent's
+action for 1,024 worlds takes about 1 ms on the GPU, against seconds of physics
+per step, so it is not worth the added complexity.
 
 ## Observations
 
@@ -89,16 +116,26 @@ How a stretch of stored steps ends decides how its returns are estimated:
 | The time limit was reached (truncated) | Its critic's value of the final observation |
 | The window ended mid-episode | Its critic's value of the next observation |
 
+One value covers all three cases. The environment's `final_observations` hold,
+for every world, the observation right after the step: the next one if the
+episode continues, the last one if it ended. When recording a step, each segment
+agent stores its critic's value of that observation, normalised without
+updating the statistics. Advantage estimation ignores it on terminated steps, so
+those get a final value of zero.
+
 Advantages are computed separately for every uninterrupted stretch in each
 world, then all stretches of the same segment are used together. A window ending
 never resets the environment; the episode continues in the next window.
 
 ## Checkpoints
 
-A checkpoint is one bundle holding, for every segment agent, its networks,
-optimizers, normaliser, random state, and training counters, plus the settings,
-the number of segments, and the observation size. It is saved only after a
-completed update. Loading it into an environment with a different number of
+A checkpoint is one bundle holding, for every segment agent, its PPO state
+(networks, optimizers, and random generator), normaliser, and training counters,
+plus the settings, the number of segments, and the observation size. It is saved
+only after a completed update. A random generator is restored only on the same
+kind of device it was saved on, since CPU and CUDA generators draw different
+sequences; elsewhere, for example when a run trained on a GPU is evaluated on
+the CPU, each agent keeps the sequence its seed gives. Loading it into an environment with a different number of
 segments or observation size fails with a clear error. It holds no stored data,
 physical state, targets, or unfinished episodes, so continuing from a checkpoint
 starts new episodes.
@@ -127,18 +164,21 @@ These are the keys of the agents sections of the configuration file (see
 | `entropy_coefficient` | 0.001 | Weight of the entropy bonus |
 
 Fixed by design rather than configured: actor and critic are separate networks,
-the policy is a Gaussian squashed by tanh into −1 to 1, and actor and critic each
-have their own Adam optimizer.
+the policy is a Gaussian squashed by tanh into −1 to 1, each action's spread is
+one learned value that does not depend on the observation (RL_lib's
+`std_mode = "global"`), and actor and critic each have their own Adam
+optimizer.
 
 The number of steps collected before each update, `rollout_window_steps` (first
 value 256 per world), belongs to the interaction loop.
 
 ## Open questions
 
-- **GPU support in RL_lib.** RL_lib does not yet let the caller choose the device
-  for networks, sampling, storage, and updates. This should be added to RL_lib as
-  a general feature, after agreeing its scope.
-- **Batched networks.** Many small networks may not keep a large GPU busy. Since
-  all segment agents have the same input size, their networks could be evaluated
-  together in one operation while keeping separate parameters, optimizers, and
-  data. Do this only if measurements show it is worth it.
+- **Minibatch size at scale.** An update minibatch costs about 3 ms on the CPU
+  and 8 ms on the local GPU, almost independently of its size up to 4,096
+  samples, so an update's time depends mostly on how many minibatches it takes.
+  With 1,024 worlds and 256 steps per window, a `minibatch_size` of 64 means
+  about 131,000 minibatches per update for the eight agents, roughly as long as
+  collecting the window; 4,096 means about 2,000. The value, or a number of
+  minibatches per epoch instead, is chosen with the first learning
+  experiments.
