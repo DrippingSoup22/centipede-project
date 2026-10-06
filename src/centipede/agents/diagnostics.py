@@ -39,7 +39,15 @@ class LearningSummary:
         "update: 1 exactly, 0 nothing, (N,)"
     )
     action_std: torch.Tensor = measure(
-        "Each action's learned spread, before squashing, (N, 6)"
+        "Each action's learned spread, before squashing, (N, 6)",
+        parts=(
+            "left shoulder sweep",
+            "left shoulder lift",
+            "left knee",
+            "right shoulder sweep",
+            "right shoulder lift",
+            "right knee",
+        ),
     )
 
 

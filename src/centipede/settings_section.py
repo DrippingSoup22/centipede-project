@@ -47,6 +47,15 @@ class SettingsSection:
             raise self._error(key, "must be non-empty text", value)
         return value
 
+    def boolean(self, key: str, default: Any = REQUIRED) -> bool:
+        """``true`` or ``false``, such as whether to write a report."""
+        if self._missing(key, default):
+            return default
+        value = self.values[key]
+        if not isinstance(value, bool):
+            raise self._error(key, "must be true or false", value)
+        return value
+
     def choice(self, key: str, options: Sequence[str], default: Any = REQUIRED) -> str:
         """One string out of a fixed set of options, such as ``"cpu"``."""
         if self._missing(key, default):

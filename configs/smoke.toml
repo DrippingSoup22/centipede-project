@@ -1,0 +1,31 @@
+# Smoke test: checks that training runs from start to finish, in seconds, on
+# the CPU. It writes a run folder with its configuration, log, and checkpoints,
+# but no report; its results mean nothing.
+#
+#   python -m centipede configs/smoke.toml
+
+[run]
+mode = "train"
+name = "smoke"
+seed = 1
+checkpoint_every_cycles = 1
+report = false
+
+[environment]
+max_episode_steps = 8
+
+[environment.simulation]
+model_path = "models/assembly_v2.xml"
+backend = "cpu"
+world_count = 2
+
+[agents]
+device = "cpu"
+hidden_layers = [16, 16]
+
+[agents.ppo]
+minibatch_size = 16
+
+[interaction_loop]
+rollout_window_steps = 16
+update_cycles = 3

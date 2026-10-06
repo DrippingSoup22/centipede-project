@@ -138,7 +138,10 @@ sequences; elsewhere, for example when a run trained on a GPU is evaluated on
 the CPU, each agent keeps the sequence its seed gives. Loading it into an environment with a different number of
 segments or observation size fails with a clear error. It holds no stored data,
 physical state, targets, or unfinished episodes, so continuing from a checkpoint
-starts new episodes.
+starts new episodes. Because the optimizers' state includes their learning rate,
+a new run that starts from a checkpoint keeps the rate it was saved with; the
+experiment therefore requires the same `learning_rate` (see
+[configuration.md](configuration.md#starting-from-another-run)).
 
 ## Settings
 

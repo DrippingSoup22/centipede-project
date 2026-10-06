@@ -15,6 +15,21 @@ from centipede.environment.observation_builder import head_forward_direction
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
 
+# Histogram bins of three episode values, fixed so that every run, CPU or GPU,
+# counts in the same bins. Episode lengths, in steps, grow in steps of about
+# 1.5x and include every power of two; a time limit on an edge, such as 1,024
+# or 8,192 steps, starts its own bin, so time-outs are not mixed with arrivals.
+# Longer episodes count in the last bin.
+LENGTH_EDGES_STEPS = (0,) + tuple(
+    sorted(
+        {2**power for power in range(4, 15)} | {3 * 2**power for power in range(3, 13)}
+    )
+)
+# Distance closed from -100% (twice as far as at the start) to 100%, in 10% bins.
+DISTANCE_CLOSED_EDGES = tuple(round(-1 + 0.1 * index, 1) for index in range(21))
+# Shares of an episode's steps, in 10% bins.
+SHARE_EDGES = tuple(round(0.1 * index, 1) for index in range(11))
+
 
 @dataclass(frozen=True)
 class StepFacts:
@@ -27,6 +42,7 @@ class StepFacts:
     contact_flags: torch.Tensor = measure(
         "Left foot, right foot and body on the ground, and legs touching, (W, N, 4)",
         summary="share",
+        parts=("left foot", "right foot", "body", "legs touching"),
     )
     segment_progress: torch.Tensor = measure(
         "Distance gained toward the segment's goal, (W, N)", "m"
@@ -61,7 +77,9 @@ class EpisodeSummary:
         "The head reached the target rather than running out of time, (W,)",
         summary="share",
     )
-    length_steps: torch.Tensor = measure("Episode length, (W,)", "steps of 20 ms")
+    length_steps: torch.Tensor = measure(
+        "Episode length, (W,)", "steps of 20 ms", histogram_edges=LENGTH_EDGES_STEPS
+    )
     segment_return: torch.Tensor = measure(
         "Sum of each segment's rewards over the episode, (W, N)"
     )
@@ -70,6 +88,10 @@ class EpisodeSummary:
     )
     final_distance: torch.Tensor = measure(
         "Head's distance to the target at the end, (W,)", "m"
+    )
+    distance_closed: torch.Tensor = measure(
+        "Share of the start distance closed by the end: 1 - final / start, (W,)",
+        histogram_edges=DISTANCE_CLOSED_EDGES,
     )
     head_path_length: torch.Tensor = measure(
         "Total distance the head's tip travelled, (W,)", "m"
@@ -84,10 +106,11 @@ class EpisodeSummary:
         "Share of steps with legs touching, (W, N)"
     )
     foot_contact_share: torch.Tensor = measure(
-        "Share of steps each foot (left, right) was on the ground, (W, N, 2)"
+        "Share of steps each foot (left, right) was on the ground, (W, N, 2)",
+        parts=("left foot", "right foot"),
     )
     upside_down_share: torch.Tensor = measure(
-        "Share of steps with the head upside down, (W,)"
+        "Share of steps with the head upside down, (W,)", histogram_edges=SHARE_EDGES
     )
 
 
@@ -130,6 +153,7 @@ class EnvironmentDiagnostics:
             segment_return=zeros(segment_count),
             start_distance=zeros(),
             final_distance=zeros(),
+            distance_closed=zeros(),
             head_path_length=zeros(),
             segment_total_progress=zeros(segment_count),
             body_contact_share=zeros(segment_count),
@@ -239,6 +263,7 @@ class EnvironmentDiagnostics:
             (episode.segment_return, self._segment_return),
             (episode.start_distance, self._start_distance),
             (episode.final_distance, step.head_distance),
+            (episode.distance_closed, 1 - step.head_distance / self._start_distance),
             (episode.head_path_length, self._head_path_length),
             (episode.segment_total_progress, self._segment_progress),
             (episode.body_contact_share, self._contact_steps[..., 2] / steps),

@@ -12,6 +12,8 @@ requires-python = ">=3.11"
 dependencies = [
     "mujoco==3.12.0",
     "numpy>=2,<3",
+    # Writes each run's complete configuration back out as TOML.
+    "tomli-w",
     "torch",
 ]
 
@@ -32,6 +34,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The run report's page, which the experiment fills with the run's data.
+[tool.setuptools.package-data]
+centipede = ["experiment/report_page.html"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

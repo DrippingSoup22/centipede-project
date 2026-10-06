@@ -26,15 +26,17 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 5 complete.** The physics simulation runs batches of worlds on
+- **Code: Stage 6 complete.** The physics simulation runs batches of worlds on
   the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests that pass
   locally and on a Kaggle T4. The environment builds on it: targets, episodes,
   observations, rewards, and diagnostics, tested locally. The agents, one
   independent PPO learner per segment using RL_lib's batched PPO, act, store
   their data, learn, and save, tested locally; they have not been trained yet.
   The interaction loop connects them for training and evaluation, tested
-  locally with a short real run. The experiment, which runs everything from one
-  configuration file, is next. On 2026-10-01 the project was restarted with
+  locally with a short real run. The experiment runs everything from one
+  configuration file and writes each run's log, checkpoints, and an HTML report;
+  it is tested locally, and a first CPU probe run was trained, continued, and
+  evaluated. Nothing has learned to walk yet. On 2026-10-01 the project was restarted with
   a new structure. A first implementation reached early learning on the CPU,
   with the rear segments learning to avoid ground contact, but no standing or
   walking. It is preserved in Git history (tag `cpu-stage8`) and in the local
@@ -46,7 +48,7 @@ separately.
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | How the program is organised: layers, components, and how they connect |
 | [`docs/model.md`](docs/model.md) | The centipede's body: dimensions, joints, motors, mass, contacts, physics settings |
-| [`docs/configuration.md`](docs/configuration.md) | The TOML files that start every run: sections, training and evaluation files |
+| [`docs/configuration.md`](docs/configuration.md) | The TOML files that start every run, and what a run writes: run folder, log, checkpoints, and report |
 | [`docs/environment.md`](docs/environment.md) | The task: physics simulation, actions, observations, targets, episodes, rewards |
 | [`docs/agents.md`](docs/agents.md) | The learners: independent segment agents, networks, PPO settings, checkpoints |
 | [`docs/diagnostics.md`](docs/diagnostics.md) | What each component measures about a run, for the training log and the report |
@@ -58,7 +60,7 @@ Centipede/
 ├─ docs/             Architecture, model, environment, and agents documents
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
-├─ configs/          Reusable TOML configuration files (not yet written)
+├─ configs/          TOML files for the smoke test, probe, training, and evaluation
 ├─ notebooks/        Kaggle notebooks that run the project on a cloud GPU
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 ├─ tests/            Automated tests, one file per component

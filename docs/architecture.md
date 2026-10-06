@@ -68,17 +68,33 @@ holding the configuration it used, its logs, and its checkpoints. The logs and
 the run's report are built from the [diagnostics](diagnostics.md) that every
 component measures about its own work.
 
-Every configuration file has a `mode`. **Train** files start a new run or
-continue an earlier one; smoke tests, probe tests, and full training use the
-same code and differ only in their values. **Evaluate** files test a saved run
-on fixed seeds, alongside zero-action and random-action baselines, and write the
-results into that run's folder. The layout of these files is described in
-[configuration.md](configuration.md).
+Every configuration file has a `mode`. **Train** files start a new run,
+possibly with the agents of an earlier run (`start_from`, for training in
+stages), or continue an earlier run (`continue_from`); smoke tests, probe
+tests, and full training use the same code and differ only in their values.
+**Evaluate** files test a saved run on fixed seeds, optionally alongside
+zero-action and random-action baselines, and write the results into that run's
+folder. Training
+writes one log line per window and a report of the whole run; the layout of the
+files and of the run folder is described in [configuration.md](configuration.md).
 
-**Files:** `experiment.py` (front file: the command you run),
-`configuration.py` (reading the TOML file and splitting it into sections), and
-`run_folder.py` (creating a run's folder and writing into it). Reusable
-configuration files live in `configs/`.
+The experiment uses the other components only through their front files: it
+creates the environment, the agents, and the interaction loop, steps through
+`train()` one cycle at a time, and reads the diagnostics between cycles. It
+never looks inside them, so a new kind of run needs only a new configuration
+file, or a new function next to `train` and `evaluate`.
+
+**Files:**
+
+| File | Covers |
+| --- | --- |
+| `experiment.py` | Front file: `run(path)` trains or evaluates as the file's mode says |
+| `configuration.py` | Reading the three kinds of file, the checks across sections, and saving the complete configuration |
+| `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, and evaluation results |
+| `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
+
+The command `python -m centipede CONFIG.toml` lives in `src/centipede/__main__.py`.
+Reusable configuration files live in `configs/`.
 
 ### Interaction loop
 

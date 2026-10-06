@@ -1,0 +1,28 @@
+# Full training, on a GPU (Kaggle's T4). Every value not written here is the
+# default in docs/configuration.md. The number of worlds and the window length
+# are first values, to be agreed from the speed measurements of Stage 8. A run
+# longer than one Kaggle session is continued with a file such as:
+#
+#   [run]
+#   mode = "train"
+#   continue_from = "runs/<this run's folder>"
+#
+#   python -m centipede configs/training.toml
+
+[run]
+mode = "train"
+name = "training"
+seed = 1
+checkpoint_every_cycles = 16
+
+[environment.simulation]
+model_path = "models/assembly_v2.xml"
+backend = "gpu"
+world_count = 1024
+
+[agents]
+device = "cuda"
+
+[interaction_loop]
+rollout_window_steps = 256
+update_cycles = 128

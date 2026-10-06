@@ -20,7 +20,7 @@ hidden afterwards.
 
 | Section | Owned by | Holds |
 | --- | --- | --- |
-| `[run]` | Experiment | What to do (`mode`), the run's name and seed, checkpoints, continuing a run |
+| `[run]` | Experiment | What to do (`mode`), the run's name and seed, checkpoints, the report, and which earlier run to start from, continue, or evaluate |
 | `[environment]` | Environment | Episode length and observation radius |
 | `[environment.simulation]` | Physics simulation | Model file, backend, number of worlds, GPU memory |
 | `[environment.target]` | Environment | Where targets are placed and when the head has arrived |
@@ -28,34 +28,73 @@ hidden afterwards.
 | `[agents]` | Agents | Device, networks, learning rate, normalisation |
 | `[agents.ppo]` | Agents | PPO settings |
 | `[interaction_loop]` | Interaction loop | Steps per window and number of update cycles |
-| `[evaluation]` | Experiment | Seeds, episodes, and optional baselines; evaluation files only |
+| `[evaluation]` | Experiment | Seeds, episodes per seed, and optional baselines; evaluation files only |
 
 The settings in each section, with their meanings and first values, are listed
 in [environment.md](environment.md#settings), [agents.md](agents.md#settings),
-and the [architecture](architecture.md) for the interaction loop.
+and the [architecture](architecture.md) for the interaction loop. The `[run]` and
+`[evaluation]` settings are listed below.
+
+## Checks across sections
+
+Each component checks its own section. The experiment adds the checks that
+need two sections at once:
+
+- The physics and the agents run on the same kind of device: `backend = "cpu"`
+  requires `[agents] device = "cpu"`, and `backend = "gpu"` requires
+  `device = "cuda"`. The other two combinations are rejected for now. They may
+  be allowed later, for example a single world on the CPU with large networks
+  on the GPU; the interaction loop would then move tensors between devices.
+
+## Kinds of file
+
+There are three kinds of file, told apart by their `[run]` section:
+
+| Kind | `[run]` holds | The file contains |
+| --- | --- | --- |
+| Training | `mode = "train"` and the run's own settings | Every section of a new run; only the values that differ from the defaults need writing |
+| Continuing | `mode = "train"` and `continue_from` | Only `[run]`, and optionally `[interaction_loop]`, such as a larger `update_cycles` |
+| Evaluation | `mode = "evaluate"` and `source` | `[run]`, `[evaluation]`, and optionally `[environment]` sections |
+
+Continuing and evaluation files name an existing run and start from its saved
+configuration: their own sections replace only the matching values, and every
+result is checked by the components as usual. Any other section is rejected
+with an error naming it, so nothing in such a file is silently ignored.
 
 ## Training files
 
-`mode = "train"` starts a new run, or continues an earlier one named by
-`continue_from`. Smoke tests, probe tests, and full training all use this mode
-and the same code; they differ only in their values, mainly the number of worlds,
-episode length, and number of update cycles.
+`mode = "train"` starts a new run. Smoke tests, probe tests, and full training
+all use this mode and the same code; they differ only in their values, mainly
+the number of worlds, episode length, and number of update cycles.
 
-| File | Purpose | Size |
+| File | Purpose | Size | Report |
+| --- | --- | --- | --- |
+| `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
+| `configs/probe.toml` | See how a choice of settings behaves | Light, about half an hour on the CPU | Yes |
+| `configs/training.toml` | The actual experiment | Full, on a GPU | Yes |
+
+The `[run]` settings of a training file:
+
+| Setting | Default | Meaning |
 | --- | --- | --- |
-| `configs/smoke.toml` | Check that everything runs from start to finish | Tiny |
-| `configs/probe.toml` | See how a choice of hyperparameters performs | Light |
-| `configs/training.toml` | The actual experiment | Full |
+| `name` | required | Part of the run folder's name; letters, digits, `-` and `_` |
+| `seed` | 0 | Starts every random sequence of the run: the agents' and the environment's |
+| `checkpoint_every_cycles` | 16 | A checkpoint is saved after every this many cycles, and always after the last |
+| `report` | `true` | Whether to write the run's report; the smoke test turns it off |
+| `runs_folder` | `"runs"` | Where run folders are created; created if missing |
+| `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
 
 A complete training file, with every section written out:
 
 ```toml
 [run]
 mode = "train"
-name = "probe"                        # run folder: runs/<date>_<name>
+name = "probe"                        # run folder: runs/<date>_<time>_<name>
 seed = 1
 checkpoint_every_cycles = 16
-# continue_from = "runs/2026-10-05_probe"
+report = true
+# runs_folder = "runs"
+# start_from = "runs/2026-10-07_1432_easy"
 
 [environment]
 max_episode_steps = 8192
@@ -82,7 +121,7 @@ leg_contact_cost = 0.005
 distance_ratio_epsilon_m = 1e-6
 
 [agents]
-device = "cpu"                        # "cpu" or "cuda"
+device = "cpu"                        # "cpu" or "cuda", matching the backend
 hidden_layers = [64, 64]
 initial_action_std = 0.5
 learning_rate = 3e-4
@@ -103,26 +142,227 @@ rollout_window_steps = 256
 update_cycles = 128
 ```
 
+### Starting from another run
+
+A training file with `start_from` creates a **new run** whose agents begin with
+another run's learned networks, optimizers, normalisers, and random
+generators. Everything else is the new file's own, so the task can change: for
+example, targets placed farther away once the centipede reaches near ones. The
+new run counts its cycles from zero and keeps its own log and report, which
+names the checkpoint it started from. Training in stages is a chain of such
+runs.
+
+Two agent settings must match the checkpoint, and a difference is rejected:
+`hidden_layers`, because the networks must have the same shape, and
+`learning_rate`, because the optimizers' saved state brings back the rate they
+were created with. The number of segments and the observation size must match
+too; the agents check those when loading.
+
+### Continuing a run
+
+A continuing file resumes an existing run, for example after a Kaggle session
+ended, or to train it for more cycles:
+
+```toml
+[run]
+mode = "train"
+continue_from = "runs/2026-10-07_1432_probe"
+
+[interaction_loop]
+update_cycles = 256                   # optional: the new total
+```
+
+Training resumes in the same folder from the latest checkpoint and counts on
+from its cycle. Windows logged after that checkpoint, by a session that stopped
+between checkpoints, are removed from the log and trained again. Checkpoints
+hold no unfinished episodes (see [agents.md](agents.md#checkpoints)), so the
+environment starts new ones, drawn with the run's seed plus the number of
+completed cycles so that they differ from the run's first episodes. The saved
+configuration is updated, and each session is recorded in `run_info.json`.
+
 ## Evaluation files
 
-`mode = "evaluate"` tests a saved run. The task settings (environment, rewards,
-episode length) are read from that run's saved configuration, so evaluation
-always tests the problem the agents were trained on. Results are written inside
-the evaluated run's folder.
+`mode = "evaluate"` tests a checkpoint of a saved run. The task settings come
+from that run's saved configuration, so by default evaluation tests the problem
+the agents were trained on. Results are written inside the evaluated run's
+folder.
 
 ```toml
 [run]
 mode = "evaluate"
-source = "runs/2026-10-05_probe"
-checkpoint = "latest"
+source = "runs/2026-10-07_1432_probe" # a run folder (its latest checkpoint) or a checkpoint file
 
 [evaluation]
 seeds = [101, 102, 103, 104]
-episodes_per_seed = 1
-baselines = ["zero"]                  # optional; leave out for none
+episodes_per_seed = 8
+baselines = ["zero", "random"]        # optional; leave out for none
+
+[environment.simulation]              # optional: replaces the run's own values
+backend = "cpu"
 ```
 
-Baselines run on the same seeds for comparison. They are off unless listed:
-`"zero"` always sends zero actions, which shows whether the agents do better than
-doing nothing; `"random"` sends uniformly random actions, which becomes a useful
-comparison once the centipede moves.
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `seeds` | required | Each seed resets the environment once and runs one episode in every world |
+| `episodes_per_seed` | 8 | The number of worlds, so the number of episodes per seed |
+| `baselines` | none | `"zero"`, `"random"`, or both, run on the same seeds as the agents |
+
+An evaluation file may also contain `[environment]` sections, whose values
+replace the run's: `backend = "cpu"` evaluates a run trained on a GPU on the
+CPU, and the agents' device follows the backend; farther targets test how far
+the learned walking carries. Every changed value is listed in the results. The
+number of worlds cannot be changed this way, since `episodes_per_seed` sets it.
+CPU and GPU physics drift apart quickly (Stage 2 of the plan measured this), so
+results from the two backends are not identical.
+
+Each world counts only its first episode; worlds that finish early start new
+episodes, which are not counted. An evaluation lasts up to `max_episode_steps`
+steps per seed and per actor, so long episodes on the CPU take a while.
+
+Baselines are off unless listed: `"zero"` always sends zero actions, which shows
+whether the agents do better than doing nothing; `"random"` sends uniformly
+random actions, which becomes a useful comparison once the centipede moves. The
+agents act with their policy's mean action, without exploration noise, and the
+checkpoint is never changed.
+
+## What a run writes
+
+```text
+runs/2026-10-07_1432_probe/
+├─ configuration.toml   the complete settings; can be run again as they are
+├─ run_info.json        each training session: start, first cycle, settings its file set, code version, packages, device
+├─ training_log.jsonl   one line of diagnostics per window
+├─ report.html          the run's summary (unless report = false)
+├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
+└─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation
+```
+
+Folders are created only when missing, and a run is never overwritten: a new run
+whose folder name is taken, by a second run in the same minute, gets a numbered
+suffix. The terminal shows one short line per window: the cycle, the speed, and
+how the episodes that ended went.
+
+The log and `run_info.json` hold what the reports need. Each log line has the
+cycle, the world steps collected so far, and every diagnostics category,
+including the bin counts of the episode histograms (`episode_distributions`,
+see [diagnostics.md](diagnostics.md#episode-summary)). Each session in
+`run_info.json` also lists the settings its configuration file set itself
+(`settings_written`), so that a report can tell chosen values from defaults.
+
+The **report** is one HTML file that opens in any browser, offline. It is
+refreshed at every checkpoint, so an interrupted run still has one. It works the
+same for a CPU run with a few worlds and a GPU run with thousands: the worlds
+are summarised on the device before anything is logged, so the page grows with
+the number of windows, not of worlds.
+
+### How the report is laid out
+
+The report is ordered by priority, and the size of each part follows it.
+
+- **Header.** The run's name; one line with the cycles done, world steps,
+  episodes, training time, and sessions; and one chip per group of settings
+  (backend and worlds, model, episode limit, targets, observation radius,
+  rewards, window and cycles, network, PPO, seed). Chips that include a setting
+  the configuration file set itself are highlighted; the others show defaults.
+  Every setting is listed in the details.
+- **1 · Results.** Five tiles: arrival share, distance closed, reward per step,
+  return, and episode length, each with its latest value, its value at the
+  start, how many episodes the latest value rests on, and a small trend line.
+  Episode values are means over the episodes of the first or last few windows
+  that have any, so a window with many episodes counts for more than one with
+  a single episode.
+  Below them, the largest chart: the head's distance to its target in every
+  window, with the distances at the start and the end of the episodes that
+  ended and the gap between them shaded. Then the reward per step split into
+  its terms, next to the return of each segment, and the three episode
+  histograms, comparing the episodes of the first and the last quarter of the
+  windows in which episodes ended.
+- **2 · Behaviour** (smaller). Eight values along the body (body and legs
+  touching, each foot on the ground, height, uprightness, speed, speed toward
+  the goal), each early, midway, and late in training; the useful share of
+  movement (speed toward the goal ÷ speed) along the body in the same way;
+  heading error; and the share of time the head is upside down.
+- **3 · Learning** (small). Policy change (KL), clipped samples, critic
+  accuracy, and action spread, each as the segments' mean with their range.
+- **4 · Run** (small). Steps per second, and the time each window spent
+  collecting and learning.
+- **Details,** behind a "Show details" button: the other learning values, each
+  behaviour value per segment over training, the number of episodes that ended
+  per window and the three histograms window by window (readable only with many
+  worlds), a table of the body at the end of training, every other logged
+  value, a table of every value at the start and at the end, the training
+  sessions, the run's facts, and all settings.
+
+Charts over training run along the world steps collected, so that runs with
+different numbers of worlds can be compared; hovering shows the cycle too.
+Dotted vertical lines mark where a later session resumed the run. The first
+window of each session also holds its start-up, such as compiling the GPU
+kernels (about 50 s on a fresh Kaggle machine), so it is drawn apart and left
+out of the speed's median.
+
+Every point of an episode value is a mean over the episodes that ended in that
+window, and every point of a step value a mean over its worlds and steps. When
+few stand behind each point (fewer than 100 episodes, or 10,000 world steps, in
+a typical window), the points are drawn faint under a moving average; with many
+worlds, as on the GPU, the line is drawn as it is. Worlds that start together
+also time out together, so long episodes give few windows with episode values;
+the values measured at every step, such as the head's distance and the reward
+per step, have a point in every window, so they lead the results.
+
+Values are shown in readable units: millimetres, millimetres per second,
+degrees, seconds of simulated time, and percentages. Percentages never go
+below 0 on an axis, and uprightness is always drawn on its whole range from −1
+to 1, so that small differences are not magnified. Heatmaps of values that have a better
+way (a higher return, height, uprightness, or speed toward the goal; less body
+contact and fewer legs touching) run from red for the worst values shown to
+blue for the best, through grey at zero or at the middle; their colour key says
+which end is better. Values that are neither good nor bad, such as speed or
+feet on the ground, run from light to dark blue. Clicking a chart's title
+opens a short explanation of what it shows and how to read it, and hovering
+over any mark shows its exact value. The reward per step and the mean return
+are the only values the report computes itself, as sums and means of logged
+values.
+
+### Which chart for which question
+
+Each kind of chart is used for one kind of question:
+
+| Question | Chart | Why |
+| --- | --- | --- |
+| How did a value change over training? | Line over world steps | Positions along one axis are read most precisely; world steps make runs of different sizes comparable |
+| What makes up a total? | Stacked areas, positive parts above zero and costs below, with the total as a line | The reward terms add up to the reward, so stacking shows the total and what drives it at once |
+| How did each segment change over training? | Heatmap: one row per segment, one column per window | Eight lines would tangle; colour shows the pattern along the body and over time together |
+| How did the episodes spread? | Histogram: early against late in training, or one per actor | A mean hides two groups of outcomes or a few failures; counting the episodes of many windows together keeps the bars readable with few worlds |
+| How does a value differ along the body? | Line along the segments, head first, early, midway, and late in training | One axis for all moments, so the change can be read directly |
+| How do two values relate? | Their ratio, as a line along the body | The useful share of movement (speed toward the goal ÷ speed) answers the question directly; a scatter of the two speeds was tried, but speed toward the goal is about a tenth of the speed, so its reference diagonal was unreadable |
+| What is the current value? | Tile with a trend line | The headline number and its direction |
+| How do the actors compare? | Bars from zero | Lengths compare quantities; used only when there are at least two actors |
+| What is the exact value? | Table, in the details only | Tables are for looking values up, not for seeing patterns |
+
+A pair plot is not used: over training every pair of values moves with time, so
+its panels would suggest relationships that are not there.
+
+### Changing the report
+
+The layout and the explanations are declared at the start of the page's script
+in `src/centipede/experiment/report_page.html` (`METRICS`, `SETTING_CHIPS`,
+`TRAINING_LAYOUT`, `EVALUATION_LAYOUT`), so changing the report means editing
+those lists. A value added to a diagnostics category that no layout places
+appears among the details automatically. The layout is a baseline for later
+work: values may be moved or resized and new ones added, but what it shows
+stays.
+
+### The evaluation report
+
+An **evaluation report** follows the same priorities and does not need
+baselines. Its header lists the seeds and episodes, its chips mark the settings
+changed for the evaluation, and its results show the five headline values as
+tiles (the mean over the seeds and the lowest to highest seed), the three
+episode histograms, and bars of the return per segment and of the reward terms.
+When baselines are listed, each tile adds one bar per actor, the histograms
+show every actor side by side, and the charts draw the baselines in grey. Its
+behaviour section has the eight values along the body and the useful share of
+movement, each with one line per actor, and the steering values,
+as bars when there are actors to compare and as numbers otherwise. Its details
+hold every value per actor, one table of the body per actor (coloured on shared
+scales so that they can be compared), the evaluation's facts, and the settings.

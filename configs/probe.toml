@@ -1,0 +1,27 @@
+# Probe: a light training run to see how a choice of settings behaves, with a
+# report. On the CPU it simulates about 22 steps per second, so these values
+# take roughly half an hour. Episodes are shorter than in full training, so
+# that several end during the run.
+#
+#   python -m centipede configs/probe.toml
+
+[run]
+mode = "train"
+name = "probe"
+seed = 1
+checkpoint_every_cycles = 8
+
+[environment]
+max_episode_steps = 1024
+
+[environment.simulation]
+model_path = "models/assembly_v2.xml"
+backend = "cpu"
+world_count = 4
+
+[agents]
+device = "cpu"
+
+[interaction_loop]
+rollout_window_steps = 256
+update_cycles = 32

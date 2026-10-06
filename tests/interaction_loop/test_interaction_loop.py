@@ -6,7 +6,7 @@ calls between agents and environment, which first episodes evaluation counts,
 and a short run with the real environment and agents.
 """
 
-from types import SimpleNamespace
+from typing import cast
 
 import torch
 
@@ -48,7 +48,7 @@ class FakeEnvironment:
             observations,
             rewards,
             ended,
-            torch.zeros(WORLDS, dtype=bool),
+            torch.zeros(WORLDS, dtype=torch.bool),
             observations,
         )
 
@@ -72,8 +72,9 @@ class FakeAgents:
 
 def fake_loop(calls, **environment_options) -> InteractionLoop:
     settings = InteractionLoopSettings(rollout_window_steps=3, update_cycles=2)
-    environment = FakeEnvironment(calls, **environment_options)
-    return InteractionLoop(environment, FakeAgents(calls), settings)
+    # The stand-ins offer the same operations the loop uses.
+    environment = cast(Environment, FakeEnvironment(calls, **environment_options))
+    return InteractionLoop(environment, cast(Agents, FakeAgents(calls)), settings)
 
 
 def test_training_resets_once_and_updates_after_every_window():
@@ -92,7 +93,7 @@ def test_evaluation_runs_until_every_first_episode_ends_and_counts_only_those():
     calls = []
     loop = fake_loop(calls, episode_ends={1: [True, False], 2: [True, True]})
 
-    loop.evaluate(FakeAgents(calls), seed=5)
+    loop.evaluate(cast(Agents, FakeAgents(calls)), seed=5)
 
     assert calls == [("reset", 5)] + [("act", False), "step"] * 2
     assert loop.diagnostics.episode_window.result()["episode_ended"] == 2

@@ -70,11 +70,25 @@ ended, and every other value as a mean over those episodes.
 | `length_steps` | `(W,)` | Episode length in steps of 20 ms |
 | `segment_return` | `(W, N)` | Sum of each segment's rewards over the episode |
 | `start_distance`, `final_distance` | `(W,)` | Head's distance to the target at the start and at the end, m |
+| `distance_closed` | `(W,)` | Share of the start distance closed by the end: 1 − final ÷ start; 1 at the target, below 0 when the head moved away |
 | `head_path_length` | `(W,)` | Total distance the head's tip travelled, m; with the net progress it shows how direct the path was |
 | `segment_total_progress` | `(W, N)` | Sum of `segment_progress`: what each segment contributed |
 | `body_contact_share`, `leg_contact_share` | `(W, N)` | Share of steps with the body on the ground, or legs touching |
 | `foot_contact_share` | `(W, N, 2)` | Share of steps each foot was on the ground |
 | `upside_down_share` | `(W,)` | Share of steps with the head upside down |
+
+Three of these values are also counted in **histograms**, so that the report
+can show how the episodes spread and not only their mean. With many worlds, a
+mean hides whether every episode went halfway or some arrived while the rest
+flipped over. The bins are fixed, the same for every run:
+
+| Value | Bins |
+| --- | --- |
+| `distance_closed` | From −100% to 100% in steps of 10% |
+| `length_steps` | Edges at 0, 16, 24, 32, 48, 64, … 12,288, 16,384 steps: each about 1.5 times the last, including every power of two, so that a time limit such as 1,024 or 8,192 steps starts its own bin and time-outs are not mixed with arrivals |
+| `upside_down_share` | From 0% to 100% in steps of 10% |
+
+Values beyond the outer edges count in the first or the last bin.
 
 ### Physics health
 
@@ -124,7 +138,10 @@ a `(W, N)` value becomes `(N,)`.
 
 Each value follows its own summary: a **mean** or a **share** averages over
 the counted rows, a **count** adds up true flags, and a **maximum** keeps the
-largest value. The episode summary counts only the worlds whose episode ended.
+largest value. A value declared with histogram edges is also counted bin by
+bin: each counted row adds one to the bin its value falls in, a bin including
+its lower edge. The counts are kept on the device like the totals, so they too
+never wait for the GPU. The episode summary counts only the worlds whose episode ended.
 In evaluation, only each world's first episode counts, so the loop passes the
 worlds still in it. A window with no ended episode gives NaN means for the
 episode summary.
@@ -137,4 +154,9 @@ episode summary.
 | `diagnostics.py` in a component's folder | That component's category and how it is filled |
 
 A component fills its category with one call, at the point where it already
-has the values. Reading, logging, and the report belong to the experiment.
+has the values. A value whose last dimension has named entries, such as the
+four contact flags, lists them as its `parts`, so that logs and reports can
+label them, and a value counted in a histogram lists its `histogram_edges`. Reading, logging, and the report belong to the experiment: it
+collects every category when a run starts, writes one log line per window, and
+draws the report from the descriptions (see
+[configuration.md](configuration.md#what-a-run-writes)).

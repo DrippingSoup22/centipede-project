@@ -1,0 +1,24 @@
+# Evaluation of a trained run, optionally next to the zero-action and
+# random-action baselines (uncomment baselines to run them; each one takes as
+# long as the agents). Set source to a run folder (its latest checkpoint) or to
+# one checkpoint file inside it. The task
+# settings are the run's own; any [environment] values written here replace
+# them, for example to evaluate a GPU-trained run on the CPU or with farther
+# targets. Results go into the run's evaluations/ folder.
+#
+#   python -m centipede configs/evaluation.toml
+
+[run]
+mode = "evaluate"
+source = "runs/2026-10-06_2231_probe"
+
+[evaluation]
+seeds = [101, 102]
+episodes_per_seed = 4
+# baselines = ["zero", "random"]
+
+# [environment.simulation]
+# backend = "cpu"
+
+# [environment.target]
+# distance_range_m = [0.030, 0.040]

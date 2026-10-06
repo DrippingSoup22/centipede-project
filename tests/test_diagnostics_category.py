@@ -21,7 +21,9 @@ class ExampleFacts:
 
 
 def test_fields_carry_their_descriptions_in_declaration_order():
-    facts = ExampleFacts(height=torch.zeros(2), touching=torch.zeros(2, dtype=bool))
+    facts = ExampleFacts(
+        height=torch.zeros(2), touching=torch.zeros(2, dtype=torch.bool)
+    )
 
     assert descriptions(facts) == {
         "height": Description("Height of the centre", "m", "mean"),
@@ -44,9 +46,11 @@ class ExampleEnds:
 
 
 def test_a_window_summary_follows_each_values_summary_and_mask():
-    facts = ExampleFacts(height=torch.zeros(3), touching=torch.zeros(3, dtype=bool))
+    facts = ExampleFacts(
+        height=torch.zeros(3), touching=torch.zeros(3, dtype=torch.bool)
+    )
     ends = ExampleEnds(
-        ended=torch.zeros(3, dtype=bool),
+        ended=torch.zeros(3, dtype=torch.bool),
         length=torch.zeros(3),
         longest_leg=torch.zeros(3, 2),
     )
@@ -78,3 +82,33 @@ def test_a_window_summary_follows_each_values_summary_and_mask():
 
     end_window.clear()
     assert end_window.result()["length"].isnan()
+
+
+@dataclass(frozen=True)
+class ExampleSpread:
+    ended: torch.Tensor = measure("Episode ended", summary="count")
+    length: torch.Tensor = measure("Episode length", histogram_edges=(0, 10, 20))
+    per_segment: torch.Tensor = measure("Per segment", histogram_edges=(0, 1, 2, 3))
+
+
+def test_a_window_summary_counts_the_masked_rows_in_each_bin():
+    spread = ExampleSpread(
+        ended=torch.tensor([True, True, True, False]),
+        length=torch.tensor([-5.0, 10.0, 25.0, 15.0]),
+        per_segment=torch.tensor([[0.5, 2.5], [1.0, 9.0], [2.0, 0.0], [1.5, 1.5]]),
+    )
+    window = WindowSummary(spread, mask_field="ended")
+
+    window.add()
+    window.add()
+
+    histograms = window.histograms()
+    assert list(histograms) == ["length", "per_segment"]
+    # A bin includes its lower edge; values outside the edges land in the end
+    # bins; world 3 is not counted.
+    assert histograms["length"].tolist() == [2.0, 4.0]
+    assert histograms["per_segment"].tolist() == [[2.0, 2.0, 2.0], [2.0, 0.0, 4.0]]
+    assert window.result()["length"] == 10.0  # the mean is kept as well
+
+    window.clear()
+    assert window.histograms()["length"].tolist() == [0.0, 0.0]

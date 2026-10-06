@@ -15,6 +15,7 @@ def test_values_are_read_converted_and_defaulted():
     section = read(
         {
             "name": "probe",
+            "report": False,
             "backend": "gpu",
             "model_path": "models/assembly_v2.xml",
             "worlds": 4,
@@ -28,6 +29,7 @@ def test_values_are_read_converted_and_defaulted():
     )
 
     assert section.text("name") == "probe"
+    assert section.boolean("report") is False
     assert section.choice("backend", ("cpu", "gpu")) == "gpu"
     assert section.path("model_path") == Path("models/assembly_v2.xml")
     assert section.positive_integer("worlds") == 4
@@ -57,6 +59,7 @@ def test_missing_required_and_unknown_keys_are_reported():
     ("method", "arguments", "value", "problem"),
     [
         ("text", (), "", "must be non-empty text"),
+        ("boolean", (), 1, "must be true or false"),
         ("choice", (("cpu", "gpu"),), "gpuu", "must be one of"),
         ("path", (), 5, "must be a path"),
         ("integer", (), True, "must be a whole number"),

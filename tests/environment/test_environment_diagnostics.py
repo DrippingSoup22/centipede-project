@@ -95,6 +95,9 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     assert episode.length_steps[1] == 2
     assert episode.segment_return[1].tolist() == [-2.0, -2.0]
     assert episode.start_distance[1] == pytest.approx(math.hypot(0.005, 0.01))
+    assert episode.distance_closed[1] == pytest.approx(
+        1 - episode.final_distance[1] / episode.start_distance[1]
+    )
     assert episode.head_path_length[1] == pytest.approx(0.002)
     assert episode.segment_total_progress[1].tolist() == pytest.approx([0.002, 0.002])
     assert episode.body_contact_share[1].tolist() == [0.5, 0.0]
