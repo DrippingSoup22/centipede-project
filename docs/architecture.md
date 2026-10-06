@@ -86,13 +86,28 @@ The exchange between agents and environment. It gives observations to the
 agents, passes their joint action to the environment, and returns the results to
 the agents. It counts steps, tells the agents to learn at the end of every
 collection window (which never resets the environment), and measures the time
-spent collecting and learning. It calculates nothing itself. Evaluation
-uses the same loop without recording or learning.
+spent collecting and learning. It calculates nothing itself.
 
-**Files:** `interaction_loop.py` (front file: `train()` and `evaluate()`) and
+`train(seed)` resets the environment once with the seed, then runs
+`update_cycles` cycles. Each cycle collects `rollout_window_steps` steps in every
+world (the agents act, the environment steps, the agents record) and ends with
+one update. It hands control back to the experiment after every cycle, so the
+experiment can write the log and save checkpoints between cycles; that time is
+not counted as collecting or learning.
+
+`evaluate(actor, seed)` resets the environment with the seed and runs until
+every world has finished its first episode. The actor is the trained agents or
+one of the baselines; it acts without exploration, and nothing is recorded or
+learned. Worlds that finish early start new episodes as usual, but only each
+world's first episode counts in the diagnostics. The experiment calls it once
+per seed and reads the results from the loop's diagnostics.
+
+**Files:** `interaction_loop.py` (front file: `train()` and `evaluate()`),
 `settings.py`, which holds `rollout_window_steps` (steps per world before each
 update, first value 256) and `update_cycles` (number of collect-and-learn
-cycles, first value 128).
+cycles, first value 128), and `diagnostics.py`, which times each window and
+summarises the environment's diagnostics over it
+(see [diagnostics.md](diagnostics.md#timing)).
 
 ### Agents
 

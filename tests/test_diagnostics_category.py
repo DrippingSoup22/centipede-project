@@ -7,6 +7,7 @@ import torch
 
 from centipede.diagnostics_category import (
     Description,
+    WindowSummary,
     descriptions,
     measure,
     values,
@@ -33,3 +34,47 @@ def test_fields_carry_their_descriptions_in_declaration_order():
 def test_an_unknown_summary_is_rejected():
     with pytest.raises(ValueError, match="summary must be one of"):
         measure("Anything", summary="median")
+
+
+@dataclass(frozen=True)
+class ExampleEnds:
+    ended: torch.Tensor = measure("Episode ended", summary="count")
+    length: torch.Tensor = measure("Episode length", summary="mean")
+    longest_leg: torch.Tensor = measure("Longest leg", summary="maximum")
+
+
+def test_a_window_summary_follows_each_values_summary_and_mask():
+    facts = ExampleFacts(height=torch.zeros(3), touching=torch.zeros(3, dtype=bool))
+    ends = ExampleEnds(
+        ended=torch.zeros(3, dtype=bool),
+        length=torch.zeros(3),
+        longest_leg=torch.zeros(3, 2),
+    )
+    fact_window = WindowSummary(facts)
+    end_window = WindowSummary(ends, mask_field="ended")
+
+    # Two steps. Only worlds 0 and 1 count; world 2 is ignored even where its
+    # episode ends with the largest values.
+    for height, touching, ended, length, leg in (
+        ([1.0, 2.0, 9.0], [True, False, True], [True, False, True], 10.0, 5.0),
+        ([3.0, 4.0, 9.0], [True, True, True], [False, True, True], 20.0, 3.0),
+    ):
+        facts.height.copy_(torch.tensor(height))
+        facts.touching.copy_(torch.tensor(touching))
+        ends.ended.copy_(torch.tensor(ended))
+        ends.length.copy_(torch.tensor([length, length, 99.0]))
+        ends.longest_leg.copy_(torch.tensor([[leg, 0.0], [leg, 1.0], [99.0, 99.0]]))
+        counted_worlds = torch.tensor([True, True, False])
+        fact_window.add(counted_worlds)
+        end_window.add(counted_worlds)
+
+    facts_summary = fact_window.result()
+    assert facts_summary["height"] == 2.5
+    assert facts_summary["touching"] == 0.75
+    ends_summary = end_window.result()
+    assert ends_summary["ended"] == 2  # world 0 on step 0, world 1 on step 1
+    assert ends_summary["length"] == 15.0
+    assert ends_summary["longest_leg"].tolist() == [5.0, 1.0]
+
+    end_window.clear()
+    assert end_window.result()["length"].isnan()

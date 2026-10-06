@@ -55,7 +55,7 @@ class EpisodeSummary:
     """
 
     episode_ended: torch.Tensor = measure(
-        "Worlds whose episode ended on the last step, (W,)", summary="share"
+        "Worlds whose episode ended on the last step, (W,)", summary="count"
     )
     arrived: torch.Tensor = measure(
         "The head reached the target rather than running out of time, (W,)",

@@ -60,7 +60,8 @@ out later from `contact_flags` over time.
 ### Episode summary
 
 Written when an episode ends, for the worlds whose episode ended on that step.
-Each value is summarised as a mean over the episodes that ended.
+Over a window, `episode_ended` is summarised as the number of episodes that
+ended, and every other value as a mean over those episodes.
 
 | Value | Shape | Meaning |
 | --- | --- | --- |
@@ -102,8 +103,31 @@ the explained variance, which describes the batch before the update.
 
 ### Timing
 
-Defined together with the interaction loop. Likely values are the time spent
-collecting and learning and the steps per second.
+Measured by the interaction loop for each window, as single values. The clock
+waits for the GPU only when collecting or learning starts and ends, so the
+times include the GPU's work.
+
+| Value | Meaning |
+| --- | --- |
+| `collecting_seconds` | Time spent collecting the window: acting, stepping, and recording |
+| `learning_seconds` | Time spent on the update after the window; 0 in evaluation |
+| `transitions_per_second` | World steps collected per second of collecting |
+
+## Window summaries
+
+The log has one line per window, so the environment's step facts and episode
+summaries are summarised over each window as they are refreshed. The interaction
+loop adds every step to two window summaries, one per category, and each
+starts empty when a window starts. A summary keeps running totals on the
+category's device, so it never waits for the GPU, and removes the worlds:
+a `(W, N)` value becomes `(N,)`.
+
+Each value follows its own summary: a **mean** or a **share** averages over
+the counted rows, a **count** adds up true flags, and a **maximum** keeps the
+largest value. The episode summary counts only the worlds whose episode ended.
+In evaluation, only each world's first episode counts, so the loop passes the
+worlds still in it. A window with no ended episode gives NaN means for the
+episode summary.
 
 ## Files
 

@@ -4,7 +4,8 @@ A component's diagnostics category is a frozen dataclass of tensors, allocated
 once and refreshed in place, like the physical state. Every field is declared
 with ``measure``, which records what the value means, its unit, and how it is
 summarised over worlds and steps. Logs and reports are built from these
-descriptions, so every value appears in them. See docs/diagnostics.md.
+descriptions, so every value appears in them. ``WindowSummary`` summarises a
+category over the steps of a window. See docs/diagnostics.md.
 
 Example, for a made-up category::
 
@@ -23,6 +24,7 @@ import torch
 SUMMARIES = (
     "mean",  # the average
     "share",  # the fraction of true flags
+    "count",  # the number of true flags
     "maximum",  # the largest value
 )
 
@@ -51,3 +53,84 @@ def descriptions(category: Any) -> dict[str, Description]:
 def values(category: Any) -> dict[str, torch.Tensor]:
     """Every field's tensor, by field name, in declaration order."""
     return {item.name: getattr(category, item.name) for item in fields(category)}
+
+
+class WindowSummary:
+    """One category summarised over the worlds and steps of a window, on its device.
+
+    The category's tensors have the worlds as their first dimension and are
+    refreshed in place each step; ``add`` folds the current values into running
+    totals, and ``result`` gives each field summarised as its description says,
+    with the worlds removed. Nothing here waits for the GPU.
+
+    ``mask_field`` names a ``(W,)`` flag of the category that selects the rows
+    to summarise, such as the worlds whose episode just ended. With no counted
+    rows in a window, means and shares are NaN and maxima are minus infinity.
+    """
+
+    def __init__(self, category: Any, mask_field: str | None = None) -> None:
+        """Allocate the running totals, on the category's device."""
+        self.category = category
+        self.mask_field = mask_field
+        self.descriptions = descriptions(category)
+        first_value = next(iter(values(category).values()))
+        self._row_count = torch.zeros((), device=first_value.device)
+        self._totals = {
+            name: torch.zeros(value.shape[1:], device=value.device)
+            for name, value in values(category).items()
+        }
+        self.clear()
+
+    def clear(self) -> None:
+        """Start a new window."""
+        self._row_count.zero_()
+        for name, total in self._totals.items():
+            if self.descriptions[name].summary == "maximum":
+                total.fill_(-torch.inf)
+            else:
+                total.zero_()
+
+    def add(self, counted_worlds: torch.Tensor | None = None) -> None:
+        """Fold in the category's current values of the counted ``(W,)`` worlds.
+
+        Without ``counted_worlds`` every world counts, unless ``mask_field``
+        leaves some out.
+        """
+        category_values = values(self.category)
+        mask = counted_worlds
+        if self.mask_field is not None:
+            row_flags = category_values[self.mask_field]
+            mask = row_flags if mask is None else mask & row_flags
+        if mask is None:
+            world_count = next(iter(category_values.values())).shape[0]
+            self._row_count += world_count
+        else:
+            self._row_count += mask.sum()
+
+        for name, value in category_values.items():
+            value = value.float()
+            total = self._totals[name]
+            if self.descriptions[name].summary == "maximum":
+                if mask is not None:
+                    value = torch.where(_rows(mask, value), value, -torch.inf)
+                torch.maximum(total, value.amax(dim=0), out=total)
+            else:
+                if mask is not None:
+                    value = torch.where(_rows(mask, value), value, 0.0)
+                total += value.sum(dim=0)
+
+    def result(self) -> dict[str, torch.Tensor]:
+        """Every field's summary so far, by field name, in declaration order."""
+        summaries = {}
+        for name, total in self._totals.items():
+            summary = self.descriptions[name].summary
+            if summary in ("mean", "share"):
+                summaries[name] = total / self._row_count
+            else:
+                summaries[name] = total.clone()
+        return summaries
+
+
+def _rows(mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
+    """A ``(W,)`` mask shaped to broadcast over a tensor whose rows are worlds."""
+    return mask.reshape(mask.shape + (1,) * (like.dim() - 1))
