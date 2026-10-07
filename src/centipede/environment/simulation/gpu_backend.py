@@ -234,7 +234,8 @@ class GPUBackend:
 
     All worlds live in one MuJoCo Warp data object, whose arrays have the world
     as their first dimension. ``physical_state`` holds every world's current
-    physical values on the GPU; ``reset`` and ``step`` refresh it in place.
+    physical values on the GPU; ``reset`` and ``step`` refresh it in place. The
+    physics steps of an action are replayed from a recorded CUDA graph.
     """
 
     def __init__(
@@ -317,6 +318,10 @@ class GPUBackend:
             )
         )
 
+        # The physics steps of one action, recorded as a CUDA graph by the
+        # first step; see ``step``.
+        self._physics_graph: wp.Graph | None = None
+
         # Each world's random sequence: the seed it was last given and how many
         # resets it has had since. Together they replace the CPU generators.
         self.reset_seeds = torch.zeros(
@@ -330,10 +335,16 @@ class GPUBackend:
         """Hold the (W, N, 6) leg actions for 20 ms in every world at once.
 
         The actions are written into ``ctrl`` once, then the physics runs 200
-        steps. The steps are only queued for the GPU; the check after them is
-        the first and only wait. A final ``forward`` updates the values derived
-        from the new positions, such as site positions and contacts, before
-        the physical state is refreshed.
+        steps. Launched from Python, each step's solver would make the CPU wait
+        for the GPU after every iteration, to decide whether to iterate again.
+        So the first step runs them from Python, which also compiles every
+        kernel, and then records them as a CUDA graph; later steps replay the
+        recording, in which the GPU decides itself when the solver is done.
+        The recording holds the addresses of MuJoCo Warp's arrays, which never
+        move; the actions, a new tensor every step, are written before it. The
+        check after the steps is the step's only wait. A final ``forward``
+        updates the values derived from the new positions, such as site
+        positions and contacts, before the physical state is refreshed.
         """
         leg_action_view = wp.from_torch(leg_actions)
         wp.launch(
@@ -343,8 +354,14 @@ class GPUBackend:
             outputs=[self.gpu_data.ctrl],
             device=self.device,
         )
-        for _ in range(PHYSICS_STEPS_PER_ACTION):
-            mjw.step(self.gpu_model, self.gpu_data)
+        if self._physics_graph is None:
+            self._run_physics_steps()
+            # Recording only writes the launches down; nothing runs twice.
+            with wp.ScopedCapture(device=self.device) as capture:
+                self._run_physics_steps()
+            self._physics_graph = capture.graph
+        else:
+            wp.capture_launch(self._physics_graph)
         self._check_worlds()
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
@@ -394,6 +411,11 @@ class GPUBackend:
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+
+    def _run_physics_steps(self) -> None:
+        """The physics steps of one action, launched from Python."""
+        for _ in range(PHYSICS_STEPS_PER_ACTION):
+            mjw.step(self.gpu_model, self.gpu_data)
 
     def _check_worlds(self) -> None:
         """Stop the run if any world's physics went wrong during the last step.

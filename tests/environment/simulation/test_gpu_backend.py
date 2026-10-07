@@ -97,6 +97,34 @@ def test_step_holds_each_worlds_actions_for_twenty_milliseconds(model, mapping):
     assert np.allclose(backend.gpu_data.time.numpy(), 200 * model.opt.timestep)
 
 
+def test_replayed_physics_steps_match_steps_launched_from_python(model, mapping):
+    """The second step replays the graph the first recorded; both must move the
+    worlds as MuJoCo Warp's steps launched one by one.
+
+    MuJoCo Warp adds some values in parallel, in no fixed order, so two runs
+    launched from Python already differ by about 1e-5 (metres or radians)
+    after two random actions; the tolerance is ten times that.
+    """
+    backend = make_backend(model, mapping, 2)
+    reference = make_backend(model, mapping, 2)
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    leg_motor_ids = torch.as_tensor(mapping.leg_actuator_ids.ravel(), device="cuda")
+
+    for _ in range(2):
+        actions = torch.rand(
+            (2, mapping.segment_count, 6), generator=generator, device="cuda"
+        )
+        backend.step(actions * 2 - 1)
+        wp.to_torch(reference.gpu_data.ctrl)[:, leg_motor_ids] = (
+            actions * 2 - 1
+        ).flatten(1)
+        for _ in range(200):
+            mjw.step(reference.gpu_model, reference.gpu_data)
+
+    assert backend._physics_graph is not None
+    assert np.allclose(positions(backend), positions(reference), rtol=0, atol=1e-4)
+
+
 # -- Reset ---------------------------------------------------------------------
 
 

@@ -66,6 +66,7 @@ import torch
 from torch.profiler import ProfilerActivity, profile, record_function, schedule
 
 from centipede.agents.agents import Agents
+from centipede.agents.segment_agent import SegmentAgent
 from centipede.environment.environment import Environment
 from centipede.environment.simulation.constants import PHYSICS_STEPS_PER_ACTION
 from centipede.experiment import experiment as experiment_module
@@ -83,6 +84,7 @@ WINDOW_NAMES = ("warm-up", "plain", "waiting", "issuing", "trace")
 # physics is tens of thousands of kernels, so the trace file is large already.
 TRACE_STEPS = 1
 MAX_MINIBATCHES = 64  # per minibatch size in the learning sweep
+CPU_MINIBATCHES = 4  # the same sweep on the CPU, which is slower per minibatch
 RULE = "=" * 78
 # CPU-side calls in a trace that copy between the CPU and the GPU or wait for
 # the GPU. PyTorch's are traced; Warp waits through the driver
@@ -711,8 +713,24 @@ def profile_learning(
         f" ({gae_seconds / window_steps * 1000:.2f} ms per row;"
         " a Python loop over the rows)"
     )
+    # The same minibatches on a copy of the agent on the CPU, when the agents
+    # are on the GPU: whether learning would be faster there.
+    cpu_agent = cpu_batch = None
+    if batch[0].is_cuda:
+        cpu_agent = SegmentAgent(
+            segment_index=0,
+            world_count=1,
+            observation_size=batch[0].shape[1],
+            rollout_window_steps=1,
+            settings=replace(configuration.agents, device="cpu"),
+            seed=0,
+        )
+        cpu_batch = tuple(values.cpu() for values in batch)
     out("  one minibatch (actor and critic step):")
-    out(f"  {'size':>7} {'full ms':>9} {'issued ms':>10} {'limit':>6}")
+    out(
+        f"  {'size':>7} {'full ms':>9} {'issued ms':>10} {'limit':>6}"
+        + (f" {'on CPU ms':>10}" if cpu_agent else "")
+    )
     sizes = sorted(set(minibatch_sizes) | {ppo_settings.minibatch_size})
     generator = torch.Generator(device=batch[0].device).manual_seed(0)
     for size in sizes:
@@ -726,9 +744,9 @@ def profile_learning(
             for _ in range(count)
         ]
 
-        def minibatches(chunks=chunks) -> None:
+        def minibatches(chunks=chunks, ppo=agent.ppo, values_batch=batch) -> None:
             for indices in chunks:
-                agent.ppo._update_minibatch(*(values[indices] for values in batch))
+                ppo._update_minibatch(*(values[indices] for values in values_batch))
 
         minibatches()  # warm-up: allocations and kernel selection
         synchronise()
@@ -743,10 +761,22 @@ def profile_learning(
             "issued_ms": issued / count * 1000,
             "limit": limit,
         }
-        out(
+        line = (
             f"  {size:>7} {full / count * 1000:>9.2f} {issued / count * 1000:>10.2f}"
             f" {limit:>6}"
         )
+        if cpu_agent is not None:
+            cpu_chunks = [indices.cpu() for indices in chunks[:CPU_MINIBATCHES]]
+            cpu_minibatches = functools.partial(
+                minibatches, cpu_chunks, cpu_agent.ppo, cpu_batch
+            )
+            cpu_minibatches()  # warm-up
+            start = time.perf_counter()
+            cpu_minibatches()
+            cpu_ms = (time.perf_counter() - start) / len(cpu_chunks) * 1000
+            result["minibatch"][size]["on_cpu_ms"] = cpu_ms
+            line += f" {cpu_ms:>10.2f}"
+        out(line)
 
     if output_folder is not None and batch[0].is_cuda:
         indices = torch.arange(
@@ -1022,6 +1052,24 @@ def project(result: dict[str, Any], configuration: Configuration, out: Output) -
         f" ({projection['hours_per_10M_transitions']:.1f} h per 10M transitions),"
         f" {projection['sessions']} session(s) of {SESSION_HOURS} h"
     )
+    # The update at this window for every minibatch size measured.
+    update_by_size = {}
+    for size, minibatch in learning["minibatch"].items():
+        count = ppo.update_epochs * math.ceil(world_count * window_steps / size)
+        update_by_size[size] = agent_count * (
+            learning["advantage_seconds_per_row"] * window_steps
+            + count * minibatch["full_ms"] / 1000
+        )
+    projection["update_seconds_by_minibatch_size"] = update_by_size
+    out(
+        "  update per cycle by minibatch size: "
+        + ", ".join(
+            f"{size:,}: {seconds / 60:.1f} min"
+            if seconds >= 60
+            else f"{size:,}: {seconds:.0f} s"
+            for size, seconds in update_by_size.items()
+        )
+    )
     out(
         f"  agents' stored data at this window: "
         f"{projection['agents_storage_mb_at_window']:,.0f} MB"
@@ -1048,7 +1096,7 @@ def main() -> None:
         help="steps of each measured window (default 8)",
     )
     parser.add_argument(
-        "--minibatch-sizes", type=int, nargs="*", default=[64, 256, 1024, 4096, 16384]
+        "--minibatch-sizes", type=int, nargs="*", default=[64, 1024, 4096, 16384, 65536]
     )
     parser.add_argument("--gpu-solver", choices=("newton", "cg"))
     parser.add_argument(
