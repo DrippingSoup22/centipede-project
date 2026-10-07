@@ -5,18 +5,24 @@ interaction loop's diagnostics, which call ``step`` after every step of a
 window and ``learning`` when its update starts; the line shows a bar of ``#``
 and ``.`` filling as the window is collected, then ``learning``. After the
 cycle, the experiment calls ``finish``, which replaces the line with the
-window's results. Lines are redrawn in place with a carriage return, only when
-the bar grows, so a terminal, or the GPU desktop's launcher passing the output
-through, shows one line per window.
+window's results. They are values of every step of every world, so they move
+smoothly from window to window: the reward per step, the head's distance to
+its target, and the share of steps with a body on the ground; episodes are
+only counted, as arrivals and time-outs, because all worlds start together and
+their time-outs come in waves. Lines are redrawn in place with a carriage
+return, only when the bar grows, so a terminal, or the GPU desktop's launcher
+passing the output through, shows one line per window.
 """
 
 from typing import Any
 
 BAR_WIDTH = 20
 COLUMNS = (
-    "{cycle}  {bar}  {collect:>7}  {learn:>6}  {speed:>7}  {left:>7}"
-    "  |  {episodes:>8}  {arrived:>7}  {mean_return:>11}"
+    "{cycle}  {bar}  {collect:>7}  {learn:>6}  {left:>7}"
+    "  |  {reward:>11}  {distance:>9}  {body_down:>9}  {arrived:>7}  {timed_out:>9}"
 )
+# Where the body-on-ground flag sits among a segment's contact flags.
+BODY_ON_GROUND = 2
 
 
 def duration(seconds: float) -> str:
@@ -48,11 +54,12 @@ class TrainingProgress:
                 bar="window".ljust(BAR_WIDTH + 2),
                 collect="collect",
                 learn="learn",
-                speed="steps/s",
                 left="left",
-                episodes="episodes",
+                reward="reward/step",
+                distance="to target",
+                body_down="body down",
                 arrived="arrived",
-                mean_return="mean return",
+                timed_out="timed out",
             ),
             flush=True,
         )
@@ -69,19 +76,28 @@ class TrainingProgress:
 
     def finish(self, record: dict[str, Any], remaining_s: float) -> None:
         """Replace the line with the window's results and start a new one."""
-        timing, episodes = record["timing"], record["episodes"]
+        timing, episodes, step = (
+            record["timing"],
+            record["episodes"],
+            record["step_facts"],
+        )
+        segments = step["reward_parts"]
+        reward_per_step = sum(sum(parts) for parts in segments) / len(segments)
+        flags = step["contact_flags"]
+        body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
         ended = episodes["episode_ended"]
-        returns = episodes["segment_return"]
+        arrived = round(ended * episodes["arrived"]) if ended else 0
         row = COLUMNS.format(
             cycle=self._cycle_label(),
             bar=self._bar(BAR_WIDTH),
             collect=f"{timing['collecting_seconds']:.1f} s",
             learn=f"{timing['learning_seconds']:.1f} s",
-            speed=f"{timing['transitions_per_second']:,.0f}",
             left=duration(remaining_s),
-            episodes=f"{ended:.0f}",
-            arrived=f"{episodes['arrived']:.0%}" if ended else "-",
-            mean_return=f"{sum(returns) / len(returns):+.3g}" if ended else "-",
+            reward=f"{reward_per_step:+.5f}",
+            distance=f"{step['head_distance'] * 1000:.0f} mm",
+            body_down=f"{body_down:.0%}",
+            arrived=f"{arrived}",
+            timed_out=f"{round(ended) - arrived}",
         )
         self._write(row, end="\n")
         self._cycle += 1

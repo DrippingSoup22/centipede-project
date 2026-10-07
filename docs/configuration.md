@@ -305,18 +305,28 @@ The report is ordered by priority, and the size of each part follows it.
   rewards, window and cycles, network, PPO, seed). Chips that include a setting
   the configuration file set itself are highlighted; the others show defaults.
   Every setting is listed in the details.
-- **1 · Results.** Five tiles: arrival share, distance closed, reward per step,
-  return, and episode length, each with its latest value, its value at the
-  start, how many episodes the latest value rests on, and a small trend line.
-  Episode values are means over the episodes of the first or last few windows
-  that have any, so a window with many episodes counts for more than one with
-  a single episode.
-  Below them, the largest chart: the head's distance to its target in every
-  window, with the distances at the start and the end of the episodes that
-  ended and the gap between them shaded. Then the reward per step split into
-  its terms, next to the return of each segment, and the three episode
-  histograms, comparing the episodes of the first and the last quarter of the
-  windows in which episodes ended.
+- **1 · Results.** Five tiles: arrival share, distance at the end (with the
+  distance at the start), reward per step, return, and episode length, each
+  with its latest value, its value at the start, and a small trend line.
+  Episode values in training are taken over whole episode lengths: each
+  window's value is the mean over the episodes that ended in the last
+  `max_episode_steps / rollout_window_steps` windows (16 for 1,024-step
+  episodes and 64-step windows), within one training session. All worlds
+  start together, so their time-outs come in waves one episode length apart;
+  a single window holds either a wave of time-outs or only the few early
+  arrivals, while over a whole episode length every world's episode is
+  counted. Episode values therefore begin once that many windows exist, and
+  "at the start" and "latest" compare the first and the last episode length.
+  Below the tiles, the largest chart: the head's distance to its target in
+  every window, with the distances at the start and the end of the episodes
+  and the gap between them shaded. Then the arrival share over training, next
+  to the episodes that ended per window (arrived, and ran out of time, as
+  bars, which shows the waves); the reward per step split into its terms,
+  next to the return of each segment; and the three episode histograms,
+  comparing the episodes of the first and the last episode length. A
+  histogram's end bars also hold the values beyond them (`<−90%`, `≥90%`),
+  and the episode length histogram ends at the time limit, whose bar holds
+  the episodes that ran out of time.
 - **2 · Behaviour** (smaller). Eight values along the body (body and legs
   touching, each foot on the ground, height, uprightness, speed, speed toward
   the goal), each early, midway, and late in training; the useful share of
@@ -329,9 +339,10 @@ The report is ordered by priority, and the size of each part follows it.
 - **Details,** behind a "Show details" button: the other learning values, each
   behaviour value per segment over training, the number of episodes that ended
   per window and the three histograms window by window (readable only with many
-  worlds), a table of the body at the end of training, every other logged
-  value, a table of every value at the start and at the end, the training
-  sessions, the run's facts, and all settings.
+  worlds), the physics' contacts, constraint rows, and solver iterations, a
+  table of the body at the end of training, every other logged value, a table
+  of every value at the start and at the end, the training sessions, the run's
+  facts, and all settings.
 
 Charts over training run along the world steps collected, so that runs with
 different numbers of worlds can be compared; hovering shows the cycle too.

@@ -171,7 +171,7 @@ const METRICS = {
       return start === null || end === null || start === 0 ? null : 100 * (1 - end / start);
     } },
   "episodes.distance_closed": { label: "Distance closed", unit: "%", scale: 100,
-    about: "The share of the starting distance each episode closed: 1 − end distance ÷ start distance." },
+    about: "The share of the starting distance each episode closed: 1 − end distance ÷ start distance, averaged over the episodes. It cannot exceed 100%, but has no lower limit: a head that ends ten times farther away than it started counts −900%, so a few episodes that wander off pull the mean far below zero. The histogram \"Distance closed, every episode\" shows how the episodes actually spread." },
   "report.mean_return": { label: "Return", unit: "",
     about: "The total reward a segment collected over an episode, averaged over the segments. Every step costs a little, so it starts negative; it rises as the costs shrink and as arrivals add their reward. Each segment's agent learns to make its own return as large as possible. Like every episode value, it exists only for windows in which episodes ended.",
     compute: (record) => mean(raw(record, "episodes.segment_return") || []) },
@@ -188,7 +188,7 @@ const METRICS = {
   "episodes.start_distance": { label: "Distance at the start", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode started." },
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
-    about: "The head's flat distance to its target when the episode ended." },
+    about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
     about: "The average reward per step, split into its four terms and averaged over the segments. The terms are stacked: arrival, the only positive term, above zero; the three costs (efficiency, body contact, leg contact) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing." },
 
@@ -211,7 +211,7 @@ const METRICS = {
     about: "How fast each segment's centre moved along the ground, in any direction." },
   "step_facts.segment_progress": { label: "Speed toward goal", unit: "mm/s", scale: SPEED, better: "higher",
     about: "The part of each segment's movement that brought it closer to its goal: the target for the head, and for every other segment the spot where the segment ahead of it was. Compared with the speed, it shows how much of the movement is useful; part of a follower's progress can come from being pulled along." },
-  "step_facts.heading_error": { label: "Heading error", unit: "°", scale: RADIANS_TO_DEGREES,
+  "step_facts.heading_error": { label: "Heading error", unit: "°", scale: RADIANS_TO_DEGREES, range: [0, 180],
     about: "The angle between the direction the head points and the direction of its target: 0° means pointing straight at it, 180° straight away from it." },
   "step_facts.head_distance": { label: "Head distance to target", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target, averaged over every world and step of the window." },
@@ -310,7 +310,14 @@ const SETTING_CHIPS = [
 // of many, and the line is drawn as it is.
 const SMOOTH_BELOW = { episodes: 100, step_facts: 10000 };
 
-const TILES = ["episodes.arrived", "report.distance_closed", "report.reward_per_step", "report.mean_return", "episodes.length_steps"];
+const TILES = ["episodes.arrived", "episodes.final_distance", "report.reward_per_step", "report.mean_return", "episodes.length_steps"];
+
+// Episode values in training are taken over the last full episode length of
+// windows, so that every world's episode is counted whether it arrived early or
+// ran out of time. All worlds start together, so their time-outs come in waves
+// one episode length apart; a single window holds either a wave of time-outs or
+// only the few early arrivals.
+const EPISODE_SPAN_NOTE = (span, steps) => `Episode values are taken over the last ${span} windows (${count(steps)} steps, one episode length), so every world's episode counts, whether it arrived or ran out of time; they begin once that many windows exist.`;
 
 const BODY_VALUES = [
   { key: "step_facts.contact_flags", part: 2, title: "Body on the ground" },
@@ -347,18 +354,24 @@ const BODY_MOMENTS = [["start", "first windows", "var(--muted)", { dashed: true 
 const USEFUL_CARD = { title: "Useful share of movement", subtitle: "Speed toward the goal ÷ speed, per segment, in percent",
   keys: ["step_facts.segment_progress", "step_facts.segment_moved"] };
 
-const HISTOGRAM_ABOUT = " Grey bars are the episodes of the first quarter of the windows in which episodes ended, blue bars those of the last quarter; each bar is its share of those episodes.";
+const HISTOGRAM_ABOUT = " Grey bars are the episodes that ended in the first episode length of windows, blue bars those of the last; each bar is its share of those episodes. Over a whole episode length every world's episode ends at least once, so arrivals and time-outs are both counted.";
 
 const TRAINING_LAYOUT = [
   { title: "Results", intro: "How well the run went. Charts run over the world steps collected; dotted vertical lines mark where a training session resumed.",
+    episodeNote: true,
     rows: [
       [{ kind: "lines", width: "w12", size: "large", title: "Getting closer to the target",
-         subtitle: "The head's distance to its target, in mm: every window (line), and at the start and the end of the episodes that ended (points, the gap shaded)",
-         about: "The line is the head's distance to its target averaged over every world and step of each window, so it exists for every window. The points are the distance when episodes started and when they ended, averaged over the episodes that ended in that window, so they exist only for windows in which an episode ended: their lines begin at the first such window (an episode ends at the time limit unless it arrives sooner) and stop at the last one. the shaded gap between them is the distance closed, and where the end lies above the start the head ended farther away than it started. A falling line and an end below the start mean the centipede is learning to move toward its target, even before it reaches it.",
+         subtitle: "The head's distance to its target, in mm: averaged over every window, and at the start and the end of the episodes of the last episode length (the gap shaded)",
+         about: "The line is the head's distance to its target averaged over every world and step of each window, so it exists for every window; it rises within an episode length when heads wander away, and drops when the worlds get new targets. The other two lines are the distance when episodes started and when they ended, averaged over the episodes of the last episode length of windows, so they begin once that many windows exist. The shaded gap between them is the distance closed; where the end lies above the start, the heads ended farther away than they started. An end line falling below the start line means the centipede is learning to move toward its target, even before it reaches it.",
          series: [{ key: "step_facts.head_distance", name: "every window", color: "var(--series-1)" },
                   { key: "episodes.start_distance", name: "episode start", color: "var(--baseline-1)" },
                   { key: "episodes.final_distance", name: "episode end", color: "var(--series-2)" }],
          fillBetween: [1, 2] }],
+      [{ kind: "lines", width: "w6", size: "large", key: "episodes.arrived", title: "Arrival share over training",
+         subtitle: "Share of the episodes that reached the target, over the last episode length of windows" },
+       { kind: "outcomes", width: "w6", size: "large", title: "Episodes ended, per window",
+         subtitle: "Arrived, and ran out of time; time-outs come in waves, one episode length apart",
+         about: "How many episodes ended in each window: those whose head reached the target, and those that ran out of time. All worlds start their first episode together, so the episodes that run out of time end together too, in a wave every episode length; the windows between the waves hold only the early arrivals. That is why the episode values elsewhere are taken over whole episode lengths." }],
       [{ kind: "stack", width: "w6", size: "large", key: "step_facts.reward_parts", title: "Where the reward comes from", totalName: "reward per step" },
        { kind: "heatmap", width: "w6", size: "large", key: "episodes.segment_return" }],
       ["distance_closed", "length_steps", "upside_down_share"]
@@ -392,7 +405,7 @@ const TRAINING_DETAILS = [
       .map((key) => ({ kind: "health", width: "w4", size: "small", key })) },
   { title: "Physics", intro: "How close the physics came to the memory the GPU backend reserves, and how hard the solver worked.",
     cards: ["physics.contact_count", "physics.constraint_rows", "physics.solver_iterations"]
-      .map((key) => ({ kind: "health", width: "w4", size: "small", key })) },
+      .map((key) => ({ kind: "lines", width: "w4", size: "small", key })) },
   { title: "Each segment over training", intro: "The behaviour values per segment and window: one row per segment, head at the top.",
     cards: [
       ...[0, 1, 2, 3].map((part) => ({ kind: "heatmap", width: "w3", size: "small", key: "step_facts.contact_flags", part,
@@ -497,6 +510,19 @@ function median(values) {
   return present.length % 2 ? present[middle] : (present[middle - 1] + present[middle]) / 2;
 }
 
+// The element-wise mean of several values of the same shape, each counted
+// with its weight; values without weight or value are left out.
+function weightedMeanOfValues(values, weights) {
+  const kept = values.map((value, i) => [value, weights[i]]).filter(([value, weight]) => value !== null && weight > 0);
+  const total = kept.reduce((sum, [, weight]) => sum + weight, 0);
+  if (!total) return null;
+  const combine = (items) => (Array.isArray(items[0][0])
+    ? items[0][0].map((_, index) => combine(items.map(([value, weight]) => [value[index], weight])))
+    : items.filter(([value]) => value !== null).reduce((sum, [value, weight]) => sum + value * weight, 0) /
+      items.filter(([value]) => value !== null).reduce((sum, [, weight]) => sum + weight, 0));
+  return combine(kept);
+}
+
 // The element-wise mean of several values of the same shape.
 function meanOfValues(values) {
   const present = values.filter((value) => value !== null);
@@ -543,26 +569,9 @@ function momentMean(values, moment) {
   return meanOfValues(momentIndices(values, moment).map((index) => values[index]));
 }
 
-// The same for an episode value: each window weighted by the episodes that
-// ended in it, so that the result is the mean over those episodes.
-function episodeMomentMean(values, log, moment) {
-  const indices = momentIndices(values, moment);
-  const weights = indices.map((index) => raw(log[index], "episodes.episode_ended") || 0);
-  const total = weights.reduce((a, b) => a + b, 0);
-  if (!total) return momentMean(values, moment);
-  return indices.reduce((sum, index, i) => sum + values[index] * weights[i], 0) / total;
-}
-
 // Whether a value is a mean over the episodes that ended in each window.
 function isEpisodeMean(key) {
   return (key.startsWith("episodes.") && key !== "episodes.episode_ended") || key === "report.distance_closed" || key === "report.mean_return";
-}
-
-// The first or last quarter of the windows that have a value, for histograms.
-function quarterIndices(values, moment) {
-  const present = values.map((value, index) => (value === null ? null : index)).filter((index) => index !== null);
-  const take = Math.max(1, Math.ceil(present.length / 4));
-  return moment === "start" ? present.slice(0, take) : present.slice(-take);
 }
 
 // =============================================================================
@@ -793,7 +802,8 @@ function lineChart(x, series, options) {
   let low = Math.min(...all), high = Math.max(...all);
   if (options.range) [low, high] = options.range;
   if (unit === "%" && low >= 0) { low = 0; if (high === 0) high = 1; }
-  const ticks = niceTicks(low, high, tiny ? 2 : 4);
+  // Angles are marked in steps of 45° so that a 0–180° range ends on a tick.
+  const ticks = unit === "°" && options.range ? niceTicks(low / 45, high / 45, 4).map((t) => t * 45) : niceTicks(low, high, tiny ? 2 : 4);
   const yLow = ticks[0], yHigh = ticks[ticks.length - 1];
   const xLow = Math.min(...x), xHigh = Math.max(Math.max(...x), xLow + 1);
   const px = (c) => left + ((c - xLow) / (xHigh - xLow)) * (width - left - right);
@@ -882,7 +892,17 @@ function stackChart(x, parts, options) {
       style: "stroke:var(--muted);stroke-dasharray:2 3" }, hoverText(marker.label)));
   }
   const toPath = (points) => points.map(([c, v], i) => `${i ? "L" : "M"}${px(c).toFixed(1)},${py(v).toFixed(1)}`).join("");
+  // Counts per window are bars: an area would spread one window's count over
+  // its neighbours.
+  const barWidth = Math.max(1, ((width - left - right) / x.length) * 0.8);
   parts.forEach((part, index) => {
+    if (options.bars) {
+      for (const column of columns) {
+        const [low, high] = column.layers[index];
+        if (high > low) chart.append(svg("rect", { x: px(column.x) - barWidth / 2, y: py(high), width: barWidth, height: py(low) - py(high), style: `fill:${part.color}` }));
+      }
+      return;
+    }
     if (columns.length === 1) {
       const [low, high] = columns[0].layers[index];
       chart.append(svg("rect", { x: px(columns[0].x) - 6, y: py(high), width: 12, height: Math.max(0.5, py(low) - py(high)), style: `fill:${part.color}` }));
@@ -1009,9 +1029,14 @@ function binLabeller(key) {
 // The first and last bins also hold the values beyond them, so the axis labels
 // the inner edges. markEdge draws a labelled line at one edge, such as the
 // time limit.
-function histogramChart(edges, series, options) {
+function histogramChart(allEdges, allSeries, options) {
   const { width = 360, label = number, markEdge = null } = options;
   const height = 150, left = 34, right = 8, top = 8, bottom = 30;
+  // With a limit, such as the time limit, no value lies beyond its bin: the
+  // bins after it are left out, and its bar holds the values at the limit.
+  const limitBin = markEdge === null ? -1 : allEdges.findIndex((edge) => edge >= markEdge.edge);
+  const edges = limitBin >= 0 ? allEdges.slice(0, limitBin + 2) : allEdges;
+  const series = allSeries.map((s) => ({ ...s, shares: s.shares.slice(0, edges.length - 1), counts: s.counts && s.counts.slice(0, edges.length - 1) }));
   const bins = edges.length - 1;
   const all = series.flatMap((s) => s.shares).filter((v) => v !== null);
   if (!all.length || all.every((v) => v === 0)) return empty("No episodes ended");
@@ -1035,10 +1060,13 @@ function histogramChart(edges, series, options) {
         hoverText(`${series.length > 1 ? `${s.name}, ` : ""}${range}: ${number(share)}% of episodes${of}`)));
     });
   });
-  // Edge labels: the inner edges at both ends and a few between them.
-  const labelled = new Set([1, bins - 1, ...[0.25, 0.5, 0.75].map((f) => Math.round(f * bins))]);
-  for (const index of labelled) {
-    chart.append(svg("text", { x: left + index * binWidth, y: height - 16, "text-anchor": "middle" }, label(edges[index])));
+  // Labels: under the end bars what they hold, as they also hold the values
+  // beyond them, and a few edges between them.
+  const textAt = (x, text) => chart.append(svg("text", { x, y: height - 16, "text-anchor": "middle" }, text));
+  textAt(left + binWidth / 2, `<${label(edges[1])}`);
+  if (limitBin < 0) textAt(left + (bins - 0.5) * binWidth, `≥${label(edges[bins - 1])}`);
+  for (const index of new Set([0.25, 0.5, 0.75].map((f) => Math.round(f * bins)))) {
+    if (index > 1 && index < bins - 1) textAt(left + index * binWidth, label(edges[index]));
   }
   if (markEdge !== null) {
     const index = edges.findIndex((edge) => edge >= markEdge.edge);
@@ -1208,24 +1236,45 @@ function trainingReport(root) {
   const stepsPerCycle = log.length ? log[0].transitions / log[0].cycle : 1;
   const cycleAt = (transitions) => Math.round(transitions / stepsPerCycle);
   const used = new Set();
+  // One episode length in windows, and the windows over which each window's
+  // episode values are taken: the last span of windows, all in the same
+  // training session, since a resumed session starts new episodes.
+  const windowSteps = settings.interaction_loop.rollout_window_steps;
+  const span = Math.max(1, Math.ceil(settings.environment.max_episode_steps / windowSteps));
+  const episodeCounts = log.map((record) => raw(record, "episodes.episode_ended") || 0);
+  const sessionStarts = sessions.map((session) => session.first_cycle);
+  const spanStart = (index) => {
+    const sessionStart = Math.max(0, ...sessionStarts.filter((first) => first < log[index].cycle));
+    const first = index - span + 1;
+    return first >= 0 && log[first].cycle > sessionStart ? first : null;
+  };
+  const overSpan = (values) => values.map((_, index) => {
+    const first = spanStart(index);
+    return first === null ? null : weightedMeanOfValues(values.slice(first, index + 1), episodeCounts.slice(first, index + 1));
+  });
   const series = (key) => {
     used.add(key);
     info(key).uses.forEach((source) => used.add(source));
-    return log.map((record) => shown(record, key));
+    const values = log.map((record) => shown(record, key));
+    return isEpisodeMean(key) ? overSpan(values) : values;
   };
   const simulation = settings.environment.simulation;
-  const worldSteps = simulation.world_count * settings.interaction_loop.rollout_window_steps;
+  const worldSteps = simulation.world_count * windowSteps;
+  // Episode values are already means over an episode length of windows.
   const smoothFor = (key) => {
     const category = key.startsWith("report.") ? (key === "report.reward_per_step" ? "step_facts" : "episodes") : key.split(".")[0];
-    if (!(category in SMOOTH_BELOW) || key === "episodes.episode_ended") return false;
-    const samples = category === "episodes" ? median(log.map((r) => raw(r, "episodes.episode_ended")).filter((n) => n)) : worldSteps;
-    return samples !== null && samples < SMOOTH_BELOW[category];
+    return category === "step_facts" && worldSteps < SMOOTH_BELOW.step_facts;
   };
+  // The windows of the first and the last full episode length, for histograms
+  // and for the values at the start and at the end.
+  const spanEnds = log.map((_, index) => index).filter((index) => spanStart(index) !== null);
+  const spanIndices = (end) => (end === undefined ? [] : Array.from({ length: span }, (_, i) => end - span + 1 + i));
+  const firstSpan = spanIndices(spanEnds[0]), lastSpan = spanIndices(spanEnds[spanEnds.length - 1]);
   // Where a later training session resumed the run.
   const markers = sessions.slice(1).map((session, index) => ({ x: session.first_cycle * stepsPerCycle,
     label: `Session ${index + 2} started at cycle ${session.first_cycle} (${session.started})` }));
-  const context = { x, log, series, smoothFor, markers, cycleAt, settings, sessions,
-    hover: (c) => `cycle ${cycleAt(c)} · ${count(c)} steps` };
+  const context = { x, log, series, smoothFor, markers, cycleAt, settings, sessions, span, firstSpan, lastSpan,
+    episodeCounts, hover: (c) => `cycle ${cycleAt(c)} · ${count(c)} steps` };
 
   // Header: what the run is, how far it got, and its settings.
   const last = log[log.length - 1];
@@ -1239,20 +1288,29 @@ function trainingReport(root) {
   const written = new Set(sessions.flatMap((session) => session.settings_written || []));
   root.append(...settingChips(settings, written, "Highlighted: set in the run's configuration files; the others are defaults."));
   if (!log.length) return;
-  if (!episodes) root.append(html("p", { class: "warning" }, "No episode has ended yet, so the episode values have none. Episodes end at the target or at the time limit; the values measured at every step are shown already."));
+  if (!spanEnds.length) {
+    root.append(html("p", { class: "warning" }, `The episode values need one full episode length of windows (${span}); this run has ${log.length}. ` +
+      "Episodes end at the target or at the time limit, so until then only the early arrivals have ended. The values measured at every step are shown already."));
+  }
 
   // Headline tiles: the latest value, the value at the start, and the trend.
+  // Episode values compare the first and the last full episode length.
   const limitSeconds = settings.environment.max_episode_steps * STEP_SECONDS;
+  const cycles = (indices) => `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}`;
+  const episodesIn = (indices) => indices.reduce((sum, index) => sum + episodeCounts[index], 0);
   root.append(html("div", { class: "tiles" }, ...TILES.map((key) => {
     const metric = info(key), values = series(key);
     const fromEpisodes = isEpisodeMean(key);
-    const at = (moment) => (fromEpisodes ? episodeMomentMean(values, log, moment) : momentMean(values, moment));
-    const latest = at("end"), first = at("start");
-    let detail = `at the start ${withUnit(first, metric.unit)}`;
+    const present = values.filter((v) => v !== null);
+    const latest = fromEpisodes ? (present.length ? present[present.length - 1] : null) : momentMean(values, "end");
+    const first = fromEpisodes ? (present.length ? present[0] : null) : momentMean(values, "start");
+    let detail = fromEpisodes && firstSpan.length
+      ? `${cycles(lastSpan)}, ${count(episodesIn(lastSpan))} episodes · ${cycles(firstSpan)}: ${withUnit(first, metric.unit)}`
+      : `at the start ${withUnit(first, metric.unit)}`;
     if (key === "episodes.length_steps") detail += ` · limit ${withUnit(limitSeconds, "s")}`;
-    if (fromEpisodes && latest !== null) {
-      const behind = momentIndices(values, "end").reduce((sum, index) => sum + (raw(log[index], "episodes.episode_ended") || 0), 0);
-      detail += ` · latest from ${count(behind)} episode${behind === 1 ? "" : "s"}`;
+    if (key === "episodes.final_distance" && latest !== null) {
+      const started = series("episodes.start_distance").filter((v) => v !== null).pop();
+      detail = `started ${withUnit(started, "mm")} away · ${detail}`;
     }
     const [title, popover] = cardTitle(metric.label, metric.about, [key]);
     return html("div", { class: "card tile" },
@@ -1263,7 +1321,8 @@ function trainingReport(root) {
   })));
 
   // Results, behaviour, learning, and the run, as the layout says.
-  TRAINING_LAYOUT.forEach((spec, index) => {
+  TRAINING_LAYOUT.forEach((layout, index) => {
+    const spec = layout.episodeNote ? { ...layout, intro: `${layout.intro} ${EPISODE_SPAN_NOTE(span, span * windowSteps)}` } : layout;
     root.append(section(index + 1, spec, ...spec.rows.map((row) =>
       html("div", { class: "row" }, ...row.map((item) => trainingCard(item, context))))));
   });
@@ -1280,8 +1339,8 @@ function trainingReport(root) {
     details.push(html("div", { class: "row" }, ...remaining.map((key) => genericCard(key, context))));
   }
   details.push(html("h3", { class: "group" }, "Every value at the start and at the end"),
-    html("p", { class: "note" }, "Means of the first and last few windows that have the value, episode values weighted by the episodes in each window; per-segment values are averaged over the segments."),
-    valuesTable(log));
+    html("p", { class: "note" }, "Means of the first and last few windows; episode values over the first and the last full episode length of windows. Per-segment values are averaged over the segments."),
+    valuesTable(log, series));
   if (sessions.length) {
     details.push(html("h3", { class: "group" }, "Training sessions"), table(["Started", "From cycle", "Configuration file", "Code version", "Device"],
       sessions.map((s) => [s.started, String(s.first_cycle), s.configuration_file, s.git_commit || "unknown", s.device]), 99));
@@ -1307,6 +1366,8 @@ function trainingCard(item, context) {
           { ...common, unit, fillBetween: item.fillBetween }));
     }
     const values = series(item.key);
+    if (!metric.compute && !log.some((record) => raw(record, item.key) !== null)) return card(item, empty("Not logged by this run"));
+    if (values.every((v) => v === null)) return card(item, empty(`Needs one full episode length of windows (${context.span})`));
     return card(item, lineChart(x, [{ name: metric.label, values, color: SERIES[0], smooth: smoothFor(item.key) }], { ...common, unit: metric.unit, range: metric.range }));
   }
 
@@ -1373,23 +1434,31 @@ function trainingCard(item, context) {
       lines.length ? alongBody(lines, { unit: "%" }, width) : empty());
   }
 
+  if (item.kind === "outcomes") {
+    const arrived = log.map((record, i) => Math.round(context.episodeCounts[i] * (raw(record, "episodes.arrived") || 0)));
+    const parts = [
+      { name: "arrived", values: arrived, color: "var(--series-1)" },
+      { name: "ran out of time", values: arrived.map((n, i) => context.episodeCounts[i] - n), color: "var(--series-2)" },
+    ];
+    return card({ ...item, keys: ["episodes.episode_ended", "episodes.arrived"] }, legend(parts.map((p) => p.name), parts.map((p) => p.color)),
+      stackChart(x, parts, { ...common, totalName: "episodes", showTotal: false, bars: true }));
+  }
+
   if (item.kind === "histogram") {
-    // The episodes of the first and the last quarter of the windows with episodes.
-    const counts = log.map((record) => {
-      const value = raw(record, item.key);
-      return value && value.some((n) => n > 0) ? value : null;
-    });
+    // The episodes of the first and the last full episode length of windows.
+    const counts = log.map((record) => raw(record, item.key));
     const label = binLabeller(item.key);
-    const groups = [["start", "first quarter", "var(--baseline-1)"], ["end", "last quarter", "var(--series-1)"]].map(([moment, name, color]) => {
-      const indices = quarterIndices(counts, moment);
-      const summed = indices.length ? counts[indices[0]].map((_, bin) => indices.reduce((sum, i) => sum + counts[i][bin], 0)) : [];
+    const groups = [[context.firstSpan, "first", "var(--baseline-1)"], [context.lastSpan, "last", "var(--series-1)"]].map(([indices, name, color]) => {
+      const present = indices.filter((i) => counts[i]);
+      const summed = present.length ? counts[present[0]].map((_, bin) => present.reduce((sum, i) => sum + counts[i][bin], 0)) : [];
       const total = summed.reduce((a, b) => a + b, 0);
       const cycles = indices.length ? `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}` : "";
-      return { name: `${name} (${cycles}, ${count(total)} episodes)`, color, counts: summed, total, shares: summed.map((n) => (total ? (100 * n) / total : 0)) };
+      return { name: `${cycles}, ${count(total)} episodes`, color, counts: summed, total, shares: summed.map((n) => (total ? (100 * n) / total : 0)) };
     });
-    if (!groups[0].total) return card({ ...item, subtitle: "" }, empty(sampleOf(log.map((r) => raw(r, item.key))) ? "No episode has ended yet" : "Not logged by this run"));
+    if (!sampleOf(counts)) return card({ ...item, subtitle: "" }, empty("Not logged by this run"));
+    if (!groups[0].total) return card({ ...item, subtitle: "" }, empty(`Needs one full episode length of windows (${context.span})`));
     const markEdge = item.key.endsWith("length_steps") ? { edge: context.settings.environment.max_episode_steps, label: "time limit" } : null;
-    return card({ ...item, subtitle: "Share of the episodes in each bin, early and late in training", about: `${metric.about}${HISTOGRAM_ABOUT}` },
+    return card({ ...item, subtitle: "Share of the episodes in each bin: the first and the last episode length of training", about: `${metric.about}${HISTOGRAM_ABOUT}` },
       legend(groups.map((g) => g.name), groups.map((g) => g.color)),
       histogramChart(metric.edges, groups, { width, label, markEdge }));
   }
@@ -1455,17 +1524,19 @@ function transpose(values) {
 }
 
 // Every value's first and last means, one row per value (and part).
-function valuesTable(log) {
+function valuesTable(log, series) {
   const rows = [];
   const keys = [...Object.keys(DESCRIPTIONS), "report.reward_per_step", "report.mean_return"];
   for (const key of keys) {
-    const metric = info(key), values = log.map((r) => shown(r, key)), sample = sampleOf(values);
+    const metric = info(key), values = series(key), sample = sampleOf(values);
     if (sample === undefined) continue;
     const shape = shapeOf(sample);
     const parts = shape === "parts" ? (metric.parts.length ? metric.parts : sample[0].map((_, i) => `part ${i}`)) : [null];
     parts.forEach((part, index) => {
       const reduced = values.map((v) => (v === null ? null : shape === "single" ? v : mean(perSegment(v, shape === "parts" ? index : undefined))));
-      const at = (moment) => (isEpisodeMean(key) ? episodeMomentMean(reduced, log, moment) : momentMean(reduced, moment));
+      // Episode values are already means over an episode length: the first and the last.
+      const present = reduced.filter((v) => v !== null);
+      const at = (moment) => (isEpisodeMean(key) ? (moment === "start" ? present[0] : present[present.length - 1]) ?? null : momentMean(reduced, moment));
       rows.push([`${metric.label}${part ? ` · ${part}` : ""}`, metric.unit, number(at("start")), number(at("end"))]);
     });
   }

@@ -10,12 +10,14 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     progress.learning()
     progress.finish(
         {
-            "timing": {
-                "collecting_seconds": 20.5,
-                "learning_seconds": 2.6,
-                "transitions_per_second": 199.6,
+            "timing": {"collecting_seconds": 20.5, "learning_seconds": 2.6},
+            # Two segments; reward parts and contact flags as the log holds them.
+            "step_facts": {
+                "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
+                "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
+                "head_distance": 0.0567,
             },
-            "episodes": {"episode_ended": 4, "arrived": 0.5, "segment_return": [1, -3]},
+            "episodes": {"episode_ended": 4, "arrived": 0.25},
         },
         remaining_s=402,
     )
@@ -27,6 +29,6 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert drawings[5].endswith("\n")  # the results end the window's line
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
     assert drawings[5].split() == [
-        *("3/12", "[####################]", "20.5", "s", "2.6", "s", "200"),
-        *("6m42s", "|", "4", "50%", "-1"),
+        *("3/12", "[####################]", "20.5", "s", "2.6", "s", "6m42s", "|"),
+        *("-0.00300", "57", "mm", "25%", "1", "3"),
     ]

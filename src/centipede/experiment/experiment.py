@@ -236,9 +236,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             )
             return folder.path
     session_cycles = total_cycles - completed_cycles
+    session_seconds = time.monotonic() - session_start
     print(
-        f"\nFinished {session_cycles} cycles in"
-        f" {duration(time.monotonic() - session_start)}: {folder.path}"
+        f"\nFinished {session_cycles} cycles in {duration(session_seconds)},"
+        f" {session_cycles * transitions_per_cycle / session_seconds:,.0f} steps/s"
+        f" overall: {folder.path}"
     )
     return folder.path
 
