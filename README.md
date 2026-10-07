@@ -64,7 +64,6 @@ Centipede/
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
-├─ notebooks/        Kaggle notebooks that run the project on a cloud GPU
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
@@ -113,33 +112,23 @@ Warp. Verified on 2026-10-03 with Python 3.13.15, MuJoCo 3.12.0, MuJoCo Warp
 3.14.0, Warp 1.17.0, PyTorch 2.14.1+cu126, and NumPy 2.5.3: MuJoCo Warp's GPU
 arrays become PyTorch GPU tensors without copying.
 
-To run the tests on a Kaggle T4, import
-[`notebooks/kaggle_gpu_tests.ipynb`](notebooks/kaggle_gpu_tests.ipynb) into
-Kaggle, select the GPU T4 accelerator, turn on internet access, and run all
-cells. The notebook clones this repository and the public RL_lib and
-MujocoReplay repositories, so it tests the latest pushed commits.
-[`notebooks/kaggle_physics_options.ipynb`](notebooks/kaggle_physics_options.ipynb)
-runs [`benchmarks/physics_options.py`](benchmarks/physics_options.py) the same
-way, comparing the physics' speed and soundness under other solver settings
-and timesteps.
-[`notebooks/kaggle_training_profile.ipynb`](notebooks/kaggle_training_profile.ipynb)
-runs [`benchmarks/training_profile.py`](benchmarks/training_profile.py), which
-measures where the time of a training cycle goes, part by part, and projects how
-long a configured run will take. Locally, run it with a training file before
-launching a long run, for example
-`python benchmarks/training_profile.py configs/probe.toml`.
+Two benchmarks measure speed on a GPU:
+[`benchmarks/training_profile.py`](benchmarks/training_profile.py) measures
+where the time of a training cycle goes, part by part, and projects how long a
+configured run will take; run it with a training file before launching a long
+run, for example
+`python benchmarks/training_profile.py configs/baseline.toml --worlds 64 256 1024`.
+[`benchmarks/physics_options.py`](benchmarks/physics_options.py) compares the
+physics' speed and soundness under other solver settings and timesteps.
 
-## Training on Kaggle
+## Training machine
 
-[`notebooks/kaggle_training.ipynb`](notebooks/kaggle_training.ipynb) trains on
-Kaggle's GPUs: one run per T4, so two runs at once (for example two seeds) on
-the T4 x2 machine. Its first code cell holds every choice: the configuration
-file, the seeds of new runs or the run folders to continue, and the session's
-time limit. Start it with **Save Version → Save & Run All (Commit)**, which
-runs in the background for up to 12 hours and keeps `/kaggle/working/runs` as
-the version's output. A run stops cleanly with a checkpoint before the time
-limit; to continue it, add the previous version's output as input and list its
-run folders in the settings cell. The notebook's first cell explains each step.
+Training runs on a desktop with an RTX 3080, set up as above, with this
+repository, `RL_lib`, and `MujocoReplay` side by side. It collects about 1,250
+transitions per second at 1,024 worlds, two and a half times a Kaggle T4. The
+laptop, whose MX330 cannot run the default solver, is used to write code, run
+the CPU tests, and read the results. Training on Kaggle was used until Stage
+8.4; its notebooks are in the local archive.
 
 ## Archive
 

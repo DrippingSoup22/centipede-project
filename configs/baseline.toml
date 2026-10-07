@@ -5,11 +5,10 @@
 # - 32 cycles = 2,048 steps per world, so 32 updates.
 # - Episodes of 1,024 steps (20 s simulated): every world gets at least two.
 # - Minibatches of 512, so eight per pass over each update's samples.
-# About 11 minutes on an RTX 3080 (0.29 s per step, measured; plan.md, Stage
-# 8.4) and about 17 on a Kaggle T4 (estimated from the 256-world measurement).
+# About 11 minutes on the RTX 3080, projected from the measured step time
+# (0.29 s per step at 64 worlds; plan.md, Stage 8.4).
 #
 #   python -m centipede configs/baseline.toml
-#   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/baseline.toml"
 
 [run]
 mode = "train"

@@ -63,7 +63,7 @@ with an error naming it, so nothing in such a file is silently ignored.
 
 ## Training files
 
-`mode = "train"` starts a new run. Smoke tests, probes, the Kaggle levels, and full
+`mode = "train"` starts a new run. Smoke tests, probes, the baseline, the GPU levels, and full
 training all use this mode and the same code; they differ only in their values, mainly
 the number of worlds, episode length, and number of update cycles.
 
@@ -71,15 +71,15 @@ the number of worlds, episode length, and number of update cycles.
 | --- | --- | --- | --- |
 | `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
 | `configs/probe.toml` | See how a choice of settings behaves on the CPU | Light, about half an hour on the CPU | Yes |
-| `configs/baseline.toml` | The first, smallest training run, against which later changes are compared | About 17 minutes on a Kaggle T4 (64 worlds, 32 cycles of 64 steps, 1,024-step episodes), estimated | Yes |
-| `configs/kaggle_quick.toml` | Check that a GPU run works and measure its speed | Quick, about 8 minutes on a Kaggle T4 (1,024 worlds, 3 cycles of 64 steps) | Yes |
-| `configs/kaggle_medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 25 minutes on a Kaggle T4 (256 worlds, 8 cycles of 256 steps) | Yes |
-| `configs/training.toml` | The actual experiment | Long, about 19 hours on a Kaggle T4 (1,024 worlds, 128 cycles of 256 steps), in two sessions | Yes |
+| `configs/baseline.toml` | The first, smallest training run, against which later changes are compared | About 11 minutes on the RTX 3080 (64 worlds, 32 cycles of 64 steps, 1,024-step episodes) | Yes |
+| `configs/quick.toml` | Check that a GPU run works and measure its speed | Quick, about 3 minutes on the RTX 3080 (1,024 worlds, 3 cycles of 64 steps) | Yes |
+| `configs/medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 14 minutes on the RTX 3080 (256 worlds, 8 cycles of 256 steps) | Yes |
+| `configs/training.toml` | The actual experiment | Long, about 7.5 hours on the RTX 3080 (1,024 worlds, 128 cycles of 256 steps) | Yes |
 
-The Kaggle times were measured with the training profile on a T4 (Stage 8.2 in
-`plan.md`): a step takes 0.67 s at 256 worlds and 2.1 s at 1,024, and a fresh
-machine adds about a minute compiling the kernels. Two runs side by side, one
-per T4, each keep their speed.
+The times are projected from the step times the training profile measured on
+the RTX 3080 desktop, the training machine (Stage 8.4 in `plan.md`): 0.29 s
+per step at 64 worlds, 0.40 s at 256, and 0.82 s at 1,024. The first run on a
+machine adds about half a minute compiling the kernels.
 
 The `[run]` settings of a training file:
 
@@ -177,8 +177,8 @@ too; the agents check those when loading.
 
 ### Continuing a run
 
-A continuing file resumes an existing run, for example after a Kaggle session
-ended, or to train it for more cycles:
+A continuing file resumes an existing run, for example after it stopped at its
+time limit, or to train it for more cycles:
 
 ```toml
 [run]

@@ -1,0 +1,29 @@
+# Medium level, about 14 minutes on the RTX 3080: a short training run to see
+# how a choice of settings starts to behave, with a report, with the long
+# level's 256-step windows. Projected from the measured step time (plan.md,
+# Stage 8.4): 0.40 s per step at 256 worlds, so 1.7 minutes per cycle (2.9 on
+# a Kaggle T4).
+#
+#   python -m centipede configs/medium.toml
+
+[run]
+mode = "train"
+name = "medium"
+seed = 1
+checkpoint_every_cycles = 4
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+# Eight minibatches per epoch: 256 worlds x 256 steps = 65,536 samples.
+minibatch_size = 8192
+
+[interaction_loop]
+rollout_window_steps = 256
+update_cycles = 8

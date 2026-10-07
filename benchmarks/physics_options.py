@@ -31,9 +31,9 @@ lets a constraint respond faster than twice the timestep. Above 0.15 ms the
 contacts therefore become softer than the model specifies; the 0.2 ms variant
 shows by how much that matters.
 
-Run from the repository root on a Kaggle T4:
+Run from the repository root on a Volta-or-newer GPU:
 
-    python benchmarks/physics_options.py --output /kaggle/working/physics_options
+    python benchmarks/physics_options.py --output benchmarks/results/<date>_options
 
 and locally on a GPU older than Volta, where only the CG solver compiles:
 

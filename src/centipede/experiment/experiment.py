@@ -8,8 +8,9 @@
   cycles, and after the last, it saves a checkpoint and refreshes the report;
   every ``record_every_cycles`` cycles it writes the window's replay recording.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
-  cycle that would end after the limit, so that a Kaggle session never ends in
-  the middle of one; the run is then continued in a new session. With
+  cycle that would end after the limit, so that a run on a machine with a
+  session limit never ends in the middle of one; the run is then continued in
+  a new session. With
   ``start_from`` the new run's agents begin from another run's
   checkpoint, for example to continue learning on a harder task.
 - **evaluate** loads a checkpoint, runs every seed with the agents and each

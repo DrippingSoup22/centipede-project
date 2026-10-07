@@ -29,10 +29,11 @@ short windows of real training at one or more world counts:
 
 The pipeline's methods are wrapped with timers at run time; no pipeline code
 changes. Some private methods are reached on purpose: this is a diagnostic,
-not pipeline code. Run from the repository root, for example on a Kaggle T4:
+not pipeline code. Run from the repository root, for example on the GPU
+desktop:
 
-    python benchmarks/training_profile.py configs/training.toml \\
-        --worlds 256 1024 4096 --output /kaggle/working/profile
+    python benchmarks/training_profile.py configs/baseline.toml \\
+        --worlds 64 256 1024 --output benchmarks/results/<date>_<machine>
 
 on the CPU backend, with the probe's settings:
 
