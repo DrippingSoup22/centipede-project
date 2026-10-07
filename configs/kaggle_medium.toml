@@ -1,0 +1,27 @@
+# Medium level, about 30 minutes on a Kaggle T4: a short training run to see
+# how a choice of settings starts to behave, with a report. The times are
+# estimates until measured (plan.md, Stage 8.2).
+#
+#   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/kaggle_medium.toml"
+
+[run]
+mode = "train"
+name = "medium"
+seed = 1
+checkpoint_every_cycles = 5
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 1024
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+# Eight minibatches per epoch: 1,024 worlds x 128 steps = 131,072 samples.
+minibatch_size = 16384
+
+[interaction_loop]
+rollout_window_steps = 128
+update_cycles = 5

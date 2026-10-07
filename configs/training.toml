@@ -1,4 +1,6 @@
-# Full training, on a GPU (Kaggle's T4). Every value not written here is the
+# Full training, the long level: about a day on a Kaggle T4, two sessions of
+# notebooks/kaggle_training.ipynb (an estimate until measured; plan.md, Stage
+# 8.2). Every value not written here is the
 # default in docs/configuration.md. 1,024 worlds and 256-step windows were
 # agreed in Stage 8.2; the number of cycles follows from the measured speed. A run
 # longer than one Kaggle session is continued with a file such as:

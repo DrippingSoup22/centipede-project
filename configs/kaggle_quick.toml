@@ -1,0 +1,28 @@
+# Quick level, up to about 10 minutes on a Kaggle T4: checks that a GPU run
+# works from start to finish and measures its speed, with a report. Three
+# short windows give three updates; nothing is expected to be learned. The
+# times are estimates until measured (plan.md, Stage 8.2).
+#
+#   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/kaggle_quick.toml"
+
+[run]
+mode = "train"
+name = "quick"
+seed = 1
+checkpoint_every_cycles = 3
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 1024
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+# Eight minibatches per epoch: 1,024 worlds x 64 steps = 65,536 samples.
+minibatch_size = 8192
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 3

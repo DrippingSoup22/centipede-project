@@ -63,15 +63,17 @@ with an error naming it, so nothing in such a file is silently ignored.
 
 ## Training files
 
-`mode = "train"` starts a new run. Smoke tests, probe tests, and full training
-all use this mode and the same code; they differ only in their values, mainly
+`mode = "train"` starts a new run. Smoke tests, probes, the Kaggle levels, and full
+training all use this mode and the same code; they differ only in their values, mainly
 the number of worlds, episode length, and number of update cycles.
 
 | File | Purpose | Size | Report |
 | --- | --- | --- | --- |
 | `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
-| `configs/probe.toml` | See how a choice of settings behaves | Light, about half an hour on the CPU | Yes |
-| `configs/training.toml` | The actual experiment | Full, on a GPU | Yes |
+| `configs/probe.toml` | See how a choice of settings behaves on the CPU | Light, about half an hour on the CPU | Yes |
+| `configs/kaggle_quick.toml` | Check that a GPU run works and measure its speed | Quick, up to about 10 minutes on a Kaggle T4 | Yes |
+| `configs/kaggle_medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 30 minutes on a Kaggle T4 | Yes |
+| `configs/training.toml` | The actual experiment | Long, about a day on a Kaggle T4, in two sessions | Yes |
 
 The `[run]` settings of a training file:
 
