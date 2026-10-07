@@ -77,12 +77,20 @@ Back up results that must survive separately.
 
 ## Setup
 
+A fresh Windows computer first needs Python 3.13, Git, and, for the GPU, a
+current NVIDIA driver. Install the first two with `winget install
+Python.Python.3.13` and `winget install Git.Git` (or from python.org, ticking
+"Add python.exe to PATH", and git-scm.com), then open a new PowerShell. Clone
+this repository, `RL_lib`, and `MujocoReplay` side by side into one folder,
+since the setup installs the other two from `..\RL_lib` and `..\MujocoReplay`.
+
 One Python environment runs everything: the CPU and GPU simulation backends,
 the learning code, and the tests. It lives outside the repository. From the
-repository root, in PowerShell:
+repository root, in PowerShell (`py -3.13` is Windows' Python launcher, which
+works even where plain `python` is not found):
 
 ```powershell
-python -m venv "$HOME\.venvs\Centipede"
+py -3.13 -m venv "$HOME\.venvs\Centipede"
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install "torch==2.14.1+cu126" --index-url https://download.pytorch.org/whl/cu126
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ..\RL_lib
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ..\MujocoReplay
