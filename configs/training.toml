@@ -1,6 +1,6 @@
 # Full training, on a GPU (Kaggle's T4). Every value not written here is the
-# default in docs/configuration.md. The number of worlds and the window length
-# are first values, to be agreed from the speed measurements of Stage 8. A run
+# default in docs/configuration.md. 1,024 worlds and 256-step windows were
+# agreed in Stage 8.2; the number of cycles follows from the measured speed. A run
 # longer than one Kaggle session is continued with a file such as:
 #
 #   [run]
@@ -18,12 +18,18 @@ checkpoint_every_cycles = 16
 # defaults to checkpoint_every_cycles), keeping 4 levels x 8 worlds by rank.
 
 [environment.simulation]
-model_path = "models/assembly_v2.xml"
+model_path = "models/assembly_v3.xml"
 backend = "gpu"
 world_count = 1024
 
 [agents]
 device = "cuda"
+
+[agents.ppo]
+# Eight minibatches per epoch: 1,024 worlds x 256 steps = 262,144 samples.
+# A minibatch costs about the same time whatever its size, so fewer, larger
+# ones make the update short (Stage 8.1).
+minibatch_size = 32768
 
 [interaction_loop]
 rollout_window_steps = 256

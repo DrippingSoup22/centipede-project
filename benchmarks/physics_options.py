@@ -59,7 +59,7 @@ import warp as wp
 from centipede.environment.simulation.constants import LEG_ANGLE_NOISE_RAD
 from centipede.environment.simulation.model_mapping import ModelMapping
 
-MODEL_PATH = "models/assembly_v2.xml"
+MODEL_PATH = "models/assembly_v3.xml"
 ACTION_SECONDS = 0.020
 # The pipeline's reserved memory per world (docs/environment.md, Settings).
 CONTACTS_PER_WORLD = 128

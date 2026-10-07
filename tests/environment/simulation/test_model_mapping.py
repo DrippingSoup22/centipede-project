@@ -16,7 +16,7 @@ from centipede.environment.simulation.model_mapping import (
     ModelMapping,
 )
 
-V2_XML = Path("models/assembly_v2.xml").read_text(encoding="utf-8")
+MODEL_XML = Path("models/assembly_v3.xml").read_text(encoding="utf-8")
 KNEE_MOTOR = (
     'name="segment_03_left_knee_motor" joint="segment_03_left_knee" '
     'gear="1e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" '
@@ -24,14 +24,14 @@ KNEE_MOTOR = (
 )
 
 
-def load(xml: str = V2_XML) -> mujoco.MjModel:
+def load(xml: str = MODEL_XML) -> mujoco.MjModel:
     return mujoco.MjModel.from_xml_string(xml)
 
 
 def edited(old: str, new: str) -> mujoco.MjModel:
     """The v2 model with one exact piece of its XML replaced."""
-    assert V2_XML.count(old) == 1, old
-    return load(V2_XML.replace(old, new))
+    assert MODEL_XML.count(old) == 1, old
+    return load(MODEL_XML.replace(old, new))
 
 
 def test_mapping_matches_the_elements_found_by_name():

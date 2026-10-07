@@ -16,7 +16,7 @@ record_every_cycles = 1
 max_episode_steps = 8
 
 [environment.simulation]
-model_path = "models/assembly_v2.xml"
+model_path = "models/assembly_v3.xml"
 backend = "cpu"
 world_count = 2
 

@@ -113,8 +113,12 @@ the agent learns from. The spine yaw motors are not controlled in this first
 version: they always receive zero, leaving the spine to bend passively against
 its springs.
 
-An action is held for 200 physics steps of 0.1 ms, so one environment step is
-**20 ms**, or 50 decisions per second. Time is measured by counting steps, never
+An action is held for **20 ms**, or 50 decisions per second: as many physics
+steps as the model's timestep fits into it, 134 steps of 0.149 ms for model v3.
+The simulation computes that number from the model and rejects a model whose
+timestep does not divide 20 ms evenly. On the GPU, an action's physics steps
+are replayed from a CUDA graph recorded on the first step, so the CPU does not
+wait for the GPU between them. Time is measured by counting steps, never
 by the simulator's clock, which drifts in 32-bit arithmetic.
 
 ### When the physics fails
@@ -147,7 +151,7 @@ Known differences of the GPU backend:
   at rest already reaches 40 contacts and 256 constraint rows.
 - Its default Newton solver needs a GPU of the Volta generation or newer, such
   as Kaggle's T4; the local MX330 and Kaggle's P100 cannot compile it. With
-  model v2, the MX330 can run the GPU backend using the conjugate-gradient
+  models v2 and v3, the MX330 can run the GPU backend using the conjugate-gradient
   solver, slowly and less converged, which is enough for local functional
   tests.
 

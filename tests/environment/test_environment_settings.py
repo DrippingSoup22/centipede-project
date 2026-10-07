@@ -14,7 +14,7 @@ from centipede.environment.settings import (
 )
 from centipede.settings_section import SettingsError
 
-SIMULATION = {"model_path": "models/assembly_v2.xml", "backend": "cpu"}
+SIMULATION = {"model_path": "models/assembly_v3.xml", "backend": "cpu"}
 
 
 def read(**values) -> EnvironmentSettings:

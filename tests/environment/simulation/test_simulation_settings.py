@@ -11,12 +11,12 @@ import pytest
 from centipede.environment.simulation.settings import SimulationSettings
 from centipede.settings_section import SettingsError
 
-REQUIRED_ONLY = {"model_path": "models/assembly_v2.xml", "backend": "cpu"}
+REQUIRED_ONLY = {"model_path": "models/assembly_v3.xml", "backend": "cpu"}
 
 
 def test_defaults_fill_everything_but_the_required_keys():
     assert SimulationSettings.from_section(REQUIRED_ONLY) == SimulationSettings(
-        model_path=Path("models/assembly_v2.xml"),
+        model_path=Path("models/assembly_v3.xml"),
         backend="cpu",
         world_count=1,
         gpu_solver="newton",

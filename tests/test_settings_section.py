@@ -17,7 +17,7 @@ def test_values_are_read_converted_and_defaulted():
             "name": "probe",
             "report": False,
             "backend": "gpu",
-            "model_path": "models/assembly_v2.xml",
+            "model_path": "models/assembly_v3.xml",
             "worlds": 4,
             "reward": 1,
             "rate": 3e-4,
@@ -31,7 +31,7 @@ def test_values_are_read_converted_and_defaulted():
     assert section.text("name") == "probe"
     assert section.boolean("report") is False
     assert section.choice("backend", ("cpu", "gpu")) == "gpu"
-    assert section.path("model_path") == Path("models/assembly_v2.xml")
+    assert section.path("model_path") == Path("models/assembly_v3.xml")
     assert section.positive_integer("worlds") == 4
     assert section.number("reward") == 1.0
     assert isinstance(section.number("reward"), float)

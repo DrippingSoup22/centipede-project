@@ -18,7 +18,7 @@ short windows of real training at one or more world counts:
 4. A PyTorch profiler trace of a few steps: kernels per step, the CPU's waits
    for the GPU, how busy the GPU was, and the most expensive kernels. With
    ``--output`` the trace is saved; it opens in https://ui.perfetto.dev.
-5. The physics alone: the 200 physics steps of one action launched from Python
+5. The physics alone: the physics steps of one action launched from Python
    and replayed as a recorded CUDA graph, and how often MuJoCo Warp's solver
    makes the CPU wait for the GPU.
 6. Learning: the advantage estimation, and one minibatch at several sizes,
@@ -68,7 +68,6 @@ from torch.profiler import ProfilerActivity, profile, record_function, schedule
 from centipede.agents.agents import Agents
 from centipede.agents.segment_agent import SegmentAgent
 from centipede.environment.environment import Environment
-from centipede.environment.simulation.constants import PHYSICS_STEPS_PER_ACTION
 from centipede.experiment import experiment as experiment_module
 from centipede.experiment.configuration import Configuration, read_configuration
 from centipede.experiment.recordings import RecordingScene, training_recording
@@ -616,18 +615,19 @@ def is_warp(name: str) -> bool:
 
 
 def profile_physics(environment: Environment, out: Output) -> dict[str, Any]:
-    """The 200 physics steps alone: from Python, as a graph, and the solver's waits."""
+    """The physics steps alone: from Python, as a graph, and the solver's waits."""
     import mujoco_warp as mjw
     import warp as wp
 
     backend = environment.simulation._backend
     gpu_model, gpu_data = backend.gpu_model, backend.gpu_data
+    steps = backend.physics_steps_per_action
     result: dict[str, Any] = {}
 
     # Each solver iteration outside a graph reads a flag on the CPU, so the
     # loop's iterations (the slowest world's) are the waits of one solve.
     iterations = []
-    for _ in range(PHYSICS_STEPS_PER_ACTION):
+    for _ in range(steps):
         mjw.step(gpu_model, gpu_data)
         iterations.append(int(wp.to_torch(gpu_data.solver_niter).max()))
     result["solver_iterations_per_physics_step"] = {
@@ -636,7 +636,7 @@ def profile_physics(environment: Environment, out: Output) -> dict[str, Any]:
     }
 
     def python_steps() -> None:
-        for _ in range(PHYSICS_STEPS_PER_ACTION):
+        for _ in range(steps):
             mjw.step(gpu_model, gpu_data)
 
     repeats = 2
@@ -660,9 +660,9 @@ def profile_physics(environment: Environment, out: Output) -> dict[str, Any]:
         result["graph_error"] = str(error)
     backend._check_worlds()
 
-    out("\nPhysics alone: the 200 physics steps of one action")
+    out(f"\nPhysics alone: the {steps} physics steps of one action")
     iterations_summary = result["solver_iterations_per_physics_step"]
-    waits_per_action = iterations_summary["mean"] * PHYSICS_STEPS_PER_ACTION
+    waits_per_action = iterations_summary["mean"] * steps
     out(
         f"  solver iterations per physics step: mean {iterations_summary['mean']:.1f},"
         f" max {iterations_summary['max']}; outside a graph each one is a wait,"

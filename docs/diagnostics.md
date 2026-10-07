@@ -97,21 +97,21 @@ Refreshed by every step and reset, for every world. The physical state carries
 what the environment needs; this category carries what the recorder and the
 speed work need. All four values describe the moment after the `forward` call
 that follows a step's last physics step, or a reset, so the CPU and GPU
-backends report the same thing; they are not peaks over the 200 physics steps
-of a transition. On the GPU the category is made of views of MuJoCo Warp's own
+backends report the same thing; they are not peaks over the physics steps of
+a transition (134 for model v3). On the GPU the category is made of views of MuJoCo Warp's own
 arrays, so filling it costs nothing; on the CPU each world's values are copied
 after the step.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |
-| `qpos` | `(W, nq)` | Every world's position coordinates, in MuJoCo's `qpos` layout (69 for model v2) | Recorded |
+| `qpos` | `(W, nq)` | Every world's position coordinates, in MuJoCo's `qpos` layout (69 for models v2 and v3) | Recorded |
 | `contact_count` | `(1,)` | Contacts in all worlds together; the GPU reserves `contacts_per_world × W` | Maximum |
 | `constraint_rows` | `(W,)` | Constraint rows in each world; the GPU reserves `constraints_per_world` | Maximum |
 | `solver_iterations` | `(W,)` | Solver iterations each world needed on the last physics call | Maximum |
 
 The three maxima are logged as the `physics` category and show how close a
 run comes to the memory reserved on the GPU and how hard the solver works. The
-CPU benchmark (`benchmarks/simulation_speed.py`, 4 worlds, 20 transitions,
+CPU benchmark (`benchmarks/simulation_speed.py`, since archived, 4 worlds, 20 transitions,
 on the laptop) measured 0.132 s per step before the category existed and
 0.112 to 0.138 s over three runs after it: the run-to-run spread is wider than
 any difference.

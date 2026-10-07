@@ -18,7 +18,7 @@ BACKENDS = ["cpu"] + (["gpu"] if torch.cuda.is_available() else [])
 
 def environment(backend="cpu", world_count=3, **changes) -> Environment:
     simulation = {
-        "model_path": "models/assembly_v2.xml",
+        "model_path": "models/assembly_v3.xml",
         "backend": backend,
         "world_count": world_count,
         "gpu_solver": "cg",  # also runs on GPUs older than Volta

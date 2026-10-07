@@ -7,15 +7,17 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The current model is **v2**, used for training. It has exactly the body and
-physics of the original **v1 flat-ground baseline**, which is kept unchanged for
-reference. Both are frozen: training work may change observations, rewards,
-targets, and learning, but never a model. A physical change requires a new,
-separately named version with its own validation.
+The current model is **v3**, used for training. It is v2 with a longer physics
+timestep (see [Model v3](#model-v3)). v2 has exactly the body and physics of the
+original **v1 flat-ground baseline**. v2 and v1 are kept unchanged for
+reference. All three are frozen: training work may change observations,
+rewards, targets, and learning, but never a model. A physical change requires a
+new, separately named version with its own validation.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v2.xml`](../models/assembly_v2.xml) | **v2**, the complete centipede used for training | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
+| [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, the complete centipede used for training | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
+| [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
 | [`models/assembly.xml`](../models/assembly.xml) | v1, the original baseline | `92143cf54b030856e436a1de6f4333c327ffb9a5f812a0e4a0b4c4aed107d50e` |
 | [`models/segment.xml`](../models/segment.xml) | One isolated trunk unit, for reference | |
 | [`models/head.xml`](../models/head.xml) | The isolated head, for reference | |
@@ -190,16 +192,17 @@ All 16 feet stayed on the ground in both cases.
 | --- | ---: |
 | MuJoCo version | 3.12.0 |
 | Integrator | `implicitfast` |
-| Physics timestep | 0.1 ms |
+| Physics timestep | 0.149 ms, 134 steps per 20 ms action (v1 and v2: 0.1 ms) |
 | Gravity | 9.81 m/s² |
 | Contact response time | 0.3 ms |
 | Joint-limit response time | 0.8 ms |
 | Contact damping ratio | 1.0 |
 | Solver tolerance | 1e-6 (v1: 1e-10) |
 
-Halving the timestep to 0.05 ms changed body positions by at most 0.006 mm and
-spine angles by at most 0.002°, so 0.1 ms is accurate enough. Agents act far less
-often than every physics step (see
+For v1, halving the timestep to 0.05 ms changed body positions by at most
+0.006 mm and spine angles by at most 0.002°, so 0.1 ms was accurate enough. v3
+lengthens it to 0.149 ms for speed (see [Model v3](#model-v3)). Agents act far
+less often than every physics step (see
 [environment.md](environment.md#actions-and-timing)).
 
 ## Visual membranes
@@ -247,6 +250,46 @@ Random flailing is chaotic: even changing the tolerance from 1e-10 to 1e-9 moves
 the body by several millimetres after two seconds. Versions and backends are
 therefore compared by checks like these and over short horizons, never by long
 trajectories.
+
+## Model v3
+
+v3 is v2 with one change: the physics timestep is 0.149 ms (exactly 20 ms /
+134) instead of 0.1 ms, so one 20 ms action takes 134 physics steps instead of
+200. The agents still act every 20 ms; only the substeps inside an action
+change. It was adopted on 2026-10-07 because, after the GPU backend replays an
+action's physics steps as a CUDA graph, the GPU's work per physics step limits
+training speed.
+
+**Why this timestep.** The contacts respond in 0.3 ms, and MuJoCo never lets a
+constraint respond faster than twice the timestep. Up to 0.15 ms the contacts
+therefore keep exactly the stiffness of v2; above it they would become softer.
+0.149 ms is the longest timestep below that bound that divides 20 ms into a
+whole number of steps.
+
+**What was compared** (`benchmarks/physics_options.py`, Kaggle T4, Newton,
+1,024 worlds for speed and 64 for the checks, every option changed in memory
+only). The time of one action, replayed as a CUDA graph, against v2:
+
+| Option | Speed | Outcome |
+| --- | ---: | --- |
+| v2 as it is (0.1 ms) | 1.00x (2.55 s) | Reference |
+| Conjugate-gradient solver | 0.31x | Slower; reaches its 80-iteration limit |
+| Solver tolerance 1e-5 or 1e-4 | 0.94x to 0.96x | No gain: Newton needs only 9 to 11 iterations |
+| Line search limited to 10 iterations | 0.91x | No gain |
+| Pyramidal friction cones | 1.34x | A world became non-finite while settling |
+| Timestep 0.125 ms | 1.10x | Sound |
+| **Timestep 0.149 ms (v3)** | **1.32x** | **Sound; contacts unchanged** |
+| Timestep 0.2 ms | 1.74x | Softer contacts: deeper penetration, larger limit excess |
+
+**Validation.** Under random full-strength leg commands (64 worlds, 2 s), v3's
+deepest penetration was 0.097 mm against v2's 0.096 mm, and its largest
+joint-limit excess 4.55° against 4.25° (v1's validation: 0.176 mm and 4.23°);
+the mean height and speed of the body stayed within 3% of v2's, about the
+run-to-run spread. The automated tests in `tests/models/test_model_v3.py`
+check that only the timestep differs from v2, that no contact is softened,
+that settling for 2 s with motors off ends with the same contacts and body
+positions within 0.013 mm of v2's (deepest penetration 0.020 mm against
+0.018 mm), and that no leg passes through a body under random commands.
 
 ## Possible future versions
 

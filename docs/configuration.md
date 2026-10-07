@@ -109,7 +109,7 @@ max_episode_steps = 8192
 observation_radius = 1
 
 [environment.simulation]
-model_path = "models/assembly_v2.xml" # required
+model_path = "models/assembly_v3.xml" # required
 backend = "cpu"                       # required: "cpu" or "gpu"
 world_count = 4
 # gpu_solver = "newton"               # GPU only: "newton" or "cg"
@@ -269,7 +269,7 @@ first episode ended. Each file carries the model, the targets as markers, and
 the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
 training run records one window of 32 worlds before each checkpoint, 2.3 MB
-each for model v2.
+each for models v2 and v3.
 
 The **report** is one HTML file that opens in any browser, offline. It is
 refreshed at every checkpoint, so an interrupted run still has one. It works the

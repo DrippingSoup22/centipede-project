@@ -21,7 +21,7 @@ mode = "train"
 name = "probe"
 
 [environment.simulation]
-model_path = "models/assembly_v2.xml"
+model_path = "models/assembly_v3.xml"
 backend = "cpu"
 world_count = 4
 

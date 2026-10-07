@@ -11,11 +11,14 @@ import torch
 
 from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import ModelMapping
+from centipede.environment.simulation.simulation import physics_steps_per_action
 
 
 def test_the_category_holds_mujocos_values_after_a_step_and_a_reset():
-    model = mujoco.MjModel.from_xml_path("models/assembly_v2.xml")
-    backend = CPUBackend(model, ModelMapping.from_model(model), 2)
+    model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    backend = CPUBackend(
+        model, ModelMapping.from_model(model), 2, physics_steps_per_action(model)
+    )
     backend.reset(seed=1)
     facts = backend.diagnostics.facts
     assert facts.qpos.shape == (2, model.nq)

@@ -22,8 +22,8 @@ separately.
 
 ## Status
 
-- **Model: complete and frozen.** The current body, v2, is in
-  [`models/assembly_v2.xml`](models/assembly_v2.xml) and described in
+- **Model: complete and frozen.** The current body, v3, is in
+  [`models/assembly_v3.xml`](models/assembly_v3.xml) and described in
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
@@ -110,9 +110,10 @@ To run the tests on a Kaggle T4, import
 Kaggle, select the GPU T4 accelerator, turn on internet access, and run all
 cells. The notebook clones this repository and the public RL_lib and
 MujocoReplay repositories, so it tests the latest pushed commits.
-[`notebooks/kaggle_speed_benchmark.ipynb`](notebooks/kaggle_speed_benchmark.ipynb)
-runs [`benchmarks/simulation_speed.py`](benchmarks/simulation_speed.py) the same
-way, measuring how fast each backend simulates.
+[`notebooks/kaggle_physics_options.ipynb`](notebooks/kaggle_physics_options.ipynb)
+runs [`benchmarks/physics_options.py`](benchmarks/physics_options.py) the same
+way, comparing the physics' speed and soundness under other solver settings
+and timesteps.
 [`notebooks/kaggle_training_profile.ipynb`](notebooks/kaggle_training_profile.ipynb)
 runs [`benchmarks/training_profile.py`](benchmarks/training_profile.py), which
 measures where the time of a training cycle goes, part by part, and projects how

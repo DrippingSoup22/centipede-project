@@ -27,7 +27,7 @@ runs_folder = "RUNS"
 max_episode_steps = 3
 
 [environment.simulation]
-model_path = "models/assembly_v2.xml"
+model_path = "models/assembly_v3.xml"
 backend = "cpu"
 world_count = 2
 

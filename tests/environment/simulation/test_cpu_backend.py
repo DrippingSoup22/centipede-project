@@ -10,21 +10,22 @@ import pytest
 import torch
 
 from centipede.environment.simulation.constants import (
+    ACTION_DURATION_S,
     LEG_ANGLE_NOISE_RAD,
-    PHYSICS_STEPS_PER_ACTION,
 )
 from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import (
     LEG_ACTION_ORDER,
     ModelMapping,
 )
+from centipede.environment.simulation.simulation import physics_steps_per_action
 
 SEGMENT_COUNT = 8
 
 
 @pytest.fixture(scope="module")
 def model():
-    return mujoco.MjModel.from_xml_path("models/assembly_v2.xml")
+    return mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
 
 
 @pytest.fixture(scope="module")
@@ -33,7 +34,7 @@ def mapping(model):
 
 
 def make_backend(model, mapping, world_count, seed=0):
-    backend = CPUBackend(model, mapping, world_count)
+    backend = CPUBackend(model, mapping, world_count, physics_steps_per_action(model))
     backend.reset(seed=seed)
     return backend
 
@@ -134,7 +135,7 @@ def test_step_holds_the_actions_for_twenty_milliseconds(model, mapping):
         for segment in range(1, SEGMENT_COUNT)
     ]
     for world_index, data in enumerate(backend.world_data):
-        assert data.time == pytest.approx(PHYSICS_STEPS_PER_ACTION * 1e-4)
+        assert data.time == pytest.approx(ACTION_DURATION_S)
         assert np.allclose(
             data.ctrl[leg_motor_ids], actions[world_index].numpy().ravel()
         )

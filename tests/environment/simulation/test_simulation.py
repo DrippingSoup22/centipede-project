@@ -1,17 +1,21 @@
 """Tests for the physics simulation's front file.
 
 The backends' behaviour is tested in their own test files; these tests cover
-only what the front adds: loading, backend choice, and forwarding.
+only what the front adds: loading, the action's duration, backend choice,
+and forwarding.
 """
+
+from pathlib import Path
 
 import pytest
 import torch
 
 from centipede.environment.simulation import PhysicsSimulation, SimulationSettings
+from centipede.environment.simulation.model_mapping import ModelContractError
 
 
 def settings(**changes) -> SimulationSettings:
-    values = {"model_path": "models/assembly_v2.xml", "backend": "cpu"} | changes
+    values = {"model_path": "models/assembly_v3.xml", "backend": "cpu"} | changes
     return SimulationSettings.from_section(values)
 
 
@@ -31,6 +35,18 @@ def test_builds_from_settings_and_forwards_reset_and_step():
     assert simulation.physical_state is state
     assert not torch.equal(state.leg_joint_position[0], moved[0])
     assert torch.equal(state.leg_joint_position[1], moved[1])
+
+
+def test_a_timestep_that_does_not_fit_the_action_is_rejected(tmp_path):
+    xml = Path("models/assembly_v3.xml").read_text(encoding="utf-8")
+    uneven = tmp_path / "uneven_timestep.xml"
+    uneven.write_text(
+        xml.replace('timestep="0.000149253731343284"', 'timestep="0.00015"'),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ModelContractError, match="timestep"):
+        PhysicsSimulation(settings(model_path=str(uneven)))
 
 
 def test_missing_model_file_fails_clearly():

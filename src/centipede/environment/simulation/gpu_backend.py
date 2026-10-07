@@ -13,7 +13,6 @@ import warp as wp
 from centipede.environment.simulation.constants import (
     LEG_ANGLE_NOISE_RAD,
     LEG_SPEED_NOISE_RAD_S,
-    PHYSICS_STEPS_PER_ACTION,
 )
 from centipede.environment.simulation.diagnostics import (
     SimulationDiagnostics,
@@ -243,14 +242,17 @@ class GPUBackend:
         model: mujoco.MjModel,
         mapping: ModelMapping,
         world_count: int,
+        physics_steps_per_action: int,
         solver: str,
         contacts_per_world: int,
         constraints_per_world: int,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
-        ``solver`` is "newton" or "cg"; it is set on the host model before the
-        copy, because MuJoCo Warp reads it while building the GPU model. The
+        ``physics_steps_per_action`` is how many of the model's timesteps make
+        one 20 ms action. ``solver`` is "newton" or "cg"; it is set on the host
+        model before the copy, because MuJoCo Warp reads it while building the
+        GPU model. The
         contact and constraint capacities are reserved here once: contacts in
         one pool shared by all worlds, constraints separately for each world.
         Each physical-state tensor is also kept as a Warp view sharing its
@@ -266,6 +268,7 @@ class GPUBackend:
         )
         self.world_count = world_count
         self.segment_count = mapping.segment_count
+        self.physics_steps_per_action = physics_steps_per_action
 
         # The Warp device that holds the model and data, and its PyTorch name.
         self.device = wp.get_device()
@@ -334,9 +337,10 @@ class GPUBackend:
     def step(self, leg_actions: torch.Tensor) -> None:
         """Hold the (W, N, 6) leg actions for 20 ms in every world at once.
 
-        The actions are written into ``ctrl`` once, then the physics runs 200
-        steps. Launched from Python, each step's solver would make the CPU wait
-        for the GPU after every iteration, to decide whether to iterate again.
+        The actions are written into ``ctrl`` once, then the physics runs its
+        steps for the action (134 for model v3). Launched from Python, each
+        step's solver would make the CPU wait for the GPU after every
+        iteration, to decide whether to iterate again.
         So the first step runs them from Python, which also compiles every
         kernel, and then records them as a CUDA graph; later steps replay the
         recording, in which the GPU decides itself when the solver is done.
@@ -414,7 +418,7 @@ class GPUBackend:
 
     def _run_physics_steps(self) -> None:
         """The physics steps of one action, launched from Python."""
-        for _ in range(PHYSICS_STEPS_PER_ACTION):
+        for _ in range(self.physics_steps_per_action):
             mjw.step(self.gpu_model, self.gpu_data)
 
     def _check_worlds(self) -> None:

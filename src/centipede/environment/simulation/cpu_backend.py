@@ -6,7 +6,6 @@ from numpy.random import Generator
 from centipede.environment.simulation.constants import (
     LEG_ANGLE_NOISE_RAD,
     LEG_SPEED_NOISE_RAD_S,
-    PHYSICS_STEPS_PER_ACTION,
 )
 from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 from centipede.environment.simulation.model_mapping import (
@@ -32,16 +31,20 @@ class CPUBackend:
         model: mujoco.MjModel,
         mapping: ModelMapping,
         world_count: int,
+        physics_steps_per_action: int,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
-        The generators start from seed 0 until ``reset`` is given a seed. Each
+        ``physics_steps_per_action`` is how many of the model's timesteps make
+        one 20 ms action. The generators start from seed 0 until ``reset`` is
+        given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
         """
         self.model = model
         self.mapping = mapping
         self.world_count = world_count
+        self.physics_steps_per_action = physics_steps_per_action
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -120,7 +123,7 @@ class CPUBackend:
 
         for world_index, data in enumerate(self.world_data):
             data.ctrl[self.mapping.leg_actuator_ids] = actions[world_index]
-            for _ in range(PHYSICS_STEPS_PER_ACTION):
+            for _ in range(self.physics_steps_per_action):
                 mujoco.mj_step(self.model, data)
             self._check_world(world_index)
 

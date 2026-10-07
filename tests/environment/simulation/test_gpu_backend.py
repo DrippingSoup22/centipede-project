@@ -19,6 +19,7 @@ if not torch.cuda.is_available():
 import warp as wp  # noqa: E402
 
 from centipede.environment.simulation.constants import (  # noqa: E402
+    ACTION_DURATION_S,
     LEG_ANGLE_NOISE_RAD,
 )
 from centipede.environment.simulation.cpu_backend import CPUBackend  # noqa: E402
@@ -27,13 +28,18 @@ from centipede.environment.simulation.gpu_backend import (  # noqa: E402
     GPUBackend,
 )
 from centipede.environment.simulation.model_mapping import ModelMapping  # noqa: E402
+from centipede.environment.simulation.simulation import (  # noqa: E402
+    physics_steps_per_action,
+)
 
 SOLVER = "newton" if torch.cuda.get_device_capability() >= (7, 0) else "cg"
+# Physics steps per action of the model the tests use, model v3.
+STEPS = physics_steps_per_action(mujoco.MjModel.from_xml_path("models/assembly_v3.xml"))
 
 
 @pytest.fixture(scope="module")
 def model():
-    return mujoco.MjModel.from_xml_path("models/assembly_v2.xml")
+    return mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +48,7 @@ def mapping(model):
 
 
 def make_backend(model, mapping, world_count, seed=0):
-    backend = GPUBackend(model, mapping, world_count, SOLVER, 128, 512)
+    backend = GPUBackend(model, mapping, world_count, STEPS, SOLVER, 128, 512)
     backend.reset(seed=seed)
     return backend
 
@@ -52,7 +58,7 @@ def positions(backend):
 
 
 def test_construction_prepares_the_gpu_worlds(model, mapping):
-    backend = GPUBackend(model, mapping, 2, "cg", 128, 512)
+    backend = GPUBackend(model, mapping, 2, STEPS, "cg", 128, 512)
 
     assert backend.gpu_model.opt.solver == mujoco.mjtSolver.mjSOL_CG
     assert (backend.gpu_data.naconmax, backend.gpu_data.njmax) == (2 * 128, 512)
@@ -83,7 +89,7 @@ def test_construction_prepares_the_gpu_worlds(model, mapping):
 
 def test_step_holds_each_worlds_actions_for_twenty_milliseconds(model, mapping):
     """A step takes about 10 s on a pre-Volta GPU, so physics runs sparingly here."""
-    backend = GPUBackend(model, mapping, 2, SOLVER, 128, 512)
+    backend = GPUBackend(model, mapping, 2, STEPS, SOLVER, 128, 512)
     actions = torch.rand(2, mapping.segment_count, 6, device="cuda") * 2 - 1
 
     backend.step(actions)
@@ -94,7 +100,7 @@ def test_step_holds_each_worlds_actions_for_twenty_milliseconds(model, mapping):
         world_actions = actions[world_index].cpu().numpy()
         assert np.array_equal(ctrl[world_index, leg_motor_ids], world_actions)
     assert not np.delete(ctrl, leg_motor_ids.ravel(), axis=1).any()
-    assert np.allclose(backend.gpu_data.time.numpy(), 200 * model.opt.timestep)
+    assert np.allclose(backend.gpu_data.time.numpy(), ACTION_DURATION_S)
 
 
 def test_replayed_physics_steps_match_steps_launched_from_python(model, mapping):
@@ -118,7 +124,7 @@ def test_replayed_physics_steps_match_steps_launched_from_python(model, mapping)
         wp.to_torch(reference.gpu_data.ctrl)[:, leg_motor_ids] = (
             actions * 2 - 1
         ).flatten(1)
-        for _ in range(200):
+        for _ in range(STEPS):
             mjw.step(reference.gpu_model, reference.gpu_data)
 
     assert backend._physics_graph is not None
@@ -248,7 +254,7 @@ def test_contact_flags_follow_the_contact_pool(model, mapping):
     """States made quickly on the CPU are loaded into two GPU worlds: motors off
     lets the bodies sink to the floor, random actions bring legs together. Every
     flag type must be seen, and always agree with the pool's shape names."""
-    source = CPUBackend(model, mapping, world_count=2)
+    source = CPUBackend(model, mapping, world_count=2, physics_steps_per_action=STEPS)
     source.reset(seed=4)
     backend = make_backend(model, mapping, world_count=2)
     state = backend.physical_state
@@ -289,11 +295,11 @@ def test_gpu_physics_matches_cpu_physics_while_settling():
     onto the floor in the same way. Settling is not chaotic, unlike random
     flailing, so positions and orientations must agree after 60 ms; speeds and
     contact flags at the moment of impact are too sensitive to compare."""
-    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v2.xml")
+    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
     cpu_model.opt.solver = SOLVERS[SOLVER]
-    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v2.xml")
+    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
     mapping = ModelMapping.from_model(cpu_model)
-    cpu = CPUBackend(cpu_model, mapping, world_count=2)
+    cpu = CPUBackend(cpu_model, mapping, world_count=2, physics_steps_per_action=STEPS)
     cpu.reset(seed=1)
     gpu = make_backend(gpu_model, mapping, world_count=2)
     for world_index, data in enumerate(cpu.world_data):
@@ -323,7 +329,7 @@ def test_gpu_physics_matches_cpu_physics_while_settling():
 def test_invalid_physics_stops_the_run(model, mapping):
     """Running out of reserved space, and a non-finite state, stop the run;
     the solver's iteration-limit notice does not."""
-    crowded = GPUBackend(model, mapping, 2, SOLVER, 1, 512)
+    crowded = GPUBackend(model, mapping, 2, STEPS, SOLVER, 1, 512)
     crowded.reset()
     with pytest.raises(RuntimeError, match="Raise contacts_per_world"):
         crowded.step(torch.zeros(2, mapping.segment_count, 6, device="cuda"))

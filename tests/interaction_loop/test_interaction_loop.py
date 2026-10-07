@@ -112,7 +112,7 @@ def test_a_short_run_with_the_real_environment_and_agents_is_finite():
             {
                 "max_episode_steps": 3,
                 "simulation": {
-                    "model_path": "models/assembly_v2.xml",
+                    "model_path": "models/assembly_v3.xml",
                     "backend": "cpu",
                     "world_count": WORLDS,
                 },
