@@ -1,0 +1,46 @@
+# Rebalanced reward: the baseline from scratch, with the reward formula
+# unchanged and its weights rebalanced so that trying to walk pays (plan.md,
+# Stage 8.4). Body contact stays the highest cost, efficiency is in the middle,
+# leg contact is the lowest:
+# - body contact 0.01 -> 0.03, three times the efficiency cost, about the same
+#   proportion as before, so crawling to the target never beats walking upright;
+# - efficiency 0.003 -> 0.01, so a step toward the goal is worth more;
+# - leg contact 0.005 -> 0.001, so an attempt that sometimes touches legs is no
+#   longer punished more than its progress gains.
+# Training is as in the baseline, but longer:
+# - 64 worlds x 64-step rollout window = 4,096 samples per update cycle.
+# - 4 epochs x 8 minibatches of 512 = 32 gradient steps per update cycle.
+# - 256 update cycles x 64 steps = 16,384 steps per world, 16 episode lengths.
+# About 1 h 40 min on the RTX 3080 (23.5 s per update cycle, measured in the
+# baseline's second stage); a checkpoint every 32 update cycles.
+#
+#   python -m centipede configs/rebalanced.toml
+
+[run]
+mode = "train"
+name = "rebalanced"
+seed = 1
+checkpoint_every_cycles = 32
+
+[environment]
+max_episode_steps = 1024
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[environment.rewards]
+body_contact_cost = 0.03
+efficiency_cost = 0.01
+leg_contact_cost = 0.001
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 256
