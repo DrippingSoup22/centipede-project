@@ -138,10 +138,11 @@ sequences; elsewhere, for example when a run trained on a GPU is evaluated on
 the CPU, each agent keeps the sequence its seed gives. Loading it into an environment with a different number of
 segments or observation size fails with a clear error. It holds no stored data,
 physical state, targets, or unfinished episodes, so continuing from a checkpoint
-starts new episodes. Because the optimizers' state includes their learning rate,
-a new run that starts from a checkpoint keeps the rate it was saved with; the
-experiment therefore requires the same `learning_rate` (see
-[configuration.md](configuration.md#starting-from-another-run)).
+starts new episodes. The optimizers' saved state also brings back the
+settings they were saved with, so after loading, each agent applies its own
+weight decay and momentum, and the experiment sets the learning rate before
+every update. A new run that starts from a checkpoint must use the same kind of
+optimizer (see [configuration.md](configuration.md#starting-from-another-run)).
 
 ## Settings
 
@@ -154,7 +155,12 @@ These are the keys of the agents sections of the configuration file (see
 | `device` | `cpu` | Where networks and stored data live: `cpu` or `cuda` |
 | `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU) |
 | `initial_action_std` | 0.5 | Starting value of the six learned action spreads |
-| `learning_rate` | 3e-4 | Adam learning rate, constant, no weight decay |
+| `optimizer` | `adam` | Each network's optimizer: `adam`, `adamw` (Adam with decoupled weight decay), or `sgd` |
+| `learning_rate` | 3e-4 | Learning rate of the first update |
+| `learning_rate_schedule` | `constant` | How the rate changes over the run's update cycles: `constant`, `linear`, or `cosine` (half a cosine, slow at both ends) |
+| `final_learning_rate` | learning_rate / 10 | Learning rate of the last update, when the schedule is not constant |
+| `weight_decay` | 0 | Pulls the weights toward zero at every step; added to the gradient (L2) for Adam and SGD, decoupled for AdamW |
+| `momentum` | 0.9 | SGD's momentum; unused by the Adam optimizers |
 | `normaliser_epsilon` | 1e-8 | Keeps observation normalisation well defined |
 | `observation_clip` | 10.0 | Normalised observations are clipped to ± this value |
 | **`[agents.ppo]`** | | |
@@ -169,8 +175,13 @@ These are the keys of the agents sections of the configuration file (see
 Fixed by design rather than configured: actor and critic are separate networks,
 the policy is a Gaussian squashed by tanh into −1 to 1, each action's spread is
 one learned value that does not depend on the observation (RL_lib's
-`std_mode = "global"`), and actor and critic each have their own Adam
-optimizer.
+`std_mode = "global"`), and actor and critic each have their own optimizer,
+of the same kind and with the same settings. RL_lib's PPO takes the
+optimizers ready-made, so choosing them needs nothing from the library.
+
+The experiment sets the learning rate before every update with the agents'
+`set_learning_rate`, computed from the schedule and the run's cycle
+(`AgentSettings.learning_rate_at`), and the learning category logs it.
 
 The number of steps collected before each update, `rollout_window_steps` (first
 value 256 per world), belongs to the interaction loop.

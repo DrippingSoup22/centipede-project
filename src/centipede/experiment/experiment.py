@@ -198,12 +198,21 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     )
     loop.diagnostics.progress = progress
     progress.header()
+    # The learning rate of each update follows the schedule over the run's
+    # cycles; the loop pauses after every cycle, before the next update.
+    agents.set_learning_rate(
+        configuration.agents.learning_rate_at(completed_cycles + 1, total_cycles)
+    )
     cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
+        if cycle < total_cycles:
+            agents.set_learning_rate(
+                configuration.agents.learning_rate_at(cycle + 1, total_cycles)
+            )
         seconds_per_cycle = (time.monotonic() - cycles_start) / (session_cycle + 1)
         remaining_s = (total_cycles - cycle) * seconds_per_cycle
         progress.finish(record, remaining_s)
@@ -257,8 +266,9 @@ def _check_agents_can_start_from(
 ) -> None:
     """Fail clearly where a checkpoint's agents differ from the new run's.
 
-    The networks must have the same layers. The optimizers' saved state also
-    brings back their learning rate, so a different one would be ignored.
+    The networks must have the same layers, and the optimizers must be of the
+    same kind, since each kind keeps its own state. Checkpoints saved before
+    the optimizer could be chosen used Adam.
     """
     saved = checkpoint["agents"]["settings"]
     if tuple(saved["hidden_layers"]) != settings.hidden_layers:
@@ -266,10 +276,11 @@ def _check_agents_can_start_from(
             f"[agents] hidden_layers must match the checkpoint {path}: "
             f"{list(saved['hidden_layers'])}, got {list(settings.hidden_layers)}"
         )
-    if saved["learning_rate"] != settings.learning_rate:
+    saved_optimizer = saved.get("optimizer", "adam")
+    if saved_optimizer != settings.optimizer:
         raise SettingsError(
-            f"[agents] learning_rate must match the checkpoint {path}: its "
-            f"optimizers keep {saved['learning_rate']}, got {settings.learning_rate}"
+            f"[agents] optimizer must match the checkpoint {path}: "
+            f"{saved_optimizer!r}, got {settings.optimizer!r}"
         )
 
 

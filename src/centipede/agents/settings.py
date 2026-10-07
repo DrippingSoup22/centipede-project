@@ -1,6 +1,10 @@
+import math
 from dataclasses import dataclass
 
 from centipede.settings_section import SettingsSection
+
+OPTIMIZERS = ("adam", "adamw", "sgd")
+LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine")
 
 
 @dataclass(frozen=True)
@@ -49,16 +53,38 @@ class AgentSettings:
 
     ``device`` is where networks and stored data live. ``initial_action_std``
     is the starting value of the six learned action spreads, and normalised
-    observations are clipped to plus or minus ``observation_clip``.
+    observations are clipped to plus or minus ``observation_clip``. Actor and
+    critic each get their own ``optimizer``, with ``weight_decay`` (and, for
+    SGD, ``momentum``); their learning rate follows ``learning_rate_schedule``
+    over the run's update cycles (``learning_rate_at``).
     """
 
     device: str
     hidden_layers: tuple[int, ...]
     initial_action_std: float
+    optimizer: str
     learning_rate: float
+    learning_rate_schedule: str
+    final_learning_rate: float
+    weight_decay: float
+    momentum: float
     normaliser_epsilon: float
     observation_clip: float
     ppo: PPOSettings
+
+    def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
+        """The learning rate of the update in ``cycle``, counted from 1 to
+        ``total_cycles``: ``learning_rate`` in the first, moving to
+        ``final_learning_rate`` in the last, in a straight line or along half
+        a cosine, or ``learning_rate`` throughout when constant."""
+        if self.learning_rate_schedule == "constant" or total_cycles == 1:
+            return self.learning_rate
+        progress = (cycle - 1) / (total_cycles - 1)
+        if self.learning_rate_schedule == "cosine":
+            progress = (1 - math.cos(math.pi * progress)) / 2
+        return self.learning_rate + progress * (
+            self.final_learning_rate - self.learning_rate
+        )
 
     @classmethod
     def from_section(cls, values: dict) -> "AgentSettings":
@@ -67,6 +93,7 @@ class AgentSettings:
         A PPO section left out of the file keeps all its defaults.
         """
         section = SettingsSection(values, "agents")
+        learning_rate = section.positive_number("learning_rate", default=3e-4)
         settings = cls(
             device=section.choice("device", ("cpu", "cuda"), default="cpu"),
             hidden_layers=section.integer_list(
@@ -75,7 +102,16 @@ class AgentSettings:
             initial_action_std=section.positive_number(
                 "initial_action_std", default=0.5
             ),
-            learning_rate=section.positive_number("learning_rate", default=3e-4),
+            optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
+            learning_rate=learning_rate,
+            learning_rate_schedule=section.choice(
+                "learning_rate_schedule", LEARNING_RATE_SCHEDULES, default="constant"
+            ),
+            final_learning_rate=section.positive_number(
+                "final_learning_rate", default=learning_rate / 10
+            ),
+            weight_decay=section.number("weight_decay", default=0.0, minimum=0.0),
+            momentum=section.number("momentum", default=0.9, minimum=0.0, maximum=1.0),
             normaliser_epsilon=section.positive_number(
                 "normaliser_epsilon", default=1e-8
             ),

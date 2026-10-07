@@ -141,7 +141,12 @@ distance_ratio_epsilon_m = 1e-6
 device = "cpu"                        # "cpu" or "cuda", matching the backend
 hidden_layers = [64, 64]
 initial_action_std = 0.5
-learning_rate = 3e-4
+optimizer = "adam"                    # "adam", "adamw", or "sgd"
+learning_rate = 3e-4                  # the rate of the first update
+learning_rate_schedule = "constant"   # "constant", "linear", or "cosine"
+final_learning_rate = 3e-5            # the rate of the last update, if not constant
+weight_decay = 0.0
+momentum = 0.9                        # SGD only
 normaliser_epsilon = 1e-8
 observation_clip = 10.0
 
@@ -171,8 +176,11 @@ runs.
 
 Two agent settings must match the checkpoint, and a difference is rejected:
 `hidden_layers`, because the networks must have the same shape, and
-`learning_rate`, because the optimizers' saved state brings back the rate they
-were created with. The number of segments and the observation size must match
+`optimizer`, because each kind of optimizer keeps its own state (checkpoints
+from before the optimizer could be chosen count as Adam). The learning rate,
+its schedule, weight decay, and momentum may differ: the new run's own values
+replace those the optimizers were saved with, and its schedule counts the new
+run's cycles from the first. The number of segments and the observation size must match
 too; the agents check those when loading.
 
 ### Continuing a run
@@ -347,17 +355,18 @@ The report is ordered by priority, and the size of each part follows it.
   histogram's end bars also hold the values beyond them (`<−90%`, `≥90%`),
   and the episode length histogram ends at the time limit, whose bar holds
   the episodes that ran out of time.
-- **2 · Behaviour** (smaller). Eight values along the body (body and legs
+- **2 · Learning** (smaller). Critic accuracy, policy change (KL), clipped
+  samples, and action spread; then the learning rate, entropy, critic loss,
+  and policy loss. Each per-segment value is drawn as the segments' mean with
+  their range.
+- **3 · Behaviour** (smaller). Eight values along the body (body and legs
   touching, each foot on the ground, height, uprightness, speed, speed toward
   the goal), each early, midway, and late in training; the useful share of
   movement (speed toward the goal ÷ speed) along the body in the same way;
   heading error; and the share of time the head is upside down.
-- **3 · Learning** (small). Policy change (KL), clipped samples, critic
-  accuracy, and action spread, each as the segments' mean with their range.
 - **4 · Run** (small). Steps per second, and the time each window spent
   collecting and learning.
-- **Details,** behind a "Show details" button: the other learning values, each
-  behaviour value per segment over training, the number of episodes that ended
+- **Details,** behind a "Show details" button: each behaviour value per segment over training, the number of episodes that ended
   per window and the three histograms window by window (readable only with many
   worlds), the physics' contacts, constraint rows, and solver iterations, a
   table of the body at the end of training, every other logged value, a table

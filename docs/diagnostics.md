@@ -130,6 +130,7 @@ the explained variance, which describes the batch before the update.
 | `approximate_kl` | `(N,)` | How far the update moved the policy |
 | `clip_fraction` | `(N,)` | Share of samples whose probability ratio was clipped |
 | `explained_variance` | `(N,)` | How much of the returns' variation the critic predicted: 1 exactly, 0 nothing |
+| `learning_rate` | `()` | The optimizers' learning rate in the update, the same for every agent; set by the experiment from the schedule |
 | `action_std` | `(N, 6)` | Each action's learned spread, before squashing |
 
 ### Timing

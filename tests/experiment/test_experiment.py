@@ -2,8 +2,8 @@
 
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
-files, continuing a run, starting from another run's agents, and evaluating
-without changing anything.
+files, continuing a run, starting from another run's agents with its own
+learning rate, and evaluating without changing anything.
 """
 
 import json
@@ -143,13 +143,22 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
 
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
-    harder_file = TRAINING_FILE.replace(
-        "[interaction_loop]",
-        "[environment.target]\ndistance_range_m = [0.03, 0.04]\n\n[interaction_loop]",
-    ).replace(
-        'runs_folder = "RUNS"',
-        f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
-        "record_every_cycles = 0",
+    harder_file = (
+        TRAINING_FILE.replace(
+            "[interaction_loop]",
+            "[environment.target]\ndistance_range_m = [0.03, 0.04]\n\n"
+            "[interaction_loop]",
+        )
+        .replace(
+            'runs_folder = "RUNS"',
+            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
+            "record_every_cycles = 0",
+        )
+        .replace(
+            "hidden_layers = [8]",
+            "hidden_layers = [8]\nlearning_rate = 1e-3\n"
+            'learning_rate_schedule = "linear"\nfinal_learning_rate = 1e-4',
+        )
     )
 
     child = run_file(tmp_path, harder_file, NAME="harder")
@@ -158,12 +167,16 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
     assert logged_cycles(child) == [1, 2, 3]
     assert not (child / "recordings").exists()  # recording was turned off
+    # Its own learning rate replaced the parent's, along its own cycles.
+    lines = (child / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
+    rates = [json.loads(line)["learning"]["learning_rate"] for line in lines]
+    assert rates == pytest.approx([1e-3, 5.5e-4, 1e-4])
 
-    other_rate = harder_file.replace(
-        "hidden_layers = [8]", "hidden_layers = [8]\nlearning_rate = 1e-3"
+    other_optimizer = harder_file.replace(
+        "hidden_layers = [8]", 'hidden_layers = [8]\noptimizer = "sgd"'
     )
-    with pytest.raises(SettingsError, match="learning_rate must match"):
-        run_file(tmp_path, other_rate, NAME="faster")
+    with pytest.raises(SettingsError, match="optimizer must match"):
+        run_file(tmp_path, other_optimizer, NAME="other")
     assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
 
 

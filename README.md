@@ -137,6 +137,7 @@ root with the project's Python:
 
 ```powershell
 python scripts/gpu_desktop.py run configs/baseline.toml
+python scripts/gpu_desktop.py queue configs/overnight
 python scripts/gpu_desktop.py watch
 python scripts/gpu_desktop.py status
 ```
@@ -153,6 +154,17 @@ it at the end too, `fetch` copies a run's folder at any time, `status` lists
 the running and recent runs with how each ended, `stop` stops the running
 ones, and `tests` runs the tests on the desktop. A second run is refused while
 one is running, unless `--alongside` is given, since two runs share the GPU.
+
+`queue` starts a whole folder of training files, which
+[`scripts/run_queue.py`](scripts/run_queue.py) runs on the desktop one after
+another, in the order of their names, for example overnight. A run that fails
+does not stop the queue. If the folder holds an `evaluation.toml`, each
+finished run is evaluated right after it, with that file's `source` replaced
+by the run's folder. Every run of the queue is a launched run of its own, so
+`status` lists it; watching or fetching the queue (`watch queue`, `fetch
+queue`) copies all its runs to the laptop, and its output, which ends with a
+table of how each run ended, to `runs/queues/`. `stop` stops the queue first,
+then its running run.
 
 Setting this up once: on the desktop, install Windows' OpenSSH Server, start
 the `sshd` service automatically, make Windows PowerShell its default shell,

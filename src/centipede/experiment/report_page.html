@@ -60,7 +60,7 @@
   .chip.set { background: var(--chip); color: var(--chip-ink); border-color: transparent; }
   .chips-note { color: var(--muted); font-size: 11.5px; margin: 0 0 18px; }
 
-  /* Sections: results large, behaviour and learning smaller, details hidden. */
+  /* Sections: results large, learning and behaviour smaller, details hidden. */
   section { margin-top: 30px; }
   section > h2 { font-size: 18px; margin: 0 0 2px; font-weight: 650; }
   section > h2 .number { color: var(--muted); font-weight: 500; margin-right: 6px; }
@@ -243,6 +243,8 @@ const METRICS = {
     about: "The share of samples whose probability ratio reached PPO's clip limit in the last update. Some clipping is normal; a large share means the updates are too aggressive." },
   "learning.explained_variance": { label: "Critic accuracy", unit: "",
     about: "How well the critic predicted the returns before the update (explained variance): 1 is perfect, 0 no better than a constant, below 0 worse than that." },
+  "learning.learning_rate": { label: "Learning rate", unit: "",
+    about: "The optimizers' learning rate in each update: constant, or falling from the starting rate to the final one along the schedule the settings name." },
   "learning.action_std": { label: "Action spread", unit: "",
     about: "The learned spread of each motor's action, averaged over the six motors. It shrinks as the policy becomes more certain." },
   "timing.transitions_per_second": { label: "Simulation speed", unit: "steps/s",
@@ -276,8 +278,16 @@ const SETTING_CHIPS = [
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}` },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
-  { keys: ["agents.hidden_layers", "agents.learning_rate", "agents.initial_action_std"],
-    text: ({ agents: a }) => `network ${a.hidden_layers.join("×")} · learning rate ${a.learning_rate} · initial spread ${a.initial_action_std}` },
+  { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
+            "agents.final_learning_rate", "agents.weight_decay", "agents.momentum", "agents.initial_action_std"],
+    text: ({ agents: a }) => {
+      // Runs from before the optimizer could be chosen used Adam at a constant rate.
+      const schedule = a.learning_rate_schedule && a.learning_rate_schedule !== "constant"
+        ? ` → ${a.final_learning_rate} (${a.learning_rate_schedule})` : "";
+      const optimizer = (a.optimizer || "adam") === "sgd" ? `SGD, momentum ${a.momentum}` : (a.optimizer === "adamw" ? "AdamW" : "Adam");
+      const decay = a.weight_decay ? ` · weight decay ${a.weight_decay}` : "";
+      return `network ${a.hidden_layers.join("×")} · ${optimizer}, learning rate ${a.learning_rate}${schedule}${decay} · initial spread ${a.initial_action_std}`;
+    } },
   { keys: ["agents.ppo"],
     text: ({ agents: { ppo: p } }) => `PPO: ${p.update_epochs} epochs · minibatch ${count(p.minibatch_size)} · γ ${p.discount} · λ ${p.gae_lambda} · clip ${p.clip_ratio} · entropy ${p.entropy_coefficient}` },
   { keys: ["run.seed"], text: (s) => `seed ${s.run.seed}` },
@@ -377,6 +387,14 @@ const TRAINING_LAYOUT = [
       ["distance_closed", "length_steps", "upside_down_share"]
         .map((name) => ({ kind: "histogram", width: "w4", size: "small", key: `episode_distributions.${name}` })),
     ] },
+  { title: "Learning", minor: true, intro: "How each segment agent's update went: the line is the segments' mean, the band their range.",
+    rows: [
+      ["learning.explained_variance", "learning.approximate_kl", "learning.clip_fraction", "learning.action_std"]
+        .map((key) => ({ kind: "health", width: "w3", size: "small", key })),
+      [{ kind: "lines", width: "w3", size: "small", key: "learning.learning_rate" },
+       ...["learning.entropy", "learning.critic_loss", "learning.actor_loss"]
+        .map((key) => ({ kind: "health", width: "w3", size: "small", key }))],
+    ] },
   { title: "Behaviour", minor: true, intro: "How the centipede moved: contacts, posture, and movement along the body, and steering. Along the body, head on the left: grey dashed is the first windows, light blue midway, dark blue the last windows.",
     rows: [
       BODY_VALUES.slice(0, 4).map((value) => ({ kind: "body", width: "w3", size: "small", ...value })),
@@ -384,11 +402,6 @@ const TRAINING_LAYOUT = [
       [{ kind: "useful", width: "w4", size: "small" },
        { kind: "lines", width: "w4", size: "small", key: "step_facts.heading_error" },
        { kind: "lines", width: "w4", size: "small", key: "episodes.upside_down_share" }],
-    ] },
-  { title: "Learning", minor: true, intro: "How each segment agent's update went: the line is the segments' mean, the band their range.",
-    rows: [
-      ["learning.approximate_kl", "learning.clip_fraction", "learning.explained_variance", "learning.action_std"]
-        .map((key) => ({ kind: "health", width: "w3", size: "small", key })),
     ] },
   { title: "Run", minor: true, intro: "Where the run's time went.",
     rows: [
@@ -401,8 +414,6 @@ const TRAINING_LAYOUT = [
 
 // Under "Show details": these groups first, then every value not placed anywhere.
 const TRAINING_DETAILS = [
-  { title: "Learning, every value", cards: ["learning.critic_loss", "learning.actor_loss", "learning.entropy"]
-      .map((key) => ({ kind: "health", width: "w4", size: "small", key })) },
   { title: "Physics", intro: "How close the physics came to the memory the GPU backend reserves, and how hard the solver worked.",
     cards: ["physics.contact_count", "physics.constraint_rows", "physics.solver_iterations"]
       .map((key) => ({ kind: "lines", width: "w4", size: "small", key })) },
@@ -1320,14 +1331,14 @@ function trainingReport(root) {
       lineChart(x, [{ name: metric.label, values, color: "var(--series-1)", smooth: smoothFor(key) }], { size: "tiny" }));
   })));
 
-  // Results, behaviour, learning, and the run, as the layout says.
+  // Results, learning, behaviour, and the run, as the layout says.
   TRAINING_LAYOUT.forEach((layout, index) => {
     const spec = layout.episodeNote ? { ...layout, intro: `${layout.intro} ${EPISODE_SPAN_NOTE(span, span * windowSteps)}` } : layout;
     root.append(section(index + 1, spec, ...spec.rows.map((row) =>
       html("div", { class: "row" }, ...row.map((item) => trainingCard(item, context))))));
   });
 
-  // Details: the rest of learning, per-segment heatmaps, everything else, tables, settings.
+  // Details: physics, per-segment heatmaps, everything else, tables, settings.
   const details = [];
   for (const group of TRAINING_DETAILS) {
     details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);

@@ -5,6 +5,7 @@ and its own Python environment (README, Setup). This script, run on the
 laptop from the repository root with the project's Python, sends it commands:
 
     python scripts/gpu_desktop.py run configs/baseline.toml   # start, watch, fetch
+    python scripts/gpu_desktop.py queue configs/overnight     # a folder, one by one
     python scripts/gpu_desktop.py watch          # follow the latest run
     python scripts/gpu_desktop.py fetch          # copy the latest run's folder here
     python scripts/gpu_desktop.py status         # running and recent runs
@@ -12,7 +13,10 @@ laptop from the repository root with the project's Python, sends it commands:
     python scripts/gpu_desktop.py tests          # pull, then run the tests there
     python scripts/gpu_desktop.py update         # git pull on the desktop
 
-``run`` pulls the pushed code, sends the laptop's configuration file as it is,
+``queue`` does the same for a folder of training files, run one after another
+by ``run_queue.py`` on the desktop, each evaluated after it with the folder's
+``evaluation.toml`` if there is one; watching or fetching a queue copies all
+its runs. ``run`` pulls the pushed code, sends the laptop's configuration file as it is,
 so a changed setting needs no commit, and starts the run. It then shows the
 run's output as it is written, one line per window with a bar that fills as
 the window is collected, and when the run ends copies its run folder into
@@ -38,6 +42,7 @@ import codecs
 import os
 import subprocess
 import sys
+import tomllib
 from datetime import datetime
 from pathlib import Path
 
@@ -52,6 +57,10 @@ DESKTOP_FUNCTIONS = Path(__file__).with_suffix(".ps1")
 DESKTOP_RUNS = "Projects/Centipede/runs"
 DESKTOP_FUNCTIONS_COPY = ".centipede_gpu_desktop.ps1"
 CONFIGURATION_COPY = ".centipede_configuration.toml"
+QUEUE_COPY = ".centipede_queue_"
+# Part of every queue's name, which tells it apart from a single run's.
+QUEUE_MARK = "_queue_"
+EVALUATION_FILE = "evaluation.toml"
 # Code that must be pushed before the desktop can run it; configuration files
 # are sent as they are.
 CODE_PATHS = ("src", "models", "tests", "benchmarks", "pyproject.toml")
@@ -138,6 +147,21 @@ def find_run(pattern: str | None) -> str:
     return name
 
 
+def copy_launched(name: str, folder: str) -> int:
+    """Copy a launch's configuration file and console output into its run folder.
+
+    Every launch into the folder, training or evaluation, keeps its own,
+    named after the launch.
+    """
+    launched = LAPTOP_RUNS / folder / "launched"
+    launched.mkdir(parents=True, exist_ok=True)
+    failed = 0
+    for suffix in (".toml", ".txt"):
+        source = f"{HOST}:{DESKTOP_RUNS}/launched/{name}{suffix}"
+        failed = failed or scp(source, str(launched / f"{name}{suffix}"))
+    return failed
+
+
 def fetch_run(name: str) -> int:
     """Copy a launched run's folder and console output into the laptop's runs."""
     _, folder = desktop_answer(f"Get-RunFolder '{name}'")
@@ -146,13 +170,7 @@ def fetch_run(name: str) -> int:
         return 1
     LAPTOP_RUNS.mkdir(exist_ok=True)
     copied = scp("-r", f"{HOST}:{DESKTOP_RUNS}/{folder}", str(LAPTOP_RUNS))
-    # Every launch into the folder, training or evaluation, keeps its own
-    # configuration file and console output, named after the launch.
-    launched = LAPTOP_RUNS / folder / "launched"
-    launched.mkdir(exist_ok=True)
-    for suffix in (".toml", ".txt"):
-        source = f"{HOST}:{DESKTOP_RUNS}/launched/{name}{suffix}"
-        copied = copied or scp(source, str(launched / f"{name}{suffix}"))
+    copied = copied or copy_launched(name, folder)
     if copied:
         print(f"Copying runs/{folder} to the laptop failed; try 'fetch' again.")
         return 1
@@ -162,15 +180,41 @@ def fetch_run(name: str) -> int:
     return 0
 
 
+def fetch_queue(name: str) -> int:
+    """Copy every run of a queue, with its evaluation, into the laptop's runs.
+
+    The queue's own output, which ends with how each run ended, goes to
+    ``runs/queues/``.
+    """
+    _, answer = desktop_answer(f"Get-QueueItems '{name}'")
+    failed = 0
+    for item in answer.split():
+        if item.endswith("_evaluation"):
+            # The evaluation's results came with its run's folder.
+            _, folder = desktop_answer(f"Get-RunFolder '{item}'")
+            failed = failed or not folder or copy_launched(item, folder)
+        else:
+            failed = fetch_run(item) or failed
+    queues = LAPTOP_RUNS / "queues"
+    queues.mkdir(parents=True, exist_ok=True)
+    scp(f"{HOST}:{DESKTOP_RUNS}/launched/{name}.txt", str(queues / f"{name}.txt"))
+    print(f"Queue output: runs/queues/{name}.txt")
+    return int(bool(failed))
+
+
+def fetch_any(name: str) -> int:
+    return fetch_queue(name) if QUEUE_MARK in name else fetch_run(name)
+
+
 def watch_and_fetch(name: str) -> int:
-    """Follow a run's output to its end, then copy its folder here."""
+    """Follow a run's or a queue's output to its end, then copy its folders here."""
     exit_code = on_desktop(f"Watch-Run '{name}'", watching=True)
     if exit_code in (INTERRUPTED, SSH_UNREACHABLE):
         return exit_code
     if exit_code:
         print(f"\nThe run failed (exit code {exit_code}); its last lines are above.")
     print()
-    fetch_run(name)
+    fetch_any(name)
     return exit_code
 
 
@@ -223,6 +267,55 @@ def run(arguments: argparse.Namespace) -> int:
     return watch_and_fetch(name)
 
 
+def queue(arguments: argparse.Namespace) -> int:
+    folder: Path = arguments.folder
+    files = sorted(
+        path for path in folder.glob("*.toml") if path.name != EVALUATION_FILE
+    )
+    if not files:
+        sys.exit(f"No training files in {folder}.")
+    for path in files:
+        try:
+            configuration = read_configuration(path)
+        except SettingsError as error:
+            sys.exit(f"Configuration error in {path.name}: {error}")
+        if configuration.evaluation is not None:
+            sys.exit(f"{path.name} is an evaluation file; name it {EVALUATION_FILE}.")
+    evaluation = folder / EVALUATION_FILE
+    if evaluation.exists():
+        # Its source is replaced by each run's folder on the desktop.
+        run_values = tomllib.loads(evaluation.read_text(encoding="utf-8")).get(
+            "run", {}
+        )
+        if run_values.get("mode") != "evaluate" or "source" not in run_values:
+            sys.exit(f'{evaluation} needs mode = "evaluate" and a source in [run].')
+    require_pushed_code()
+    name = f"{datetime.now():%Y-%m-%d_%H%M%S}{QUEUE_MARK}{folder.name}"
+    folder_copy = f"{QUEUE_COPY}{name}"
+    if scp("-r", str(folder), f"{HOST}:{folder_copy}"):
+        unreachable()
+    alongside = "$true" if arguments.alongside else "$false"
+    exit_code, answer = desktop_answer(
+        f"Start-Queue '{name}' (Join-Path $HOME '{folder_copy}') {alongside}"
+    )
+    if exit_code:
+        print(answer)
+        return exit_code
+    evaluated = f"each run, with {EVALUATION_FILE}" if evaluation.exists() else "none"
+    print(f"Started {name} on the GPU desktop")
+    print(f"  runs           {', '.join(path.stem for path in files)}")
+    print(f"  evaluation     {evaluated}")
+    print(f"  code           {answer.removeprefix('code ')}")
+    if arguments.detach:
+        print("Follow it with 'watch queue'; copy its runs here with 'fetch queue'.")
+        return 0
+    print(
+        "Ctrl+C stops watching; the queue goes on. Copy its runs here later with"
+        " 'fetch queue'.\n"
+    )
+    return watch_and_fetch(name)
+
+
 def watch(arguments: argparse.Namespace) -> int:
     name = find_run(arguments.name)
     print(f"Watching {name}; Ctrl+C stops watching, not the run.\n")
@@ -230,7 +323,7 @@ def watch(arguments: argparse.Namespace) -> int:
 
 
 def fetch(arguments: argparse.Namespace) -> int:
-    return fetch_run(find_run(arguments.name))
+    return fetch_any(find_run(arguments.name))
 
 
 def status(_: argparse.Namespace) -> int:
@@ -267,6 +360,21 @@ def main() -> None:
         help="start even if another run is running; they share the GPU",
     )
     run_parser.set_defaults(action=run)
+    queue_parser = commands.add_parser(
+        "queue", help="pull, then run a folder of training files one after another"
+    )
+    queue_parser.add_argument(
+        "folder", type=Path, help="training files, and optionally evaluation.toml"
+    )
+    queue_parser.add_argument(
+        "--detach", action="store_true", help="start the queue without watching it"
+    )
+    queue_parser.add_argument(
+        "--alongside",
+        action="store_true",
+        help="start even if another run is running; they share the GPU",
+    )
+    queue_parser.set_defaults(action=queue)
     for name, action, description in (
         ("watch", watch, "follow a run's output, then copy its results here"),
         ("fetch", fetch, "copy a run's results here"),

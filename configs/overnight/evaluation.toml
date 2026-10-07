@@ -1,0 +1,12 @@
+# The overnight queue's evaluation, run after each training run that finished:
+# the queue replaces source with that run's folder. One seed of 32 worlds,
+# about 5 minutes; the agents act with their policy's mean action, without
+# exploration.
+
+[run]
+mode = "evaluate"
+source = "runs/FILLED_IN_BY_THE_QUEUE"
+
+[evaluation]
+seeds = [101]
+episodes_per_seed = 32

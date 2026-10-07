@@ -63,9 +63,9 @@ class SegmentAgent:
 
         self.ppo = PPO(
             actor_network,
-            torch.optim.Adam(actor_network.parameters(), lr=settings.learning_rate),
+            _optimizer(actor_network, settings),
             critic_network,
-            torch.optim.Adam(critic_network.parameters(), lr=settings.learning_rate),
+            _optimizer(critic_network, settings),
             clip_ratio=settings.ppo.clip_ratio,
             entropy_coefficient=settings.ppo.entropy_coefficient,
             seed=seed,
@@ -124,6 +124,12 @@ class SegmentAgent:
         next_values = self.ppo.state_value(normalised_observations)
         self.rollout_storage.store_outcome(rewards, terminated, truncated, next_values)
 
+    def set_learning_rate(self, learning_rate: float) -> None:
+        """Use ``learning_rate`` in both optimizers from the next update on."""
+        for optimizer in self._optimizers():
+            for group in optimizer.param_groups:
+                group["lr"] = learning_rate
+
     def update(self) -> PPOUpdateSummary:
         """Learn from this agent's full window, then start a new one."""
         ppo_settings = self.settings.ppo
@@ -147,7 +153,40 @@ class SegmentAgent:
         }
 
     def load_state_dict(self, state: Mapping[str, Any]) -> None:
-        """Restore what ``state_dict`` saved, onto this agent's device."""
+        """Restore what ``state_dict`` saved, onto this agent's device.
+
+        Loading an optimizer also brings back the settings it was saved with;
+        this agent's own weight decay and momentum replace them, and the
+        experiment sets the learning rate before every update.
+        """
         self.ppo.load_state_dict(state["ppo"])
+        for optimizer in self._optimizers():
+            for group in optimizer.param_groups:
+                group["weight_decay"] = self.settings.weight_decay
+                if "momentum" in group:
+                    group["momentum"] = self.settings.momentum
         self.observation_normaliser.load_state_dict(state["observation_normaliser"])
         self.update_count = int(state["update_count"])
+
+    def _optimizers(self) -> tuple[torch.optim.Optimizer, torch.optim.Optimizer]:
+        return self.ppo.actor_optimizer, self.ppo.critic_optimizer
+
+
+def _optimizer(
+    network: torch.nn.Module, settings: AgentSettings
+) -> torch.optim.Optimizer:
+    """The optimizer the settings name, for one network's parameters."""
+    parameters = network.parameters()
+    if settings.optimizer == "sgd":
+        return torch.optim.SGD(
+            parameters,
+            lr=settings.learning_rate,
+            momentum=settings.momentum,
+            weight_decay=settings.weight_decay,
+        )
+    optimizer_class = (
+        torch.optim.AdamW if settings.optimizer == "adamw" else torch.optim.Adam
+    )
+    return optimizer_class(
+        parameters, lr=settings.learning_rate, weight_decay=settings.weight_decay
+    )

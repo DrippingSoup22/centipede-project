@@ -38,6 +38,9 @@ class LearningSummary:
         "How much of the returns' variation the critic predicted before the "
         "update: 1 exactly, 0 nothing, (N,)"
     )
+    learning_rate: torch.Tensor = measure(
+        "The optimizers' learning rate in the update, the same for every agent"
+    )
     action_std: torch.Tensor = measure(
         "Each action's learned spread, before squashing, (N, 6)",
         parts=(
@@ -65,6 +68,7 @@ class AgentDiagnostics:
                 name: torch.zeros(segment_count, device=device)
                 for name in SUMMARY_NAMES
             },
+            learning_rate=torch.zeros((), device=device),
             action_std=torch.zeros((segment_count, ACTION_SIZE), device=device),
         )
 

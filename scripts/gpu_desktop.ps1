@@ -24,17 +24,19 @@ function Invoke-Tests {
     exit $LASTEXITCODE
 }
 
-# The running training or evaluation processes: two per run, because a
-# virtual environment's python.exe starts the real interpreter as a second
-# process with the same arguments.
+# The running training, evaluation, and queue processes: two per run,
+# because a virtual environment's python.exe starts the real interpreter as a
+# second process with the same arguments.
 function Get-Runs {
     Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
-        Where-Object { $_.CommandLine -like '*-m centipede*' }
+        Where-Object { $_.CommandLine -like '*-m centipede*' -or $_.CommandLine -like '*run_queue.py*' }
 }
 
-# A run's name is its configuration file's name in runs\launched.
+# A run's name is its configuration file's name in runs\launched, the last
+# argument of its command; a queue's is its folder's name there.
 function Get-RunName($process) {
-    [IO.Path]::GetFileNameWithoutExtension(($process.CommandLine -split '"')[-2])
+    $last = ($process.CommandLine.Trim() -split '\s+')[-1].Trim('"')
+    [IO.Path]::GetFileNameWithoutExtension($last)
 }
 
 function Test-Running($name) {
@@ -83,11 +85,8 @@ function Get-RunFolder($name) {
     if ($found) { Write-Output $found.Matches[0].Groups[3].Value.Trim() }
 }
 
-# Starts a run from the configuration file the laptop copied, detached from
-# the SSH session: Windows stops what an SSH session started when it
-# disconnects, but not what its process service (WMI) starts. cmd's
-# !errorlevel!, with /v:on, is read after the run has ended.
-function Start-Run($name, $configurationCopy, $alongside) {
+# Refuses to start while another run or queue is running, unless $alongside.
+function Assert-Idle($alongside) {
     $running = @(Get-Runs)
     if ($running.Count -and -not $alongside) {
         $names = ($running | ForEach-Object { Get-RunName $_ } | Sort-Object -Unique) -join ', '
@@ -96,16 +95,45 @@ function Start-Run($name, $configurationCopy, $alongside) {
             ' add --alongside to start anyway.')
         exit 1
     }
-    Update-Code
-    New-Item -ItemType Directory -Force $Launched | Out-Null
-    $file = "$Launched\$name.toml"
-    $console = "$Launched\$name.txt"
-    Move-Item -Force $configurationCopy $file
-    $command = "cmd /v:on /c `"set PYTHONUTF8=1&& `"$Python`" -u -m centipede " +
-        "`"$file`" > `"$console`" 2>&1 & echo $EndMarker !errorlevel!>> `"$console`"`""
+}
+
+# Starts Python with $arguments, its output in $console, detached from the
+# SSH session: Windows stops what an SSH session started when it disconnects,
+# but not what its process service (WMI) starts. cmd's !errorlevel!, with
+# /v:on, is read after the process has ended.
+function Start-Detached($arguments, $console) {
+    $command = "cmd /v:on /c `"set PYTHONUTF8=1&& `"$Python`" -u $arguments " +
+        "> `"$console`" 2>&1 & echo $EndMarker !errorlevel!>> `"$console`"`""
     $started = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
         -Arguments @{ CommandLine = $command; CurrentDirectory = $Project }
     if ($started.ReturnValue) { Write-Output 'the run could not be started'; exit 1 }
+}
+
+# Starts a run from the configuration file the laptop copied.
+function Start-Run($name, $configurationCopy, $alongside) {
+    Assert-Idle $alongside
+    Update-Code
+    New-Item -ItemType Directory -Force $Launched | Out-Null
+    $file = "$Launched\$name.toml"
+    Move-Item -Force $configurationCopy $file
+    Start-Detached "-m centipede `"$file`"" "$Launched\$name.txt"
+}
+
+# Starts a queue from the folder of configuration files the laptop copied:
+# scripts\run_queue.py runs them one after another.
+function Start-Queue($name, $folderCopy, $alongside) {
+    Assert-Idle $alongside
+    Update-Code
+    New-Item -ItemType Directory -Force $Launched | Out-Null
+    $folder = "$Launched\$name"
+    Move-Item -Force $folderCopy $folder
+    Start-Detached "scripts\run_queue.py `"$folder`"" "$Launched\$name.txt"
+}
+
+# The names of a queue's runs and evaluations, in order.
+function Get-QueueItems($name) {
+    Get-ChildItem "$Launched\${name}_*.txt" -ErrorAction SilentlyContinue |
+        Sort-Object Name | ForEach-Object { Write-Output $_.BaseName }
 }
 
 # Passes a run's output through as it is written, from its start, carriage
@@ -166,7 +194,9 @@ function Show-Status($recentShown, $linesShown) {
 }
 
 function Stop-Runs {
-    $running = @(Get-Runs | Group-Object { Get-RunName $_ })
+    # A queue first, so that it starts nothing after its run is stopped.
+    $running = @(Get-Runs | Group-Object { Get-RunName $_ } |
+        Sort-Object { -not ($_.Group[0].CommandLine -like '*run_queue.py*') })
     foreach ($run in $running) {
         $run.Group | ForEach-Object {
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue

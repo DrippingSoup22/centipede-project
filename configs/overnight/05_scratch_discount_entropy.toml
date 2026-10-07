@@ -1,0 +1,39 @@
+# Overnight queue, 2026-10-08 (plan.md, Stage 8.4). Every run here keeps the
+# baseline's training settings and the middle reward agreed with the user:
+# - reward: body contact 0.03 (highest), efficiency 0.01, leg contact 0.0025;
+# - 64 worlds, episode length 1,024 steps, rollout window 64 steps, minibatch
+#   size 512, epochs 4, 64 update cycles (4 episode lengths), about 25 min,
+#   then the queue's evaluation, about 5 min.
+# What this run changes from that reference:
+#   from scratch; discount 0.99, entropy coefficient 0.01.
+
+[run]
+mode = "train"
+name = "overnight_05_scratch_discount_entropy"
+seed = 1
+checkpoint_every_cycles = 16
+
+[environment]
+max_episode_steps = 1024
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[environment.rewards]
+body_contact_cost = 0.03
+efficiency_cost = 0.01
+leg_contact_cost = 0.0025
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+discount = 0.99
+entropy_coefficient = 0.01
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 64

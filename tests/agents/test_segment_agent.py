@@ -128,3 +128,23 @@ def test_the_seed_alone_decides_the_starting_networks():
 
     assert all(map(torch.equal, starting_weights(0), starting_weights(0)))
     assert not all(map(torch.equal, starting_weights(0), starting_weights(1)))
+
+
+def test_the_settings_choose_the_optimizer_and_loading_keeps_this_agents_own():
+    def agent_with(**values):
+        settings = AgentSettings.from_section({"hidden_layers": [8], **values})
+        return SegmentAgent(0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, 0)
+
+    adam = agent_with(weight_decay=0.01)
+    sgd = agent_with(optimizer="sgd", momentum=0.5)
+    assert type(adam.ppo.actor_optimizer) is torch.optim.Adam
+    assert type(sgd.ppo.critic_optimizer) is torch.optim.SGD
+    assert sgd.ppo.critic_optimizer.param_groups[0]["momentum"] == 0.5
+
+    adam.set_learning_rate(1e-5)
+    restored = agent_with()  # no weight decay
+    restored.load_state_dict(adam.state_dict())
+    for optimizer in (restored.ppo.actor_optimizer, restored.ppo.critic_optimizer):
+        group = optimizer.param_groups[0]
+        assert group["weight_decay"] == 0.0  # its own, not the saved 0.01
+        assert group["lr"] == 1e-5  # until the experiment sets the next one

@@ -3,8 +3,9 @@
 The group looks like one agent from outside: it takes and returns tensors for
 the whole body, with the worlds first and the segments second, and gives each
 segment agent only its own segment's slice. The interaction loop uses ``act``,
-``record``, and ``update``; the experiment creates the group, saves and loads
-it, and reads ``diagnostics``. The two baselines offer the same ``act`` for
+``record``, and ``update``; the experiment creates the group, sets its
+learning rate before each update, saves and loads it, and reads
+``diagnostics``. The two baselines offer the same ``act`` for
 evaluation. See docs/agents.md.
 """
 
@@ -79,6 +80,12 @@ class Agents:
                 truncated,
                 final_observations[:, segment_index],
             )
+
+    def set_learning_rate(self, learning_rate: float) -> None:
+        """Every agent uses ``learning_rate`` from the next update on."""
+        for agent in self.segment_agents:
+            agent.set_learning_rate(learning_rate)
+        self.diagnostics.learning.learning_rate.fill_(learning_rate)
 
     def update(self) -> None:
         """Let each agent learn from its own window, then fill the diagnostics."""

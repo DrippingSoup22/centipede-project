@@ -17,7 +17,12 @@ def test_an_empty_section_gives_the_agreed_first_values():
         device="cpu",
         hidden_layers=(64, 64),
         initial_action_std=0.5,
+        optimizer="adam",
         learning_rate=3e-4,
+        learning_rate_schedule="constant",
+        final_learning_rate=3e-4 / 10,
+        weight_decay=0.0,
+        momentum=0.9,
         normaliser_epsilon=1e-8,
         observation_clip=10.0,
         ppo=PPOSettings(
@@ -43,9 +48,33 @@ def test_the_ppo_section_is_read_by_its_own_class():
 
 
 @pytest.mark.parametrize(
+    ("schedule", "rates"),
+    [
+        ("constant", [1e-3, 1e-3, 1e-3, 1e-3, 1e-3]),
+        ("linear", [1e-3, 7.75e-4, 5.5e-4, 3.25e-4, 1e-4]),
+        # Half a cosine: slow at both ends, halfway in the middle.
+        ("cosine", [1e-3, 8.682e-4, 5.5e-4, 2.318e-4, 1e-4]),
+    ],
+)
+def test_the_learning_rate_moves_from_the_first_to_the_last_update(schedule, rates):
+    settings = AgentSettings.from_section(
+        {
+            "learning_rate": 1e-3,
+            "learning_rate_schedule": schedule,
+            "final_learning_rate": 1e-4,
+        }
+    )
+
+    assert [settings.learning_rate_at(cycle, 5) for cycle in range(1, 6)] == (
+        pytest.approx(rates, rel=1e-3)
+    )
+
+
+@pytest.mark.parametrize(
     ("values", "problem"),
     [
         ({"device": "gpu"}, r"\[agents\] device"),
+        ({"optimizer": "rmsprop"}, "optimizer"),
         ({"hidden_layers": [64, 0]}, "hidden_layers"),
         ({"ppo": {"discount": 1.5}}, "discount"),
         ({"ppo": {"clip_ratio": 1.0}}, "clip_ratio"),
