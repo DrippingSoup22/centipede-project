@@ -1,9 +1,11 @@
 # Overnight queue, 2026-10-08 (plan.md, Stage 8.4). Every run here keeps the
 # baseline's training settings and the reward agreed with the user:
-# - reward: arrival 20, body contact 0.01, efficiency 0.005, leg contact
-#   0.0025. Any arrival beats standing still: arrival > 1,024 x (body + leg),
-#   so even arriving on the last step, crawling with legs always touching
-#   (+2.1 per segment), beats standing for the whole episode (-5.1);
+# - reward: arrival 10, body contact 0.01, efficiency 0.005, leg contact
+#   0.0025. Per segment, standing still for the whole episode scores -5.1;
+#   an upright arrival beats it whenever it comes (on the last step, with legs
+#   always touching, +2.3), and a crawling one unless it takes over about 860
+#   steps. Walking upright beats crawling by 0.01 per step, 15% of the arrival
+#   on a 150-step trip (9.2 against 7.6);
 # - 64 worlds, episode length 1,024 steps, rollout window 64 steps, minibatch
 #   size 512, epochs 4, 64 update cycles (4 episode lengths), about 25 min,
 #   then the queue's evaluation, about 5 min.
@@ -25,7 +27,7 @@ backend = "gpu"
 world_count = 64
 
 [environment.rewards]
-arrival_reward = 20
+arrival_reward = 10
 body_contact_cost = 0.01
 efficiency_cost = 0.005
 leg_contact_cost = 0.0025
