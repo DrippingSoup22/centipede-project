@@ -7,13 +7,16 @@ environment's step facts, episode summaries, and the simulation's facts to the
 window's summaries, and feeds the recorder. Each window starts empty. The
 clock waits for the GPU only when a timed part starts and ends, once per
 window, so the times include the GPU's work. The values are listed in
-docs/diagnostics.md; the recorder is described in ``recording.py``.
+docs/diagnostics.md; the recorder is described in ``recording.py``. A caller
+may also give ``progress``, told of every step and of each update's start,
+for example to draw the window's progress in the terminal.
 """
 
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import Protocol
 
 import torch
 
@@ -34,6 +37,14 @@ class Timing:
     transitions_per_second: torch.Tensor = measure(
         "World steps collected per second of collecting", "1/s"
     )
+
+
+class WindowProgress(Protocol):
+    """Told how far each window has come; used by the experiment's terminal."""
+
+    def step(self, steps_taken: int) -> None: ...
+
+    def learning(self) -> None: ...
 
 
 class LoopDiagnostics:
@@ -61,6 +72,7 @@ class LoopDiagnostics:
         )
         self._world_count = environment.world_count
         self._window_steps = 0
+        self.progress: WindowProgress | None = None
 
     @contextmanager
     def collecting(self) -> Iterator[None]:
@@ -82,6 +94,8 @@ class LoopDiagnostics:
     @contextmanager
     def learning(self) -> Iterator[None]:
         """Time the update inside the block."""
+        if self.progress is not None:
+            self.progress.learning()
         start = _synchronised_clock()
         yield
         self.timing.learning_seconds.fill_(_synchronised_clock() - start)
@@ -97,6 +111,8 @@ class LoopDiagnostics:
         self.simulation_window.add()
         self.recorder.step_taken(counted_worlds)
         self._window_steps += 1
+        if self.progress is not None:
+            self.progress.step(self._window_steps)
 
 
 def _synchronised_clock() -> float:

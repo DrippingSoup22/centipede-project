@@ -43,6 +43,7 @@ from centipede.experiment.configuration import (
     dotted_keys,
     read_configuration,
 )
+from centipede.experiment.progress import TrainingProgress, duration
 from centipede.experiment.recordings import (
     RecordingScene,
     evaluation_recording,
@@ -173,6 +174,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         if run_settings.time_limit_hours is None
         else run_settings.time_limit_hours * 3600
     )
+    progress = TrainingProgress(
+        completed_cycles + 1, total_cycles, loop_settings.rollout_window_steps
+    )
+    loop.diagnostics.progress = progress
+    progress.header()
     cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
@@ -181,7 +187,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         folder.append_log(record)
         seconds_per_cycle = (time.monotonic() - cycles_start) / (session_cycle + 1)
         remaining_s = (total_cycles - cycle) * seconds_per_cycle
-        print(_progress_line(record, total_cycles, remaining_s))
+        progress.finish(record, remaining_s)
         out_of_time = (
             time_limit_s is not None
             and cycle < total_cycles
@@ -212,7 +218,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         if out_of_time:
             print(
                 f"Stopped after cycle {cycle} of {total_cycles}: another cycle"
-                f" (about {_duration(seconds_per_cycle)}) would pass the time"
+                f" (about {duration(seconds_per_cycle)}) would pass the time"
                 f" limit of {run_settings.time_limit_hours:g} h. Continue it with"
                 f' continue_from = "{folder.path.as_posix()}".'
             )
@@ -360,38 +366,6 @@ def _write_training_report(
         configuration.training_values(),
         sessions,
     )
-
-
-def _progress_line(
-    record: dict[str, Any], total_cycles: int, remaining_s: float
-) -> str:
-    """One short terminal line per window, with the time the rest will take."""
-    timing, episodes = record["timing"], record["episodes"]
-    line = (
-        f"cycle {record['cycle']:>4}/{total_cycles}"
-        f"  {timing['transitions_per_second']:>8,.0f} steps/s"
-        f"  collect {timing['collecting_seconds']:6.1f} s"
-        f"  learn {timing['learning_seconds']:5.1f} s"
-        f"  left {_duration(remaining_s):>7}"
-        f"  episodes {episodes['episode_ended']:>4.0f}"
-    )
-    if episodes["episode_ended"]:
-        returns = episodes["segment_return"]
-        line += (
-            f"  arrived {episodes['arrived']:4.0%}"
-            f"  mean return {sum(returns) / len(returns):+.3g}"
-        )
-    return line
-
-
-def _duration(seconds: float) -> str:
-    """A duration as ``2h05m``, ``7m30s``, or ``45s``."""
-    seconds = round(seconds)
-    if seconds >= 3600:
-        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
-    if seconds >= 60:
-        return f"{seconds // 60}m{seconds % 60:02d}s"
-    return f"{seconds}s"
 
 
 def _session_facts(

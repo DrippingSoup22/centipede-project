@@ -41,9 +41,18 @@ function Test-Running($name) {
     [bool](Get-Runs | Where-Object { (Get-RunName $_) -eq $name })
 }
 
+# A console file's lines as a terminal shows them: the progress bar redraws
+# its line with carriage returns, and only the last drawing stays. Lines end
+# in CR LF, as Python writes them to a file on Windows.
+function Get-ShownLines($console, $count) {
+    $text = [IO.File]::ReadAllText($console).Replace("`r`n", "`n")
+    $lines = $text.TrimEnd("`n").Split("`n") | ForEach-Object { $_.Split("`r")[-1] }
+    $lines | Select-Object -Last $count
+}
+
 function Get-RunState($console) {
     if (Test-Running $console.BaseName) { return 'running' }
-    $last = Get-Content $console.FullName -Tail 1
+    $last = Get-ShownLines $console.FullName 1
     if ($last -eq "$EndMarker 0") { return 'finished' }
     if ($last -like "$EndMarker *") {
         return 'failed, exit code ' + $last.Split(' ')[-1]
@@ -52,10 +61,28 @@ function Get-RunState($console) {
     'ended without its last line'
 }
 
+# The name of the latest launched run whose name contains $pattern.
+function Find-Run($pattern) {
+    $consoles = @(Get-ChildItem "$Launched\*$pattern*.txt" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime)
+    if ($consoles.Count) { Write-Output $consoles[-1].BaseName }
+}
+
+# The run folder a launched run wrote into, from the paths it printed:
+# "Run folder: runs\<folder>" in training, "Results: runs\<folder>\..." in
+# evaluation.
+function Get-RunFolder($name) {
+    $console = "$Launched\$name.txt"
+    if (-not (Test-Path $console)) { return }
+    $found = Select-String -Path $console -Pattern '(Run folder|Results): (.*\\)?runs\\([^\\]+)' |
+        Select-Object -First 1
+    if ($found) { Write-Output $found.Matches[0].Groups[3].Value.Trim() }
+}
+
 # Starts a run from the configuration file the laptop copied, detached from
-# the SSH session: Windows stops what an SSH session started when it disconnects, but
-# not what its process service (WMI) starts. cmd's !errorlevel!, with /v:on,
-# is read after the run has ended.
+# the SSH session: Windows stops what an SSH session started when it
+# disconnects, but not what its process service (WMI) starts. cmd's
+# !errorlevel!, with /v:on, is read after the run has ended.
 function Start-Run($name, $configurationCopy, $alongside) {
     $running = @(Get-Runs)
     if ($running.Count -and -not $alongside) {
@@ -78,9 +105,9 @@ function Start-Run($name, $configurationCopy, $alongside) {
     Write-Output "started $name"
 }
 
-# Prints a run's output as it is written, until its end line; exits with the
-# run's exit code.
-function Watch-Run($name, $onlyNewLines) {
+# Passes a run's output through as it is written, from its start, carriage
+# returns included, until its end line; exits with the run's exit code.
+function Watch-Run($name) {
     $console = "$Launched\$name.txt"
     for ($wait = 0; -not (Test-Path $console) -and $wait -lt 30; $wait++) {
         Start-Sleep 1
@@ -88,38 +115,28 @@ function Watch-Run($name, $onlyNewLines) {
     if (-not (Test-Path $console)) { Write-Output "no output for $name"; exit 1 }
     $stream = [IO.File]::Open($console, 'Open', 'Read', 'ReadWrite')
     $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)
-    if ($onlyNewLines) { [void]$reader.ReadToEnd() }
+    $buffer = New-Object char[] 8192
+    $recent = ''
+    $stillRunning = $true
     while ($true) {
-        $line = $reader.ReadLine()
-        if ($null -ne $line) {
-            [Console]::Out.WriteLine($line)
+        $count = $reader.Read($buffer, 0, $buffer.Length)
+        if ($count -gt 0) {
+            $text = [string]::new($buffer, 0, $count)
+            [Console]::Out.Write($text)
             [Console]::Out.Flush()
-            if ($line -like "$EndMarker *") { exit [int]$line.Split(' ')[-1] }
+            $recent = $recent + $text
+            if ($recent.Length -gt 400) { $recent = $recent.Substring($recent.Length - 400) }
+            if ($recent -match "$EndMarker (-?\d+)") { exit [int]$Matches[1] }
             continue
         }
-        if (-not (Test-Running $name)) {
-            Start-Sleep 2
-            $rest = $reader.ReadToEnd()
-            if ($rest) { [Console]::Out.Write($rest) }
+        if (-not $stillRunning) {
             Write-Output 'the run is no longer running'
             exit 1
         }
-        Start-Sleep 1
+        # One more pass after the process ends, for its last lines.
+        if (-not (Test-Running $name)) { $stillRunning = $false; Start-Sleep 2 }
+        else { Start-Sleep -Milliseconds 500 }
     }
-}
-
-# The latest run whose name contains $pattern: its last lines, then its new
-# ones while it runs.
-function Watch-Latest($pattern, $linesShown) {
-    $consoles = @(Get-ChildItem "$Launched\*$pattern*.txt" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime)
-    if (-not $consoles.Count) { Write-Output 'no launched run matches'; exit 1 }
-    $chosen = $consoles[-1]
-    $state = Get-RunState $chosen
-    Write-Output "$($chosen.BaseName) ($state):"
-    Get-Content $chosen.FullName -Tail $linesShown
-    if ($state -ne 'running') { exit 0 }
-    Watch-Run $chosen.BaseName $true
 }
 
 function Show-Status($recentShown, $linesShown) {
@@ -139,7 +156,7 @@ function Show-Status($recentShown, $linesShown) {
         }
         Write-Output ''
         Write-Output "latest output, $($consoles[-1].BaseName):"
-        Get-Content $consoles[-1].FullName -Tail $linesShown
+        Get-ShownLines $consoles[-1].FullName $linesShown
     }
     exit 0
 }

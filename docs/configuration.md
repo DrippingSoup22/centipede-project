@@ -259,8 +259,12 @@ runs/2026-10-07_1432_probe/
 
 Folders are created only when missing, and a run is never overwritten: a new run
 whose folder name is taken, by a second run in the same minute, gets a numbered
-suffix. The terminal shows one short line per window: the cycle, the speed, and
-how the episodes that ended went.
+suffix. The terminal shows one line per window, under a header: while the window is
+collected, a bar of `#` and `.` fills in place, then shows `learning` during
+the update; afterwards the line holds the window's collecting and learning
+times, the speed, the time the remaining cycles will take, and how the
+episodes that ended went (how many, the share that arrived, and the mean
+return).
 
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,

@@ -143,14 +143,15 @@ python scripts/gpu_desktop.py status
 
 `run` makes the desktop pull the pushed code, sends it the configuration file
 as it is on the laptop, starts the run there, independently of the SSH
-connection, and shows its output as it is written; Ctrl+C stops watching, not
-the run. `watch` follows the latest run again (or the one whose name contains
-a given text), `status` lists the running and recent runs with how each ended,
-`stop` stops the running ones, and `tests` runs the tests on the desktop. A
-second run is refused while one is running, unless `--alongside` is given,
-since two runs share the GPU. The desktop's `runs/` and `benchmarks/results/` folders are kept in
-step with the laptop's by Syncthing, so a run's report appears on the laptop
-while the run is still writing it.
+connection, and shows its output as it is written: one line per window, with
+a bar of `#` and `.` that fills as the window is collected. When the run
+ends, it copies the run's folder into the laptop's `runs/`, with the console
+output as `console.txt`. Ctrl+C stops watching, not the run. `watch` follows
+the latest run again (or the one whose name contains a given text) and copies
+it at the end too, `fetch` copies a run's folder at any time, `status` lists
+the running and recent runs with how each ended, `stop` stops the running
+ones, and `tests` runs the tests on the desktop. A second run is refused while
+one is running, unless `--alongside` is given, since two runs share the GPU.
 
 Setting this up once: on the desktop, install Windows' OpenSSH Server, start
 the `sshd` service automatically, make Windows PowerShell its default shell,

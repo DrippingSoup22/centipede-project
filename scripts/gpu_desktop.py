@@ -4,8 +4,9 @@ The desktop holds its own copy of this repository, RL_lib, and MujocoReplay,
 and its own Python environment (README, Setup). This script, run on the
 laptop from the repository root with the project's Python, sends it commands:
 
-    python scripts/gpu_desktop.py run configs/baseline.toml   # start, then watch
-    python scripts/gpu_desktop.py watch          # follow the latest run's output
+    python scripts/gpu_desktop.py run configs/baseline.toml   # start, watch, fetch
+    python scripts/gpu_desktop.py watch          # follow the latest run
+    python scripts/gpu_desktop.py fetch          # copy the latest run's folder here
     python scripts/gpu_desktop.py status         # running and recent runs
     python scripts/gpu_desktop.py stop           # stop every running run
     python scripts/gpu_desktop.py tests          # pull, then run the tests there
@@ -13,11 +14,14 @@ laptop from the repository root with the project's Python, sends it commands:
 
 ``run`` pulls the pushed code, sends the laptop's configuration file as it is,
 so a changed setting needs no commit, and starts the run. It then shows the
-run's output as it is written, until the run ends; Ctrl+C stops watching, not
-the run, and ``watch`` picks it up again. Each run's file and console output
-are kept in the desktop's ``runs/launched/``; the output ends with the run's
-exit code. Its run folder in ``runs/`` reaches the laptop through the folder
-synchronisation (README, Training machine).
+run's output as it is written, one line per window with a bar that fills as
+the window is collected, and when the run ends copies its run folder into
+the laptop's ``runs/``, with the console output as ``console.txt``. Ctrl+C
+stops watching, not the run; ``watch`` picks it up again and also copies the
+folder at the end, and ``fetch`` copies it at any time. ``watch`` and
+``fetch`` take part of a run's name to choose an earlier run. Each run's file
+and console output are kept in the desktop's ``runs/launched/``; the output
+ends with the run's exit code.
 
 What runs on the desktop is ``gpu_desktop.ps1``: every command first copies
 it, and ``run`` its configuration file, into the desktop's home folder with
@@ -29,6 +33,7 @@ commands that long. ``CENTIPEDE_GPU_HOST`` names the desktop; by default
 
 import argparse
 import base64
+import codecs
 import os
 import subprocess
 import sys
@@ -40,8 +45,10 @@ from centipede.settings_section import SettingsError
 
 HOST = os.environ.get("CENTIPEDE_GPU_HOST", "gpu")
 REPOSITORY = Path(__file__).resolve().parents[1]
+LAPTOP_RUNS = REPOSITORY / "runs"
 DESKTOP_FUNCTIONS = Path(__file__).with_suffix(".ps1")
-# Where the copied files land, in the desktop user's home folder.
+# Paths on the desktop, relative to its user's home folder, where scp starts.
+DESKTOP_RUNS = "Projects/Centipede/runs"
 DESKTOP_FUNCTIONS_COPY = ".centipede_gpu_desktop.ps1"
 CONFIGURATION_COPY = ".centipede_configuration.toml"
 # Code that must be pushed before the desktop can run it; configuration files
@@ -61,45 +68,106 @@ def unreachable() -> None:
     )
 
 
-def copy_to_desktop(source: Path, destination: str) -> None:
-    """Copy one file into the desktop user's home folder."""
-    command = ["scp", "-q", *SSH_OPTIONS, str(source), f"{HOST}:{destination}"]
-    if subprocess.run(command).returncode:
+def scp(*paths: str) -> int:
+    return subprocess.run(["scp", "-q", *SSH_OPTIONS, *paths]).returncode
+
+
+def ssh_command(call: str) -> list[str]:
+    """Copy the desktop's functions over, and the command that makes one call."""
+    if scp(str(DESKTOP_FUNCTIONS), f"{HOST}:{DESKTOP_FUNCTIONS_COPY}"):
         unreachable()
-
-
-def on_desktop(call: str, watching: bool = False) -> int:
-    """Run one call to the desktop's functions, printing its output as it comes."""
-    copy_to_desktop(DESKTOP_FUNCTIONS, DESKTOP_FUNCTIONS_COPY)
     # Quiet before anything loads, or PowerShell reports loading its modules.
     script = (
         "$ProgressPreference = 'SilentlyContinue'\n"
         f". (Join-Path $HOME '{DESKTOP_FUNCTIONS_COPY}')\n{call}"
     )
     encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    command = (
+    return [
+        "ssh",
+        *SSH_OPTIONS,
+        HOST,
         "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass"
-        f" -EncodedCommand {encoded}"
-    )
-    ssh = subprocess.Popen(["ssh", *SSH_OPTIONS, HOST, command], stdout=subprocess.PIPE)
+        f" -EncodedCommand {encoded}",
+    ]
+
+
+def on_desktop(call: str, watching: bool = False) -> int:
+    """Make one call, passing its output through as it comes; its exit code.
+
+    The output goes through unchanged, carriage returns included, so the
+    terminal redraws each window's progress bar in place.
+    """
+    ssh = subprocess.Popen(ssh_command(call), stdout=subprocess.PIPE)
     assert ssh.stdout is not None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
     try:
-        for line in ssh.stdout:
-            print(line.decode("utf-8", errors="replace"), end="", flush=True)
+        while chunk := os.read(ssh.stdout.fileno(), 4096):
+            sys.stdout.write(decoder.decode(chunk))
+            sys.stdout.flush()
     except KeyboardInterrupt:
         ssh.terminate()
         if watching:
             print(
-                "\nStopped watching; the run goes on. Follow it again with"
+                "\n\nStopped watching; the run goes on. Follow it again with"
                 " 'watch', or stop it with 'stop'."
             )
         return INTERRUPTED
     exit_code = ssh.wait()
     if exit_code == SSH_UNREACHABLE:
         # The copy just reached the desktop, so the connection broke on the way.
-        print("\nThe connection to the desktop was lost.", file=sys.stderr)
+        print("\n\nThe connection to the desktop was lost.", file=sys.stderr)
         if watching:
             print("The run goes on; follow it again with 'watch'.", file=sys.stderr)
+    return exit_code
+
+
+def desktop_answer(call: str) -> str:
+    """Make one call and return its output."""
+    answer = subprocess.run(ssh_command(call), capture_output=True)
+    if answer.returncode == SSH_UNREACHABLE:
+        unreachable()
+    return answer.stdout.decode("utf-8", errors="replace").strip()
+
+
+def find_run(pattern: str | None) -> str:
+    """The name of the latest launched run whose name contains ``pattern``."""
+    name = desktop_answer(f"Find-Run '{(pattern or '').replace(chr(39), '')}'")
+    if not name:
+        sys.exit("No launched run matches." if pattern else "No run was launched yet.")
+    return name
+
+
+def fetch_run(name: str) -> int:
+    """Copy a launched run's folder and console output into the laptop's runs."""
+    folder = desktop_answer(f"Get-RunFolder '{name}'")
+    if not folder:
+        print(f"{name} wrote no run folder; its output is in runs/launched there.")
+        return 1
+    print(f"\nCopying {folder} into runs/ ...", end=" ", flush=True)
+    LAPTOP_RUNS.mkdir(exist_ok=True)
+    copied = scp("-r", f"{HOST}:{DESKTOP_RUNS}/{folder}", str(LAPTOP_RUNS))
+    copied = copied or scp(
+        f"{HOST}:{DESKTOP_RUNS}/launched/{name}.txt",
+        str(LAPTOP_RUNS / folder / "console.txt"),
+    )
+    if copied:
+        print("failed; try 'fetch' again.")
+        return 1
+    report = LAPTOP_RUNS / folder / "report.html"
+    print("done.")
+    print(f"  {LAPTOP_RUNS / folder}")
+    if report.exists():
+        print(f"  report: {report}")
+    return 0
+
+
+def watch_and_fetch(name: str) -> int:
+    """Follow a run's output to its end, then copy its folder here."""
+    print(f"Watching {name}; Ctrl+C stops watching, not the run.\n")
+    exit_code = on_desktop(f"Watch-Run '{name}'", watching=True)
+    if exit_code in (INTERRUPTED, SSH_UNREACHABLE):
+        return exit_code
+    fetch_run(name)
     return exit_code
 
 
@@ -132,20 +200,24 @@ def run(arguments: argparse.Namespace) -> int:
         sys.exit(f"Configuration error: {error}")
     require_pushed_code()
     name = f"{datetime.now():%Y-%m-%d_%H%M%S}_{configuration_path.stem}"
-    copy_to_desktop(configuration_path, CONFIGURATION_COPY)
+    if scp(str(configuration_path), f"{HOST}:{CONFIGURATION_COPY}"):
+        unreachable()
     alongside = "$true" if arguments.alongside else "$false"
     exit_code = on_desktop(
         f"Start-Run '{name}' (Join-Path $HOME '{CONFIGURATION_COPY}') {alongside}"
     )
     if exit_code or arguments.detach:
         return exit_code
-    print("Its output follows; Ctrl+C stops watching, not the run.\n")
-    return on_desktop(f"Watch-Run '{name}' $false", watching=True)
+    print()
+    return watch_and_fetch(name)
 
 
 def watch(arguments: argparse.Namespace) -> int:
-    pattern = (arguments.name or "").replace("'", "")
-    return on_desktop(f"Watch-Latest '{pattern}' {OUTPUT_LINES_SHOWN}", watching=True)
+    return watch_and_fetch(find_run(arguments.name))
+
+
+def fetch(arguments: argparse.Namespace) -> int:
+    return fetch_run(find_run(arguments.name))
 
 
 def status(_: argparse.Namespace) -> int:
@@ -169,7 +241,9 @@ def update(_: argparse.Namespace) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(required=True)
-    run_parser = commands.add_parser("run", help="pull, start a run, and watch it")
+    run_parser = commands.add_parser(
+        "run", help="pull, start a run, watch it, and copy its results here"
+    )
     run_parser.add_argument("configuration", type=Path, help="a TOML file")
     run_parser.add_argument(
         "--detach", action="store_true", help="start the run without watching it"
@@ -180,11 +254,15 @@ def main() -> None:
         help="start even if another run is running; they share the GPU",
     )
     run_parser.set_defaults(action=run)
-    watch_parser = commands.add_parser("watch", help="follow a run's output")
-    watch_parser.add_argument(
-        "name", nargs="?", help="part of the run's name; by default the latest run"
-    )
-    watch_parser.set_defaults(action=watch)
+    for name, action, description in (
+        ("watch", watch, "follow a run's output, then copy its results here"),
+        ("fetch", fetch, "copy a run's results here"),
+    ):
+        chosen = commands.add_parser(name, help=description)
+        chosen.add_argument(
+            "name", nargs="?", help="part of the run's name; by default the latest run"
+        )
+        chosen.set_defaults(action=action)
     for name, action, description in (
         ("status", status, "running and recent runs"),
         ("stop", stop, "stop every running run"),
