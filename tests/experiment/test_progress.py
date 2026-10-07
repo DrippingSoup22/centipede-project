@@ -1,6 +1,10 @@
 """Tests for the terminal's view of a training run: one line per window."""
 
-from centipede.experiment.progress import EvaluationProgress, TrainingProgress
+from centipede.experiment.progress import (
+    EvaluationProgress,
+    TrainingProgress,
+    training_settings,
+)
 
 
 def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys):
@@ -58,3 +62,23 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
     row = drawings[-1].split()
     assert row[:5] == ["1/2", "agents,", "seed", "7", "[" + "#" * 20 + "]"]
     assert row[-5:] == ["|", "50%", "-1", "12.3", "mm"]
+
+
+def test_the_settings_header_names_the_six_training_settings_and_what_they_make():
+    values = {
+        "run": {"seed": 1},
+        "environment": {"max_episode_steps": 1024, "simulation": {"world_count": 64}},
+        "agents": {"ppo": {"update_epochs": 4, "minibatch_size": 500}},
+        "interaction_loop": {"rollout_window_steps": 64, "update_cycles": 32},
+    }
+
+    lines = training_settings(values, {"run.seed"}).splitlines()
+
+    assert lines[1].split() == ["worlds", "64", "world_count"]
+    assert lines[6].split() == ["epochs", "4", "update_epochs"]
+    # 4,096 samples in minibatches of 500: eight full ones and a smaller last one.
+    assert "= 4,096 samples" in lines[8] and "4 epochs x 9 minibatches = 36" in lines[9]
+    assert "= 2,048 steps per world (2 episode lengths)" in lines[10]
+    assert "131,072 samples" in lines[11]
+    assert "  [run]  seed* = 1" in lines
+    assert "  [environment]  max_episode_steps = 1024" in lines

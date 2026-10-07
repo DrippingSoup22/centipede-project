@@ -1,5 +1,10 @@
 """The terminal's view of training and evaluation: one line per pass, drawn as it fills.
 
+Before training, ``training_settings`` lists the run's settings: the six that
+shape training, under the names used everywhere (worlds, episode length,
+rollout window, update cycles, minibatch size, epochs), what they add up to,
+and then every other setting, marked where the file sets it itself.
+
 The experiment prints a header, then hands a ``TrainingProgress`` or an
 ``EvaluationProgress`` to the interaction loop's diagnostics, which call
 ``step`` after every step and ``learning`` when an update starts; the line
@@ -22,10 +27,12 @@ Its results are those first episodes: the share that arrived, their mean
 return, and the head's distance to its target at the end.
 """
 
+import math
 import time
 from typing import Any
 
 BAR_WIDTH = 20
+SETTINGS_LINE_WIDTH = 100
 TRAINING_COLUMNS = (
     "{cycle}  {bar}  {collect:>7}  {learn:>6}  {left:>7}"
     "  |  {reward:>11}  {distance:>9}  {body_down:>9}  {arrived:>7}  {timed_out:>9}"
@@ -46,6 +53,83 @@ def duration(seconds: float) -> str:
     if seconds >= 60:
         return f"{seconds // 60}m{seconds % 60:02d}s"
     return f"{seconds}s"
+
+
+def training_settings(values: dict[str, Any], written_keys: set[str]) -> str:
+    """The run's settings, as printed before training.
+
+    ``values`` are the complete training settings as nested tables, every
+    default filled in; ``written_keys`` are the dotted names the file sets.
+    """
+    loop, ppo = values["interaction_loop"], values["agents"]["ppo"]
+    worlds = values["environment"]["simulation"]["world_count"]
+    episode_length = values["environment"]["max_episode_steps"]
+    window, cycles = loop["rollout_window_steps"], loop["update_cycles"]
+    minibatch_size, epochs = ppo["minibatch_size"], ppo["update_epochs"]
+    samples = worlds * window
+    minibatches = math.ceil(samples / minibatch_size)
+    steps_per_world = cycles * window
+    lines = [
+        "Training                          (set in the file as)",
+        *(
+            f"  {name:<14}  {amount:<16}  {key}"
+            for name, amount, key in (
+                ("worlds", f"{worlds:,}", "world_count"),
+                ("episode length", f"{episode_length:,} steps", "max_episode_steps"),
+                ("rollout window", f"{window:,} steps", "rollout_window_steps"),
+                ("update cycles", f"{cycles:,}", "update_cycles"),
+                ("minibatch size", f"{minibatch_size:,} samples", "minibatch_size"),
+                ("epochs", f"{epochs:,}", "update_epochs"),
+            )
+        ),
+        "",
+        f"  Each update cycle: {worlds:,} worlds x {window:,} steps ="
+        f" {samples:,} samples for each segment agent,",
+        f"    used in {epochs:,} epochs x {minibatches:,} minibatches ="
+        f" {epochs * minibatches:,} gradient steps.",
+        f"  The whole run: {cycles:,} update cycles x {window:,} steps ="
+        f" {steps_per_world:,} steps per world"
+        f" ({steps_per_world / episode_length:.3g} episode lengths),",
+        f"    {steps_per_world * worlds:,} samples for each segment agent.",
+        "",
+        "All settings (* set by the file, the others are defaults)",
+    ]
+    for section, settings in _settings_tables(values):
+        items = [
+            f"{key}{'*' if f'{section}.{key}' in written_keys else ''}"
+            f" = {_setting_text(value)}"
+            for key, value in settings.items()
+        ]
+        line = f"  [{section}]"
+        indent = " " * 4
+        for item in items:
+            if len(line) + 2 + len(item) > SETTINGS_LINE_WIDTH:
+                lines.append(line)
+                line = indent + item
+            else:
+                line += ("  " if line.strip() else "") + item
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _settings_tables(values: dict[str, Any], prefix: str = ""):
+    """Each table's own settings, as (dotted table name, settings), in file order."""
+    own = {key: value for key, value in values.items() if not isinstance(value, dict)}
+    if own:
+        yield prefix.rstrip("."), own
+    for key, value in values.items():
+        if isinstance(value, dict):
+            yield from _settings_tables(value, f"{prefix}{key}.")
+
+
+def _setting_text(value: Any) -> str:
+    if isinstance(value, list):
+        return "[" + ", ".join(_setting_text(item) for item in value) + "]"
+    if isinstance(value, str):
+        return f'"{value}"'
+    if isinstance(value, bool):
+        return str(value).lower()
+    return f"{value:g}" if isinstance(value, float) else str(value)
 
 
 def _bar(filled: int) -> str:

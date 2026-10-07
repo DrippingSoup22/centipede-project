@@ -47,6 +47,7 @@ from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
     duration,
+    training_settings,
 )
 from centipede.experiment.recordings import (
     RecordingScene,
@@ -143,17 +144,19 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     total_cycles = loop_settings.update_cycles
     print(f"Run folder: {folder.path}")
-    cycles = (
-        f"cycles {completed_cycles + 1} to {total_cycles}"
-        if completed_cycles
-        else f"{total_cycles} cycles"
+    if continue_from is not None:
+        print(f"Continues at update cycle {completed_cycles + 1} of {total_cycles}")
+    elif checkpoint_path is not None:
+        print(f"Agents start from {checkpoint_path}")
+    print(
+        f"{configuration.environment.simulation.backend.upper()} physics,"
+        f" agents on {configuration.agents.device}\n"
     )
     print(
-        f"{environment.world_count} worlds"
-        f" ({configuration.environment.simulation.backend} physics,"
-        f" agents on {configuration.agents.device}), {cycles} of"
-        f" {loop_settings.rollout_window_steps} steps, episodes of up to"
-        f" {configuration.environment.max_episode_steps:,} steps\n"
+        training_settings(
+            configuration.training_values(), set(dotted_keys(configuration_path))
+        ),
+        end="\n\n",
     )
     if completed_cycles >= total_cycles:
         print(f"Already {completed_cycles} of {total_cycles} cycles; nothing to do.")

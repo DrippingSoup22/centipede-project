@@ -261,7 +261,18 @@ Folders are created only when missing, and a run is never overwritten: a new run
 whose folder name is taken, by a second run in the same minute, gets a numbered
 suffix.
 
-The terminal shows one line per pass, under a header, drawn again in place
+Before training, the terminal lists the run's settings. First come the six
+that shape training, each with the key that sets it: worlds
+(`world_count`), episode length (`max_episode_steps`), rollout window
+(`rollout_window_steps`), update cycles (`update_cycles`), minibatch size
+(`minibatch_size`), and epochs (`update_epochs`). Then what they add up to: the
+samples each segment agent collects per update cycle (worlds × rollout window),
+the gradient steps it takes on them (epochs × minibatches), and the steps per
+world over the whole run (update cycles × rollout window), also in episode
+lengths. Last comes every setting of the run, defaults included, with a `*` on
+those the file sets itself.
+
+The terminal then shows one line per pass, under a header, drawn again in place
 as a bar of `#` and `.` fills. In training a pass is a window: the bar fills
 as its steps are collected and shows `learning` during the update; the line
 then holds the collecting and learning times, the time the remaining cycles
