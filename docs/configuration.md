@@ -259,12 +259,21 @@ runs/2026-10-07_1432_probe/
 
 Folders are created only when missing, and a run is never overwritten: a new run
 whose folder name is taken, by a second run in the same minute, gets a numbered
-suffix. The terminal shows one line per window, under a header: while the window is
-collected, a bar of `#` and `.` fills in place, then shows `learning` during
-the update; afterwards the line holds the window's collecting and learning
-times, the speed, the time the remaining cycles will take, and how the
-episodes that ended went (how many, the share that arrived, and the mean
-return).
+suffix.
+
+The terminal shows one line per pass, under a header, drawn again in place
+as a bar of `#` and `.` fills. In training a pass is a window: the bar fills
+as its steps are collected and shows `learning` during the update; the line
+then holds the collecting and learning times, the time the remaining cycles
+will take, and values of every step of every world (the reward per step, the
+head's distance to its target, the share of steps with a body on the ground),
+with the episodes that ended counted as arrivals and time-outs. The last line
+gives the session's time and overall speed. In evaluation a pass is one actor
+and seed: the bar fills toward the time limit, with the most time the
+evaluation can still take, and jumps to full when every world's first episode
+has ended; the line then holds the time it took, the time left, and its first
+episodes (the share that arrived, their mean return, and the head's distance
+to its target at the end).
 
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,

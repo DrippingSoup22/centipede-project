@@ -43,7 +43,11 @@ from centipede.experiment.configuration import (
     dotted_keys,
     read_configuration,
 )
-from centipede.experiment.progress import TrainingProgress, duration
+from centipede.experiment.progress import (
+    EvaluationProgress,
+    TrainingProgress,
+    duration,
+)
 from centipede.experiment.recordings import (
     RecordingScene,
     evaluation_recording,
@@ -478,6 +482,17 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
             environment.device, seed
         )
     print(f"Evaluating {checkpoint_path}")
+    print(
+        f"{environment.world_count} worlds, {len(evaluation.seeds)} seeds,"
+        f" {', '.join(actors)}; each world's first episode, up to"
+        f" {configuration.environment.max_episode_steps:,} steps\n"
+    )
+    progress = EvaluationProgress(
+        len(actors) * len(evaluation.seeds),
+        configuration.environment.max_episode_steps,
+    )
+    loop.diagnostics.progress = progress
+    progress.header()
     stem = f"{datetime.now():%Y-%m-%d_%H%M%S}_{checkpoint_path.stem}"
     recorder = loop.diagnostics.recorder
     scene = (
@@ -490,13 +505,14 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         for seed in evaluation.seeds:
             if evaluation.record:
                 recorder.arm(configuration.environment.max_episode_steps)
+            progress.start(actor_name, seed)
             loop.evaluate(make_actor(seed), seed)
             record = {"seed": seed}
             record |= {
                 category.name: category.plain_values() for category in categories
             }
             results[actor_name].append(record)
-            print(f"  {actor_name:<14} seed {seed:<6} {_episode_line(record)}")
+            progress.finish(record)
             if evaluation.record:
                 window = recorder.take(1, 1, "all")
                 folder.write_evaluation_recording(
@@ -528,7 +544,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     write_evaluation_report(
         report_path, folder.path.name, run_facts, categories, results, settings
     )
-    print(f"Results: {report_path}")
+    print(f"\nResults: {report_path}")
     return folder.path
 
 
@@ -554,14 +570,3 @@ def _evaluation_categories(
         _timing_category(loop),
         _physics_category(loop),
     ]
-
-
-def _episode_line(record: dict[str, Any]) -> str:
-    """One seed's episodes, in a few numbers."""
-    episodes = record["episodes"]
-    returns = episodes["segment_return"]
-    return (
-        f"arrived {episodes['arrived']:4.0%}"
-        f"  mean return {sum(returns) / len(returns):+.3g}"
-        f"  final distance {episodes['final_distance']:.4f} m"
-    )

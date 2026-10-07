@@ -1,6 +1,6 @@
 """Tests for the terminal's view of a training run: one line per window."""
 
-from centipede.experiment.progress import TrainingProgress
+from centipede.experiment.progress import EvaluationProgress, TrainingProgress
 
 
 def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys):
@@ -32,3 +32,29 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
         *("3/12", "[####################]", "20.5", "s", "2.6", "s", "6m42s", "|"),
         *("-0.00300", "57", "mm", "25%", "1", "3"),
     ]
+
+
+def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
+    capsys,
+):
+    progress = EvaluationProgress(total_passes=2, max_episode_steps=10)
+    progress.start("agents", seed=7)
+    for steps_taken in range(1, 6):  # every world arrived after 5 steps
+        progress.step(steps_taken)
+    progress.finish(
+        {
+            "episodes": {
+                "arrived": 0.5,
+                "segment_return": [1, -3],
+                "final_distance": 0.0123,
+            }
+        }
+    )
+
+    drawings = capsys.readouterr().out.split("\r")[1:]
+    assert drawings[0].startswith(" 1/2  agents, seed 7  ")
+    assert "[##..................]  1/10 steps" in drawings[0]
+    # Finished early: the bar is full, and the row holds the first episodes.
+    row = drawings[-1].split()
+    assert row[:5] == ["1/2", "agents,", "seed", "7", "[" + "#" * 20 + "]"]
+    assert row[-5:] == ["|", "50%", "-1", "12.3", "mm"]
