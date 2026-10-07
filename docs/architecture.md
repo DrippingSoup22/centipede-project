@@ -77,6 +77,9 @@ zero-action and random-action baselines, and write the results into that run's
 folder. Training
 writes one log line per window and a report of the whole run; the layout of the
 files and of the run folder is described in [configuration.md](configuration.md).
+Recorded windows are written as replay files for the sibling `../MujocoReplay`
+project, a general viewer for recorded MuJoCo poses that knows nothing about
+this project; Centipede uses its package only to write the files.
 
 The experiment uses the other components only through their front files: it
 creates the environment, the agents, and the interaction loop, steps through
@@ -90,8 +93,9 @@ file, or a new function next to `train` and `evaluate`.
 | --- | --- |
 | `experiment.py` | Front file: `run(path)` trains or evaluates as the file's mode says |
 | `configuration.py` | Reading the three kinds of file, the checks across sections, and saving the complete configuration |
-| `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, and evaluation results |
+| `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, recordings, and evaluation results |
 | `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
+| `recordings.py` | Turning a recorded window into a replay recording for the sibling MujocoReplay project |
 
 The command `python -m centipede CONFIG.toml` lives in `src/centipede/__main__.py`.
 Reusable configuration files live in `configs/`.
@@ -118,12 +122,18 @@ learned. Worlds that finish early start new episodes as usual, but only each
 world's first episode counts in the diagnostics. The experiment calls it once
 per seed and reads the results from the loop's diagnostics.
 
+`diagnostics` also carries the recorder: the experiment arms it before a
+window it wants recorded, the loop's diagnostics feed it every step, and the
+experiment takes the chosen worlds' poses afterwards
+(see [diagnostics.md](diagnostics.md#recordings)).
+
 **Files:** `interaction_loop.py` (front file: `train()` and `evaluate()`),
 `settings.py`, which holds `rollout_window_steps` (steps per world before each
 update, first value 256) and `update_cycles` (number of collect-and-learn
-cycles, first value 128), and `diagnostics.py`, which times each window and
-summarises the environment's diagnostics over it
-(see [diagnostics.md](diagnostics.md#timing)).
+cycles, first value 128), `diagnostics.py`, which times each window and
+summarises the environment's and the simulation's diagnostics over it
+(see [diagnostics.md](diagnostics.md#timing)), and `recording.py`, the
+recorder.
 
 ### Agents
 

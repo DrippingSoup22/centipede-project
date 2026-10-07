@@ -8,6 +8,7 @@ from centipede.environment.simulation.constants import (
     LEG_SPEED_NOISE_RAD_S,
     PHYSICS_STEPS_PER_ACTION,
 )
+from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 from centipede.environment.simulation.model_mapping import (
     BODY_CATEGORY,
     FLOOR_CATEGORY,
@@ -22,7 +23,8 @@ class CPUBackend:
     """Runs every world with CPU MuJoCo, keeping one MjData per world.
 
     All worlds share one model. ``physical_state`` holds every world's current
-    physical values; ``reset`` and ``step`` refresh it in place.
+    physical values; ``reset`` and ``step`` refresh it in place, and
+    ``diagnostics`` (the simulation's category) with it.
     """
 
     def __init__(
@@ -66,6 +68,7 @@ class CPUBackend:
         self._leg_leg_contact = self.physical_state.leg_leg_contact.numpy()
         self._body_planar_position = self.physical_state.body_planar_position.numpy()
         self._head_tip_position = self.physical_state.head_tip_position.numpy()
+        self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
         self, world_mask: torch.Tensor | None = None, seed: int | None = None
@@ -104,6 +107,7 @@ class CPUBackend:
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)
+        self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(self, leg_actions: torch.Tensor) -> None:
         """Hold each world's leg actions for one 20 ms step.
@@ -122,6 +126,7 @@ class CPUBackend:
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)
+        self.diagnostics.fill_from_cpu(self.world_data)
 
     def _check_world(self, world_index: int) -> None:
         """Stop the run if MuJoCo reported or produced an impossible state.

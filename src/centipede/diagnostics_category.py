@@ -28,6 +28,7 @@ SUMMARIES = (
     "share",  # the fraction of true flags
     "count",  # the number of true flags
     "maximum",  # the largest value
+    "recorded",  # kept as it is for recordings; never summarised
 )
 
 
@@ -86,23 +87,33 @@ class WindowSummary:
     to summarise, such as the worlds whose episode just ended. With no counted
     rows in a window, means and shares are NaN and maxima are minus infinity.
     ``histograms`` gives the bin counts of the values that declare edges.
+    Values declared ``recorded`` are not summarised and do not appear in
+    ``descriptions`` or ``result``.
     """
 
     def __init__(self, category: Any, mask_field: str | None = None) -> None:
         """Allocate the running totals, on the category's device."""
         self.category = category
         self.mask_field = mask_field
-        self.descriptions = descriptions(category)
+        # Recorded values are left out of the summary entirely.
+        self.descriptions = {
+            name: description
+            for name, description in descriptions(category).items()
+            if description.summary != "recorded"
+        }
         first_value = next(iter(values(category).values()))
         self._row_count = torch.zeros((), device=first_value.device)
         self._totals = {
             name: torch.zeros(value.shape[1:], device=value.device)
             for name, value in values(category).items()
+            if name in self.descriptions
         }
         # Per histogram: the inner edges, the counts with the bins as the last
         # dimension, and each entry's first position in the flattened counts.
         self._histograms = {}
         for name, value in values(category).items():
+            if name not in self.descriptions:
+                continue
             edges = self.descriptions[name].histogram_edges
             if not edges:
                 continue
@@ -145,6 +156,8 @@ class WindowSummary:
             self._row_count += mask.sum()
 
         for name, value in category_values.items():
+            if name not in self._totals:
+                continue
             value = value.float()
             total = self._totals[name]
             if self.descriptions[name].summary == "maximum":

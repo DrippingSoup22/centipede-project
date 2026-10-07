@@ -40,6 +40,7 @@ The environment lives in `src/centipede/environment/`.
 | `simulation/simulation.py` | Front file of the physics simulation: loads the model, chooses the backend, offers `reset()`, `step()`, and the physical state |
 | `simulation/model_mapping.py` | Finding each segment's parts in the model by name, and checking them |
 | `simulation/physical_state.py` | The physical state handed to the environment |
+| `simulation/diagnostics.py` | The simulation's [diagnostics](diagnostics.md#simulation-facts): every world's positions and the physics health values |
 | `simulation/constants.py` | Fixed values both backends share: physics steps per action, reset noise |
 | `simulation/cpu_backend.py` | Physics on the CPU with MuJoCo |
 | `simulation/gpu_backend.py` | Physics on the GPU with MuJoCo Warp |

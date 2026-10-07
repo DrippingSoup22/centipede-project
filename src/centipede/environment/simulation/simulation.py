@@ -12,7 +12,8 @@ class PhysicsSimulation:
 
     It loads the model named in the settings, checks it against the segment
     contract, and runs every world on the chosen backend. ``physical_state``
-    is refreshed in place by every ``reset`` and ``step``.
+    is refreshed in place by every ``reset`` and ``step``, and so is
+    ``diagnostics.facts``, the simulation's diagnostics category.
     """
 
     def __init__(self, settings: SimulationSettings) -> None:
@@ -40,6 +41,7 @@ class PhysicsSimulation:
         self.world_count = settings.world_count
         self.step_duration_s = PHYSICS_STEPS_PER_ACTION * model.opt.timestep
         self.physical_state = self._backend.physical_state
+        self.diagnostics = self._backend.diagnostics
 
     def reset(
         self, world_mask: torch.Tensor | None = None, seed: int | None = None

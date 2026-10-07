@@ -251,6 +251,12 @@ const METRICS = {
     about: "Seconds spent collecting the window: acting, simulating, and storing." },
   "timing.learning_seconds": { label: "Learning", unit: "s",
     about: "Seconds spent on the update after the window." },
+  "physics.contact_count": { label: "Contacts, all worlds together", unit: "",
+    about: "The most contacts all worlds together had after a step of the window. The GPU backend reserves contacts_per_world times the number of worlds, and a run that needs more stops with a clear error, so this shows how much of that reserve is used." },
+  "physics.constraint_rows": { label: "Constraint rows, one world", unit: "",
+    about: "The most constraint rows a single world needed after a step of the window. The GPU backend reserves constraints_per_world rows for each world." },
+  "physics.solver_iterations": { label: "Solver iterations", unit: "",
+    about: "The most iterations the solver needed in a world on the last physics call of a step of the window: how hard the physics works." },
 };
 
 // The settings summarised under the title. A chip is highlighted when the
@@ -383,6 +389,9 @@ const TRAINING_LAYOUT = [
 // Under "Show details": these groups first, then every value not placed anywhere.
 const TRAINING_DETAILS = [
   { title: "Learning, every value", cards: ["learning.critic_loss", "learning.actor_loss", "learning.entropy"]
+      .map((key) => ({ kind: "health", width: "w4", size: "small", key })) },
+  { title: "Physics", intro: "How close the physics came to the memory the GPU backend reserves, and how hard the solver worked.",
+    cards: ["physics.contact_count", "physics.constraint_rows", "physics.solver_iterations"]
       .map((key) => ({ kind: "health", width: "w4", size: "small", key })) },
   { title: "Each segment over training", intro: "The behaviour values per segment and window: one row per segment, head at the top.",
     cards: [

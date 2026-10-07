@@ -83,6 +83,10 @@ The `[run]` settings of a training file:
 | `report` | `true` | Whether to write the run's report; the smoke test turns it off |
 | `runs_folder` | `"runs"` | Where run folders are created; created if missing |
 | `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
+| `record_every_cycles` | `checkpoint_every_cycles` | The window of every cycle that is a multiple of this, and always the last, is recorded for replay; `0` records nothing |
+| `record_levels` | 4 | Worlds are ranked by their summed reward over the window and split into this many levels |
+| `record_per_level` | 8 | How many worlds of each level are kept, evenly spaced from the level's best to its worst |
+| `record_selection` | `"ranked"` | `"ranked"` keeps the worlds chosen by level; `"first"` keeps the first worlds, as many, so that consecutive recordings show the same worlds |
 
 A complete training file, with every section written out:
 
@@ -95,6 +99,10 @@ checkpoint_every_cycles = 16
 report = true
 # runs_folder = "runs"
 # start_from = "runs/2026-10-07_1432_easy"
+# record_every_cycles = 16           # defaults to checkpoint_every_cycles
+# record_levels = 4
+# record_per_level = 8
+# record_selection = "ranked"
 
 [environment]
 max_episode_steps = 8192
@@ -206,6 +214,7 @@ backend = "cpu"
 | `seeds` | required | Each seed resets the environment once and runs one episode in every world |
 | `episodes_per_seed` | 8 | The number of worlds, so the number of episodes per seed |
 | `baselines` | none | `"zero"`, `"random"`, or both, run on the same seeds as the agents |
+| `record` | `true` | Write a replay recording of every world for each actor and seed |
 
 An evaluation file may also contain `[environment]` sections, whose values
 replace the run's: `backend = "cpu"` evaluates a run trained on a GPU on the
@@ -234,7 +243,9 @@ runs/2026-10-07_1432_probe/
 ├─ training_log.jsonl   one line of diagnostics per window
 ├─ report.html          the run's summary (unless report = false)
 ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
-└─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation
+├─ recordings/          cycle_0016.npz, ...: replay recordings of training windows
+└─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation,
+                        and <the same>_<actor>_seed<seed>.npz recordings
 ```
 
 Folders are created only when missing, and a run is never overwritten: a new run
@@ -248,6 +259,17 @@ including the bin counts of the episode histograms (`episode_distributions`,
 see [diagnostics.md](diagnostics.md#episode-summary)). Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
+
+The **recordings** hold the poses of the recorded windows for replay in the
+sibling MujocoReplay project: `recordings/cycle_NNNN.npz` is the window
+collected in cycle `NNNN`, by the agents after `NNNN − 1` updates, with the
+worlds chosen by level; an evaluation's recordings hold every world of each
+actor and seed, from the first episode's first step until the last world's
+first episode ended. Each file carries the model, the targets as markers, and
+the run's setup, so it replays on its own
+(see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
+training run records one window of 32 worlds before each checkpoint, 2.3 MB
+each for model v2.
 
 The **report** is one HTML file that opens in any browser, offline. It is
 refreshed at every checkpoint, so an interrupted run still has one. It works the

@@ -5,11 +5,13 @@
 - **train** creates a new run folder, or reopens one with ``continue_from``;
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
-  cycles, and after the last, it saves a checkpoint and refreshes the report.
+  cycles, and after the last, it saves a checkpoint and refreshes the report;
+  every ``record_every_cycles`` cycles it writes the window's replay recording.
   With ``start_from`` the new run's agents begin from another run's
   checkpoint, for example to continue learning on a harder task.
 - **evaluate** loads a checkpoint, runs every seed with the agents and each
-  listed baseline, and writes the results and their report into the run.
+  listed baseline, and writes the results, their report, and the recordings
+  into the run.
 
 This is the only component that deals with files. See docs/architecture.md and
 docs/configuration.md.
@@ -35,6 +37,11 @@ from centipede.experiment.configuration import (
     EvaluationSettings,
     dotted_keys,
     read_configuration,
+)
+from centipede.experiment.recordings import (
+    RecordingScene,
+    evaluation_recording,
+    training_recording,
 )
 from centipede.experiment.report import (
     LoggedCategory,
@@ -138,12 +145,41 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     )
     categories = _training_categories(loop, agents, environment)
     transitions_per_cycle = environment.world_count * loop_settings.rollout_window_steps
+
+    # Recording: the recorder is armed before each window to record, and its
+    # result is taken after that window, both between cycles.
+    recorder = loop.diagnostics.recorder
+    record_every = run_settings.record_every_cycles
+
+    def recorded(cycle: int) -> bool:
+        return record_every > 0 and (cycle % record_every == 0 or cycle == total_cycles)
+
+    scene = (
+        RecordingScene.from_run(configuration, environment) if record_every else None
+    )
+    if recorded(completed_cycles + 1):
+        recorder.arm(loop_settings.rollout_window_steps)
+
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
         print(_progress_line(record, total_cycles))
+        if recorded(cycle):
+            window = recorder.take(
+                run_settings.record_levels,
+                run_settings.record_per_level,
+                run_settings.record_selection,
+            )
+            folder.write_recording(
+                f"cycle_{cycle:04d}",
+                training_recording(
+                    scene, window, cycle, total_cycles, configuration, folder
+                ),
+            )
+        if cycle < total_cycles and recorded(cycle + 1):
+            recorder.arm(loop_settings.rollout_window_steps)
         if cycle % run_settings.checkpoint_every_cycles == 0 or cycle == total_cycles:
             folder.save_checkpoint(cycle, agents.state_dict())
             if run_settings.report:
@@ -205,6 +241,7 @@ def _training_categories(
             lambda: values(agents.diagnostics.learning),
         ),
         _timing_category(loop),
+        _physics_category(loop),
     ]
 
 
@@ -250,6 +287,20 @@ def _timing_category(loop: InteractionLoop) -> LoggedCategory:
         "collecting or learning starts and ends.",
         descriptions(timing),
         lambda: values(timing),
+    )
+
+
+def _physics_category(loop: InteractionLoop) -> LoggedCategory:
+    """The simulation's facts over a window: how hard the physics worked."""
+    simulation_window = loop.diagnostics.simulation_window
+    return LoggedCategory(
+        "physics",
+        "Physics",
+        "Maxima over every world and step of each window, read after each step's "
+        "last physics call. The GPU backend reserves contacts_per_world times the "
+        "number of worlds contacts and constraints_per_world rows per world.",
+        simulation_window.descriptions,
+        simulation_window.result,
     )
 
 
@@ -389,9 +440,18 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
             environment.device, seed
         )
     print(f"Evaluating {checkpoint_path}")
+    stem = f"{datetime.now():%Y-%m-%d_%H%M%S}_{checkpoint_path.stem}"
+    recorder = loop.diagnostics.recorder
+    scene = (
+        RecordingScene.from_run(configuration, environment)
+        if evaluation.record
+        else None
+    )
     results: dict[str, list[dict[str, Any]]] = {name: [] for name in actors}
     for actor_name, make_actor in actors.items():
         for seed in evaluation.seeds:
+            if evaluation.record:
+                recorder.arm(configuration.environment.max_episode_steps)
             loop.evaluate(make_actor(seed), seed)
             record = {"seed": seed}
             record |= {
@@ -399,8 +459,21 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
             }
             results[actor_name].append(record)
             print(f"  {actor_name:<14} seed {seed:<6} {_episode_line(record)}")
-
-    stem = f"{datetime.now():%Y-%m-%d_%H%M%S}_{checkpoint_path.stem}"
+            if evaluation.record:
+                window = recorder.take(1, 1, "all")
+                folder.write_evaluation_recording(
+                    f"{stem}_{actor_name.replace(' ', '_')}_seed{seed}",
+                    evaluation_recording(
+                        scene,
+                        window,
+                        actor_name,
+                        seed,
+                        checkpoint_path,
+                        checkpoint["completed_cycles"],
+                        configuration,
+                        folder,
+                    ),
+                )
     run_facts = {
         "checkpoint": str(checkpoint_path),
         "cycles_trained": checkpoint["completed_cycles"],
@@ -441,6 +514,7 @@ def _evaluation_categories(
             loop, environment, "Means over the steps of each world's first episode."
         ),
         _timing_category(loop),
+        _physics_category(loop),
     ]
 
 

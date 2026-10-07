@@ -30,7 +30,7 @@ no policy observes them and no reward depends on them.
 | --- | --- | --- |
 | Step facts | Environment | What happened in the last 20 ms step |
 | Episode summary | Environment | How each finished episode went |
-| Physics health | Physics simulation | How close the physics came to its limits |
+| Simulation facts | Physics simulation | Every world's positions, and how close the physics came to its limits |
 | Learning | Agents | How each segment agent's last update went |
 | Timing | Interaction loop | Where the run's time goes |
 
@@ -51,6 +51,7 @@ Refreshed on every step, for every world.
 | `uprightness` | `(W, N)` | How upright the segment is: 1 upright, 0 on its side, −1 upside down | Mean |
 | `head_distance` | `(W,)` | Flat distance from the head's tip to the target, m | Mean |
 | `heading_error` | `(W,)` | Angle between the head's forward direction and the target, rad, from 0 to π | Mean |
+| `target_position` | `(W, 2)` | Each world's target, world x and y, m; refreshed again for the worlds a step resets, so it always matches the pose | Recorded |
 
 Comparing `segment_progress` with `segment_moved` shows how much of a segment's
 movement brings it closer to its goal. Gait measures, such as how long each foot
@@ -90,14 +91,30 @@ flipped over. The bins are fixed, the same for every run:
 
 Values beyond the outer edges count in the first or the last bin.
 
-### Physics health
+### Simulation facts
 
-Defined together with the work on simulation speed, so that measuring it never
-changes the speed measured before. The intended values are single numbers for
-the whole run, the same on both backends, each taken from the busiest physics
-step: contacts per world, constraint rows in one world, and solver iterations.
-They show how close a run comes to the memory reserved on the GPU and how hard
-the solver works.
+Refreshed by every step and reset, for every world. The physical state carries
+what the environment needs; this category carries what the recorder and the
+speed work need. All four values describe the moment after the `forward` call
+that follows a step's last physics step, or a reset, so the CPU and GPU
+backends report the same thing; they are not peaks over the 200 physics steps
+of a transition. On the GPU the category is made of views of MuJoCo Warp's own
+arrays, so filling it costs nothing; on the CPU each world's values are copied
+after the step.
+
+| Value | Shape | Meaning | Summary |
+| --- | --- | --- | --- |
+| `qpos` | `(W, nq)` | Every world's position coordinates, in MuJoCo's `qpos` layout (69 for model v2) | Recorded |
+| `contact_count` | `(1,)` | Contacts in all worlds together; the GPU reserves `contacts_per_world × W` | Maximum |
+| `constraint_rows` | `(W,)` | Constraint rows in each world; the GPU reserves `constraints_per_world` | Maximum |
+| `solver_iterations` | `(W,)` | Solver iterations each world needed on the last physics call | Maximum |
+
+The three maxima are logged as the `physics` category and show how close a
+run comes to the memory reserved on the GPU and how hard the solver works. The
+CPU benchmark (`benchmarks/simulation_speed.py`, 4 worlds, 20 transitions,
+on the laptop) measured 0.132 s per step before the category existed and
+0.112 to 0.138 s over three runs after it: the run-to-run spread is wider than
+any difference.
 
 ### Learning
 
@@ -138,7 +155,9 @@ a `(W, N)` value becomes `(N,)`.
 
 Each value follows its own summary: a **mean** or a **share** averages over
 the counted rows, a **count** adds up true flags, and a **maximum** keeps the
-largest value. A value declared with histogram edges is also counted bin by
+largest value. A **recorded** value is never summarised: it is kept as it is
+for the recorder and left out of the window summary, the log, and the
+report. A value declared with histogram edges is also counted bin by
 bin: each counted row adds one to the bin its value falls in, a bin including
 its lower edge. The counts are kept on the device like the totals, so they too
 never wait for the GPU. The episode summary counts only the worlds whose episode ended.
@@ -146,12 +165,35 @@ In evaluation, only each world's first episode counts, so the loop passes the
 worlds still in it. A window with no ended episode gives NaN means for the
 episode summary.
 
+## Recordings
+
+A recording keeps the poses of a window for replay, so that what the worlds
+did can be watched afterwards without rendering anything during the run. The
+interaction loop's recorder (`interaction_loop/recording.py`) is armed by the
+experiment before a window it wants recorded. While that window runs, every
+step copies the simulation's `qpos` of every world into a buffer on the device
+and adds the step's rewards to each world's score; the step facts' target and
+the episode summary's `episode_ended` are kept alongside. These are a few small
+tensor operations that never wait for the GPU. After the window, between
+cycles, the experiment takes the chosen worlds and writes the file: the worlds
+are ranked by their summed reward and chosen by level with MujocoReplay's
+`selected_ranks`, so that the best, the middle, and the worst are all present
+(`record_levels` and `record_per_level` in [configuration.md](configuration.md#training-files)).
+Only the chosen worlds are copied to the CPU.
+
+The file format belongs to the sibling MujocoReplay project, which replays
+the files (`../MujocoReplay/docs/recording-format.md`); `experiment/recordings.py`
+builds each file from the recorded window, the model, and the run's facts.
+
 ## Files
 
 | File | Covers |
 | --- | --- |
 | `src/centipede/diagnostics_category.py` | Shared helper: describing values and summarising them over a window, written once for every category |
 | `diagnostics.py` in a component's folder | That component's category and how it is filled |
+| `src/centipede/environment/simulation/diagnostics.py` | The simulation's category, filled by the backends |
+| `src/centipede/interaction_loop/recording.py` | The recorder: the poses of an armed window, and the choice of worlds |
+| `src/centipede/experiment/recordings.py` | Turning a recorded window into a MujocoReplay recording file |
 
 A component fills its category with one call, at the point where it already
 has the values. A value whose last dimension has named entries, such as the

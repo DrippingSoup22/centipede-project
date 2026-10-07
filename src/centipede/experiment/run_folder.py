@@ -8,7 +8,8 @@ A training run's folder, under ``runs_folder``::
     ├─ training_log.jsonl   one line of diagnostics per window
     ├─ report.html          the run's summary, unless the run turned it off
     ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
-    └─ evaluations/         one results file and one report per evaluation
+    ├─ recordings/          cycle_0016.npz, ...: replays of training windows
+    └─ evaluations/         results, report, and replays of each evaluation
 
 Folders are created only when they do not exist yet, and an existing run is
 never overwritten: a new run whose name is taken gets a numbered suffix.
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from mujoco_replay.recording import Recording, write_recording
 
 from centipede.experiment.configuration import (
     SAVED_CONFIGURATION_NAME,
@@ -37,6 +39,7 @@ class RunFolder:
         """Use an existing run folder; ``create`` and ``open`` are the usual ways."""
         self.path = path
         self.checkpoints = path / "checkpoints"
+        self.recordings = path / "recordings"
         self.evaluations = path / "evaluations"
         self.log_path = path / "training_log.jsonl"
         self.run_info_path = path / "run_info.json"
@@ -140,6 +143,22 @@ class RunFolder:
         }:
             raise SettingsError(f"{path} is not a checkpoint of this project")
         return checkpoint
+
+    # -- Recordings -------------------------------------------------------------------
+
+    def write_recording(self, stem: str, recording: Recording) -> Path:
+        """Save a training window's recording as ``recordings/<stem>.npz``."""
+        self.recordings.mkdir(exist_ok=True)
+        path = self.recordings / f"{stem}.npz"
+        write_recording(path, recording)
+        return path
+
+    def write_evaluation_recording(self, stem: str, recording: Recording) -> Path:
+        """Save an evaluation's recording as ``evaluations/<stem>.npz``."""
+        self.evaluations.mkdir(exist_ok=True)
+        path = self.evaluations / f"{stem}.npz"
+        write_recording(path, recording)
+        return path
 
     # -- Evaluations ------------------------------------------------------------------
 

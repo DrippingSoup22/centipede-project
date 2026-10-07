@@ -46,7 +46,9 @@ class RunSettings:
     """The [run] section of a training run.
 
     ``start_from`` is a run folder (its latest checkpoint) or a checkpoint
-    file whose agents the new run begins with.
+    file whose agents the new run begins with. The ``record_*`` settings say
+    which windows are recorded for replay and which worlds are kept; see
+    docs/configuration.md.
     """
 
     name: str
@@ -55,21 +57,34 @@ class RunSettings:
     report: bool
     runs_folder: Path
     start_from: Path | None
+    record_every_cycles: int
+    record_levels: int
+    record_per_level: int
+    record_selection: str
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
         """Check the section's values and fill in the defaults."""
         section = SettingsSection(values, "run")
         section.choice("mode", ("train",))
+        checkpoint_every_cycles = section.positive_integer(
+            "checkpoint_every_cycles", default=16
+        )
         settings = cls(
             name=section.text("name"),
             seed=section.integer("seed", default=0, minimum=0),
-            checkpoint_every_cycles=section.positive_integer(
-                "checkpoint_every_cycles", default=16
-            ),
+            checkpoint_every_cycles=checkpoint_every_cycles,
             report=section.boolean("report", default=True),
             runs_folder=section.path("runs_folder", default=Path("runs")),
             start_from=section.path("start_from", default=None),
+            record_every_cycles=section.integer(
+                "record_every_cycles", default=checkpoint_every_cycles, minimum=0
+            ),
+            record_levels=section.positive_integer("record_levels", default=4),
+            record_per_level=section.positive_integer("record_per_level", default=8),
+            record_selection=section.choice(
+                "record_selection", ("ranked", "first"), default="ranked"
+            ),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.
@@ -89,6 +104,7 @@ class EvaluationSettings:
     Each seed runs one episode in each of ``episodes_per_seed`` worlds, for the
     agents and for every listed baseline. ``environment_changes`` lists the
     environment settings the file changed from training, by dotted name.
+    ``record`` writes a replay recording of every world for each actor and seed.
     """
 
     source: Path
@@ -96,6 +112,7 @@ class EvaluationSettings:
     episodes_per_seed: int
     baselines: tuple[str, ...]
     environment_changes: dict[str, Any] = field(default_factory=dict)
+    record: bool = True
 
     @classmethod
     def from_section(
@@ -109,6 +126,7 @@ class EvaluationSettings:
             episodes_per_seed=section.positive_integer("episodes_per_seed", default=8),
             baselines=section.choice_list("baselines", ("zero", "random"), default=()),
             environment_changes=environment_changes,
+            record=section.boolean("record", default=True),
         )
         section.reject_unknown_keys()
         return settings

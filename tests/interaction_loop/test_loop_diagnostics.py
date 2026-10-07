@@ -10,11 +10,15 @@ from types import SimpleNamespace
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
+from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 from centipede.interaction_loop.diagnostics import LoopDiagnostics
 
 
 def test_windows_start_empty_and_time_collecting_and_learning():
-    environment_diagnostics = EnvironmentDiagnostics(2, 3, ["arrival"], "cpu")
+    simulation = SimulationDiagnostics.allocate(2, 3, "cpu")
+    environment_diagnostics = EnvironmentDiagnostics(
+        2, 3, ["arrival"], "cpu", simulation.facts
+    )
     environment = SimpleNamespace(diagnostics=environment_diagnostics, world_count=2)
     diagnostics = LoopDiagnostics(environment)
     episode = environment_diagnostics.episode
@@ -30,6 +34,11 @@ def test_windows_start_empty_and_time_collecting_and_learning():
 
     # Only the second window's two steps of two worlds are summarised.
     assert diagnostics.step_window.result()["body_height"].tolist() == [2.0] * 3
+    assert list(diagnostics.simulation_window.result()) == [
+        "contact_count",
+        "constraint_rows",
+        "solver_iterations",
+    ]
     assert diagnostics.episode_window.result()["episode_ended"] == 4
     timing = diagnostics.timing
     assert timing.collecting_seconds > 0 and timing.learning_seconds > 0

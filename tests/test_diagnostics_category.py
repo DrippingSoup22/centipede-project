@@ -39,6 +39,21 @@ def test_an_unknown_summary_is_rejected():
 
 
 @dataclass(frozen=True)
+class ExamplePoses:
+    pose: torch.Tensor = measure("Kept for recordings", summary="recorded")
+    rows: torch.Tensor = measure("Rows used", summary="maximum")
+
+
+def test_a_recorded_value_is_left_out_of_the_window_summary():
+    poses = ExamplePoses(pose=torch.ones(2, 3), rows=torch.tensor([4, 7]))
+    window = WindowSummary(poses)
+    window.add()
+
+    assert list(window.descriptions) == ["rows"]
+    assert window.result() == {"rows": torch.tensor(7.0)}
+
+
+@dataclass(frozen=True)
 class ExampleEnds:
     ended: torch.Tensor = measure("Episode ended", summary="count")
     length: torch.Tensor = measure("Episode length", summary="mean")

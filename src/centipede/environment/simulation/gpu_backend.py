@@ -15,6 +15,10 @@ from centipede.environment.simulation.constants import (
     LEG_SPEED_NOISE_RAD_S,
     PHYSICS_STEPS_PER_ACTION,
 )
+from centipede.environment.simulation.diagnostics import (
+    SimulationDiagnostics,
+    SimulationFacts,
+)
 from centipede.environment.simulation.model_mapping import (
     BODY_CATEGORY,
     FLOOR_CATEGORY,
@@ -301,6 +305,17 @@ class GPUBackend:
         self._right_foot_ground_contact = wp.from_torch(state.right_foot_ground_contact)
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
+
+        # The simulation's category, as views of MuJoCo Warp's own arrays: the
+        # physics refreshes them, so nothing is copied per step.
+        self.diagnostics = SimulationDiagnostics(
+            SimulationFacts(
+                qpos=wp.to_torch(self.gpu_data.qpos),
+                contact_count=wp.to_torch(self.gpu_data.nacon),
+                constraint_rows=wp.to_torch(self.gpu_data.nefc),
+                solver_iterations=wp.to_torch(self.gpu_data.solver_niter),
+            )
+        )
 
         # Each world's random sequence: the seed it was last given and how many
         # resets it has had since. Together they replace the CPU generators.

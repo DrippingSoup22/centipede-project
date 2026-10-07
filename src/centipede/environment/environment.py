@@ -56,6 +56,7 @@ class Environment:
             self.segment_count,
             self.reward_function.term_names,
             self.device,
+            self.simulation.diagnostics.facts,
         )
 
         # Episode state, overwritten in place.

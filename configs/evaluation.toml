@@ -4,7 +4,8 @@
 # one checkpoint file inside it. The task
 # settings are the run's own; any [environment] values written here replace
 # them, for example to evaluate a GPU-trained run on the CPU or with farther
-# targets. Results go into the run's evaluations/ folder.
+# targets. Results go into the run's evaluations/ folder, with a replay
+# recording of every world for each actor and seed unless record = false.
 #
 #   python -m centipede configs/evaluation.toml
 

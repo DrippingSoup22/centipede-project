@@ -14,6 +14,8 @@ mode = "train"
 name = "training"
 seed = 1
 checkpoint_every_cycles = 16
+# The window before each checkpoint is recorded for replay (record_every_cycles
+# defaults to checkpoint_every_cycles), keeping 4 levels x 8 worlds by rank.
 
 [environment.simulation]
 model_path = "models/assembly_v2.xml"

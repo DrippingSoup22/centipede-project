@@ -13,6 +13,7 @@ from centipede.diagnostics_category import descriptions
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
+from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 
 TARGET = torch.tensor([[0.020, 0.0], [0.0, 0.010]])  # ahead of world 0, left of 1
 NO = torch.tensor([False, False])
@@ -24,6 +25,13 @@ def upright_state() -> PhysicalState:
     state.body_planar_position[:, 1, 0] = -0.004
     state.head_tip_position[:, 0] = 0.005
     return state
+
+
+def make_diagnostics(reward_part_names=("first", "second")) -> EnvironmentDiagnostics:
+    simulation = SimulationDiagnostics.allocate(2, 4, "cpu")
+    return EnvironmentDiagnostics(
+        2, 2, list(reward_part_names), "cpu", simulation.facts
+    )
 
 
 def step_rewards(value: float) -> StepRewards:
@@ -44,7 +52,7 @@ def record(diagnostics, state, previous_state, rewards, terminated=NO, truncated
 
 
 def test_step_facts_describe_the_last_step():
-    diagnostics = EnvironmentDiagnostics(2, 2, ["first", "second"], "cpu")
+    diagnostics = make_diagnostics()
     before = upright_state()
     after = upright_state()
     after.body_planar_position[:, 0, 1] = 0.003  # head centre moves 3 mm sideways
@@ -71,7 +79,7 @@ def test_step_facts_describe_the_last_step():
 
 
 def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
-    diagnostics = EnvironmentDiagnostics(2, 2, ["first", "second"], "cpu")
+    diagnostics = make_diagnostics()
     state = upright_state()
     diagnostics.start_episodes(torch.tensor([True, True]), state, TARGET)
     state.body_ground_contact[:, 0] = True
@@ -115,3 +123,25 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     )
     assert episode.length_steps.tolist() == [3.0, 1.0]
     assert episode.arrived.tolist() == [False, False]
+
+
+def test_the_target_follows_the_worlds_just_reset():
+    diagnostics = make_diagnostics()
+    state = upright_state()
+
+    record(
+        diagnostics,
+        state,
+        state,
+        step_rewards(0.0),
+        terminated=torch.tensor([True, False]),
+    )
+    assert torch.equal(diagnostics.step.target_position, TARGET)
+
+    new_targets = torch.tensor([[0.050, 0.0], [0.060, 0.0]])
+    diagnostics.start_episodes(torch.tensor([True, False]), state, new_targets)
+
+    assert torch.equal(
+        diagnostics.step.target_position, torch.tensor([[0.050, 0.0], [0.0, 0.010]])
+    )
+    assert diagnostics.simulation.qpos.shape == (2, 4)

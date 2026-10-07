@@ -15,6 +15,7 @@ from centipede.agents.settings import AgentSettings
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
 from centipede.environment.settings import EnvironmentSettings
+from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 from centipede.interaction_loop.interaction_loop import InteractionLoop
 from centipede.interaction_loop.settings import InteractionLoopSettings
 
@@ -30,7 +31,13 @@ class FakeEnvironment:
         self.calls = calls
         self.episode_ends = episode_ends or {}
         self.world_count = WORLDS
-        self.diagnostics = EnvironmentDiagnostics(WORLDS, SEGMENTS, ["arrival"], "cpu")
+        self.diagnostics = EnvironmentDiagnostics(
+            WORLDS,
+            SEGMENTS,
+            ["arrival"],
+            "cpu",
+            SimulationDiagnostics.allocate(WORLDS, 2, "cpu").facts,
+        )
         self.steps_taken = 0
 
     def reset(self, seed):

@@ -1,12 +1,13 @@
-"""The interaction loop's diagnostics: timing, and the environment's window summaries.
+"""The interaction loop's diagnostics: timing, window summaries, and the recorder.
 
 The front file uses three things. ``with collecting():`` around a window's
 steps, both in training and in evaluation, and ``with learning():`` around the
 update, time those parts; ``step_taken`` after every step adds the
-environment's step facts and episode summaries to the window's summaries. Each
-window starts empty. The clock waits for the GPU only when a timed part starts
-and ends, once per window, so the times include the GPU's work. The values are
-listed in docs/diagnostics.md.
+environment's step facts, episode summaries, and the simulation's facts to the
+window's summaries, and feeds the recorder. Each window starts empty. The
+clock waits for the GPU only when a timed part starts and ends, once per
+window, so the times include the GPU's work. The values are listed in
+docs/diagnostics.md; the recorder is described in ``recording.py``.
 """
 
 import time
@@ -17,6 +18,7 @@ from dataclasses import dataclass
 import torch
 
 from centipede.diagnostics_category import WindowSummary, measure
+from centipede.interaction_loop.recording import WindowRecorder
 
 
 @dataclass(frozen=True)
@@ -37,17 +39,21 @@ class Timing:
 class LoopDiagnostics:
     """Times each window and summarises the environment's categories over it.
 
-    ``timing``, ``step_window``, and ``episode_window`` are what the experiment
-    reads; each window summary offers its category's ``descriptions`` and its
-    ``result()``. Episode summaries count only the worlds whose episode ended.
+    ``timing``, ``step_window``, ``episode_window``, and ``simulation_window``
+    are what the experiment reads; each window summary offers its category's
+    ``descriptions`` and its ``result()``. Episode summaries count only the
+    worlds whose episode ended; the simulation's maxima always count every
+    world. ``recorder`` records the poses of the windows the experiment arms.
     """
 
     def __init__(self, environment) -> None:
-        """Prepare the summaries of the environment's two categories."""
+        """Prepare the summaries of the three categories and the recorder."""
         self.step_window = WindowSummary(environment.diagnostics.step)
         self.episode_window = WindowSummary(
             environment.diagnostics.episode, mask_field="episode_ended"
         )
+        self.simulation_window = WindowSummary(environment.diagnostics.simulation)
+        self.recorder = WindowRecorder(environment.diagnostics, environment.world_count)
         self.timing = Timing(
             collecting_seconds=torch.zeros(()),
             learning_seconds=torch.zeros(()),
@@ -61,6 +67,8 @@ class LoopDiagnostics:
         """Start a new window, and time the steps taken inside the block."""
         self.step_window.clear()
         self.episode_window.clear()
+        self.simulation_window.clear()
+        self.recorder.start_window()
         self._window_steps = 0
         self.timing.learning_seconds.zero_()
         start = _synchronised_clock()
@@ -86,6 +94,8 @@ class LoopDiagnostics:
         """
         self.step_window.add(counted_worlds)
         self.episode_window.add(counted_worlds)
+        self.simulation_window.add()
+        self.recorder.step_taken()
         self._window_steps += 1
 
 

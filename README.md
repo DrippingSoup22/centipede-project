@@ -8,7 +8,8 @@ reward when the head reaches a target.
 
 The physics runs in [MuJoCo](https://mujoco.org/), on the CPU or, with MuJoCo
 Warp, on the GPU. The learning algorithms come from the sibling `../RL_lib`
-library.
+library, and recorded runs are watched with the sibling `../MujocoReplay`
+viewer.
 
 ## Goals
 
@@ -26,7 +27,7 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 6 complete.** The physics simulation runs batches of worlds on
+- **Code: Stage 7 complete.** The physics simulation runs batches of worlds on
   the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests that pass
   locally and on a Kaggle T4. The environment builds on it: targets, episodes,
   observations, rewards, and diagnostics, tested locally. The agents, one
@@ -36,7 +37,9 @@ separately.
   locally with a short real run. The experiment runs everything from one
   configuration file and writes each run's log, checkpoints, and an HTML report;
   it is tested locally, and a first CPU probe run was trained, continued, and
-  evaluated. Nothing has learned to walk yet. On 2026-10-01 the project was restarted with
+  evaluated. Training and evaluation also record the poses of chosen worlds
+  for replay in the sibling `../MujocoReplay` project, a viewer for recorded
+  MuJoCo poses that is developed separately. Nothing has learned to walk yet. On 2026-10-01 the project was restarted with
   a new structure. A first implementation reached early learning on the CPU,
   with the rear segments learning to avoid ground contact, but no standing or
   walking. It is preserved in Git history (tag `cpu-stage8`) and in the local
@@ -80,6 +83,7 @@ repository root, in PowerShell:
 python -m venv "$HOME\.venvs\Centipede"
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install "torch==2.14.1+cu126" --index-url https://download.pytorch.org/whl/cu126
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ..\RL_lib
+& "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ..\MujocoReplay
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install -e ".[gpu,dev]"
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pybind11_stubgen mujoco -o typings --ignore-all-errors
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pytest

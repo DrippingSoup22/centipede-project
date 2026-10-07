@@ -73,6 +73,13 @@ def test_construction_prepares_the_gpu_worlds(model, mapping):
         assert tensor.is_cuda, field.name
         assert getattr(backend, f"_{field.name}").ptr == tensor.data_ptr(), field.name
 
+    # The simulation's category is MuJoCo Warp's own arrays, seen as tensors.
+    facts = backend.diagnostics.facts
+    assert facts.qpos.data_ptr() == backend.gpu_data.qpos.ptr
+    assert facts.constraint_rows.data_ptr() == backend.gpu_data.nefc.ptr
+    assert facts.solver_iterations.data_ptr() == backend.gpu_data.solver_niter.ptr
+    assert facts.contact_count.data_ptr() == backend.gpu_data.nacon.ptr
+
 
 def test_step_holds_each_worlds_actions_for_twenty_milliseconds(model, mapping):
     """A step takes about 10 s on a pre-Volta GPU, so physics runs sparingly here."""

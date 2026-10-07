@@ -14,6 +14,7 @@ from centipede.diagnostics_category import measure
 from centipede.environment.observation_builder import head_forward_direction
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
+from centipede.environment.simulation.diagnostics import SimulationFacts
 
 # Histogram bins of three episode values, fixed so that every run, CPU or GPU,
 # counts in the same bins. Episode lengths, in steps, grow in steps of about
@@ -59,6 +60,11 @@ class StepFacts:
     )
     heading_error: torch.Tensor = measure(
         "Angle between the head's forward direction and the target, (W,)", "rad"
+    )
+    target_position: torch.Tensor = measure(
+        "Each world's target, world x and y, (W, 2); kept for recordings",
+        "m",
+        summary="recorded",
     )
 
 
@@ -117,8 +123,10 @@ class EpisodeSummary:
 class EnvironmentDiagnostics:
     """Fills the environment's two categories, and keeps per-episode totals.
 
-    ``step`` and ``episode`` are the categories the experiment reads;
-    ``reward_part_names`` labels the last dimension of ``reward_parts``.
+    ``step`` and ``episode`` are the categories the experiment reads, and
+    ``simulation`` is the physics simulation's, offered here because only the
+    environment can see the simulation. ``reward_part_names`` labels the last
+    dimension of ``reward_parts``.
     """
 
     def __init__(
@@ -127,9 +135,11 @@ class EnvironmentDiagnostics:
         segment_count: int,
         reward_part_names: list[str],
         device: torch.device | str,
+        simulation_facts: SimulationFacts,
     ) -> None:
         """Allocate both categories and the running totals, all zero."""
         self.reward_part_names = list(reward_part_names)
+        self.simulation = simulation_facts
 
         def zeros(*trailing_shape: int, dtype=torch.float32) -> torch.Tensor:
             return torch.zeros(
@@ -145,6 +155,7 @@ class EnvironmentDiagnostics:
             uprightness=zeros(segment_count),
             head_distance=zeros(),
             heading_error=zeros(),
+            target_position=zeros(2),
         )
         self.episode = EpisodeSummary(
             episode_ended=zeros(dtype=torch.bool),
@@ -193,6 +204,11 @@ class EnvironmentDiagnostics:
             total.masked_fill_(_per_world(world_mask, total), 0.0)
         start = _head_distance(physical_state, target_position)
         self._start_distance.copy_(torch.where(world_mask, start, self._start_distance))
+        # The new targets of the reset worlds, so that after a step every
+        # world's target matches its pose.
+        self.step.target_position.copy_(
+            torch.where(world_mask[:, None], target_position, self.step.target_position)
+        )
 
     def record_step(
         self,
@@ -239,6 +255,7 @@ class EnvironmentDiagnostics:
             1 - 2 * (quaternion[..., 1] ** 2 + quaternion[..., 2] ** 2)
         )
         step.head_distance.copy_(to_target.norm(dim=-1))
+        step.target_position.copy_(target_position)
         step.heading_error.copy_(
             torch.atan2(
                 forward[:, 0] * to_target[:, 1] - forward[:, 1] * to_target[:, 0],

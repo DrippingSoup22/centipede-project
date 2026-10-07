@@ -10,6 +10,7 @@ import json
 
 import pytest
 import torch
+from mujoco_replay.recording import read_recording
 
 from centipede.experiment.experiment import run
 from centipede.settings_section import SettingsError
@@ -72,6 +73,22 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert logged_cycles(folder) == [1, 2, 3]
     assert "/*REPORT_DATA*/" not in (folder / "report.html").read_text(encoding="utf-8")
 
+    # The window before each checkpoint is recorded: both worlds, 2 frames each.
+    recordings = sorted(path.name for path in (folder / "recordings").iterdir())
+    assert recordings == ["cycle_0002.npz", "cycle_0003.npz"]
+    recording = read_recording(folder / "recordings" / "cycle_0003.npz")
+    assert recording.qpos.shape == (2, 2, 69)
+    assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
+    assert recording.marker_positions.shape == (2, 2, 1, 3)
+    assert recording.frame_info[:, 0].tolist() == [2, 2]  # updates done
+    assert recording.frame_info[:, 1].tolist() == [5, 6]  # steps per world
+    assert (recording.event_frames.tolist(), recording.event_labels) == (
+        [2],
+        ("update 3",),
+    )
+    assert recording.setup["configuration"]["run"]["record_every_cycles"] == 2
+    assert "<include" not in recording.model_xml
+
     continuing = (
         f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
         "[interaction_loop]\nupdate_cycles = 5\n"
@@ -94,6 +111,22 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert latest.read_bytes() == saved_bytes
     (results_path,) = (folder / "evaluations").glob("*.json")
     assert results_path.with_suffix(".html").exists()
+    evaluation_recordings = sorted(
+        path.name.removeprefix(results_path.stem)
+        for path in (folder / "evaluations").glob("*.npz")
+    )
+    assert evaluation_recordings == [
+        "_agents_seed7.npz",
+        "_agents_seed8.npz",
+        "_zero_action_seed7.npz",
+        "_zero_action_seed8.npz",
+    ]
+    first_episodes = read_recording(
+        folder / "evaluations" / (results_path.stem + "_agents_seed7.npz")
+    )
+    assert first_episodes.qpos.shape[1:] == (2, 69)
+    assert first_episodes.frame_info is None and first_episodes.event_frames is None
+    assert first_episodes.setup["actor"] == "agents"
     results = json.loads(results_path.read_text())["results"]
     assert list(results) == ["agents", "zero action"]
     for records in results.values():
@@ -112,7 +145,8 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         "[environment.target]\ndistance_range_m = [0.03, 0.04]\n\n[interaction_loop]",
     ).replace(
         'runs_folder = "RUNS"',
-        f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"',
+        f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
+        "record_every_cycles = 0",
     )
 
     child = run_file(tmp_path, harder_file, NAME="harder")
@@ -120,6 +154,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     # The child's agents continued from the parent's three updates.
     assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
     assert logged_cycles(child) == [1, 2, 3]
+    assert not (child / "recordings").exists()  # recording was turned off
 
     other_rate = harder_file.replace(
         "hidden_layers = [8]", "hidden_layers = [8]\nlearning_rate = 1e-3"
