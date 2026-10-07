@@ -71,9 +71,14 @@ the number of worlds, episode length, and number of update cycles.
 | --- | --- | --- | --- |
 | `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
 | `configs/probe.toml` | See how a choice of settings behaves on the CPU | Light, about half an hour on the CPU | Yes |
-| `configs/kaggle_quick.toml` | Check that a GPU run works and measure its speed | Quick, up to about 10 minutes on a Kaggle T4 | Yes |
-| `configs/kaggle_medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 30 minutes on a Kaggle T4 | Yes |
-| `configs/training.toml` | The actual experiment | Long, about a day on a Kaggle T4, in two sessions | Yes |
+| `configs/kaggle_quick.toml` | Check that a GPU run works and measure its speed | Quick, about 8 minutes on a Kaggle T4 (1,024 worlds, 3 cycles of 64 steps) | Yes |
+| `configs/kaggle_medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 25 minutes on a Kaggle T4 (256 worlds, 8 cycles of 256 steps) | Yes |
+| `configs/training.toml` | The actual experiment | Long, about 19 hours on a Kaggle T4 (1,024 worlds, 128 cycles of 256 steps), in two sessions | Yes |
+
+The Kaggle times were measured with the training profile on a T4 (Stage 8.2 in
+`plan.md`): a step takes 0.67 s at 256 worlds and 2.1 s at 1,024, and a fresh
+machine adds about a minute compiling the kernels. Two runs side by side, one
+per T4, each keep their speed.
 
 The `[run]` settings of a training file:
 

@@ -1,7 +1,8 @@
-# Quick level, up to about 10 minutes on a Kaggle T4: checks that a GPU run
-# works from start to finish and measures its speed, with a report. Three
-# short windows give three updates; nothing is expected to be learned. The
-# times are estimates until measured (plan.md, Stage 8.2).
+# Quick level, about 8 minutes on a Kaggle T4: checks that a GPU run works
+# from start to finish and measures its speed, with a report. Three short
+# windows give three updates; nothing is expected to be learned. Measured
+# (plan.md, Stage 8.2): 2.1 s per step at 1,024 worlds, so 2.2 minutes per
+# cycle, plus about a minute compiling the kernels on a fresh machine.
 #
 #   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/kaggle_quick.toml"
 

@@ -1,6 +1,9 @@
-# Medium level, about 30 minutes on a Kaggle T4: a short training run to see
-# how a choice of settings starts to behave, with a report. The times are
-# estimates until measured (plan.md, Stage 8.2).
+# Medium level, about 25 minutes on a Kaggle T4: a short training run to see
+# how a choice of settings starts to behave, with a report. 256 worlds give
+# 78% of 1,024 worlds' transitions per second but four updates for every one,
+# with the long level's 256-step windows. Measured (plan.md, Stage 8.2): 0.67 s
+# per step at 256 worlds, so 2.9 minutes per cycle, plus about a minute
+# compiling the kernels on a fresh machine.
 #
 #   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/kaggle_medium.toml"
 
@@ -8,20 +11,20 @@
 mode = "train"
 name = "medium"
 seed = 1
-checkpoint_every_cycles = 5
+checkpoint_every_cycles = 4
 
 [environment.simulation]
 model_path = "models/assembly_v3.xml"
 backend = "gpu"
-world_count = 1024
+world_count = 256
 
 [agents]
 device = "cuda"
 
 [agents.ppo]
-# Eight minibatches per epoch: 1,024 worlds x 128 steps = 131,072 samples.
-minibatch_size = 16384
+# Eight minibatches per epoch: 256 worlds x 256 steps = 65,536 samples.
+minibatch_size = 8192
 
 [interaction_loop]
-rollout_window_steps = 128
-update_cycles = 5
+rollout_window_steps = 256
+update_cycles = 8
