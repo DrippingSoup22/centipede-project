@@ -1,0 +1,33 @@
+# Baseline, second stage: the same settings as configs/baseline.toml, with the
+# agents starting from the first baseline's trained networks, optimizers,
+# normalisers, and random generators (its last checkpoint, cycle 32), so that
+# they begin already standing without contact costs (plan.md, Stage 8.4). It
+# is a new run, counted from cycle 1 with its own report; compare it with the
+# first baseline's report. About 11 minutes on the RTX 3080.
+#
+#   python scripts/gpu_desktop.py run configs/baseline_stage2.toml
+
+[run]
+mode = "train"
+name = "baseline_stage2"
+start_from = "runs/2026-10-07_2130_baseline"
+seed = 1
+checkpoint_every_cycles = 8
+
+[environment]
+max_episode_steps = 1024
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 32
