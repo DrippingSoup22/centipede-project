@@ -106,10 +106,17 @@ arrays become PyTorch GPU tensors without copying.
 To run the tests on a Kaggle T4, import
 [`notebooks/kaggle_gpu_tests.ipynb`](notebooks/kaggle_gpu_tests.ipynb) into
 Kaggle, select the GPU T4 accelerator, turn on internet access, and run all
-cells. The notebook clones this repository, so it tests the latest pushed commit.
+cells. The notebook clones this repository and the public RL_lib and
+MujocoReplay repositories, so it tests the latest pushed commits.
 [`notebooks/kaggle_speed_benchmark.ipynb`](notebooks/kaggle_speed_benchmark.ipynb)
 runs [`benchmarks/simulation_speed.py`](benchmarks/simulation_speed.py) the same
 way, measuring how fast each backend simulates.
+[`notebooks/kaggle_training_profile.ipynb`](notebooks/kaggle_training_profile.ipynb)
+runs [`benchmarks/training_profile.py`](benchmarks/training_profile.py), which
+measures where the time of a training cycle goes, part by part, and projects how
+long a configured run will take. Locally, run it with a training file before
+launching a long run, for example
+`python benchmarks/training_profile.py configs/probe.toml`.
 
 ## Archive
 
