@@ -145,8 +145,9 @@ python scripts/gpu_desktop.py status
 as it is on the laptop, starts the run there, independently of the SSH
 connection, and shows its output as it is written: one line per window, with
 a bar of `#` and `.` that fills as the window is collected. When the run
-ends, it copies the run's folder into the laptop's `runs/`, with the console
-output as `console.txt`. Ctrl+C stops watching, not the run. `watch` follows
+ends, it copies the run's folder into the laptop's `runs/`; the folder's
+`launched/` holds each launch's configuration file and console output, so a
+training run and its evaluations keep theirs apart. Ctrl+C stops watching, not the run. `watch` follows
 the latest run again (or the one whose name contains a given text) and copies
 it at the end too, `fetch` copies a run's folder at any time, `status` lists
 the running and recent runs with how each ended, `stop` stops the running

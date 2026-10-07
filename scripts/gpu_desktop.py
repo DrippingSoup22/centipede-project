@@ -16,7 +16,8 @@ laptop from the repository root with the project's Python, sends it commands:
 so a changed setting needs no commit, and starts the run. It then shows the
 run's output as it is written, one line per window with a bar that fills as
 the window is collected, and when the run ends copies its run folder into
-the laptop's ``runs/``, with the console output as ``console.txt``. Ctrl+C
+the laptop's ``runs/``, with the configuration file sent and the console
+output in its ``launched/`` folder, named after the launch. Ctrl+C
 stops watching, not the run; ``watch`` picks it up again and also copies the
 folder at the end, and ``fetch`` copies it at any time. ``watch`` and
 ``fetch`` take part of a run's name to choose an earlier run. Each run's file
@@ -145,10 +146,13 @@ def fetch_run(name: str) -> int:
         return 1
     LAPTOP_RUNS.mkdir(exist_ok=True)
     copied = scp("-r", f"{HOST}:{DESKTOP_RUNS}/{folder}", str(LAPTOP_RUNS))
-    copied = copied or scp(
-        f"{HOST}:{DESKTOP_RUNS}/launched/{name}.txt",
-        str(LAPTOP_RUNS / folder / "console.txt"),
-    )
+    # Every launch into the folder, training or evaluation, keeps its own
+    # configuration file and console output, named after the launch.
+    launched = LAPTOP_RUNS / folder / "launched"
+    launched.mkdir(exist_ok=True)
+    for suffix in (".toml", ".txt"):
+        source = f"{HOST}:{DESKTOP_RUNS}/launched/{name}{suffix}"
+        copied = copied or scp(source, str(launched / f"{name}{suffix}"))
     if copied:
         print(f"Copying runs/{folder} to the laptop failed; try 'fetch' again.")
         return 1
