@@ -6,7 +6,7 @@
     python -u scripts/run_queue.py runs/launched/<queue name>
 
 Every training file in the folder, in the order of their names, becomes one
-launched run, named ``<queue name>_<number>_<file name>``, with its file and
+launched run, named ``<queue name>_<file name>``, with its file and
 console output in ``runs/launched/`` like a run started with ``run``, so
 ``status``, ``watch``, and ``fetch`` know each one. If the folder also holds
 ``evaluation.toml``, each training run that finished is evaluated right after
@@ -81,7 +81,7 @@ def main() -> int:
     )
     outcomes = []
     for number, file in enumerate(files, 1):
-        name = f"{queue_folder.name}_{number:02d}_{file.stem}"
+        name = f"{queue_folder.name}_{file.stem}"
         print(
             f"\n=== {number}/{len(files)}  {file.stem}  (started"
             f" {datetime.now():%H:%M}, queue running for"
