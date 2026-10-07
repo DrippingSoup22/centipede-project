@@ -1,10 +1,12 @@
-# Baseline: the first, smallest training run on a Kaggle T4, against which
-# every later change is compared, one setting at a time (plan.md, Stage 8.4).
-# 64 worlds, eight 256-step windows, so eight updates from 16,384 samples
-# each. Episodes last four windows (1,024 steps, 20 s of simulated time), so
-# every world finishes at least two episodes and the report has episode values.
-# About 17 minutes, an estimate from the 256-world measurement; the run's
-# progress lines measure it.
+# Baseline: the first, small training run, against which later changes are
+# compared one setting at a time (plan.md, Stage 8.4). Every value is a
+# starting point to tune, not a rule.
+# - 64 worlds x 64-step windows = 4,096 samples per update.
+# - 32 cycles = 2,048 steps per world, so 32 updates.
+# - Episodes of 1,024 steps (20 s simulated): every world gets at least two.
+# - Minibatches of 512, so eight per pass over each update's samples.
+# About 17 minutes on a Kaggle T4, estimated from the 256-world measurement;
+# the run's progress lines measure it.
 #
 #   In notebooks/kaggle_training.ipynb: CONFIGURATION = "configs/baseline.toml"
 
@@ -12,7 +14,7 @@
 mode = "train"
 name = "baseline"
 seed = 1
-checkpoint_every_cycles = 4
+checkpoint_every_cycles = 8
 
 [environment]
 max_episode_steps = 1024
@@ -26,9 +28,8 @@ world_count = 64
 device = "cuda"
 
 [agents.ppo]
-# Eight minibatches per epoch: 64 worlds x 256 steps = 16,384 samples.
-minibatch_size = 2048
+minibatch_size = 512
 
 [interaction_loop]
-rollout_window_steps = 256
-update_cycles = 8
+rollout_window_steps = 64
+update_cycles = 32
