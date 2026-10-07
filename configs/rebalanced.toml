@@ -7,12 +7,12 @@
 # - efficiency 0.003 -> 0.01, so a step toward the goal is worth more;
 # - leg contact 0.005 -> 0.001, so an attempt that sometimes touches legs is no
 #   longer punished more than its progress gains.
-# Training is as in the baseline, but longer:
+# Training is as in the baseline, slightly longer:
 # - 64 worlds x 64-step rollout window = 4,096 samples per update cycle.
 # - 4 epochs x 8 minibatches of 512 = 32 gradient steps per update cycle.
-# - 256 update cycles x 64 steps = 16,384 steps per world, 16 episode lengths.
-# About 1 h 40 min on the RTX 3080 (23.5 s per update cycle, measured in the
-# baseline's second stage); a checkpoint every 32 update cycles.
+# - 48 update cycles x 64 steps = 3,072 steps per world, 3 episode lengths.
+# About 19 min on the RTX 3080 (23.5 s per update cycle, measured in the
+# baseline's second stage); a checkpoint every 8 update cycles.
 #
 #   python -m centipede configs/rebalanced.toml
 
@@ -20,7 +20,7 @@
 mode = "train"
 name = "rebalanced"
 seed = 1
-checkpoint_every_cycles = 32
+checkpoint_every_cycles = 8
 
 [environment]
 max_episode_steps = 1024
@@ -43,4 +43,4 @@ minibatch_size = 512
 
 [interaction_loop]
 rollout_window_steps = 64
-update_cycles = 256
+update_cycles = 48
