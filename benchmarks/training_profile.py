@@ -307,25 +307,24 @@ def instrument(
     wrap(loop.diagnostics.simulation_window, "add", "physics summary")
 
 
-_proxy_installed = False
-
-
 def install_mujoco_warp_proxy(timers: PhaseTimers) -> None:
-    """Time MuJoCo Warp's step and forward as the GPU backend calls them."""
-    global _proxy_installed
-    if _proxy_installed:
-        return
+    """Time MuJoCo Warp's step and forward as the GPU backend calls them.
+
+    Each world count has its own timers, so each gets a new proxy around the
+    real module.
+    """
+    import mujoco_warp
+
     from centipede.environment.simulation import gpu_backend
 
-    proxy = ModuleProxy(gpu_backend.mjw)
-    proxy.step = gpu_backend.mjw.step
-    proxy.forward = gpu_backend.mjw.forward
-    proxy.reset_data = gpu_backend.mjw.reset_data
+    proxy = ModuleProxy(mujoco_warp)
+    proxy.step = mujoco_warp.step
+    proxy.forward = mujoco_warp.forward
+    proxy.reset_data = mujoco_warp.reset_data
     timers.wrap(proxy, "step", "MuJoCo Warp step")
     timers.wrap(proxy, "forward", "MuJoCo Warp forward")
     timers.wrap(proxy, "reset_data", "MuJoCo Warp reset")
     gpu_backend.mjw = proxy
-    _proxy_installed = True
 
 
 # -- One world count ------------------------------------------------------------------

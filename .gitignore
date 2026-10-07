@@ -16,6 +16,10 @@ dist/
 # Generated experiment outputs stay local unless deliberately archived.
 /runs/
 
+# Benchmark and profile results, one folder per measurement, also stay local;
+# plan.md records what they showed.
+/benchmarks/results/
+
 # Superseded project artifacts are retained locally, outside version control.
 /archive/
 

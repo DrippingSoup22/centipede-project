@@ -66,11 +66,13 @@ Centipede/
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
 ├─ notebooks/        Kaggle notebooks that run the project on a cloud GPU
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
+│  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
 └─ runs/             Training and evaluation results; local only
 ```
 
-`runs/` and `archive/` stay on this computer and are not part of the repository.
+`runs/`, `benchmarks/results/`, and `archive/` stay on this computer and are not
+part of the repository.
 Back up results that must survive separately.
 
 ## Setup
