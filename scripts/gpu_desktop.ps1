@@ -15,7 +15,7 @@ Set-Location $Project
 function Update-Code {
     git pull --ff-only -q
     if ($LASTEXITCODE) { Write-Output 'git pull failed on the desktop'; exit 1 }
-    Write-Output ('desktop at ' + (git log --oneline -1))
+    Write-Output ('code ' + (git log --oneline -1))
 }
 
 function Invoke-Tests {
@@ -45,7 +45,11 @@ function Test-Running($name) {
 # its line with carriage returns, and only the last drawing stays. Lines end
 # in CR LF, as Python writes them to a file on Windows.
 function Get-ShownLines($console, $count) {
-    $text = [IO.File]::ReadAllText($console).Replace("`r`n", "`n")
+    # Opened for sharing, since a running run is still writing it.
+    $stream = [IO.File]::Open($console, 'Open', 'Read', 'ReadWrite')
+    $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)
+    $text = $reader.ReadToEnd().Replace("`r`n", "`n")
+    $reader.Close()
     $lines = $text.TrimEnd("`n").Split("`n") | ForEach-Object { $_.Split("`r")[-1] }
     $lines | Select-Object -Last $count
 }
@@ -102,11 +106,11 @@ function Start-Run($name, $configurationCopy, $alongside) {
     $started = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
         -Arguments @{ CommandLine = $command; CurrentDirectory = $Project }
     if ($started.ReturnValue) { Write-Output 'the run could not be started'; exit 1 }
-    Write-Output "started $name"
 }
 
 # Passes a run's output through as it is written, from its start, carriage
-# returns included, until its end line; exits with the run's exit code.
+# returns included, until its end line, which it leaves out; exits with the
+# run's exit code.
 function Watch-Run($name) {
     $console = "$Launched\$name.txt"
     for ($wait = 0; -not (Test-Path $console) -and $wait -lt 30; $wait++) {
@@ -122,7 +126,7 @@ function Watch-Run($name) {
         $count = $reader.Read($buffer, 0, $buffer.Length)
         if ($count -gt 0) {
             $text = [string]::new($buffer, 0, $count)
-            [Console]::Out.Write($text)
+            [Console]::Out.Write(($text -replace "$EndMarker -?\d+\r?\n?", ''))
             [Console]::Out.Flush()
             $recent = $recent + $text
             if ($recent.Length -gt 400) { $recent = $recent.Substring($recent.Length - 400) }

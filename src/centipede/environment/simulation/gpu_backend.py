@@ -27,6 +27,11 @@ from centipede.environment.simulation.model_mapping import (
 )
 from centipede.environment.simulation.physical_state import PhysicalState
 
+# Warp otherwise prints a banner when it starts and a line for every kernel it
+# loads, which bury the training's own output. The training profile measures
+# the start-up time itself.
+wp.config.quiet = True
+
 SOLVERS = {"newton": mujoco.mjtSolver.mjSOL_NEWTON, "cg": mujoco.mjtSolver.mjSOL_CG}
 # MuJoCo Warp's per-world overflow bits that mean data was dropped. The solver's
 # iteration-limit bits are only notices, so they are not checked.

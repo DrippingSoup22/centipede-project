@@ -139,6 +139,18 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     total_cycles = loop_settings.update_cycles
     print(f"Run folder: {folder.path}")
+    cycles = (
+        f"cycles {completed_cycles + 1} to {total_cycles}"
+        if completed_cycles
+        else f"{total_cycles} cycles"
+    )
+    print(
+        f"{environment.world_count} worlds"
+        f" ({configuration.environment.simulation.backend} physics,"
+        f" agents on {configuration.agents.device}), {cycles} of"
+        f" {loop_settings.rollout_window_steps} steps, episodes of up to"
+        f" {configuration.environment.max_episode_steps:,} steps\n"
+    )
     if completed_cycles >= total_cycles:
         print(f"Already {completed_cycles} of {total_cycles} cycles; nothing to do.")
         return folder.path
@@ -223,7 +235,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 f' continue_from = "{folder.path.as_posix()}".'
             )
             return folder.path
-    print(f"Finished: {folder.path}")
+    session_cycles = total_cycles - completed_cycles
+    print(
+        f"\nFinished {session_cycles} cycles in"
+        f" {duration(time.monotonic() - session_start)}: {folder.path}"
+    )
     return folder.path
 
 

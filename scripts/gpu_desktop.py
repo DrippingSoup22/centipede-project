@@ -121,17 +121,17 @@ def on_desktop(call: str, watching: bool = False) -> int:
     return exit_code
 
 
-def desktop_answer(call: str) -> str:
-    """Make one call and return its output."""
+def desktop_answer(call: str) -> tuple[int, str]:
+    """Make one call; its exit code and output."""
     answer = subprocess.run(ssh_command(call), capture_output=True)
     if answer.returncode == SSH_UNREACHABLE:
         unreachable()
-    return answer.stdout.decode("utf-8", errors="replace").strip()
+    return answer.returncode, answer.stdout.decode("utf-8", errors="replace").strip()
 
 
 def find_run(pattern: str | None) -> str:
     """The name of the latest launched run whose name contains ``pattern``."""
-    name = desktop_answer(f"Find-Run '{(pattern or '').replace(chr(39), '')}'")
+    _, name = desktop_answer(f"Find-Run '{(pattern or '').replace(chr(39), '')}'")
     if not name:
         sys.exit("No launched run matches." if pattern else "No run was launched yet.")
     return name
@@ -139,11 +139,10 @@ def find_run(pattern: str | None) -> str:
 
 def fetch_run(name: str) -> int:
     """Copy a launched run's folder and console output into the laptop's runs."""
-    folder = desktop_answer(f"Get-RunFolder '{name}'")
+    _, folder = desktop_answer(f"Get-RunFolder '{name}'")
     if not folder:
         print(f"{name} wrote no run folder; its output is in runs/launched there.")
         return 1
-    print(f"\nCopying {folder} into runs/ ...", end=" ", flush=True)
     LAPTOP_RUNS.mkdir(exist_ok=True)
     copied = scp("-r", f"{HOST}:{DESKTOP_RUNS}/{folder}", str(LAPTOP_RUNS))
     copied = copied or scp(
@@ -151,22 +150,22 @@ def fetch_run(name: str) -> int:
         str(LAPTOP_RUNS / folder / "console.txt"),
     )
     if copied:
-        print("failed; try 'fetch' again.")
+        print(f"Copying runs/{folder} to the laptop failed; try 'fetch' again.")
         return 1
-    report = LAPTOP_RUNS / folder / "report.html"
-    print("done.")
-    print(f"  {LAPTOP_RUNS / folder}")
-    if report.exists():
-        print(f"  report: {report}")
+    print(f"Copied to the laptop: runs/{folder}")
+    if (LAPTOP_RUNS / folder / "report.html").exists():
+        print(f"  report: runs/{folder}/report.html")
     return 0
 
 
 def watch_and_fetch(name: str) -> int:
     """Follow a run's output to its end, then copy its folder here."""
-    print(f"Watching {name}; Ctrl+C stops watching, not the run.\n")
     exit_code = on_desktop(f"Watch-Run '{name}'", watching=True)
     if exit_code in (INTERRUPTED, SSH_UNREACHABLE):
         return exit_code
+    if exit_code:
+        print(f"\nThe run failed (exit code {exit_code}); its last lines are above.")
+    print()
     fetch_run(name)
     return exit_code
 
@@ -203,17 +202,27 @@ def run(arguments: argparse.Namespace) -> int:
     if scp(str(configuration_path), f"{HOST}:{CONFIGURATION_COPY}"):
         unreachable()
     alongside = "$true" if arguments.alongside else "$false"
-    exit_code = on_desktop(
+    exit_code, answer = desktop_answer(
         f"Start-Run '{name}' (Join-Path $HOME '{CONFIGURATION_COPY}') {alongside}"
     )
-    if exit_code or arguments.detach:
+    if exit_code:
+        print(answer)
         return exit_code
-    print()
+    code = answer.removeprefix("code ")
+    print(f"Started {name} on the GPU desktop")
+    print(f"  configuration  {configuration_path.as_posix()}")
+    print(f"  code           {code}")
+    if arguments.detach:
+        print("Follow it with 'watch'; its results are copied here at the end.")
+        return 0
+    print("Ctrl+C stops watching; the run goes on.\n")
     return watch_and_fetch(name)
 
 
 def watch(arguments: argparse.Namespace) -> int:
-    return watch_and_fetch(find_run(arguments.name))
+    name = find_run(arguments.name)
+    print(f"Watching {name}; Ctrl+C stops watching, not the run.\n")
+    return watch_and_fetch(name)
 
 
 def fetch(arguments: argparse.Namespace) -> int:
