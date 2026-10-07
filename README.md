@@ -64,6 +64,7 @@ Centipede/
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
+├─ scripts/          Controlling the GPU desktop from the laptop
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
@@ -129,6 +130,34 @@ transitions per second at 1,024 worlds, two and a half times a Kaggle T4. The
 laptop, whose MX330 cannot run the default solver, is used to write code, run
 the CPU tests, and read the results. Training on Kaggle was used until Stage
 8.4; its notebooks are in the local archive.
+
+The laptop controls the desktop over SSH, through
+[`scripts/gpu_desktop.py`](scripts/gpu_desktop.py), run from the repository
+root with the project's Python:
+
+```powershell
+python scripts/gpu_desktop.py tests
+python scripts/gpu_desktop.py run configs/baseline.toml
+python scripts/gpu_desktop.py status
+```
+
+`run` makes the desktop pull the pushed code, sends it the configuration file
+as it is on the laptop, and starts the run there, independently of the SSH
+connection; `status` shows the running runs and the latest output, and `stop`
+stops them. The desktop's `runs/` and `benchmarks/results/` folders are kept in
+step with the laptop's by Syncthing, so a run's report appears on the laptop
+while the run is still writing it.
+
+Setting this up once: on the desktop, install Windows' OpenSSH Server, start
+the `sshd` service automatically, make Windows PowerShell its default shell,
+and set the network profile to Private (the SSH firewall rule covers only
+private networks). On the laptop, create a key with `ssh-keygen -t ed25519`,
+add its public half to the desktop's
+`C:\ProgramData\ssh\administrators_authorized_keys` (the file Windows reads
+for administrator accounts), and name the desktop `gpu` in `~/.ssh/config`
+with its address and user. The script expects the desktop's projects in
+`~\Projects` and its environment in `~\.venvs\Centipede`; another host name
+can be given in `CENTIPEDE_GPU_HOST`.
 
 ## Archive
 
