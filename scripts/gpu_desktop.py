@@ -2,27 +2,29 @@
 
 The desktop holds its own copy of this repository, RL_lib, and MujocoReplay,
 and its own Python environment (README, Setup). This script, run on the
-laptop, sends it commands:
+laptop from the repository root with the project's Python, sends it commands:
 
-    python scripts/gpu_desktop.py update      # git pull on the desktop
-    python scripts/gpu_desktop.py tests       # pull, then run the tests there
-    python scripts/gpu_desktop.py run configs/baseline.toml
-    python scripts/gpu_desktop.py status      # running runs, latest output
-    python scripts/gpu_desktop.py stop        # stop every running run
+    python scripts/gpu_desktop.py run configs/baseline.toml   # start, then watch
+    python scripts/gpu_desktop.py watch          # follow the latest run's output
+    python scripts/gpu_desktop.py status         # running and recent runs
+    python scripts/gpu_desktop.py stop           # stop every running run
+    python scripts/gpu_desktop.py tests          # pull, then run the tests there
+    python scripts/gpu_desktop.py update         # git pull on the desktop
 
-Run it from the repository root, with the project's Python environment.
+``run`` pulls the pushed code, sends the laptop's configuration file as it is,
+so a changed setting needs no commit, and starts the run. It then shows the
+run's output as it is written, until the run ends; Ctrl+C stops watching, not
+the run, and ``watch`` picks it up again. Each run's file and console output
+are kept in the desktop's ``runs/launched/``; the output ends with the run's
+exit code. Its run folder in ``runs/`` reaches the laptop through the folder
+synchronisation (README, Training machine).
 
-``run`` pulls the pushed code, then sends the laptop's configuration file as it
-is, so a changed setting needs no commit. The file and the run's console
-output are kept in the desktop's ``runs/launched/``. The run is started by
-Windows' process service rather than by the SSH session, because Windows
-stops everything an SSH session started when it disconnects; the run keeps
-going after this script returns. Its folder in ``runs/`` reaches the laptop
-through the folder synchronisation (README, Training machine).
-
-``CENTIPEDE_GPU_HOST`` names the desktop; by default ``gpu``, an alias in
-``~/.ssh/config``. Every command goes to the desktop's Windows PowerShell,
-encoded, so that nothing in it needs quoting twice.
+What runs on the desktop is ``gpu_desktop.ps1``: every command first copies
+it, and ``run`` its configuration file, into the desktop's home folder with
+scp, then sends one short call to its functions, encoded so that nothing
+needs quoting twice. The whole file does not fit in one command: Windows cuts
+commands that long. ``CENTIPEDE_GPU_HOST`` names the desktop; by default
+``gpu``, an alias in ``~/.ssh/config``.
 """
 
 import argparse
@@ -38,35 +40,67 @@ from centipede.settings_section import SettingsError
 
 HOST = os.environ.get("CENTIPEDE_GPU_HOST", "gpu")
 REPOSITORY = Path(__file__).resolve().parents[1]
-# PowerShell expands $HOME on the desktop.
-REMOTE_PROJECT = r"$HOME\Projects\Centipede"
-REMOTE_PYTHON = r"$HOME\.venvs\Centipede\Scripts\python.exe"
+DESKTOP_FUNCTIONS = Path(__file__).with_suffix(".ps1")
+# Where the copied files land, in the desktop user's home folder.
+DESKTOP_FUNCTIONS_COPY = ".centipede_gpu_desktop.ps1"
+CONFIGURATION_COPY = ".centipede_configuration.toml"
 # Code that must be pushed before the desktop can run it; configuration files
 # are sent as they are.
 CODE_PATHS = ("src", "models", "tests", "benchmarks", "pyproject.toml")
-CONSOLE_LINES_SHOWN = 8
-
-PRELUDE = """
-$ProgressPreference = 'SilentlyContinue'
-Set-Location "{project}"
-function Update-Code {{
-    git pull --ff-only -q
-    if ($LASTEXITCODE) {{ Write-Output 'git pull failed on the desktop'; exit 1 }}
-    Write-Output ("desktop at " + (git log --oneline -1))
-}}
-function Get-Runs {{
-    Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
-        Where-Object {{ $_.CommandLine -like '*-m centipede*' }}
-}}
-"""
+RECENT_RUNS_SHOWN = 5
+OUTPUT_LINES_SHOWN = 6
+SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
+SSH_UNREACHABLE = 255
+INTERRUPTED = 130
 
 
-def remote(script: str) -> int:
-    """Run ``script`` in the desktop's PowerShell, in the project; its exit code."""
-    full_script = PRELUDE.format(project=REMOTE_PROJECT) + script
-    encoded = base64.b64encode(full_script.encode("utf-16-le")).decode("ascii")
-    command = f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
-    return subprocess.run(["ssh", "-o", "BatchMode=yes", HOST, command]).returncode
+def unreachable() -> None:
+    sys.exit(
+        f"Could not reach the desktop ({HOST}): is it on and awake, and is its"
+        " SSH server running?"
+    )
+
+
+def copy_to_desktop(source: Path, destination: str) -> None:
+    """Copy one file into the desktop user's home folder."""
+    command = ["scp", "-q", *SSH_OPTIONS, str(source), f"{HOST}:{destination}"]
+    if subprocess.run(command).returncode:
+        unreachable()
+
+
+def on_desktop(call: str, watching: bool = False) -> int:
+    """Run one call to the desktop's functions, printing its output as it comes."""
+    copy_to_desktop(DESKTOP_FUNCTIONS, DESKTOP_FUNCTIONS_COPY)
+    # Quiet before anything loads, or PowerShell reports loading its modules.
+    script = (
+        "$ProgressPreference = 'SilentlyContinue'\n"
+        f". (Join-Path $HOME '{DESKTOP_FUNCTIONS_COPY}')\n{call}"
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    command = (
+        "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass"
+        f" -EncodedCommand {encoded}"
+    )
+    ssh = subprocess.Popen(["ssh", *SSH_OPTIONS, HOST, command], stdout=subprocess.PIPE)
+    assert ssh.stdout is not None
+    try:
+        for line in ssh.stdout:
+            print(line.decode("utf-8", errors="replace"), end="", flush=True)
+    except KeyboardInterrupt:
+        ssh.terminate()
+        if watching:
+            print(
+                "\nStopped watching; the run goes on. Follow it again with"
+                " 'watch', or stop it with 'stop'."
+            )
+        return INTERRUPTED
+    exit_code = ssh.wait()
+    if exit_code == SSH_UNREACHABLE:
+        # The copy just reached the desktop, so the connection broke on the way.
+        print("\nThe connection to the desktop was lost.", file=sys.stderr)
+        if watching:
+            print("The run goes on; follow it again with 'watch'.", file=sys.stderr)
+    return exit_code
 
 
 def git(*arguments: str) -> str:
@@ -90,16 +124,6 @@ def require_pushed_code() -> None:
         )
 
 
-def update(_: argparse.Namespace) -> int:
-    require_pushed_code()
-    return remote("Update-Code")
-
-
-def tests(_: argparse.Namespace) -> int:
-    require_pushed_code()
-    return remote(f'Update-Code\n& "{REMOTE_PYTHON}" -m pytest -q\nexit $LASTEXITCODE')
-
-
 def run(arguments: argparse.Namespace) -> int:
     configuration_path: Path = arguments.configuration
     try:
@@ -108,69 +132,66 @@ def run(arguments: argparse.Namespace) -> int:
         sys.exit(f"Configuration error: {error}")
     require_pushed_code()
     name = f"{datetime.now():%Y-%m-%d_%H%M%S}_{configuration_path.stem}"
-    content = base64.b64encode(configuration_path.read_bytes()).decode("ascii")
-    return remote(f"""
-Update-Code
-$launched = Join-Path (Get-Location) 'runs\\launched'
-New-Item -ItemType Directory -Force $launched | Out-Null
-$file = Join-Path $launched '{name}.toml'
-$console = Join-Path $launched '{name}.txt'
-[IO.File]::WriteAllBytes($file, [Convert]::FromBase64String('{content}'))
-$python = "{REMOTE_PYTHON}"
-$command = 'cmd /c "set PYTHONUTF8=1&& "' + $python + '" -u -m centipede "' +
-    $file + '" > "' + $console + '" 2>&1"'
-$started = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{{
-    CommandLine = $command; CurrentDirectory = (Get-Location).Path }}
-if ($started.ReturnValue) {{ Write-Output 'the run could not be started'; exit 1 }}
-Write-Output "started {name}; its output: runs\\launched\\{name}.txt"
-""")
+    copy_to_desktop(configuration_path, CONFIGURATION_COPY)
+    alongside = "$true" if arguments.alongside else "$false"
+    exit_code = on_desktop(
+        f"Start-Run '{name}' (Join-Path $HOME '{CONFIGURATION_COPY}') {alongside}"
+    )
+    if exit_code or arguments.detach:
+        return exit_code
+    print("Its output follows; Ctrl+C stops watching, not the run.\n")
+    return on_desktop(f"Watch-Run '{name}' $false", watching=True)
+
+
+def watch(arguments: argparse.Namespace) -> int:
+    pattern = (arguments.name or "").replace("'", "")
+    return on_desktop(f"Watch-Latest '{pattern}' {OUTPUT_LINES_SHOWN}", watching=True)
 
 
 def status(_: argparse.Namespace) -> int:
-    return remote(f"""
-$runs = @(Get-Runs)
-if ($runs.Count) {{
-    foreach ($run in $runs) {{
-        Write-Output ("running since " + $run.CreationDate.ToString('HH:mm') +
-            ": " + ($run.CommandLine -replace '^.*-m centipede ', ''))
-    }}
-}} else {{ Write-Output 'no run is running' }}
-$latest = Get-ChildItem runs\\launched\\*.txt -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime | Select-Object -Last 1
-if ($latest) {{
-    Write-Output ""
-    Write-Output ("latest output, " + $latest.Name + ":")
-    Get-Content $latest.FullName -Tail {CONSOLE_LINES_SHOWN}
-}}
-exit 0
-""")
+    return on_desktop(f"Show-Status {RECENT_RUNS_SHOWN} {OUTPUT_LINES_SHOWN}")
 
 
 def stop(_: argparse.Namespace) -> int:
-    return remote("""
-$runs = @(Get-Runs)
-foreach ($run in $runs) { Stop-Process -Id $run.ProcessId -Force }
-Write-Output ("stopped " + $runs.Count + " run(s); each keeps its last checkpoint")
-exit 0
-""")
+    return on_desktop("Stop-Runs")
+
+
+def tests(_: argparse.Namespace) -> int:
+    require_pushed_code()
+    return on_desktop("Invoke-Tests")
+
+
+def update(_: argparse.Namespace) -> int:
+    require_pushed_code()
+    return on_desktop("Update-Code")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(required=True)
-    commands.add_parser("update", help="git pull on the desktop").set_defaults(
-        action=update
-    )
-    commands.add_parser("tests", help="pull, then run the tests").set_defaults(
-        action=tests
-    )
-    run_parser = commands.add_parser("run", help="pull, then start a run")
+    run_parser = commands.add_parser("run", help="pull, start a run, and watch it")
     run_parser.add_argument("configuration", type=Path, help="a TOML file")
-    run_parser.set_defaults(action=run)
-    commands.add_parser("status", help="running runs and latest output").set_defaults(
-        action=status
+    run_parser.add_argument(
+        "--detach", action="store_true", help="start the run without watching it"
     )
-    commands.add_parser("stop", help="stop every running run").set_defaults(action=stop)
+    run_parser.add_argument(
+        "--alongside",
+        action="store_true",
+        help="start even if another run is running; they share the GPU",
+    )
+    run_parser.set_defaults(action=run)
+    watch_parser = commands.add_parser("watch", help="follow a run's output")
+    watch_parser.add_argument(
+        "name", nargs="?", help="part of the run's name; by default the latest run"
+    )
+    watch_parser.set_defaults(action=watch)
+    for name, action, description in (
+        ("status", status, "running and recent runs"),
+        ("stop", stop, "stop every running run"),
+        ("tests", tests, "pull, then run the tests"),
+        ("update", update, "git pull on the desktop"),
+    ):
+        commands.add_parser(name, help=description).set_defaults(action=action)
     arguments = parser.parse_args()
     sys.exit(arguments.action(arguments))
 

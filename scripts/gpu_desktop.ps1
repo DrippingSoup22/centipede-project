@@ -1,0 +1,159 @@
+# What scripts/gpu_desktop.py runs on the GPU desktop. The laptop copies this
+# file into the desktop's home folder before every command, then calls one of
+# the functions below over SSH.
+
+$ProgressPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+$Project = "$HOME\Projects\Centipede"
+$Python = "$HOME\.venvs\Centipede\Scripts\python.exe"
+$Launched = "$Project\runs\launched"
+# The last line of every run's output, written after its process ends,
+# followed by the exit code.
+$EndMarker = 'run ended with exit code'
+Set-Location $Project
+
+function Update-Code {
+    git pull --ff-only -q
+    if ($LASTEXITCODE) { Write-Output 'git pull failed on the desktop'; exit 1 }
+    Write-Output ('desktop at ' + (git log --oneline -1))
+}
+
+function Invoke-Tests {
+    Update-Code
+    & $Python -m pytest -q
+    exit $LASTEXITCODE
+}
+
+# The running training or evaluation processes: two per run, because a
+# virtual environment's python.exe starts the real interpreter as a second
+# process with the same arguments.
+function Get-Runs {
+    Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" |
+        Where-Object { $_.CommandLine -like '*-m centipede*' }
+}
+
+# A run's name is its configuration file's name in runs\launched.
+function Get-RunName($process) {
+    [IO.Path]::GetFileNameWithoutExtension(($process.CommandLine -split '"')[-2])
+}
+
+function Test-Running($name) {
+    [bool](Get-Runs | Where-Object { (Get-RunName $_) -eq $name })
+}
+
+function Get-RunState($console) {
+    if (Test-Running $console.BaseName) { return 'running' }
+    $last = Get-Content $console.FullName -Tail 1
+    if ($last -eq "$EndMarker 0") { return 'finished' }
+    if ($last -like "$EndMarker *") {
+        return 'failed, exit code ' + $last.Split(' ')[-1]
+    }
+    if ($last -eq 'stopped from the laptop') { return 'stopped' }
+    'ended without its last line'
+}
+
+# Starts a run from the configuration file the laptop copied, detached from
+# the SSH session: Windows stops what an SSH session started when it disconnects, but
+# not what its process service (WMI) starts. cmd's !errorlevel!, with /v:on,
+# is read after the run has ended.
+function Start-Run($name, $configurationCopy, $alongside) {
+    $running = @(Get-Runs)
+    if ($running.Count -and -not $alongside) {
+        $names = ($running | ForEach-Object { Get-RunName $_ } | Sort-Object -Unique) -join ', '
+        Write-Output "already running: $names"
+        Write-Output ('Two runs share the GPU and slow each other;' +
+            ' add --alongside to start anyway.')
+        exit 1
+    }
+    Update-Code
+    New-Item -ItemType Directory -Force $Launched | Out-Null
+    $file = "$Launched\$name.toml"
+    $console = "$Launched\$name.txt"
+    Move-Item -Force $configurationCopy $file
+    $command = "cmd /v:on /c `"set PYTHONUTF8=1&& `"$Python`" -u -m centipede " +
+        "`"$file`" > `"$console`" 2>&1 & echo $EndMarker !errorlevel!>> `"$console`"`""
+    $started = Invoke-CimMethod -ClassName Win32_Process -MethodName Create `
+        -Arguments @{ CommandLine = $command; CurrentDirectory = $Project }
+    if ($started.ReturnValue) { Write-Output 'the run could not be started'; exit 1 }
+    Write-Output "started $name"
+}
+
+# Prints a run's output as it is written, until its end line; exits with the
+# run's exit code.
+function Watch-Run($name, $onlyNewLines) {
+    $console = "$Launched\$name.txt"
+    for ($wait = 0; -not (Test-Path $console) -and $wait -lt 30; $wait++) {
+        Start-Sleep 1
+    }
+    if (-not (Test-Path $console)) { Write-Output "no output for $name"; exit 1 }
+    $stream = [IO.File]::Open($console, 'Open', 'Read', 'ReadWrite')
+    $reader = New-Object IO.StreamReader($stream, [Text.Encoding]::UTF8)
+    if ($onlyNewLines) { [void]$reader.ReadToEnd() }
+    while ($true) {
+        $line = $reader.ReadLine()
+        if ($null -ne $line) {
+            [Console]::Out.WriteLine($line)
+            [Console]::Out.Flush()
+            if ($line -like "$EndMarker *") { exit [int]$line.Split(' ')[-1] }
+            continue
+        }
+        if (-not (Test-Running $name)) {
+            Start-Sleep 2
+            $rest = $reader.ReadToEnd()
+            if ($rest) { [Console]::Out.Write($rest) }
+            Write-Output 'the run is no longer running'
+            exit 1
+        }
+        Start-Sleep 1
+    }
+}
+
+# The latest run whose name contains $pattern: its last lines, then its new
+# ones while it runs.
+function Watch-Latest($pattern, $linesShown) {
+    $consoles = @(Get-ChildItem "$Launched\*$pattern*.txt" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime)
+    if (-not $consoles.Count) { Write-Output 'no launched run matches'; exit 1 }
+    $chosen = $consoles[-1]
+    $state = Get-RunState $chosen
+    Write-Output "$($chosen.BaseName) ($state):"
+    Get-Content $chosen.FullName -Tail $linesShown
+    if ($state -ne 'running') { exit 0 }
+    Watch-Run $chosen.BaseName $true
+}
+
+function Show-Status($recentShown, $linesShown) {
+    $running = @(Get-Runs | Group-Object { Get-RunName $_ })
+    foreach ($run in $running) {
+        $since = ($run.Group | Sort-Object CreationDate)[0].CreationDate.ToString('HH:mm')
+        Write-Output "running since ${since}: $($run.Name)"
+    }
+    if (-not $running.Count) { Write-Output 'no run is running' }
+    $consoles = @(Get-ChildItem "$Launched\*.txt" -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime | Select-Object -Last $recentShown)
+    if ($consoles.Count) {
+        Write-Output ''
+        Write-Output 'recent runs:'
+        foreach ($console in $consoles) {
+            Write-Output "  $($console.BaseName): $(Get-RunState $console)"
+        }
+        Write-Output ''
+        Write-Output "latest output, $($consoles[-1].BaseName):"
+        Get-Content $consoles[-1].FullName -Tail $linesShown
+    }
+    exit 0
+}
+
+function Stop-Runs {
+    $running = @(Get-Runs | Group-Object { Get-RunName $_ })
+    foreach ($run in $running) {
+        $run.Group | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep 1
+        Add-Content "$Launched\$($run.Name).txt" 'stopped from the laptop'
+        Write-Output "stopped $($run.Name); it keeps its last checkpoint"
+    }
+    if (-not $running.Count) { Write-Output 'no run is running' }
+    exit 0
+}
