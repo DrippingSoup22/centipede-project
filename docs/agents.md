@@ -39,7 +39,7 @@ run's seed. It works for any number of segments.
 
 During evaluation, `act` is called with `training` off: each segment agent
 returns its policy's mean action, without changing its normaliser or
-remembering anything, and nothing is recorded or learned. The mean shows what
+remembering anything, and nothing is stored or learned. The mean shows what
 the policy has learned, without the exploration noise added in training. For
 comparison, the front file also provides two baselines
 with the same `act`: one that always returns zero actions and one that returns

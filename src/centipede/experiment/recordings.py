@@ -21,6 +21,7 @@ from centipede.experiment.run_folder import RunFolder
 from centipede.interaction_loop.recording import RecordedWindow
 
 SCORE_NAME = "summed reward"
+FIRST_EPISODE_SCORE_NAME = "first episode's summed reward"
 TARGET_MARKER = "target"
 
 
@@ -67,6 +68,9 @@ def training_recording(
         world_ids=window.world_ids,
         level=window.level,
         episode_start=window.episode_start,
+        level_count=window.level_count,
+        rank=window.rank,
+        ranked_worlds=window.ranked_worlds,
         marker_names=(TARGET_MARKER,),
         marker_positions=_target_markers(window.target, scene.marker_radius),
         marker_radius=np.array([scene.marker_radius]),
@@ -100,15 +104,19 @@ def evaluation_recording(
     configuration: Configuration,
     folder: RunFolder,
 ) -> Recording:
-    """Every world's first episode of one actor and seed, and what followed."""
+    """Every world's first episode of one actor and seed, and what followed.
+
+    Worlds are scored and ranked by their first episode only, as in the
+    evaluation's results. The file holds every world, so its order is the
+    run's ranking and levels would say nothing.
+    """
     return Recording(
         model_xml=scene.model_xml,
         frame_seconds=scene.frame_seconds,
         qpos=window.qpos,
         score=window.score,
-        score_name=SCORE_NAME,
+        score_name=FIRST_EPISODE_SCORE_NAME,
         world_ids=window.world_ids,
-        level=window.level,
         episode_start=window.episode_start,
         marker_names=(TARGET_MARKER,),
         marker_positions=_target_markers(window.target, scene.marker_radius),

@@ -177,9 +177,17 @@ the episode summary's `episode_ended` are kept alongside. These are a few small
 tensor operations that never wait for the GPU. After the window, between
 cycles, the experiment takes the chosen worlds and writes the file: the worlds
 are ranked by their summed reward and chosen by level with MujocoReplay's
-`selected_ranks`, so that the best, the middle, and the worst are all present
+`selected_ranks`, so that the file holds the best, the middle, and the worst
 (`record_levels` and `record_per_level` in [configuration.md](configuration.md#training-files)).
-Only the chosen worlds are copied to the CPU.
+Only the chosen worlds are copied to the CPU. Each file also gives every
+world's rank among all the run's worlds and the number of levels, so the viewer
+shows, for example, "rank 37 of 1,024" and "level 2 of 4". The viewer's
+default view shows the best world of each of 16 bands, which leaves out the
+worst world of a file of 4 levels × 8 worlds; showing all 32 includes it.
+
+An evaluation's recording holds every world, ranked by the summed reward of its
+first episode only, as in the evaluation's results; the frames continue until
+the last world's first episode has ended.
 
 The file format belongs to the sibling MujocoReplay project, which replays
 the files (`../MujocoReplay/docs/recording-format.md`); `experiment/recordings.py`

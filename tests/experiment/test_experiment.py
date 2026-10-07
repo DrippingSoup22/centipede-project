@@ -79,6 +79,8 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     recording = read_recording(folder / "recordings" / "cycle_0003.npz")
     assert recording.qpos.shape == (2, 2, 69)
     assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
+    assert (recording.rank.tolist(), recording.ranked_worlds) == ([1, 2], 2)
+    assert recording.level_count == 4
     assert recording.marker_positions.shape == (2, 2, 1, 3)
     assert recording.frame_info[:, 0].tolist() == [2, 2]  # updates done
     assert recording.frame_info[:, 1].tolist() == [5, 6]  # steps per world
@@ -126,6 +128,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     )
     assert first_episodes.qpos.shape[1:] == (2, 69)
     assert first_episodes.frame_info is None and first_episodes.event_frames is None
+    assert first_episodes.level is None and first_episodes.rank is None
     assert first_episodes.setup["actor"] == "agents"
     results = json.loads(results_path.read_text())["results"]
     assert list(results) == ["agents", "zero action"]

@@ -22,7 +22,7 @@ def make_recorder():
     return WindowRecorder(diagnostics, WORLDS), diagnostics
 
 
-def take_steps(recorder, diagnostics, rewards_per_world, start_frame=0):
+def take_steps(recorder, diagnostics, rewards_per_world, start_frame=0, counted=None):
     """Steps with each world's reward; world 1 restarts an episode at frame 1."""
     for frame, reward in enumerate(rewards_per_world, start=start_frame):
         diagnostics.simulation.qpos.copy_(
@@ -35,7 +35,7 @@ def take_steps(recorder, diagnostics, rewards_per_world, start_frame=0):
         diagnostics.episode.episode_ended.copy_(
             torch.tensor([False, frame == 1, False])
         )
-        recorder.step_taken()
+        recorder.step_taken(counted)
 
 
 def test_only_armed_windows_are_recorded_and_worlds_are_ranked():
@@ -53,6 +53,11 @@ def test_only_armed_windows_are_recorded_and_worlds_are_ranked():
     # Best world 1, then the worst band's first rank (world 2), best first.
     assert window.world_ids.tolist() == [1, 2]
     assert window.level.tolist() == [1, 2]
+    assert (window.rank.tolist(), window.ranked_worlds, window.level_count) == (
+        [1, 3],
+        3,
+        2,
+    )
     np.testing.assert_allclose(window.score, [4.0, -2.0])
     assert window.qpos.shape == (2, 2, POSITIONS)
     np.testing.assert_allclose(window.qpos[1, 0], [12.0, 13.0])  # frame 1, world 1
@@ -78,3 +83,16 @@ def test_first_and_all_keep_the_asked_worlds_with_their_levels():
     everything = recorder.take(levels=3, per_level=1, selection="all")
     assert everything.world_ids.tolist() == [1, 0, 2]
     assert everything.level.tolist() == [1, 2, 3]
+
+
+def test_only_counted_worlds_add_to_their_score():
+    recorder, diagnostics = make_recorder()
+    recorder.arm(frames=2)
+    recorder.start_window()
+    take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]])
+    # World 1's first episode has ended: its later rewards do not count.
+    counted = torch.tensor([True, False, True])
+    take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]], 1, counted)
+    window = recorder.take(levels=1, per_level=3, selection="all")
+    assert window.world_ids.tolist() == [1, 0, 2]
+    np.testing.assert_allclose(window.score, [2.0, 1.0, -2.0])

@@ -117,7 +117,7 @@ not counted as collecting or learning.
 
 `evaluate(actor, seed)` resets the environment with the seed and runs until
 every world has finished its first episode. The actor is the trained agents or
-one of the baselines; it acts without exploration, and nothing is recorded or
+one of the baselines; it acts without exploration, and nothing is stored or
 learned. Worlds that finish early start new episodes as usual, but only each
 world's first episode counts in the diagnostics. The experiment calls it once
 per seed and reads the results from the loop's diagnostics.

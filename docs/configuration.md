@@ -71,6 +71,7 @@ the number of worlds, episode length, and number of update cycles.
 | --- | --- | --- | --- |
 | `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
 | `configs/probe.toml` | See how a choice of settings behaves on the CPU | Light, about half an hour on the CPU | Yes |
+| `configs/baseline.toml` | The first, smallest training run, against which later changes are compared | About 17 minutes on a Kaggle T4 (64 worlds, 8 cycles of 256 steps, 1,024-step episodes), estimated | Yes |
 | `configs/kaggle_quick.toml` | Check that a GPU run works and measure its speed | Quick, about 8 minutes on a Kaggle T4 (1,024 worlds, 3 cycles of 64 steps) | Yes |
 | `configs/kaggle_medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 25 minutes on a Kaggle T4 (256 worlds, 8 cycles of 256 steps) | Yes |
 | `configs/training.toml` | The actual experiment | Long, about 19 hours on a Kaggle T4 (1,024 worlds, 128 cycles of 256 steps), in two sessions | Yes |
@@ -277,7 +278,12 @@ first episode ended. Each file carries the model, the targets as markers, and
 the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
 training run records one window of 32 worlds before each checkpoint, 2.3 MB
-each for models v2 and v3.
+each for models v2 and v3. To watch a run's recordings, in order, with
+MujocoReplay installed:
+
+```powershell
+mujoco-replay runs\<run>\recordings\*.npz
+```
 
 The **report** is one HTML file that opens in any browser, offline. It is
 refreshed at every checkpoint, so an interrupted run still has one. It works the

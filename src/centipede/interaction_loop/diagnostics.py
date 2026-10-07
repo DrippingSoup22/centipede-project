@@ -95,7 +95,7 @@ class LoopDiagnostics:
         self.step_window.add(counted_worlds)
         self.episode_window.add(counted_worlds)
         self.simulation_window.add()
-        self.recorder.step_taken()
+        self.recorder.step_taken(counted_worlds)
         self._window_steps += 1
 
 

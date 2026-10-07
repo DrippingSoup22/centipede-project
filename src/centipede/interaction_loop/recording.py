@@ -28,7 +28,9 @@ class RecordedWindow:
 
     ``K`` worlds in rank order (best first) over ``T`` frames: ``qpos (T, K,
     nq)``, ``score (K,)``, ``world_ids (K,)``, ``level (K,)``, ``episode_start
-    (T, K)``, and ``target (T, K, 2)``.
+    (T, K)``, and ``target (T, K, 2)``. ``rank (K,)`` is each world's rank
+    among all ``ranked_worlds`` worlds, 1 for the best, and ``level_count`` is
+    the number of levels the worlds were split into.
     """
 
     qpos: np.ndarray
@@ -37,6 +39,9 @@ class RecordedWindow:
     level: np.ndarray
     episode_start: np.ndarray
     target: np.ndarray
+    rank: np.ndarray
+    ranked_worlds: int
+    level_count: int
 
 
 class WindowRecorder:
@@ -79,15 +84,22 @@ class WindowRecorder:
         self._score.zero_()
         self._recording = True
 
-    def step_taken(self) -> None:
-        """Keep the step just taken, if this window is recorded."""
+    def step_taken(self, counted_worlds: torch.Tensor | None = None) -> None:
+        """Keep the step just taken, if this window is recorded.
+
+        ``counted_worlds`` is the ``(W,)`` mask of the worlds whose rewards
+        count toward their score, for evaluation; in training every world's do.
+        """
         if not self._recording:
             return
         frame = self._frame
         self._qpos[frame].copy_(self._simulation.qpos)
         self._episode_start[frame].copy_(self._episode.episode_ended)
         self._target[frame].copy_(self._step_facts.target_position)
-        self._score += self._step_facts.reward_parts.sum(dim=(1, 2))
+        rewards = self._step_facts.reward_parts.sum(dim=(1, 2))
+        if counted_worlds is not None:
+            rewards = rewards * counted_worlds
+        self._score += rewards
         self._frame += 1
 
     def take(self, levels: int, per_level: int, selection: str) -> RecordedWindow:
@@ -121,6 +133,9 @@ class WindowRecorder:
             level=level,
             episode_start=self._episode_start[:frames, chosen].cpu().numpy(),
             target=self._target[:frames, chosen].cpu().numpy(),
+            rank=np.asarray(ranks, dtype=np.int64) + 1,
+            ranked_worlds=self._world_count,
+            level_count=levels,
         )
 
     def _allocate(self, frames: int) -> None:

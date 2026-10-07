@@ -69,7 +69,7 @@ class InteractionLoop:
         """Run one episode in every world, from a reset with ``seed``.
 
         ``actor`` is the trained agents or a baseline; it acts without
-        training, and nothing is recorded or learned. Worlds that finish early
+        training, and nothing is stored or learned. Worlds that finish early
         start new episodes, as in training, but only each world's first
         episode counts in the diagnostics, which the caller reads afterwards.
         """
