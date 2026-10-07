@@ -121,6 +121,18 @@ long a configured run will take. Locally, run it with a training file before
 launching a long run, for example
 `python benchmarks/training_profile.py configs/probe.toml`.
 
+## Training on Kaggle
+
+[`notebooks/kaggle_training.ipynb`](notebooks/kaggle_training.ipynb) trains on
+Kaggle's GPUs: one run per T4, so two runs at once (for example two seeds) on
+the T4 x2 machine. Its first code cell holds every choice: the configuration
+file, the seeds of new runs or the run folders to continue, and the session's
+time limit. Start it with **Save Version → Save & Run All (Commit)**, which
+runs in the background for up to 12 hours and keeps `/kaggle/working/runs` as
+the version's output. A run stops cleanly with a checkpoint before the time
+limit; to continue it, add the previous version's output as input and list its
+run folders in the settings cell. The notebook's first cell explains each step.
+
 ## Archive
 
 Material that is no longer active is moved to the local `archive/` folder rather

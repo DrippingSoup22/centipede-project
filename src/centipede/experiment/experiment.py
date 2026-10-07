@@ -7,7 +7,10 @@
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
   every ``record_every_cycles`` cycles it writes the window's replay recording.
-  With ``start_from`` the new run's agents begin from another run's
+  With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
+  cycle that would end after the limit, so that a Kaggle session never ends in
+  the middle of one; the run is then continued in a new session. With
+  ``start_from`` the new run's agents begin from another run's
   checkpoint, for example to continue learning on a harder task.
 - **evaluate** loads a checkpoint, runs every seed with the agents and each
   listed baseline, and writes the results, their report, and the recordings
@@ -19,6 +22,7 @@ docs/configuration.md.
 
 import platform
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
@@ -80,6 +84,7 @@ def run(configuration_path: Path) -> Path:
 
 def train(configuration: Configuration, configuration_path: Path) -> Path:
     """Run the training cycles the configuration asks for; returns the run folder."""
+    session_start = time.monotonic()
     run_settings = configuration.run
     loop_settings = configuration.interaction_loop
     continue_from = configuration.continue_from
@@ -160,12 +165,27 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     if recorded(completed_cycles + 1):
         recorder.arm(loop_settings.rollout_window_steps)
 
+    # Wall-clock time per cycle in this session, everything included, for the
+    # time remaining and the time limit.
+    time_limit_s = (
+        None
+        if run_settings.time_limit_hours is None
+        else run_settings.time_limit_hours * 3600
+    )
+    cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
-        print(_progress_line(record, total_cycles))
+        seconds_per_cycle = (time.monotonic() - cycles_start) / (session_cycle + 1)
+        remaining_s = (total_cycles - cycle) * seconds_per_cycle
+        print(_progress_line(record, total_cycles, remaining_s))
+        out_of_time = (
+            time_limit_s is not None
+            and cycle < total_cycles
+            and time.monotonic() - session_start + seconds_per_cycle > time_limit_s
+        )
         if recorded(cycle):
             window = recorder.take(
                 run_settings.record_levels,
@@ -180,10 +200,22 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             )
         if cycle < total_cycles and recorded(cycle + 1):
             recorder.arm(loop_settings.rollout_window_steps)
-        if cycle % run_settings.checkpoint_every_cycles == 0 or cycle == total_cycles:
+        if (
+            cycle % run_settings.checkpoint_every_cycles == 0
+            or cycle == total_cycles
+            or out_of_time
+        ):
             folder.save_checkpoint(cycle, agents.state_dict())
             if run_settings.report:
                 _write_training_report(folder, configuration, categories)
+        if out_of_time:
+            print(
+                f"Stopped after cycle {cycle} of {total_cycles}: another cycle"
+                f" (about {_duration(seconds_per_cycle)}) would pass the time"
+                f" limit of {run_settings.time_limit_hours:g} h. Continue it with"
+                f' continue_from = "{folder.path.as_posix()}".'
+            )
+            return folder.path
     print(f"Finished: {folder.path}")
     return folder.path
 
@@ -329,14 +361,17 @@ def _write_training_report(
     )
 
 
-def _progress_line(record: dict[str, Any], total_cycles: int) -> str:
-    """One short terminal line per window."""
+def _progress_line(
+    record: dict[str, Any], total_cycles: int, remaining_s: float
+) -> str:
+    """One short terminal line per window, with the time the rest will take."""
     timing, episodes = record["timing"], record["episodes"]
     line = (
         f"cycle {record['cycle']:>4}/{total_cycles}"
         f"  {timing['transitions_per_second']:>8,.0f} steps/s"
         f"  collect {timing['collecting_seconds']:6.1f} s"
         f"  learn {timing['learning_seconds']:5.1f} s"
+        f"  left {_duration(remaining_s):>7}"
         f"  episodes {episodes['episode_ended']:>4.0f}"
     )
     if episodes["episode_ended"]:
@@ -346,6 +381,16 @@ def _progress_line(record: dict[str, Any], total_cycles: int) -> str:
             f"  mean return {sum(returns) / len(returns):+.3g}"
         )
     return line
+
+
+def _duration(seconds: float) -> str:
+    """A duration as ``2h05m``, ``7m30s``, or ``45s``."""
+    seconds = round(seconds)
+    if seconds >= 3600:
+        return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+    if seconds >= 60:
+        return f"{seconds // 60}m{seconds % 60:02d}s"
+    return f"{seconds}s"
 
 
 def _session_facts(

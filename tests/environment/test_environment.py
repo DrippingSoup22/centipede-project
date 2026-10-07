@@ -1,4 +1,4 @@
-"""Tests for the environment's front file, with the real model v2.
+"""Tests for the environment's front file, with the real model v3.
 
 The parts have their own tests; these cover only what the front adds: episode
 state (targets, step counts, previous positions), episode ends, and resetting

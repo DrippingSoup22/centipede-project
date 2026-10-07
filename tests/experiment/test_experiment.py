@@ -1,4 +1,4 @@
-"""Tests for the experiment's front file, with tiny runs of the real model v2.
+"""Tests for the experiment's front file, with tiny runs of the real model v3.
 
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
@@ -162,3 +162,27 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     with pytest.raises(SettingsError, match="learning_rate must match"):
         run_file(tmp_path, other_rate, NAME="faster")
     assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
+
+
+def test_a_time_limit_stops_the_session_with_a_checkpoint_to_continue_from(tmp_path):
+    """A limit too short for even one cycle stops after the first, with a
+    checkpoint although checkpoints are every two cycles; a continuing file
+    with a new limit finishes the run."""
+    limited = TRAINING_FILE.replace(
+        'runs_folder = "RUNS"', 'runs_folder = "RUNS"\ntime_limit_hours = 1e-9'
+    )
+
+    folder = run_file(tmp_path, limited, NAME="session")
+
+    assert logged_cycles(folder) == [1]
+    assert [path.name for path in (folder / "checkpoints").iterdir()] == [
+        "cycle_0001.pt"
+    ]
+
+    continuing = (
+        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
+        "time_limit_hours = 1\n"
+    )
+    run_file(tmp_path, continuing)
+
+    assert logged_cycles(folder) == [1, 2, 3]

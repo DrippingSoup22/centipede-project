@@ -6,7 +6,7 @@ There are three kinds of file, told apart by their ``[run]`` section:
   with ``start_from`` its agents begin from another run's checkpoint;
 - a **continuing file** (``mode = "train"`` with ``continue_from``) names an
   existing run and may only change ``[interaction_loop]``, such as a larger
-  ``update_cycles``;
+  ``update_cycles``, and the session's ``time_limit_hours``;
 - an **evaluation file** (``mode = "evaluate"``) names a run or one of its
   checkpoints, holds ``[evaluation]``, and may change ``[environment]``
   settings, such as farther targets or the CPU backend.
@@ -47,7 +47,9 @@ class RunSettings:
 
     ``start_from`` is a run folder (its latest checkpoint) or a checkpoint
     file whose agents the new run begins with. The ``record_*`` settings say
-    which windows are recorded for replay and which worlds are kept; see
+    which windows are recorded for replay and which worlds are kept.
+    ``time_limit_hours`` bounds one training session: the run stops cleanly,
+    with a checkpoint, before a cycle that would end after it. See
     docs/configuration.md.
     """
 
@@ -61,6 +63,7 @@ class RunSettings:
     record_levels: int
     record_per_level: int
     record_selection: str
+    time_limit_hours: float | None
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
@@ -85,6 +88,7 @@ class RunSettings:
             record_selection=section.choice(
                 "record_selection", ("ranked", "first"), default="ranked"
             ),
+            time_limit_hours=section.positive_number("time_limit_hours", default=None),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.
@@ -215,14 +219,21 @@ def run_folder_of(source: Path) -> Path:
 def _continuing_configuration(
     file_values: dict, run_section: SettingsSection
 ) -> Configuration:
-    """The saved run's configuration, with the file's [interaction_loop] on top."""
+    """The saved run's configuration, with the file's changes on top.
+
+    The file may set [interaction_loop] and, in [run], the new session's
+    ``time_limit_hours``.
+    """
     continue_from = run_section.path("continue_from")
+    time_limit_hours = run_section.positive_number("time_limit_hours", default=None)
     run_section.reject_unknown_keys()
     _allow_only_sections(
         file_values, ("run", "interaction_loop"), "A file with continue_from"
     )
     saved = read_toml(run_folder_of(continue_from) / SAVED_CONFIGURATION_NAME)
     changes = {"interaction_loop": file_values.get("interaction_loop", {})}
+    if time_limit_hours is not None:
+        changes["run"] = {"time_limit_hours": time_limit_hours}
     values = _merged(saved, changes)
     return _checked_configuration(values, mode="train", continue_from=continue_from)
 

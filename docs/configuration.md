@@ -53,7 +53,7 @@ There are three kinds of file, told apart by their `[run]` section:
 | Kind | `[run]` holds | The file contains |
 | --- | --- | --- |
 | Training | `mode = "train"` and the run's own settings | Every section of a new run; only the values that differ from the defaults need writing |
-| Continuing | `mode = "train"` and `continue_from` | Only `[run]`, and optionally `[interaction_loop]`, such as a larger `update_cycles` |
+| Continuing | `mode = "train"` and `continue_from` | Only `[run]`, optionally with the session's `time_limit_hours`, and optionally `[interaction_loop]`, such as a larger `update_cycles` |
 | Evaluation | `mode = "evaluate"` and `source` | `[run]`, `[evaluation]`, and optionally `[environment]` sections |
 
 Continuing and evaluation files name an existing run and start from its saved
@@ -87,6 +87,7 @@ The `[run]` settings of a training file:
 | `record_levels` | 4 | Worlds are ranked by their summed reward over the window and split into this many levels |
 | `record_per_level` | 8 | How many worlds of each level are kept, evenly spaced from the level's best to its worst |
 | `record_selection` | `"ranked"` | `"ranked"` keeps the worlds chosen by level; `"first"` keeps the first worlds, as many, so that consecutive recordings show the same worlds |
+| `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
 
 A complete training file, with every section written out:
 
