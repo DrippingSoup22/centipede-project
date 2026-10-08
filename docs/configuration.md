@@ -190,8 +190,11 @@ Two agent settings must match the checkpoint, and a difference is rejected:
 from before the optimizer could be chosen count as Adam). The learning rate,
 its schedule, weight decay, and momentum may differ: the new run's own values
 replace those the optimizers were saved with, and its schedule counts the new
-run's cycles from the first. The number of segments and the observation size must match
-too; the agents check those when loading.
+run's cycles from the first. The number of segments must match too. The new
+run may give its agents more to see or command than the checkpoint's, as
+`spine_control` does: its agents are then widened, starting exactly as the
+saved ones act, with fresh optimizers (see
+[agents.md](agents.md#checkpoints)). Fewer is rejected when loading.
 
 ### Continuing a run
 

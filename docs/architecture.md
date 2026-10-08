@@ -160,8 +160,9 @@ data for learning.
 ### Physics simulation
 
 Part of the environment, in `environment/simulation/`. It loads the model, finds
-each segment's motors and contact shapes by name, applies leg actions, advances
-the physics, resets worlds, and reports the physical state. It also offers the
+each segment's motors and contact shapes by name, applies the leg and spine
+actions (the spine's are zero unless the environment's spine control sends
+them), advances the physics, resets worlds, and reports the physical state. It also offers the
 head's outline seen from above, read from the model's head shape, which the
 environment uses to decide arrival. A CPU backend uses
 MuJoCo and a GPU backend uses MuJoCo Warp; the configuration chooses one, and

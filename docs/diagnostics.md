@@ -43,10 +43,12 @@ Refreshed on every step, for every world.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |
-| `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact (runs before 2026-10-08: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
+| `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact, and movement when it has parts (runs before 2026-10-08: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
 | `contact_flags` | `(W, N, 4)` | Left foot, right foot, and body on the ground; legs touching | Share of steps |
 | `segment_progress` | `(W, N)` | Metres gained toward the segment's goal: the target for the head, the spot where the segment ahead was for the others | Mean |
 | `segment_moved` | `(W, N)` | Metres the segment's centre moved, measured flat on the ground | Mean |
+| `joint_movement` | `(W, N)` | How far the joints the segment commands moved on the step, rad: the root of their mean squared movement, which the movement cost charges | Mean |
+| `spine_bend` | `(W, N)` | Angle of the spine joint behind the segment, either way, rad; 0 for the rear | Mean |
 | `body_height` | `(W, N)` | Height of the segment's centre, m | Mean |
 | `uprightness` | `(W, N)` | How upright the segment is: 1 upright, 0 on its side, −1 upside down | Mean |
 | `head_distance` | `(W,)` | Flat distance from the head's tip to the target, m | Mean |
@@ -136,7 +138,8 @@ the explained variance, which describes the batch before the update.
 | `clip_fraction` | `(N,)` | Share of samples whose probability ratio was clipped |
 | `explained_variance` | `(N,)` | How much of the returns' variation the critic predicted: 1 exactly, 0 nothing |
 | `learning_rate` | `()` | The optimizers' learning rate in the update, the same for every agent; set by the experiment from the schedule |
-| `action_std` | `(N, 6)` | Each action's learned spread, before squashing |
+| `action_std` | `(N, 6)` | Each leg action's learned spread, before squashing |
+| `spine_action_std` | `(N,)` | The learned spread of the command for the spine joint behind the segment, before squashing; 0 for a segment without one |
 
 ### Timing
 

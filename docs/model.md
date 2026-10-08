@@ -130,8 +130,10 @@ maximum torques above. The head owns its six leg motors; every other unit owns
 its six leg motors and the yaw motor connecting it to the unit ahead, giving
 6 × 8 + 7 = 55. Pitch has no motor. Each motor's owning unit is also stored in the
 XML (`actuator_user`), so ownership can be checked without relying on the order
-of motors in the file. How motors become agent actions is described in
-[environment.md](environment.md#actions-and-timing).
+of motors in the file. Ownership says which unit a motor sits in; which agent
+commands it is the environment's choice: with spine control, each yaw motor is
+commanded by the unit ahead of its joint. How motors become agent actions is
+described in [environment.md](environment.md#actions-and-timing).
 
 ## Mass and inertia
 
