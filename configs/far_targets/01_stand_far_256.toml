@@ -1,0 +1,61 @@
+# Far targets, 2026-10-08 (plan.md, Stage 8.4), decided with the user: the
+# task becomes reaching the target however the centipede gets there, not
+# aiming the head's tip within 1 mm (docs/environment.md, Episodes):
+# - arrival: the target lies under the head's outline (8 mm wide), read from
+#   the model;
+# - targets 30-60 mm away (one to two body lengths), within 30 degrees of
+#   straight ahead: a straight walk reaches 18% of them by luck;
+# - progress counted down to half the head's width (4 mm): an approach from
+#   45 mm is worth 3.5 halvings, about the old 3.9;
+# - the range circle: the episode is cut, like the time limit, when the head's
+#   tip is farther than 2.5 times its start distance from the target.
+# Everything else as in configs/shared_progress: every segment receives the
+# head's progress, 64 worlds, rollout window 64 steps, minibatch size 512,
+# epochs 4, 64 update cycles (about 26 min), from the standing prototype; the
+# discount and the per-step costs follow the episode length (rules R0, R1).
+#
+# Episode length 256 steps (5.1 s): the farthest target needs about 110
+# steps at the 0.5 mm per step training reached, 190 at 0.3 mm per step.
+# Hypothesis: with a reachable but permissive target, arrivals rise above the
+# 18% a straight walk gets, the heading error falls below 90 degrees, and the
+# episodes that run out of time end closer than they started; few leave the
+# range circle; posture as the prototype's.
+
+[run]
+mode = "train"
+name = "far_01_stand_far_256"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 64

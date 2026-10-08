@@ -22,7 +22,7 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
                 "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
                 "head_distance": 0.0567,
             },
-            "episodes": {"episode_ended": 4, "arrived": 0.25},
+            "episodes": {"episode_ended": 4, "arrived": 0.25, "left_range": 0.25},
         },
         remaining_s=402,
     )
@@ -35,7 +35,7 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
     assert drawings[5].split() == [
         *("3/12", "[####################]", "20.5", "s", "2.6", "s", "6m42s", "|"),
-        *("-0.00300", "57", "mm", "25%", "1", "3"),
+        *("-0.00300", "57", "mm", "25%", "1", "2", "1"),  # arrived, timed out, too far
     ]
 
 

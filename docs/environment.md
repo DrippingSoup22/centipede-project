@@ -87,7 +87,11 @@ it drives the right joint and accepts commands from −1 to 1, and that every mo
 is found exactly once with none left over (`6N + N − 1`, which is 55 for v1). It
 also checks that every collision shape records its owning segment and its
 category (floor, body, leg, left foot, right foot, or membrane; see
-[model.md](model.md#contacts-and-friction)).
+[model.md](model.md#contacts-and-friction)). From the head's body shape it
+measures the head's **outline** seen from above, the rectangle that encloses
+it, measured from the head's centre site: how far it reaches behind and ahead,
+and its half-width. The environment reads it from the simulation
+(`head_outline`) to decide arrival and the closest distance progress counts.
 
 If any check fails, the program stops with a clear error; after that, the
 mapping is trusted. A model with a different number of segments needs no code
@@ -251,24 +255,64 @@ poses. A reset gives no reward, and its pose counts as the "previous" state for
 the first step.
 
 **Target.** The head gets a point on the ground in front of it, chosen relative
-to its tip and direction: distance uniformly between 10 and 20 mm, direction
-uniformly within 15° left or right of straight ahead. The target is a point
-remembered by the environment, not an object in the simulation.
+to its tip and direction: distance uniformly between 30 and 60 mm, about one to
+two body lengths, and direction uniformly within 30° left or right of straight
+ahead. The target is a point remembered by the environment, not an object in
+the simulation.
 
 The head's **forward** direction is its body's x axis, which points from its
 centre to its tip, laid flat on the ground; **left** is 90° anticlockwise from
 it, the side of the left legs. Targets are placed, and the two target values
 observed, in these directions.
 
-**End.** An episode ends in one of two ways, always for all segments together:
+**End.** An episode ends in one of three ways, always for all segments
+together:
 
-- **Arrival** (terminated): the head's tip comes within 1 mm of the target,
-  measured flat on the ground.
+- **Arrival** (terminated): the target lies under the head, seen from above:
+  inside the rectangle that encloses the head's body shape, which the
+  simulation reads from the model when it loads (7.2 mm long, from 2.2 mm
+  behind the head's centre to its tip, and 8 mm wide, for model v3).
 - **Time limit** (truncated): the episode reaches `max_episode_steps`, with no
   extra penalty.
+- **Leaving the range circle** (truncated, like the time limit): the head's tip
+  is farther from the target than 2.5 times its distance at the start
+  (`range_circle_ratio`), 75 to 150 mm for these targets.
 
-If both happen on the same step, arrival wins. Nothing else ends an episode: the
-centipede may fall or touch the ground with its body and recover.
+If arrival and a cut happen on the same step, arrival wins. Nothing else ends
+an episode: the centipede may fall or touch the ground with its body and
+recover.
+
+**Why the head, and why so permissive.** Until 2026-10-08 the head's tip had to
+come within 1 mm of targets 10 to 20 mm away: an aim within an eighth of the
+head's own width, on top of learning to walk. The user wants a centipede that
+walks far to reach its target, however it gets there, so the target now only
+has to come under the head. Only the head sees the target and its distance
+makes the progress, so the head, not any segment, decides arrival: counting the
+whole body would also count the body sweeping or swinging over targets the
+head missed, and with targets in front the head gets there first anyway. The
+head is eight times wider than the old 2 mm circle, so the targets moved
+farther: a straight walk, without steering, now reaches 18% of them (it reached
+26.6% before), and an approach is worth 3.5 halvings, about the old 3.9:
+
+| Targets, with arrival under the head | Straight-walk luck at ±15° | ±30° | ±45° | Halvings per approach |
+| --- | ---: | ---: | ---: | ---: |
+| 10–20 mm | 94% | | 36% | 1.9 |
+| 30–60 mm | 35% | 18% | 12% | 3.5 |
+| 40–80 mm | 26.5% | | 8.8% | 3.9 |
+
+**Why the range circle.** In the first runs of the rules, every episode that ran
+out of time ended more than 50 mm from its target, and up to half of them more
+than 100 mm: about half of each episode was spent far beyond the target, where
+a step changes the halvings very little and the target's position lies far
+outside what the networks usually see. Leaving the circle restarts the world
+with a new target, so those steps become new approaches. It ends the episode
+like the time limit, not as a failure: the agents' critic values the state the
+episode was cut in, as at the time limit, so the reward and what is best stay
+unchanged, and walking away can never become a way to stop paying the costs. At
+2.5 times the start distance, a centipede that overshoots can still walk one and
+a half times its first distance past the target and turn back before it is cut.
+The circle grows with the targets' distance, so it needs no change when they
+move farther.
 
 ## Rewards
 
@@ -323,10 +367,10 @@ agent, which keeps every agent's networks, data, and learning separate.
 for any target distance, and it is worth the same at 16 mm as at 2 mm. Over an
 episode the progress adds up to `log2(start distance ÷ end distance)`,
 whatever path it took: wiggling back and forth earns nothing, and walking past
-the target gives back what was earned on the way. Distances closer than the
-arrival radius count as the radius, so an episode that arrives earns exactly
-`log2(start distance ÷ arrival radius)`, and landing nearer the target's centre
-earns nothing more. Moving away is penalised only by the logarithm of how far
+the target gives back what was earned on the way. Distances closer than half
+the head's width (4 mm) count as 4 mm: within the head's reach nothing pays
+more, so there is nothing to gain from aiming the tip exactly, and an approach
+from 45 mm is worth `log2(45 ÷ 4)` = 3.5 halvings. Moving away is penalised only by the logarithm of how far
 the head goes: ending twice as far as it started costs one halving.
 
 Progress is part of the goal, not only a guide to it: it says that ending closer
@@ -393,20 +437,23 @@ With `A = 1` and 256-step episodes:
 
 Doubling the episode length halves the per-step costs and sets the discount to
 0.9987; nothing else changes. Every training run prints these weights under its
-settings. Totals per segment over one episode, without discount, in units of
-`A`, for targets 10 to 20 mm away; they are the same for every segment, with
-its own contacts:
+settings. Totals per segment over one episode of 256 steps, without discount,
+in units of `A`, for targets 30 to 60 mm away; they are the same for every
+segment, with its own contacts:
 
 | Outcome | Total |
 | --- | ---: |
-| Clean arrival from 15 mm in 90 steps | +1.82 |
-| Worst arrival from 10 mm: on the last step, body on the ground and legs touching throughout | +1.07 |
-| Clean near miss, ending 2 mm from the target | +0.44 |
+| Clean arrival from 45 mm in 150 steps | +1.67 |
+| Worst arrival from 30 mm: on the last step, body on the ground and legs touching throughout | +0.98 |
+| Clean near miss from 45 mm, ending 8 mm from the target | +0.35 |
 | Legs touching throughout, halving its distance | −0.12 |
 | Standing still, upright | −0.23 |
 | Body on the ground throughout, halving its distance | −0.35 |
-| Clean walk straight past the target, ending 40 mm away | −0.56 |
-| Worst failure: body down, legs touching, ending 58 mm away | −1.14 |
+| Clean walk away, cut by the range circle after 200 steps | −0.49 |
+| Worst failure: body down, legs touching, cut by the circle on the last step | −1.00 |
+
+The two cut episodes stop at the circle: what would have followed is left to
+the critic's estimate, as at the time limit.
 
 Seen from the start through the discount, the worst arrival comes to about +0.5
 (zero for its costs, plus its progress) and standing still to −0.17. Per step at
@@ -493,9 +540,11 @@ These are the keys of the environment sections of the configuration file (see
 | `constraints_per_world` | 512 | Reserved constraint memory, GPU only |
 | `start_heading_range_deg` | 0 | A reset turns the whole body about the vertical by a random angle within ± this many degrees; 180 allows any heading |
 | **`[environment.target]`** | | |
-| `distance_range_m` | 0.010 to 0.020 | Distance of a new target from the head's tip |
-| `bearing_range_deg` | −15 to 15 | Direction of a new target from straight ahead |
-| `arrival_radius_m` | 0.001 | Distance that counts as arrival |
+| `distance_range_m` | 0.030 to 0.060 | Distance of a new target from the head's tip |
+| `bearing_range_deg` | −30 to 30 | Direction of a new target from straight ahead |
+| `arrival` | `"head"` | `"head"`: the target must lie under the head's outline; `"tip"`: the head's tip must come within `arrival_radius_m` |
+| `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip, as every run saved before 2026-10-08's head arrival does |
+| `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. Not set in the tip's files: no circle |
 | **`[environment.rewards]`** | | |
 | `arrival_reward` (`A`) | 1.0 | Shared reward for reaching the target: the unit of every other weight |
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |

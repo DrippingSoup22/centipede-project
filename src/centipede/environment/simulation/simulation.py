@@ -69,6 +69,7 @@ class PhysicsSimulation:
             )
 
         self.segment_count = mapping.segment_count
+        self.head_outline = mapping.head_outline
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
         self.physical_state = self._backend.physical_state

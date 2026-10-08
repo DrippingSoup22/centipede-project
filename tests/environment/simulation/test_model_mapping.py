@@ -51,6 +51,12 @@ def test_mapping_matches_the_elements_found_by_name():
             assert mapping.leg_dof_addresses[segment, action_index] == joint.dofadr
     assert mapping.head_tip_site_id == model.site("head_tip").id
     assert mapping.root_qpos_address == model.joint("root").qposadr[0]
+    # The head seen from above: 2.2 mm behind its centre to its tip 5 mm ahead,
+    # and 8 mm wide (docs/model.md, Body).
+    outline = mapping.head_outline
+    assert (outline.rear_m, outline.front_m, outline.half_width_m) == pytest.approx(
+        (-0.0022, 0.005, 0.004), abs=2e-5
+    )
 
     for name, owner, category in [
         ("floor", -1, FLOOR_CATEGORY),

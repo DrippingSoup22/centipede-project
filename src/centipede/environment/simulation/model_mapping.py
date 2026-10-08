@@ -26,10 +26,24 @@ class ModelContractError(ValueError):
 
 
 @dataclass(frozen=True)
+class HeadOutline:
+    """The head's body shape seen from above, as the rectangle that encloses it.
+
+    Distances in metres from the head's centre, along the head (``rear_m``
+    negative, ``front_m`` positive, forward) and to each side (``half_width_m``).
+    """
+
+    rear_m: float
+    front_m: float
+    half_width_m: float
+
+
+@dataclass(frozen=True)
 class ModelMapping:
     """Index tables linking each segment to its parts in a loaded model.
 
-    The parts are its motors, joints, body, centre site, and collision shapes.
+    The parts are its motors, joints, body, centre site, and collision shapes;
+    ``head_outline`` is the head's shape seen from above.
     """
 
     segment_count: int
@@ -42,6 +56,7 @@ class ModelMapping:
     root_qpos_address: int
     geom_owner_indices: np.ndarray
     geom_categories: np.ndarray
+    head_outline: HeadOutline
 
     @classmethod
     def from_model(cls, model: mujoco.MjModel) -> "ModelMapping":
@@ -56,6 +71,11 @@ class ModelMapping:
         )
         root_qpos_address = _find_root_joint(model, int(body_ids[0]))
         geom_owner_indices, geom_categories = _read_geom_metadata(model, segment_count)
+        is_head_shape = (geom_owner_indices == 0) & (geom_categories == BODY_CATEGORY)
+        head_shape_id = int(np.flatnonzero(is_head_shape)[0])
+        head_outline = _head_outline(
+            model, head_shape_id, int(body_ids[0]), int(center_site_ids[0])
+        )
         return cls(
             segment_count=segment_count,
             leg_actuator_ids=leg_actuator_ids,
@@ -67,6 +87,7 @@ class ModelMapping:
             root_qpos_address=root_qpos_address,
             geom_owner_indices=geom_owner_indices,
             geom_categories=geom_categories,
+            head_outline=head_outline,
         )
 
 
@@ -226,6 +247,33 @@ def _find_root_joint(model: mujoco.MjModel, head_body_id: int) -> int:
             "segment_00 must be a child of the world with a free joint"
         )
     return int(model.jnt_qposadr[first_joint_id])
+
+
+def _head_outline(
+    model: mujoco.MjModel, shape_id: int, head_body_id: int, center_site_id: int
+) -> HeadOutline:
+    """The rectangle that encloses the head's body shape, seen from above.
+
+    MuJoCo gives each shape a box around it in the shape's own frame; its
+    corners are turned into the head body's frame and measured from the head's
+    centre site, whose axes are the body's.
+    """
+    if model.geom_bodyid[shape_id] != head_body_id:
+        raise ModelContractError("The head's body shape must belong to segment_00")
+    box_center, box_half_size = (
+        model.geom_aabb[shape_id, :3],
+        model.geom_aabb[shape_id, 3:],
+    )
+    signs = np.array(np.meshgrid([-1, 1], [-1, 1], [-1, 1])).reshape(3, -1).T
+    rotation = np.zeros(9)
+    mujoco.mju_quat2Mat(rotation, model.geom_quat[shape_id])
+    corners = (box_center + signs * box_half_size) @ rotation.reshape(3, 3).T
+    corners += model.geom_pos[shape_id] - model.site_pos[center_site_id]
+    return HeadOutline(
+        rear_m=float(corners[:, 0].min()),
+        front_m=float(corners[:, 0].max()),
+        half_width_m=float(np.abs(corners[:, 1]).max()),
+    )
 
 
 def _read_geom_metadata(

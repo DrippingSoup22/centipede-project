@@ -28,9 +28,19 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
     assert settings.observation_radius == 1
     assert settings.simulation.world_count == 1
     assert settings.target == TargetSettings(
-        distance_range_m=(0.010, 0.020),
-        bearing_range_deg=(-15.0, 15.0),
-        arrival_radius_m=0.001,
+        distance_range_m=(0.030, 0.060),
+        bearing_range_deg=(-30.0, 30.0),
+        arrival="head",
+        arrival_radius_m=None,
+        range_circle_ratio=2.5,
+    )
+    # A file with the tip's radius, as every run saved before the head arrival,
+    # keeps the tip, with no range circle.
+    tip = read(target={"arrival_radius_m": 0.001}).target
+    assert (tip.arrival, tip.arrival_radius_m, tip.range_circle_ratio) == (
+        "tip",
+        0.001,
+        None,
     )
     assert settings.rewards == RewardSettings(
         arrival_reward=1.0,
@@ -85,6 +95,11 @@ def test_nested_sections_are_read_by_their_own_classes():
             "mixes the per-step weights",
         ),
         ({"rewards": {"cost_budget_parts": 5}}, "cannot take more than the budget"),
+        ({"target": {"range_circle_ratio": 0.8}}, "must be 0 .no circle. or above 1"),
+        (
+            {"target": {"arrival": "head", "arrival_radius_m": 0.001}},
+            'arrival_radius_m belongs to arrival = "tip"',
+        ),
         ({"target": {"arrival_radius": 0.001}}, r"\[environment.target\] has unknown"),
         ({"reward": {}}, r"\[environment\] has unknown settings: reward"),
     ],

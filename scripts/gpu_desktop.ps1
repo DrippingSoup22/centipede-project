@@ -12,7 +12,19 @@ $Launched = "$Project\runs\launched"
 $EndMarker = 'run ended with exit code'
 Set-Location $Project
 
+# Pulls the pushed code, but never new commits while a run or queue runs: each
+# run of a queue starts with the code on disk, so its next runs would change.
 function Update-Code {
+    git fetch -q
+    if ($LASTEXITCODE) { Write-Output 'git fetch failed on the desktop'; exit 1 }
+    $behind = [int](git rev-list --count 'HEAD..@{upstream}')
+    $running = @(Get-Runs)
+    if ($behind -and $running.Count) {
+        $names = ($running | ForEach-Object { Get-RunName $_ } | Sort-Object -Unique) -join ', '
+        Write-Output "not pulling $behind new commits while $names runs: the runs a queue"
+        Write-Output 'starts next would use them. Try again when it has ended.'
+        exit 1
+    }
     git pull --ff-only -q
     if ($LASTEXITCODE) { Write-Output 'git pull failed on the desktop'; exit 1 }
     Write-Output ('code ' + (git log --oneline -1))

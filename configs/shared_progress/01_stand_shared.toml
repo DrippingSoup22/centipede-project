@@ -38,6 +38,11 @@ model_path = "models/assembly_v3.xml"
 backend = "gpu"
 world_count = 64
 
+[environment.target]                  # pinned: these runs' task, the head's tip
+distance_range_m = [0.010, 0.020]     # within 1 mm of targets 10-20 mm away
+bearing_range_deg = [-15, 15]
+arrival_radius_m = 0.001
+
 [environment.rewards]
 arrival_reward = 1
 step_cost_parts = 2

@@ -40,7 +40,7 @@ def test_a_seed_repeats_starts_and_targets_have_their_own_sequence(backend):
     default_targets = environment(backend)
     other_targets = environment(
         backend,
-        target={"distance_range_m": [0.03, 0.04], "bearing_range_deg": [20, 30]},
+        target={"distance_range_m": [0.01, 0.02], "bearing_range_deg": [20, 30]},
     )
 
     first = default_targets.reset(seed=3)
@@ -49,45 +49,61 @@ def test_a_seed_repeats_starts_and_targets_have_their_own_sequence(backend):
     # Other target settings change the targets but never the starting poses.
     assert torch.equal(first[..., :-2], other[..., :-2])
     distance, bearing = target_distance_and_bearing(first)
-    assert torch.all((distance >= 0.010) & (distance <= 0.020))
-    assert torch.all(bearing.abs() <= 15)
+    assert torch.all((distance >= 0.030) & (distance <= 0.060))
+    assert torch.all(bearing.abs() <= 30)
     distance, bearing = target_distance_and_bearing(other)
-    assert torch.all((distance >= 0.030) & (distance <= 0.040))
+    assert torch.all((distance >= 0.010) & (distance <= 0.020))
     assert torch.all((bearing >= 20) & (bearing <= 30))  # to the head's left
 
     assert torch.equal(default_targets.reset(seed=3), first)
     assert not torch.equal(default_targets.reset(seed=4)[:, 0, -2:], first[:, 0, -2:])
 
 
-def test_episodes_end_by_arrival_or_time_limit_and_only_those_worlds_restart():
-    """World 0 arrives on its last allowed step, world 1 runs out of time, and
-    world 2 is one step into its episode and continues."""
-    env = environment(max_episode_steps=2)
+def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():
+    """World 0 arrives on its last allowed step, with its target under the rear
+    of the head, 6 mm from the tip; world 1 runs out of time; world 2's head is
+    outside its range circle; world 3 is one step into its episode and goes on."""
+    env = environment(world_count=4, max_episode_steps=2)
     env.reset(seed=1)
-    zero_action = torch.zeros(3, env.segment_count, 6)
+    zero_action = torch.zeros(4, env.segment_count, 6)
     _, _, terminated, truncated, _ = env.step(zero_action)
     assert not torch.any(terminated | truncated)
 
-    head_tip = env.simulation.physical_state.head_tip_position
-    env.target_position[0] = head_tip[0, :2]  # the head barely moves in 20 ms
-    env.episode_steps[2] = 0
+    state = env.simulation.physical_state
+    head_centre, head_tip = state.body_planar_position[:, 0], state.head_tip_position
+    behind_centre = head_centre[0] - 0.2 * (head_tip[0, :2] - head_centre[0])
+    env.target_position[0] = behind_centre  # the head barely moves in 20 ms
+    env.target_position[2] = head_tip[2, :2] + torch.tensor([1.0, 0.0])
+    env.episode_steps[2:] = 0
     targets_before = env.target_position.clone()
 
     observations, rewards, terminated, truncated, final = env.step(zero_action)
 
-    assert terminated.tolist() == [True, False, False]  # arrival wins
-    assert truncated.tolist() == [False, True, False]
+    assert terminated.tolist() == [True, False, False, False]  # arrival wins
+    assert truncated.tolist() == [False, True, True, False]
     assert torch.all(rewards[0] > 0) and torch.all(rewards[1:] < 0)
-    assert env.episode_steps.tolist() == [0, 0, 1]
+    assert env.episode_steps.tolist() == [0, 0, 0, 1]
     target_moved = (env.target_position != targets_before).any(dim=-1)
-    assert target_moved.tolist() == [True, True, False]
+    assert target_moved.tolist() == [True, True, True, False]
+    episodes = env.diagnostics.episode
+    assert episodes.left_range[:3].tolist() == [False, False, True]
+    assert episodes.ending[[0, 2]].tolist() == [0.5, 5.5]  # arrived, left the circle
 
     # Finished worlds return the observation their episode ended with: world 0's
-    # target was reached, and its new one is at least 10 mm away.
+    # target was 6 mm from the tip, and its new one is at least 30 mm away.
     restarted = (observations != final).flatten(start_dim=1).any(dim=-1)
-    assert restarted.tolist() == [True, True, False]
-    assert target_distance_and_bearing(final)[0][0] <= 0.001
-    assert target_distance_and_bearing(observations)[0][0] >= 0.010
+    assert restarted.tolist() == [True, True, True, False]
+    assert 0.005 < target_distance_and_bearing(final)[0][0] < 0.007
+    assert target_distance_and_bearing(observations)[0][0] >= 0.030
+
+    # Runs before the head arrival needed the tip within 1 mm, and had no circle.
+    tip_env = environment(world_count=1, target={"arrival_radius_m": 0.001})
+    tip_env.reset(seed=1)
+    tip_env.target_position[0] = tip_env.simulation.physical_state.body_planar_position[
+        0, 0
+    ]
+    _, _, terminated, truncated, _ = tip_env.step(zero_action[:1])
+    assert not terminated.item() and not truncated.item()
 
 
 def test_progress_is_measured_from_the_positions_before_the_step():

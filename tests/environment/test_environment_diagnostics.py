@@ -39,7 +39,15 @@ def step_rewards(value: float) -> StepRewards:
     return StepRewards(parts.sum(dim=-1), parts, torch.full((2, 2), 0.001))
 
 
-def record(diagnostics, state, previous_state, rewards, terminated=NO, truncated=NO):
+def record(
+    diagnostics,
+    state,
+    previous_state,
+    rewards,
+    terminated=NO,
+    truncated=NO,
+    left_range=NO,
+):
     diagnostics.record_step(
         state,
         previous_state.body_planar_position.clone(),
@@ -48,6 +56,7 @@ def record(diagnostics, state, previous_state, rewards, terminated=NO, truncated
         rewards,
         terminated,
         truncated,
+        left_range,
     )
 
 
@@ -100,6 +109,7 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
 
     assert episode.episode_ended.tolist() == [False, True]
     assert episode.arrived.tolist() == [False, True]
+    assert episode.ending[1] == 0.5  # the middle of the "arrived" bin
     assert episode.length_steps[1] == 2
     assert episode.segment_return[1].tolist() == [-2.0, -2.0]
     assert episode.start_distance[1] == pytest.approx(math.hypot(0.005, 0.01))
@@ -120,9 +130,13 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
         moved,
         step_rewards(-1.0),
         truncated=torch.tensor([True, True]),
+        left_range=torch.tensor([False, True]),
     )
     assert episode.length_steps.tolist() == [3.0, 1.0]
     assert episode.arrived.tolist() == [False, False]
+    assert episode.left_range.tolist() == [False, True]
+    # World 0 ran out of time 13 mm from a target 15 mm away at the start: closer.
+    assert episode.ending.tolist() == [3.5, 5.5]
 
 
 def test_the_target_follows_the_worlds_just_reset():

@@ -36,6 +36,7 @@ SETTINGS_LINE_WIDTH = 100
 TRAINING_COLUMNS = (
     "{cycle}  {bar}  {collect:>7}  {learn:>6}  {left:>7}"
     "  |  {reward:>11}  {distance:>9}  {body_down:>9}  {arrived:>7}  {timed_out:>9}"
+    "  {too_far:>7}"
 )
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {bar}  {took:>6}  {left:>7}"
@@ -140,6 +141,24 @@ def reward_weights(
     return "\n".join(lines)
 
 
+def recording_sizes(
+    file_count: int, world_count: int, frames: int, position_count: int
+) -> str:
+    """The recordings a training run will write, with their expected sizes.
+
+    A world's frame holds its ``position_count`` positions as 32-bit numbers,
+    the target's position, and whether an episode started there; the rest of
+    a file is small.
+    """
+    file_bytes = frames * world_count * (4 * position_count + 13)
+    files = f"{file_count:,} file{'' if file_count == 1 else 's'}"
+    return (
+        f"Recordings: {files} of {world_count:,} worlds x {frames:,} steps,"
+        f" about {file_bytes / 1e6:.3g} MB each, {file_count * file_bytes / 1e6:.3g}"
+        " MB in all"
+    )
+
+
 def _settings_tables(values: dict[str, Any], prefix: str = ""):
     """Each table's own settings, as (dotted table name, settings), in file order."""
     own = {key: value for key, value in values.items() if not isinstance(value, dict)}
@@ -227,6 +246,7 @@ class TrainingProgress(_RedrawnLine):
                 body_down="body down",
                 arrived="arrived",
                 timed_out="timed out",
+                too_far="too far",
             ),
             flush=True,
         )
@@ -244,6 +264,7 @@ class TrainingProgress(_RedrawnLine):
         body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
         ended = episodes["episode_ended"]
         arrived = round(ended * episodes["arrived"]) if ended else 0
+        too_far = round(ended * episodes["left_range"]) if ended else 0
         self._end_pass(
             TRAINING_COLUMNS.format(
                 cycle=self._label(),
@@ -255,7 +276,8 @@ class TrainingProgress(_RedrawnLine):
                 distance=f"{step['head_distance'] * 1000:.0f} mm",
                 body_down=f"{body_down:.0%}",
                 arrived=f"{arrived}",
-                timed_out=f"{round(ended) - arrived}",
+                timed_out=f"{round(ended) - arrived - too_far}",
+                too_far=f"{too_far}",
             )
         )
         self._cycle += 1

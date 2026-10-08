@@ -10,25 +10,60 @@ class TargetSettings:
 
     A new target is placed at a distance and bearing drawn uniformly from these
     ranges, measured from the head's tip and its forward direction; positive
-    bearings are to the head's left.
+    bearings are to the head's left. ``arrival`` is ``"head"`` when the target
+    must lie under the head's outline, or ``"tip"`` when the head's tip must come
+    within ``arrival_radius_m`` (None for ``"head"``). An episode is also cut,
+    like a time limit, when the head's tip leaves the range circle: centred on
+    the target, with ``range_circle_ratio`` times the distance at the start as
+    its radius; 0 means no circle.
+
+    The tip and no circle are the task of the runs before 2026-10-08's head
+    arrival: a file that sets ``arrival_radius_m``, as their saved files do,
+    uses the tip, and has no circle unless it sets one.
     """
 
     distance_range_m: tuple[float, float]
     bearing_range_deg: tuple[float, float]
-    arrival_radius_m: float
+    arrival: str
+    arrival_radius_m: float | None
+    range_circle_ratio: float | None
 
     @classmethod
     def from_section(cls, values: dict) -> "TargetSettings":
         """Check the section's values and fill in the defaults."""
         section = SettingsSection(values, "environment.target")
+        tip_task = "arrival_radius_m" in values
+        arrival = section.choice(
+            "arrival", ("head", "tip"), default="tip" if tip_task else "head"
+        )
+        if arrival == "head" and tip_task:
+            raise SettingsError(
+                '[environment.target] arrival_radius_m belongs to arrival = "tip";'
+                ' with arrival = "head" the head\'s outline decides'
+            )
+        range_circle_ratio = section.number(
+            "range_circle_ratio", default=None if tip_task else 2.5, minimum=0.0
+        )
+        if range_circle_ratio is not None and 0 < range_circle_ratio <= 1:
+            raise SettingsError(
+                "[environment.target] range_circle_ratio must be 0 (no circle) or"
+                " above 1, or the head would start outside its circle, got"
+                f" {range_circle_ratio:g}"
+            )
         settings = cls(
             distance_range_m=section.number_range(
-                "distance_range_m", default=(0.010, 0.020), minimum=0.0
+                "distance_range_m", default=(0.030, 0.060), minimum=0.0
             ),
             bearing_range_deg=section.number_range(
-                "bearing_range_deg", default=(-15.0, 15.0)
+                "bearing_range_deg", default=(-30.0, 30.0)
             ),
-            arrival_radius_m=section.positive_number("arrival_radius_m", default=0.001),
+            arrival=arrival,
+            arrival_radius_m=(
+                section.positive_number("arrival_radius_m", default=0.001)
+                if arrival == "tip"
+                else None
+            ),
+            range_circle_ratio=range_circle_ratio,
         )
         section.reject_unknown_keys()
         return settings

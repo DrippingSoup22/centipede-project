@@ -22,7 +22,7 @@ from mujoco_replay.selection import level_of_ranks, selected_ranks
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 
-SELECTIONS = ("ranked", "first", "all")
+SELECTIONS = ("ranked", "first")
 
 
 @dataclass(frozen=True)
@@ -115,25 +115,28 @@ class WindowRecorder:
         self._score += rewards
         self._frame += 1
 
-    def take(self, levels: int, per_level: int, selection: str) -> RecordedWindow:
+    def take(self, levels: int, worlds: int | str, selection: str) -> RecordedWindow:
         """The recording's chosen worlds, copied to the CPU; ends it, complete or not.
 
-        ``"ranked"`` keeps the worlds at MujocoReplay's ``selected_ranks`` of
-        the summed reward; ``"first"`` keeps the first worlds, as many as the
-        ranked choice would, for continuity across recordings; ``"all"`` keeps
-        every world. Worlds come out in rank order, best first.
+        ``worlds`` is how many worlds to keep, or ``"all"``; every world is
+        kept when there are no more than that. Otherwise ``"ranked"`` keeps
+        worlds evenly spaced over the ranks of the summed reward, the best and
+        the worst included (MujocoReplay's ``selected_ranks`` with one band),
+        and ``"first"`` keeps the first worlds, for continuity across
+        recordings. Worlds come out in rank order, best first, each with its
+        level among ``levels``.
         """
         self._recording = False
         frames = self._frame
         order = torch.argsort(self._score, descending=True, stable=True)
-        if selection == "all":
+        kept = self._world_count if worlds == "all" else min(worlds, self._world_count)
+        if kept == self._world_count:
             chosen = order
             ranks = np.arange(self._world_count)
         elif selection == "ranked":
-            ranks, _ = selected_ranks(self._world_count, levels, per_level)
+            ranks, _ = selected_ranks(self._world_count, 1, kept)
             chosen = order[torch.as_tensor(ranks, device=self._device)]
         else:
-            kept = min(self._world_count, levels * per_level)
             rank_of_world = torch.empty_like(order)
             rank_of_world[order] = torch.arange(self._world_count, device=self._device)
             chosen = torch.argsort(rank_of_world[:kept])

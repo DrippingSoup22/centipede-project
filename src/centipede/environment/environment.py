@@ -50,10 +50,16 @@ class Environment:
             self.device,
         )
         self.observation_size = self.observation_builder.observation_size
+        # Arrival under the head counts progress no closer than half the head's
+        # width: within the head's reach, nothing pays more.
+        self.head_outline = self.simulation.head_outline
+        target = settings.target
         self.reward_function = RewardFunction(
             settings.rewards,
             settings.max_episode_steps,
-            settings.target.arrival_radius_m,
+            self.head_outline.half_width_m
+            if target.arrival == "head"
+            else target.arrival_radius_m,
         )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
@@ -77,6 +83,11 @@ class Environment:
         )
         self.previous_head_tip_position = torch.zeros(
             (self.world_count, 2), dtype=torch.float32, device=self.device
+        )
+        # The radius of each world's range circle, around its target; infinite
+        # when there is no circle.
+        self.range_radius = torch.full(
+            (self.world_count,), torch.inf, dtype=torch.float32, device=self.device
         )
 
         # Targets have their own random sequence, separate from the starting
@@ -121,13 +132,18 @@ class Environment:
         self.simulation.step(joint_action)
         self.episode_steps += 1
 
-        # 3. Arrival or time limit; arrival wins when both happen.
+        # 3. Arrival, or a cut: the time limit or leaving the range circle,
+        # which end the episode alike. Arrival wins when both happen.
         head_distance = (self.target_position - state.head_tip_position[:, :2]).norm(
             dim=-1
         )
-        terminated = head_distance <= self.settings.target.arrival_radius_m
+        if self.settings.target.arrival == "head":
+            terminated = self._target_under_head()
+        else:
+            terminated = head_distance <= self.settings.target.arrival_radius_m
+        left_range = (head_distance > self.range_radius) & ~terminated
         time_is_up = self.episode_steps >= self.settings.max_episode_steps
-        truncated = time_is_up & ~terminated
+        truncated = (time_is_up | left_range) & ~terminated
 
         # 4. and 5. Rewards, observations, diagnostics.
         step_rewards = self.reward_function.compute(
@@ -146,6 +162,7 @@ class Environment:
             step_rewards,
             terminated,
             truncated,
+            left_range,
         )
 
         # 6. Reset the worlds whose episode ended. ``build`` returns a new
@@ -196,4 +213,31 @@ class Environment:
         new_target = head_tip + distance[:, None] * direction
         self.target_position.copy_(
             torch.where(world_mask[:, None], new_target, self.target_position)
+        )
+        if target_settings.range_circle_ratio:
+            self.range_radius.copy_(
+                torch.where(
+                    world_mask,
+                    target_settings.range_circle_ratio * distance,
+                    self.range_radius,
+                )
+            )
+
+    def _target_under_head(self) -> torch.Tensor:
+        """Worlds whose target lies under the head's outline, seen from above.
+
+        The target is measured from the head's centre along the head's forward
+        direction and to its side, and compared with the rectangle that encloses
+        the head's body shape.
+        """
+        state = self.simulation.physical_state
+        outline = self.head_outline
+        offset = self.target_position - state.body_planar_position[:, 0]
+        forward = head_forward_direction(state.body_quaternion[:, 0])
+        along = (offset * forward).sum(dim=-1)
+        across = forward[:, 0] * offset[:, 1] - forward[:, 1] * offset[:, 0]
+        return (
+            (along >= outline.rear_m)
+            & (along <= outline.front_m)
+            & (across.abs() <= outline.half_width_m)
         )

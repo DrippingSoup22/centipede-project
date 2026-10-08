@@ -98,9 +98,9 @@ The `[run]` settings of a training file:
 | `runs_folder` | `"runs"` | Where run folders are created; created if missing |
 | `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
 | `record_every_episodes` | 1 | One episode length of windows is recorded for replay every this many episode lengths, as one file: cycles 1 to 4, then 5 to 8, ... for 256-step episodes and 64-step windows. All worlds start together, so each file holds every world's whole episode from its first step, or several episodes for the worlds that arrived early. `0` records nothing |
-| `record_levels` | 4 | Worlds are ranked by their summed reward over the window and split into this many levels |
-| `record_per_level` | 8 | How many worlds of each level are kept, evenly spaced from the level's best to its worst |
-| `record_selection` | `"ranked"` | `"ranked"` keeps the worlds chosen by level; `"first"` keeps the first worlds, as many, so that consecutive recordings show the same worlds |
+| `record_worlds` | `"all"` | How many worlds each recording keeps: `"all"`, every world whatever `world_count` is, or a whole number; a number at least `world_count` also keeps every world |
+| `record_selection` | `"ranked"` | Which worlds a number keeps: `"ranked"` keeps worlds evenly spaced over the ranks of their summed reward, the best and the worst included; `"first"` keeps the first worlds, so that consecutive recordings show the same worlds |
+| `record_levels` | 4 | The recorded worlds' ranks are sorted into this many levels, which the viewer shows (for example "level 2 of 4") |
 | `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
 
 A complete training file, with every section written out:
@@ -115,9 +115,9 @@ report = true
 # runs_folder = "runs"
 # start_from = "runs/2026-10-07_1432_easy"
 # record_every_episodes = 1          # one file per episode length
-# record_levels = 4
-# record_per_level = 8
+# record_worlds = "all"              # or a number of worlds
 # record_selection = "ranked"
+# record_levels = 4
 
 [environment]
 max_episode_steps = 8192
@@ -133,9 +133,10 @@ world_count = 4
 # start_heading_range_deg = 0         # 180: every reset faces a random direction
 
 [environment.target]
-distance_range_m = [0.010, 0.020]
-bearing_range_deg = [-15, 15]
-arrival_radius_m = 0.001
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"                      # the target must come under the head
+range_circle_ratio = 2.5              # cut, like the time limit, beyond 2.5 x the start distance
 
 [environment.rewards]                 # proportions; see docs/environment.md
 arrival_reward = 1.0                  # the unit of every other weight
@@ -312,8 +313,8 @@ see [diagnostics.md](diagnostics.md#episode-summary)). Each session in
 
 The **recordings** hold the poses of the recorded steps for replay in the
 sibling MujocoReplay project: `recordings/cycles_AAAA-BBBB.npz` holds the
-windows collected in cycles `AAAA` to `BBBB`, one episode length, with the
-worlds chosen by level; the agents update after every window, so the file
+windows collected in cycles `AAAA` to `BBBB`, one episode length, with every
+world or the number `record_worlds` asks for; the agents update after every window, so the file
 marks each update as an event and each frame with the updates done before
 it. The last file of a session can be shorter, where the session ended.
 An evaluation's recordings hold every world of each
@@ -321,10 +322,23 @@ actor and seed, from the first episode's first step until the last world's
 first episode ended. Each file carries the model, the targets as markers, and
 the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
-training run records every episode length, 32 worlds each: about 2.3 MB per
-256 steps for models v2 and v3, so 9 MB for a 1,024-step episode. While a
-file is recorded, every world's poses stay in device memory; a run that would
-need more than 1 GiB for it is refused, with the settings to change. To watch a run's recordings, in order, with
+training run records every episode length and every world. A file takes about
+`steps × worlds × 289` bytes for model v3 (`4 × 69` for the positions, 13 for
+the target and the episode starts), and each training run prints its files'
+number and size before it starts:
+
+| Run | Worlds | Steps per file | File |
+| --- | --- | --- | --- |
+| 256-step episodes | 64 | 256 | 4.7 MB |
+| 1,024-step episodes | 64 | 1,024 | 19 MB |
+| 256-step episodes | 1,024 | 256 | 76 MB |
+| 1,024-step episodes | 1,024 | 1,024 | 303 MB |
+
+A 64-world run of 64 cycles of 64 steps with 256-step episodes writes 16 files,
+about 75 MB; with 1,024 worlds it would be 1.2 GB, which `record_worlds = 128`
+cuts to about 150 MB. While a file is recorded, every world's poses stay in
+device memory, whatever `record_worlds` keeps; a run that would need more than
+1 GiB for it is refused, with the settings to change. To watch a run's recordings, in order, with
 MujocoReplay installed:
 
 ```powershell

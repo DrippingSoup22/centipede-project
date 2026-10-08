@@ -68,6 +68,8 @@ ended, and every other value as a mean over those episodes.
 | --- | --- | --- |
 | `episode_ended` | `(W,)` | Which worlds' episodes ended on this step; only their rows are summarised |
 | `arrived` | `(W,)` | Whether the head reached the target, rather than running out of time |
+| `left_range` | `(W,)` | Whether the episode was cut because the head's tip left the range circle |
+| `ending` | `(W,)` | How the episode ended, as the middle of its bin: arrived (0.5); ran out of time within a quarter of the start distance (1.5), within half (2.5), closer than at the start (3.5), or not closer (4.5); left the range circle (5.5) |
 | `length_steps` | `(W,)` | Episode length in steps of 20 ms |
 | `segment_return` | `(W, N)` | Sum of each segment's rewards over the episode |
 | `start_distance`, `final_distance` | `(W,)` | Head's distance to the target at the start and at the end, m |
@@ -78,14 +80,15 @@ ended, and every other value as a mean over those episodes.
 | `foot_contact_share` | `(W, N, 2)` | Share of steps each foot was on the ground |
 | `upside_down_share` | `(W,)` | Share of steps with the head upside down |
 
-Four of these values are also counted in **histograms**, so that the report
+Five of these values are also counted in **histograms**, so that the report
 can show how the episodes spread and not only their mean. With many worlds, a
 mean hides whether every episode went halfway or some arrived while the rest
 flipped over. The bins are fixed, the same for every run:
 
 | Value | Bins |
 | --- | --- |
-| `final_distance` | Edges at 0, 1, 5, 10, 15, 20, 30, 50, 100, and 200 mm: below 1 mm are the arrivals, with the 1 mm arrival radius; the others tell how far the episodes that ran out of time ended |
+| `ending` | One bin per ending, edges 0 to 6: measured against each episode's own start distance, so the classes hold for any target distance; the report's "Where episodes ended" uses it |
+| `final_distance` | Edges at 0, 1, 5, 10, 15, 20, 30, 50, 100, and 200 mm: below 1 mm were the arrivals with the tip's 1 mm radius; the others tell how far the episodes that ran out of time ended. Reports of runs without `ending` use it |
 | `distance_closed` | From −100% to 100% in steps of 10% |
 | `length_steps` | Edges at 0, 16, 24, 32, 48, 64, … 12,288, 16,384 steps: each about 1.5 times the last, including every power of two, so that a time limit such as 1,024 or 8,192 steps starts its own bin and time-outs are not mixed with arrivals |
 | `upside_down_share` | From 0% to 100% in steps of 10% |
@@ -181,16 +184,17 @@ the simulation's `qpos` of every world into a buffer on the device and adds
 the step's rewards to each world's score; the step facts' target and the
 episode summary's `episode_ended` are kept alongside. These are a few small
 tensor operations that never wait for the GPU. When the recording is complete,
-or the session ends, the experiment takes the chosen worlds between cycles and
+or the session ends, the experiment takes the kept worlds between cycles and
 writes the file: the worlds are ranked by their summed reward over the whole
-recording and chosen by level with MujocoReplay's
-`selected_ranks`, so that the file holds the best, the middle, and the worst
-(`record_levels` and `record_per_level` in [configuration.md](configuration.md#training-files)).
-Only the chosen worlds are copied to the CPU. Each file also gives every
-world's rank among all the run's worlds and the number of levels, so the viewer
-shows, for example, "rank 37 of 1,024" and "level 2 of 4". The viewer's
-default view shows the best world of each of 16 bands, which leaves out the
-worst world of a file of 4 levels × 8 worlds; showing all 32 includes it.
+recording and written in rank order, best first. By default every world is
+kept; a number of worlds (`record_worlds` in
+[configuration.md](configuration.md#training-files)) keeps that many, evenly
+spaced over the ranks with MujocoReplay's `selected_ranks` (one band), so that
+the file holds the best, the middle, and the worst. Only the kept worlds are
+copied to the CPU. Each file also gives every world's rank among all the run's
+worlds and its level among `record_levels`, so the viewer shows, for example,
+"rank 37 of 1,024" and "level 2 of 4". With every world in the file, the
+viewer's highlight reaches each of them, whichever worlds it draws.
 
 An evaluation's recording holds every world, ranked by the summed reward of its
 first episode only, as in the evaluation's results; the frames continue until

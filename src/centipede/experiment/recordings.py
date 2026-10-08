@@ -24,6 +24,8 @@ from centipede.interaction_loop.recording import RecordedWindow
 SCORE_NAME = "summed reward"
 FIRST_EPISODE_SCORE_NAME = "first episode's summed reward"
 TARGET_MARKER = "target"
+# The target's radius in replays when arrival is under the head.
+TARGET_MARKER_RADIUS_M = 0.001
 
 
 @dataclass(frozen=True)
@@ -40,10 +42,12 @@ class RecordingScene:
     ) -> "RecordingScene":
         """Read the model once as a single document, includes resolved."""
         model_path = configuration.environment.simulation.model_path
+        target = configuration.environment.target
         return cls(
             model_xml=mujoco.MjSpec.from_file(str(model_path)).to_xml(),
             frame_seconds=environment.simulation.step_duration_s,
-            marker_radius=configuration.environment.target.arrival_radius_m,
+            # With arrival under the head, the target is only a point to see.
+            marker_radius=target.arrival_radius_m or TARGET_MARKER_RADIUS_M,
         )
 
 

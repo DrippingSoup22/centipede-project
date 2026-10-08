@@ -36,6 +36,19 @@ SHARE_EDGES = tuple(round(0.1 * index, 1) for index in range(11))
 # the targets (placed 10 to 20 mm away) and coarsely far from them. Farther
 # endings count in the last bin.
 FINAL_DISTANCE_EDGES_M = (0.0, 0.001, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.1, 0.2)
+# How each episode ended, one bin each, measured against its own start
+# distance so that the classes hold for any target distance: arrived; ran out
+# of time within a quarter of the start distance, within half, closer than at
+# the start, or not closer; left the range circle.
+ENDINGS = (
+    "arrived",
+    "within a quarter",
+    "within half",
+    "closer",
+    "not closer",
+    "left the circle",
+)
+ENDING_EDGES = tuple(range(len(ENDINGS) + 1))
 
 
 @dataclass(frozen=True)
@@ -88,6 +101,16 @@ class EpisodeSummary:
     arrived: torch.Tensor = measure(
         "The head reached the target rather than running out of time, (W,)",
         summary="share",
+    )
+    left_range: torch.Tensor = measure(
+        "The head's tip left the range circle, which cut the episode, (W,)",
+        summary="share",
+    )
+    ending: torch.Tensor = measure(
+        "How the episode ended, as the bin of ENDINGS, (W,): arrived; ran out of"
+        " time within a quarter of the start distance, within half, closer, or not"
+        " closer; left the range circle",
+        histogram_edges=ENDING_EDGES,
     )
     length_steps: torch.Tensor = measure(
         "Episode length, (W,)", "steps of 20 ms", histogram_edges=LENGTH_EDGES_STEPS
@@ -168,6 +191,8 @@ class EnvironmentDiagnostics:
         self.episode = EpisodeSummary(
             episode_ended=zeros(dtype=torch.bool),
             arrived=zeros(dtype=torch.bool),
+            left_range=zeros(dtype=torch.bool),
+            ending=zeros(),
             length_steps=zeros(),
             segment_return=zeros(segment_count),
             start_distance=zeros(),
@@ -190,6 +215,9 @@ class EnvironmentDiagnostics:
         )  # left foot, right foot, body, legs
         self._upside_down_steps = zeros()
         self._start_distance = zeros()
+        # Remaining shares of the start distance that separate the endings
+        # "within a quarter", "within half", "closer", and "not closer".
+        self._remaining_edges = torch.tensor([0.25, 0.5, 1.0], device=device)
 
     def start_episodes(
         self,
@@ -227,12 +255,14 @@ class EnvironmentDiagnostics:
         step_rewards: StepRewards,
         terminated: torch.Tensor,
         truncated: torch.Tensor,
+        left_range: torch.Tensor,
     ) -> None:
         """Refresh the step facts, add to the totals, and publish ended episodes.
 
         Called once per step, after rewards and episode ends are known and
         before any world is reset; the arguments are values the front file
-        already has.
+        already has. ``left_range`` marks the cut episodes whose head left the
+        range circle.
         """
         step = self.step
         quaternion = physical_state.body_quaternion
@@ -282,8 +312,21 @@ class EnvironmentDiagnostics:
         steps = self._steps[:, None]
         episode = self.episode
         episode.episode_ended.copy_(ended)
+        remaining = step.head_distance / self._start_distance
+        ending = torch.where(
+            terminated,
+            0,
+            torch.where(
+                left_range,
+                5,
+                torch.bucketize(remaining, self._remaining_edges, right=True) + 1,
+            ),
+        )
         for summary, value in (
             (episode.arrived, terminated),
+            (episode.left_range, left_range),
+            # The middle of the ending's bin, so that it counts in that bin.
+            (episode.ending, ending + 0.5),
             (episode.length_steps, self._steps),
             (episode.segment_return, self._segment_return),
             (episode.start_distance, self._start_distance),

@@ -214,6 +214,10 @@ const METRICS = {
     about: "How the episodes spread over their length, in bins that grow by about 1.5 times, so short arrivals and long ones are both visible. Episodes that ran out of time fill the bin that starts at the time limit; arrivals fill the bins before it." },
   "episode_distributions.final_distance": { label: "Distance at the end, every episode", source: "episodes.final_distance", better: "lower",
     about: "How far from its target each episode's head ended. Arrivals end within the arrival radius; the episodes that ran out of time end wherever the head was. Counting episodes in bins shows what most centipedes did, which a mean distance hides: a few that wander far away pull a mean up however well the others did." },
+  "episode_distributions.ending": { label: "How episodes ended, every episode", source: "episodes.ending",
+    about: "How each episode ended, measured against its own start distance so that the classes hold for any target distance: arrived; ran out of time within a quarter of the start distance, within half, closer than at the start, or not closer; or left the range circle, which cut it. Runs from 8 October 2026's arrival under the head on log it." },
+  "episodes.left_range": { label: "Left the circle", unit: "%", scale: 100, better: "lower",
+    about: "The share of episodes cut because the head's tip left the range circle around the target, whose radius is a multiple of the distance at the start. Such an episode ends like a time limit: the world starts again with a new target." },
   "episode_distributions.upside_down_share": { label: "Head upside down, every episode", source: "episodes.upside_down_share", better: "lower",
     about: "How the episodes spread over the share of their steps with the head upside down, in 10% bins. It tells a few episodes that flipped over and stayed there from many that flipped briefly." },
 
@@ -292,7 +296,10 @@ const SETTING_CHIPS = [
   } },
   { keys: ["environment.target"],
     text: ({ environment: { target: t } }) => `targets ${number(t.distance_range_m[0] * 1000)}–${number(t.distance_range_m[1] * 1000)} mm, ` +
-      `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, arrival within ${number(t.arrival_radius_m * 1000)} mm` },
+      `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, ` +
+      // Runs before 8 October 2026's arrival under the head set the tip's radius.
+      (t.arrival_radius_m !== undefined && t.arrival !== "head" ? `arrival within ${number(t.arrival_radius_m * 1000)} mm` : "arrival under the head") +
+      (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` : "") },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
@@ -1343,9 +1350,32 @@ function endingClasses(settings, edges) {
   return classes.filter((c) => c.bins.length);
 }
 
+// How episodes ended in runs that log the "ending" histogram (from 8 October
+// 2026's arrival under the head on): one bin per class, against each episode's
+// start distance.
+const RELATIVE_ENDING_CLASSES = [
+  { name: "arrived", quality: 1 },
+  { name: "within a quarter of the start distance", quality: 0.8 },
+  { name: "within half", quality: 0.64 },
+  { name: "closer", quality: 0.5 },
+  { name: "not closer", quality: 0.2 },
+  { name: "left the circle", quality: 0.06 },
+];
+
+// Which histogram tells where episodes ended, and its classes: the "ending"
+// histogram where `logged(key)` finds it, else the final distance of older runs.
+function endingSource(settings, logged) {
+  const relative = "episode_distributions.ending";
+  if (logged(relative)) {
+    return { key: relative, classes: RELATIVE_ENDING_CLASSES.map((c, bin) => ({ ...c, bins: [bin], color: qualityColor(c.quality) })) };
+  }
+  const key = "episode_distributions.final_distance";
+  return { key, classes: endingClasses(settings, info(key).edges) };
+}
+
 // The ending classes of each sample: rows for shareRows or columns for shareBars.
-function endingCounts(sample, classes) {
-  const counts = sample.counts("episode_distributions.final_distance");
+function endingCounts(sample, classes, key = "episode_distributions.final_distance") {
+  const counts = sample.counts(key);
   if (!counts) return null;
   const perClass = classes.map((c) => c.bins.reduce((sum, bin) => sum + counts[bin], 0));
   return { perClass, total: perClass.reduce((a, b) => a + b, 0) };
@@ -1712,29 +1742,36 @@ function trainingCard(item, context) {
   }
 
   if (item.kind === "endings") {
-    const key = "episode_distributions.final_distance";
+    const { key, classes } = endingSource(context.settings, (k) => log.some((record) => raw(record, k) !== null));
+    const relative = key === "episode_distributions.ending";
     context.used.add(key);
     const spec = { ...item, title: "Where episodes ended", keys: [key],
-      subtitle: `Every episode of each episode length: arrived, or how far from its target it ran out of time. Targets start ${targetRange(context.settings)} away`,
-      about: "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad; the grey band is about as far as targets start. A bar that fills with blue from the bottom means the centipedes get to their targets." };
+      subtitle: relative
+        ? `Every episode of each episode length: arrived, ran out of time (by how much of its start distance was left), or left the range circle. Targets start ${targetRange(context.settings)} away`
+        : `Every episode of each episode length: arrived, or how far from its target it ran out of time. Targets start ${targetRange(context.settings)} away`,
+      about: relative
+        ? "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by the share of their start distance left at the end (within a quarter, within half, closer than at the start, not closer), then the episodes whose head left the range circle. Blue is good, red bad. A bar that fills with blue from the bottom means the centipedes get to their targets."
+        : "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad; the grey band is about as far as targets start. A bar that fills with blue from the bottom means the centipedes get to their targets." };
     if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run: older runs did not log where each episode ended"));
     if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
-    const classes = endingClasses(context.settings, info(key).edges);
     const columns = context.blocks.map((indices) => ({ label: context.blockLabel(indices), cycle: log[indices[indices.length - 1]].cycle,
-      ...endingCounts(context.blockSample(indices), classes) })).filter((column) => column.total > 0);
+      ...endingCounts(context.blockSample(indices), classes, key) })).filter((column) => column.total > 0);
     return card(spec, legend(classes.map((c) => c.name), classes.map((c) => c.color)), shareBars(columns, classes, width));
   }
 
   if (item.kind === "ending_bins") {
-    const key = "episode_distributions.final_distance";
+    const { key, classes } = endingSource(context.settings, (k) => log.some((record) => raw(record, k) !== null));
+    const relative = key === "episode_distributions.ending";
     const spec = { ...item, title: "Where episodes ended: first and last", keys: [key],
-      subtitle: "Episodes of the first and the last episode length, by the distance at which they ended; the blue numbers count the last",
+      subtitle: relative
+        ? "Episodes of the first and the last episode length, by how they ended; the blue numbers count the last"
+        : "Episodes of the first and the last episode length, by the distance at which they ended; the blue numbers count the last",
       about: `${info(key).about} The grey bars are the first episode length of training, the blue bars the last.` };
     if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run"));
     if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
     const edges = info(key).edges;
     const mm = (edge) => number(edge * 1000);
-    const labels = edges.slice(0, -1).map((edge, bin) => (bin === 0
+    const labels = relative ? classes.map((c) => c.name) : edges.slice(0, -1).map((edge, bin) => (bin === 0
       ? (context.settings.environment.target.arrival_radius_m === 0.001 ? "arrived" : `under ${mm(edges[1])} mm`)
       : bin === edges.length - 2 ? `${mm(edge)} mm or more` : `${mm(edge)}–${mm(edges[bin + 1])} mm`));
     const groups = context.moments.map(([, indices, color]) => {
@@ -1976,15 +2013,19 @@ function evaluationCard(item, context) {
   }
 
   if (item.kind === "endings") {
-    const key = "episode_distributions.final_distance";
+    const { key, classes } = endingSource(settings, (k) => samples.some((sample) => sample.counts(k) !== null));
+    const relative = key === "episode_distributions.ending";
     const spec = { ...item, title: "Where episodes ended", keys: [key],
-      subtitle: `${several ? "Each actor's" : "The agents'"} episodes: arrived, or how far from its target the head ran out of time. Targets start ${targetRange(settings)} away`,
-      about: "One bar per actor, holding its episodes of every seed: the share that arrived (left), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad, and grey about as far as the targets of training start." +
+      subtitle: relative
+        ? `${several ? "Each actor's" : "The agents'"} episodes: arrived, ran out of time (by how much of its start distance was left), or left the range circle. Targets start ${targetRange(settings)} away`
+        : `${several ? "Each actor's" : "The agents'"} episodes: arrived, or how far from its target the head ran out of time. Targets start ${targetRange(settings)} away`,
+      about: (relative
+        ? "One bar per actor, holding its episodes of every seed: the share that arrived (left), then the episodes that ran out of time, by the share of their start distance left at the end, then the episodes whose head left the range circle. Blue is good, red bad."
+        : "One bar per actor, holding its episodes of every seed: the share that arrived (left), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad, and grey about as far as the targets of training start.") +
         (context.facts.seeds.length > 1 ? " The thin bars under it are the seeds one by one: alike, they show that the result holds on every seed." : "") };
     if (samples.every((sample) => sample.counts(key) === null)) return card(spec, empty("Not recorded by this evaluation: older evaluations did not record where each episode ended"));
-    const classes = endingClasses(settings, info(key).edges);
-    const rows = actors.flatMap((actor, i) => [{ label: actor, ...endingCounts(samples[i], classes) },
-      ...(seedSamples[i].length > 1 ? seedSamples[i].map((sample, k) => ({ label: `seed ${data.results[actor][k].seed}`, minor: true, ...endingCounts(sample, classes) })) : [])])
+    const rows = actors.flatMap((actor, i) => [{ label: actor, ...endingCounts(samples[i], classes, key) },
+      ...(seedSamples[i].length > 1 ? seedSamples[i].map((sample, k) => ({ label: `seed ${data.results[actor][k].seed}`, minor: true, ...endingCounts(sample, classes, key) })) : [])])
       .filter((row) => row.total > 0);
     return card(spec, legend(classes.map((c) => c.name), classes.map((c) => c.color)), shareRows(rows, classes, width));
   }

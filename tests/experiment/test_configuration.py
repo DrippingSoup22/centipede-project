@@ -52,6 +52,7 @@ def test_the_saved_configuration_reads_back_identically(saved_run):
     assert read_configuration(run_folder / "configuration.toml") == configuration
     assert configuration.interaction_loop.update_cycles == 6
     assert configuration.run.seed == 0  # a default, now written out
+    assert configuration.run.record_worlds == "all"  # recordings keep every world
     # Unset, the discount follows the episode length (rule R0): an arrival on
     # the last of 8,192 steps is worth half.
     assert configuration.agents.ppo.discount == 2 ** (-1 / 8192)
@@ -91,10 +92,38 @@ def test_files_that_name_a_run_start_from_its_saved_configuration(saved_run, tmp
     assert evaluating.environment == expected_environment
 
 
+def with_run_setting(line):
+    return TRAINING_FILE.replace('name = "probe"', f'name = "probe"\n{line}')
+
+
+def test_recordings_keep_a_number_of_worlds_and_old_runs_still_read(
+    saved_run, tmp_path
+):
+    numbered = write(tmp_path, with_run_setting("record_worlds = 9"))
+    assert read_configuration(numbered).run.record_worlds == 9
+
+    # Runs saved before record_worlds have record_per_level, retired since.
+    run_folder, _ = saved_run
+    saved = run_folder / "configuration.toml"
+    text = saved.read_text(encoding="utf-8")
+    saved.write_text(text.replace("[run]\n", "[run]\nrecord_per_level = 8\n", 1))
+    assert "record_per_level" in saved.read_text(encoding="utf-8")
+    continuing = read_configuration(
+        write(
+            tmp_path,
+            f'[run]\nmode = "train"\ncontinue_from = "{run_folder.as_posix()}"\n',
+        )
+    )
+    assert continuing.run.record_worlds == "all"
+
+
 @pytest.mark.parametrize(
     ("text", "problem"),
     [
         (TRAINING_FILE + '[agents]\ndevice = "cuda"\n', "device must be 'cpu'"),
+        (with_run_setting("record_worlds = 0"), 'must be "all" or a whole number'),
+        (with_run_setting('record_worlds = "most"'), 'must be "all" or a whole'),
+        (with_run_setting("record_per_level = 8"), "replaced on 2026-10-08"),
         (TRAINING_FILE.replace('"probe"', '"my probe"'), "name may only contain"),
         (TRAINING_FILE + "[evaluation]\nseeds = [1]\n", "may only contain"),
         (

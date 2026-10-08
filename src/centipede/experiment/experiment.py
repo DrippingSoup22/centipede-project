@@ -49,6 +49,7 @@ from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
     duration,
+    recording_sizes,
     reward_weights,
     training_settings,
 )
@@ -183,6 +184,19 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         ),
         end="\n\n",
     )
+    if run_settings.record_every_episodes:
+        blocks = recording_windows * run_settings.record_every_episodes
+        file_count = sum(
+            (cycle - 1) % blocks == 0
+            for cycle in range(completed_cycles + 1, total_cycles + 1)
+        )
+        world_count, position_count = environment.diagnostics.simulation.qpos.shape
+        kept = run_settings.record_worlds
+        kept = world_count if kept == "all" else min(kept, world_count)
+        print(
+            recording_sizes(file_count, kept, recording_frames, position_count),
+            end="\n\n",
+        )
     if completed_cycles >= total_cycles:
         print(f"Already {completed_cycles} of {total_cycles} cycles; nothing to do.")
         return folder.path
@@ -258,7 +272,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         ):
             window = recorder.take(
                 run_settings.record_levels,
-                run_settings.record_per_level,
+                run_settings.record_worlds,
                 run_settings.record_selection,
             )
             folder.write_recording(
@@ -582,7 +596,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
             results[actor_name].append(record)
             progress.finish(record)
             if evaluation.record:
-                window = recorder.take(1, 1, "all")
+                window = recorder.take(1, "all", "ranked")
                 folder.write_evaluation_recording(
                     f"{stem}_{actor_name.replace(' ', '_')}_seed{seed}",
                     evaluation_recording(

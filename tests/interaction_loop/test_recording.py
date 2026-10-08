@@ -48,9 +48,9 @@ def test_only_armed_windows_are_recorded_and_worlds_are_ranked():
     recorder.arm(frames=2)
     recorder.start_window()
     take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0], [0.5, 2.0, -1.0]])
-    window = recorder.take(levels=2, per_level=1, selection="ranked")
+    window = recorder.take(levels=2, worlds=2, selection="ranked")
 
-    # Best world 1, then the worst band's first rank (world 2), best first.
+    # Two of three worlds, evenly over the ranks: the best and the worst.
     assert window.world_ids.tolist() == [1, 2]
     assert window.level.tolist() == [1, 2]
     assert (window.rank.tolist(), window.ranked_worlds, window.level_count) == (
@@ -77,7 +77,7 @@ def test_a_recording_carries_on_through_windows_until_complete():
     take_steps(recorder, diagnostics, [[1.0, 0.0, 0.0]] * 2, start_frame=2)
     assert recorder.complete  # the fourth step was not kept
 
-    window = recorder.take(levels=1, per_level=1, selection="ranked")
+    window = recorder.take(levels=1, worlds=1, selection="ranked")
     assert window.qpos.shape == (3, 1, POSITIONS)
     np.testing.assert_allclose(window.qpos[2, 0], [20.0, 21.0])  # frame 2, world 0
     np.testing.assert_allclose(window.score, [3.0])
@@ -91,7 +91,7 @@ def test_first_and_all_keep_the_asked_worlds_with_their_levels():
     recorder.start_window()
     take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]])  # one of four frames
 
-    first = recorder.take(levels=1, per_level=2, selection="first")
+    first = recorder.take(levels=1, worlds=2, selection="first")
     assert first.world_ids.tolist() == [1, 0]  # worlds 0 and 1, best first
     assert first.level.tolist() == [1, 1]
     assert first.qpos.shape == (1, 2, POSITIONS)
@@ -99,9 +99,17 @@ def test_first_and_all_keep_the_asked_worlds_with_their_levels():
     recorder.arm(frames=1)
     recorder.start_window()
     take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]])
-    everything = recorder.take(levels=3, per_level=1, selection="all")
+    everything = recorder.take(levels=3, worlds="all", selection="ranked")
     assert everything.world_ids.tolist() == [1, 0, 2]
     assert everything.level.tolist() == [1, 2, 3]
+    assert (everything.rank.tolist(), everything.ranked_worlds) == ([1, 2, 3], 3)
+
+    # Asking for more worlds than there are keeps them all.
+    recorder.arm(frames=1)
+    recorder.start_window()
+    take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]])
+    more = recorder.take(levels=3, worlds=128, selection="first")
+    assert more.world_ids.tolist() == [1, 0, 2]
 
 
 def test_only_counted_worlds_add_to_their_score():
@@ -112,6 +120,6 @@ def test_only_counted_worlds_add_to_their_score():
     # World 1's first episode has ended: its later rewards do not count.
     counted = torch.tensor([True, False, True])
     take_steps(recorder, diagnostics, [[0.5, 2.0, -1.0]], 1, counted)
-    window = recorder.take(levels=1, per_level=3, selection="all")
+    window = recorder.take(levels=1, worlds="all", selection="ranked")
     assert window.world_ids.tolist() == [1, 0, 2]
     np.testing.assert_allclose(window.score, [2.0, 1.0, -2.0])
