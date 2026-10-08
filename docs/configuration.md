@@ -146,11 +146,13 @@ leg_contact_cost_parts = 1
 # cost_budget_parts = 6               # default: the costs' parts together
 head_progress_ratio = 1               # a halving = one episode of step cost
 follower_progress_share = 1           # every follower receives the head's progress
+# command_cost_ratio = 4              # off by default: Ant's control cost, in step costs
 
 [agents]
 device = "cpu"                        # "cpu" or "cuda", matching the backend
 hidden_layers = [64, 64]
 initial_action_std = 0.5
+exploration_noise_beta = 0.0          # 0 white noise, 0.5 or 1 colored (smoother)
 optimizer = "adam"                    # "adam", "adamw", or "sgd"
 learning_rate = 3e-4                  # the rate of the first update
 learning_rate_schedule = "constant"   # "constant", "linear", or "cosine"

@@ -360,7 +360,7 @@ produce, and the rewards used before, which earlier runs keep.
 Every segment `i` receives, on every step:
 
 ```text
-r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i − w_move × M_i
+r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i − w_move × M_i − w_command × C_i
 ```
 
 | Term | Its value on a step | Who receives it |
@@ -371,6 +371,7 @@ r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L
 | **Body contact** `B_i` | 1 when the segment's body touches the ground | That segment |
 | **Leg contact** `L_i` | 1 when one of its legs touches another leg; both segments involved pay | That segment |
 | **Movement** `M_i` | How far the joints the segment commands moved on the step, squared and averaged over them, in units of how far random commands move a joint (25° for v3, squared); at most 1. Only when `movement_cost_parts` is set | That segment |
+| **Command** `C_i` | The segment's commands for the step, squared and averaged over the joints it commands: 0 for none, 1 for full commands. Only when `command_cost_ratio` is set | That segment |
 
 Feet on the ground cost nothing, and nothing rewards a particular gait. The
 design is a **team led by the head**: only the head sees the target, but every
@@ -420,6 +421,18 @@ mean action 0.003; a calm stroke over half the sweep range, twice a second,
 gives about 0.02. The noise itself pays the cost, so PPO is pushed to shrink it
 as far as that pays: the cost does not say how to walk, it only stops jitter
 being free.
+
+**Why a command cost.** In the runs of 2026-10-08 the movement cost, at one and
+two parts of the budget, left the jitter as it was (joint movement 0.68 → 0.67
+of random commands). The command cost is the control cost of Gymnasium's Ant
+(Towers et al., 2024): it charges what each segment commands, squared, rather
+than what its joints do, so a large command costs the same whether or not the
+body follows it. Ant pays 1 per healthy step and charges 0.5 times the sum of
+its 8 squared commands, so a mean squared command of 1 costs 4 healthy steps;
+`command_cost_ratio` = 4 copies that ratio against the step cost. Like the
+noise it charges, it lies outside the cost budget: with it, the worst episode
+no longer balances to zero (rule R1). Added for the night tests of 2026-10-09
+([results/night_2026-10-09](../results/night_2026-10-09/README.md)).
 
 **Why progress counts halvings.** A halving has no unit, so the same rules hold
 for any target distance, and it is worth the same at 16 mm as at 2 mm. Over an
@@ -626,6 +639,7 @@ These are the keys of the environment sections of the configuration file (see
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
 | `movement_cost_parts` | 0 | The movement cost's parts of the cost budget; 0 (off) unless a file sets it, so that runs saved before it existed keep their reward |
 | `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
+| `command_cost_ratio` | 0 | The command cost's weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`. Outside the cost budget, so it breaks rule R1 when set; 0 (off) unless a file sets it. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
 | `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
 | `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole episodes of step cost |
 | `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
