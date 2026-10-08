@@ -64,7 +64,7 @@ Centipede/
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
-├─ scripts/          Controlling the GPU desktop from the laptop
+├─ scripts/          Controlling the GPU desktop and Kaggle from the laptop
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
@@ -128,8 +128,8 @@ Training runs on a desktop with an RTX 3080, set up as above, with this
 repository, `RL_lib`, and `MujocoReplay` side by side. It collects about 1,250
 transitions per second at 1,024 worlds, two and a half times a Kaggle T4. The
 laptop, whose MX330 cannot run the default solver, is used to write code, run
-the CPU tests, and read the results. Training on Kaggle was used until Stage
-8.4; its notebooks are in the local archive.
+the CPU tests, and read the results. While the desktop cannot be reached,
+training runs on Kaggle (below).
 
 The laptop controls the desktop over SSH, through
 [`scripts/gpu_desktop.py`](scripts/gpu_desktop.py), run from the repository
@@ -188,6 +188,43 @@ for administrator accounts), and name the desktop `gpu` in `~/.ssh/config`
 with its address and user. The script expects the desktop's projects in
 `~\Projects` and its environment in `~\.venvs\Centipede`; another host name
 can be given in `CENTIPEDE_GPU_HOST`.
+
+### Training on Kaggle
+
+[`scripts/kaggle_gpu.py`](scripts/kaggle_gpu.py) trains one run and its
+evaluation on a Kaggle T4, in one session of the private notebook
+`centipede-training`, launched and followed from the laptop. It uses Kaggle's
+command-line tool, installed in the project's environment and signed in once
+(the sign-in opens the browser):
+
+```powershell
+& "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install kaggle==2.2.4
+& "$HOME\.venvs\Centipede\Scripts\kaggle.exe" auth login
+```
+
+Then, from the repository root with the project's Python:
+
+```powershell
+python scripts/kaggle_gpu.py run configs/spine_movement/02_movement_1.toml
+python scripts/kaggle_gpu.py watch
+python scripts/kaggle_gpu.py status
+python scripts/kaggle_gpu.py fetch
+```
+
+`run` checks that the code is pushed, since the session clones it at the
+laptop's commit, uploads the run that the file starts from as a private
+dataset the first time, and sends the configuration file as it is on the
+laptop, with the `evaluation.toml` beside it. The session,
+[`scripts/kaggle_session.py`](scripts/kaggle_session.py), runs the tests
+(`--skip-tests` leaves them out), trains, and evaluates the new run. `run`
+shows its output as Kaggle streams it, one line per window, and when it ends
+copies the run folder into `runs/` and the console output of every step into
+`runs/kaggle/<launch>/`, so Kaggle's web page is not needed. Ctrl+C stops
+watching, not the session; `watch` follows it again, `status` tells whether it
+is queued, running, or ended, and `fetch` copies its results at any time,
+waiting while it runs. Only the latest session is followed or fetched, so a
+new one is refused until it has ended. Run folders made on Kaggle are named
+by its clock, in UTC.
 
 ## Archive
 

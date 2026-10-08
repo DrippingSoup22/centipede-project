@@ -528,7 +528,10 @@ def git(*arguments: str) -> str:
 
 
 def require_pushed_code() -> None:
-    """Stop unless the desktop can pull exactly the code the laptop has."""
+    """Stop unless GitHub has exactly the code the laptop has.
+
+    The desktop pulls it from there, and Kaggle clones it (kaggle_gpu.py).
+    """
     git("fetch", "-q")
     unpushed = int(git("rev-list", "--count", "@{upstream}..HEAD"))
     uncommitted = git(
@@ -536,7 +539,7 @@ def require_pushed_code() -> None:
     )
     if unpushed or uncommitted:
         sys.exit(
-            "The desktop runs the code on GitHub: commit and push first"
+            "The GPU runs the code on GitHub: commit and push first"
             f" ({unpushed} unpushed commits; uncommitted: {uncommitted or 'none'})."
         )
 
