@@ -1,4 +1,4 @@
-﻿# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
+# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
 # short tests one at a time while the user sleeps, each on the reward-study
 # baseline with 256 worlds (test 01) and one change, judged by the evaluation
 # with the policy's mean action.
