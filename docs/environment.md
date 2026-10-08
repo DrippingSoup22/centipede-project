@@ -274,37 +274,54 @@ centipede may fall or touch the ground with its body and recover.
 
 The reward was rebuilt on 2026-10-08 from a small set of rules, agreed with
 the user, so that every weight follows from them instead of being tuned by
-hand. This section gives the terms, the rules, what they produce, and the
-reward used before, which earlier runs keep.
+hand; the same day, after its first runs, the followers' progress was replaced
+by a share of the head's. This section gives the terms, the rules, what they
+produce, and the rewards used before, which earlier runs keep.
 
 ### The terms
 
 Every segment `i` receives, on every step:
 
 ```text
-r_i = A × arrived + w_progress × P_i − w_step − w_body × B_i − w_leg × L_i
+r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i
 ```
 
 | Term | Its value on a step | Who receives it |
 | --- | --- | --- |
 | **Arrival** | 1 on the step the head comes within the arrival radius of the target, otherwise 0 | Every segment, the same |
-| **Progress** `P_i` | `log2(distance before ÷ distance after)`: how many times the segment halved its distance to its goal; negative when it moved away, 0 when it did not move | The head toward the target; every other segment toward the spot where the segment ahead of it was at the start of the step, counted at `follower_progress_ratio` of the head's weight |
+| **Progress** `P` | `log2(distance before ÷ distance after)` of the head's tip and the target: how many times the head halved its distance; negative when it moved away, 0 when it did not move | Every segment, the same (`follower_progress_share` = 1) |
 | **Step cost** | 1 on every step | Every segment |
 | **Body contact** `B_i` | 1 when the segment's body touches the ground | That segment |
 | **Leg contact** `L_i` | 1 when one of its legs touches another leg; both segments involved pay | That segment |
 
 Feet on the ground cost nothing, and nothing rewards a particular gait. The
-design is a **leader and followers**: only the head sees the target, and its
-progress is what pulls the body toward it; each follower is rewarded, weakly,
-for following the path of the segment ahead. Because a follower aims at a place
-its leader has already been, a straight or turning path passes down the body
-from segment to segment. Since the body is connected, part of a follower's
-progress can come from being pulled along, so evaluation must measure what each
-segment actually contributes.
+design is a **team led by the head**: only the head sees the target, but every
+segment is paid for the head's progress, so each one pushes, steers, or holds
+back as far as that brings the head closer, and walking past the target costs
+all of them what it earned. The head leads by what it knows; how hard the
+others push, and when they stop, has to come from training. Posture stays each
+segment's own: the contact costs, paid by the segment that touches, are the
+only terms that differ between segments.
+
+**Why the followers share the head's progress.** The first runs of the rules
+paid each follower for halving its own distance to the spot where the segment
+ahead had been. The segments are joined by hinges at a fixed distance
+([model.md](model.md), Spine), so a follower cannot lag behind its leader or
+catch up with it: its distance to that spot shrank by exactly how far the body
+moved forward on the step. The term rewarded every follower for the body's
+speed, wherever it went, and since the spot moved on with every step, nothing
+was ever given back: about 40 halvings per episode, worth about 0.9 `A` to each
+follower. Seven segments paid to push outweighed the one trying to steer; the
+results are under [The first runs of the rules](#the-first-runs-of-the-rules).
+Matching the leader's velocity instead was considered and rejected for the same
+reason: with the distance fixed, two neighbours' velocities differ only when
+the body turns, so it would be blind to speed and would penalise the turns the
+head needs. Sharing the head's progress is a shared reward copied to each
+agent, which keeps every agent's networks, data, and learning separate.
 
 **Why progress counts halvings.** A halving has no unit, so the same rules hold
 for any target distance, and it is worth the same at 16 mm as at 2 mm. Over an
-episode the head's progress adds up to `log2(start distance ÷ end distance)`,
+episode the progress adds up to `log2(start distance ÷ end distance)`,
 whatever path it took: wiggling back and forth earns nothing, and walking past
 the target gives back what was earned on the way. Distances closer than the
 arrival radius count as the radius, so an episode that arrives earns exactly
@@ -346,14 +363,15 @@ for leg contact.
   standing still at −σ = −2λ: worse by the mildest cost.
 - **R3. The order of the costs.** Body contact weighs most, then the step cost,
   then leg contact: the budget is split **3 : 2 : 1** (β : σ : λ).
-- **R4. The followers follow but do not push.** A follower's progress weight is
-  `follower_progress_ratio` = 1/10 of the head's. Its goal is only one segment
-  (3.8 mm) away, so a step of walking halves a good share of that distance: at
-  the 0.17 mm per step measured in the first runs, a whole episode of walking
-  makes about 16 halvings, which at 1/10 earns 0.38 `A`, below the cost budget.
-  Following then never outweighs posture and time. Above about 1/5 it would, and
-  above 1/2 it would outweigh the arrival itself, making walking forward the
-  followers' goal: they would push the head straight past its target.
+- **R4. Every segment shares the head's progress.** Each follower receives the
+  head's progress at `follower_progress_share` = 1. The share must make helping
+  the head worth more than a follower's own posture over an episode, or it
+  would rather keep still: a full approach from 15 mm is worth about 0.9 `A`,
+  more than a whole episode of leg contact (λ = 0.116) above a share of 0.13,
+  and of body contact (β = 0.347) above 0.39. Nothing limits it from above:
+  a follower gains only when the head comes closer and loses when it moves
+  away, so its interest and the head's never diverge, and with a share of 1
+  every segment values the approach equally.
 
 Two earlier candidates turned out to be consequences rather than rules. A full
 approach from 20 mm earns `log2(20) × σ ≈ 1.0 A`, about the arrival; every
@@ -370,14 +388,14 @@ With `A = 1` and 256-step episodes:
 | Step cost | 0.00090 per step | σ = 2/6 of the budget (0.231), over 256 steps |
 | Body contact | 0.00136 per step | β = 3/6 of the budget (0.347) |
 | Leg contact | 0.00045 per step | λ = 1/6 of the budget (0.116) |
-| Progress, head | 0.231 per halving | σ × `head_progress_ratio` |
-| Progress, followers | 0.0231 per halving | The head's × `follower_progress_ratio` |
+| Progress | 0.231 per halving of the head's distance, to every segment | σ × `head_progress_ratio`, shared at `follower_progress_share` |
 | Discount | 0.9973 | 2^(−1/256) |
 
 Doubling the episode length halves the per-step costs and sets the discount to
 0.9987; nothing else changes. Every training run prints these weights under its
 settings. Totals per segment over one episode, without discount, in units of
-`A`, for targets 10 to 20 mm away:
+`A`, for targets 10 to 20 mm away; they are the same for every segment, with
+its own contacts:
 
 | Outcome | Total |
 | --- | ---: |
@@ -392,9 +410,9 @@ settings. Totals per segment over one episode, without discount, in units of
 
 Seen from the start through the discount, the worst arrival comes to about +0.5
 (zero for its costs, plus its progress) and standing still to −0.17. Per step at
-walking speed, the head's progress is about three times the body cost at 15 mm
-and grows near the target, so a much faster crawl could outweigh an upright
-walk; the reports' body values show whether it does.
+walking speed, the progress is about three times the body cost at 15 mm and
+grows near the target, so a much faster crawl could outweigh an upright walk;
+the reports' body values show whether it does.
 
 **Switching a cost off.** A cost of 0 parts is off. The budget is split into
 `cost_budget_parts` equal parts, by default the costs' parts together; setting
@@ -422,6 +440,21 @@ head's progress part averaged zero, and no run learned to steer. A
 configuration that sets any of `efficiency_cost`, `body_contact_cost`, or
 `leg_contact_cost` uses this reward, so runs saved before keep it when they are
 continued or evaluated; a file that also sets the proportions is refused.
+
+### The first runs of the rules
+
+The first two runs of the rules (2026-10-08, `configs/reward_rules/`, from the
+standing prototype, two seeds) paid each follower for halving its own distance
+to the spot where the segment ahead had been, at `follower_progress_ratio` =
+1/10 of the head's weight. As explained above, that paid for speed. Over the
+64 update cycles, each follower's progress rose from +0.0021 to +0.0045 per
+step, five times the step cost, while the head's fell from −0.0004 to −0.0016:
+the centipedes walked faster (head path 123 → 167 mm per episode) and past
+their targets, ending 81 and 70 mm away instead of 34 mm, with the heading
+error rising from 119° to 145°. Arrivals stayed at 21–23%, the luck of walking
+straight. A file that sets `follower_progress_ratio` keeps that term, with
+`follower_progress_share` 0 unless it sets that too, so those runs read back
+with their reward.
 
 ### Changing the reward
 
@@ -470,7 +503,8 @@ These are the keys of the environment sections of the configuration file (see
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
 | `cost_budget_parts` | The three together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
 | `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole episodes of step cost |
-| `follower_progress_ratio` | 0.1 | A follower's progress weight, as a share of the head's |
+| `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
+| `follower_progress_ratio` | Not set | The first runs' followers' own progress toward the spot where the segment ahead had been, as a share of the head's weight; kept for those runs |
 | `distance_ratio_epsilon_m` (`ε`) | 0.000001 | Keeps the efficiency ratio of the earlier reward defined |
 | `efficiency_cost`, `body_contact_cost`, `leg_contact_cost` | Not set | Per-step weights of the reward used before 2026-10-08 (0.003, 0.010, and 0.005 when any is set); setting one selects that reward |
 
@@ -493,11 +527,3 @@ Left for after the first version works, one change at a time:
 - A body with more segments: a new model version. The code adapts, but trained
   agents do not carry over, because each segment has its own network.
 - A reward term for a wave-like gait, only if one does not emerge on its own.
-- A shared progress term (proposed 2026-10-08, kept for later by the user):
-  every segment receives `w × (d_before − d_after)`, the head's progress toward
-  the target, like the shared arrival reward. Its total over an episode is
-  `w × (start distance − end distance)`, so wiggling earns nothing and walking
-  past the target gives back what was earned (potential-based shaping, Ng,
-  Harada & Russell, 1999). It changes the design from a leader that pulls and
-  followers that follow to every segment actively helping the head, so it is
-  tested as its own path, not combined with the leader–follower efficiency.

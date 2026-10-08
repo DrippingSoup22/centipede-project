@@ -72,7 +72,7 @@ def test_the_worst_arrival_balances_to_zero_through_the_discount():
     assert any_cost.per_step["body_contact"] == any_cost.per_step["leg_contact"] == 0
 
 
-def test_progress_counts_halvings_of_each_distance_followers_at_their_share():
+def test_progress_counts_the_heads_halvings_for_every_segment():
     state = unchanged_state()
     state.head_tip_position[1, 0] += 0.0075  # head: 15 mm → 7.5 mm, one halving
     state.body_planar_position[1, 1, 0] += 0.002  # 4 mm → 2 mm from the leader's spot
@@ -82,11 +82,16 @@ def test_progress_counts_halvings_of_each_distance_followers_at_their_share():
 
     head = weights["progress"]
     assert not parts["progress"][0].any()
-    assert parts["progress"][1].tolist() == pytest.approx(
-        [head, 0.1 * head, -0.1 * head], rel=1e-5
-    )
+    assert parts["progress"][1].tolist() == pytest.approx([head] * 3, rel=1e-5)
     assert step.segment_progress[1].tolist() == pytest.approx(
         [0.0075, 0.002, -0.004], abs=1e-7
+    )
+
+    # The first runs of the rules paid followers for their own goals instead.
+    own_goals = RewardSettings.from_section({"follower_progress_ratio": 0.1})
+    _, parts, _ = rewards_for(state, settings=own_goals)
+    assert parts["progress"][1].tolist() == pytest.approx(
+        [head, 0.1 * head, -0.1 * head], rel=1e-5
     )
 
     # Landing on the target's centre counts as reaching the arrival radius.

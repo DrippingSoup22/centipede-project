@@ -78,24 +78,34 @@ def arrival(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
 
 
 def progress(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
-    """How many times each segment halved its distance to its goal: positive
-    when it came closer, negative when it moved away, 0 when it did not move.
+    """How many times the head halved its distance to the target, for every
+    segment: positive when it came closer, negative when it moved away.
 
-    log2(distance before ÷ distance after), counted in full for the head and at
-    ``follower_progress_ratio`` for the followers, whose goals are much nearer.
-    Distances closer than the arrival radius count as the radius, so landing
-    nearer the target's centre earns nothing more. Over an episode the head's
-    values add up to log2(start distance ÷ end distance), whatever its path:
-    log2(start distance ÷ arrival radius) for an episode that arrives.
+    log2(distance before ÷ distance after) of the head, which every follower
+    receives too, at ``follower_progress_share`` (1: the same). Distances
+    closer than the arrival radius count as the radius, so landing nearer the
+    target's centre earns nothing more. Over an episode the values add up to
+    log2(start distance ÷ end distance), whatever the path: log2(start distance
+    ÷ arrival radius) for an episode that arrives, and walking past the target
+    gives back what was earned.
+
+    The first runs of the rules, on 2026-10-08, paid each follower instead for
+    halving its own distance to the spot where the segment ahead had been, at
+    ``follower_progress_ratio``. Those spots move on every step, so the
+    followers' values never added up to anything bounded: they paid for speed.
+    The term is kept so that those runs read back with their reward.
     """
     radius = context.arrival_radius_m
     halvings = torch.log2(
         context.distance_before.clamp(min=radius)
         / context.distance_after.clamp(min=radius)
     )
-    share = torch.full_like(halvings[0], settings.follower_progress_ratio)
-    share[0] = 1.0
-    return halvings * share
+    head = halvings[:, :1]
+    rewards = settings.follower_progress_share * head.expand_as(halvings)
+    if settings.follower_progress_ratio is not None:
+        rewards = rewards + settings.follower_progress_ratio * halvings
+    rewards[:, 0] = head[:, 0]
+    return rewards
 
 
 def step_cost(context: RewardContext, settings: RewardSettings) -> torch.Tensor:

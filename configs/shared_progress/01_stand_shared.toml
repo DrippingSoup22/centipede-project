@@ -1,0 +1,57 @@
+# Shared progress, 2026-10-08 (plan.md, Stage 8.4): the followers no longer
+# have goals of their own. In the first runs of the rules each follower was
+# paid for halving its distance to the spot where the segment ahead had been;
+# the segments are hinged at a fixed distance, so that paid for the body's
+# speed, and the centipedes walked past their targets (docs/environment.md,
+# The first runs of the rules). Now every segment receives the head's
+# progress, the halvings of the head's distance to the target, at
+# follower_progress_share (rule R4); everything else is as in those runs:
+# - reward: arrival 1, costs split 3 : 2 : 1 (body : step : legs) of the
+#   budget that makes the worst arrival balance to zero, one halving worth one
+#   episode of step cost; each segment pays for its own contacts;
+# - discount 2^(-1/256) = 0.9973, set by the configuration (rule R0);
+# - 64 worlds, episode length 256 steps, rollout window 64 steps, minibatch
+#   size 512, epochs 4; targets 10-20 mm, within 15 degrees.
+#
+# Path C, from the standing prototype, runs/2026-10-07_2221_baseline_stage2;
+# 64 update cycles, about 26 min.
+# Hypothesis: paid only for the head's approach, the followers stop pushing
+# the body past the target. Expect, against the first runs of the rules: the
+# head's path per episode no longer growing (123 -> 167 mm there), episodes
+# that run out of time ending closer than they started (0% there), the
+# heading error falling below 90 degrees (rising to 145 there), and arrivals
+# above the 26.5% a straight walk gets by luck; body on the ground and legs
+# touching as low as the prototype's.
+
+[run]
+mode = "train"
+name = "shared_01_stand_shared"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+head_progress_ratio = 1
+follower_progress_share = 1           # every follower receives the head's progress
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 64

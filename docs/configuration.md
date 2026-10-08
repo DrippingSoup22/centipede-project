@@ -144,7 +144,7 @@ body_contact_cost_parts = 3
 leg_contact_cost_parts = 1
 # cost_budget_parts = 6               # default: the costs' parts together
 head_progress_ratio = 1               # a halving = one episode of step cost
-follower_progress_ratio = 0.1         # followers' progress, share of the head's
+follower_progress_share = 1           # every follower receives the head's progress
 
 [agents]
 device = "cpu"                        # "cpu" or "cuda", matching the backend

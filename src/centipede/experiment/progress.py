@@ -127,8 +127,8 @@ def reward_weights(
     ]
     if "progress" in per_step:
         lines += [
-            "    progress is per halving of the head's distance to its target;",
-            "    a follower's halvings count at follower_progress_ratio",
+            "    progress is per halving of the head's distance to its target,",
+            "    received by every follower too, at follower_progress_share",
         ]
     if episode_shares:
         lines.append(

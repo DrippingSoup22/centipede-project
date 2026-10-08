@@ -44,6 +44,7 @@ PROPORTION_KEYS = (
     "leg_contact_cost_parts",
     "cost_budget_parts",
     "head_progress_ratio",
+    "follower_progress_share",
     "follower_progress_ratio",
 )
 
@@ -71,8 +72,15 @@ class RewardSettings:
     default the sum of the three costs' parts), and each cost takes its own
     number of parts. ``head_progress_ratio`` is what one halving of the head's
     distance to its target is worth, in whole episodes of step cost, and
-    ``follower_progress_ratio`` the followers' progress weight as a share of the
-    head's. A cost of zero parts is switched off.
+    ``follower_progress_share`` the share of the head's progress that every
+    follower receives as well (1: the same). A cost of zero parts is switched
+    off.
+
+    ``follower_progress_ratio`` belongs to the first runs of the rules, on
+    2026-10-08, whose followers were paid for halving their distance to the spot
+    where the segment ahead had been; it is None unless a file sets it, and in
+    such a file ``follower_progress_share`` defaults to 0, so those runs read
+    back with their reward.
 
     A file that sets the per-step weights of the reward used before 2026-10-08
     (``efficiency_cost``, ``body_contact_cost``, ``leg_contact_cost``) uses that
@@ -88,6 +96,7 @@ class RewardSettings:
     leg_contact_cost_parts: float | None
     cost_budget_parts: float | None
     head_progress_ratio: float | None
+    follower_progress_share: float | None
     follower_progress_ratio: float | None
     efficiency_cost: float | None
     body_contact_cost: float | None
@@ -116,6 +125,7 @@ class RewardSettings:
                 leg_contact_cost_parts=None,
                 cost_budget_parts=None,
                 head_progress_ratio=None,
+                follower_progress_share=None,
                 follower_progress_ratio=None,
                 efficiency_cost=section.number(
                     "efficiency_cost", default=0.003, minimum=0.0
@@ -146,6 +156,7 @@ class RewardSettings:
                     f" at least the costs' parts together ({sum(parts):g}), got"
                     f" {budget_parts:g}: the costs cannot take more than the budget"
                 )
+            own_goals = "follower_progress_ratio" in values
             settings = cls(
                 arrival_reward=arrival_reward,
                 step_cost_parts=parts[0],
@@ -155,8 +166,15 @@ class RewardSettings:
                 head_progress_ratio=section.number(
                     "head_progress_ratio", default=1.0, minimum=0.0
                 ),
-                follower_progress_ratio=section.number(
-                    "follower_progress_ratio", default=0.1, minimum=0.0
+                follower_progress_share=section.number(
+                    "follower_progress_share",
+                    default=0.0 if own_goals else 1.0,
+                    minimum=0.0,
+                ),
+                follower_progress_ratio=(
+                    section.number("follower_progress_ratio", minimum=0.0)
+                    if own_goals
+                    else None
                 ),
                 efficiency_cost=None,
                 body_contact_cost=None,
@@ -204,8 +222,8 @@ class RewardSettings:
         return RewardWeights(
             per_step={
                 "arrival": arrival,
-                # Per halving of the head's distance; the term itself counts a
-                # follower's halvings at follower_progress_ratio.
+                # Per halving of the head's distance; the term itself gives the
+                # followers their share of it.
                 "progress": self.head_progress_ratio * shares["step_cost"] * arrival,
                 "step_cost": shares["step_cost"] * arrival / steps,
                 "body_contact": shares["body_contact"] * arrival / steps,
