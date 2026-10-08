@@ -6,7 +6,8 @@
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
-  every ``record_every_cycles`` cycles it writes the window's replay recording.
+  the first window of every ``record_every_cycles`` cycles, and the last, are
+  written as replay recordings.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -177,8 +178,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     recorder = loop.diagnostics.recorder
     record_every = run_settings.record_every_cycles
 
+    # The first window of each block of record_every cycles: all worlds start
+    # together, so when the block spans whole episode lengths, it opens an
+    # episode for every world that has not arrived early, rather than showing
+    # the end of episodes that ran out of time. The last window is always kept.
     def recorded(cycle: int) -> bool:
-        return record_every > 0 and (cycle % record_every == 0 or cycle == total_cycles)
+        return record_every > 0 and (
+            (cycle - 1) % record_every == 0 or cycle == total_cycles
+        )
 
     scene = (
         RecordingScene.from_run(configuration, environment) if record_every else None

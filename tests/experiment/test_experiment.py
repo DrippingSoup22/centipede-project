@@ -73,9 +73,10 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert logged_cycles(folder) == [1, 2, 3]
     assert "/*REPORT_DATA*/" not in (folder / "report.html").read_text(encoding="utf-8")
 
-    # The window before each checkpoint is recorded: both worlds, 2 frames each.
+    # The first window of every two cycles, and the last, are recorded: both
+    # worlds, 2 frames each.
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycle_0002.npz", "cycle_0003.npz"]
+    assert recordings == ["cycle_0001.npz", "cycle_0003.npz"]
     recording = read_recording(folder / "recordings" / "cycle_0003.npz")
     assert recording.qpos.shape == (2, 2, 69)
     assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels

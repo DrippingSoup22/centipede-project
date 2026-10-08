@@ -1,0 +1,44 @@
+# Short episodes, 2026-10-08 (plan.md, Stage 8.4): the overnight runs 02 (scratch, discount)
+# again, with episodes of 256 steps (5 s) instead of 1,024, so that a
+# centipede that walked past its target is reset after at most 5 s instead of
+# wandering for up to 20 s. A straight walk at the overnight runs' 0.2 mm per
+# step covers 51 mm in that time; targets are 10-20 mm away.
+# - reward as overnight: arrival 10, body contact 0.01, efficiency 0.005, leg
+#   contact 0.0025. Per segment, standing still for an episode now scores
+#   -1.3, and every arrival beats it, even on the last step, crawling with
+#   legs always touching (+5.5);
+# - 64 worlds, rollout window 64 steps (4 windows per episode), minibatch
+#   size 512, epochs 4, discount 0.995, 64 update cycles: 16 episode lengths
+#   per world, about 25 min, then the queue's evaluation, about 1 min.
+# Starts from scratch.
+
+[run]
+mode = "train"
+name = "short_02_scratch_short"
+seed = 1
+checkpoint_every_cycles = 16
+
+[environment]
+max_episode_steps = 256
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 64
+
+[environment.rewards]
+arrival_reward = 10
+body_contact_cost = 0.01
+efficiency_cost = 0.005
+leg_contact_cost = 0.0025
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 512
+discount = 0.995
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 64

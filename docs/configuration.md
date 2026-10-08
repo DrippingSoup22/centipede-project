@@ -91,7 +91,7 @@ The `[run]` settings of a training file:
 | `report` | `true` | Whether to write the run's report; the smoke test turns it off |
 | `runs_folder` | `"runs"` | Where run folders are created; created if missing |
 | `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
-| `record_every_cycles` | `checkpoint_every_cycles` | The window of every cycle that is a multiple of this, and always the last, is recorded for replay; `0` records nothing |
+| `record_every_cycles` | `checkpoint_every_cycles` | The first window of every block of this many cycles (cycles 1, 1 + this, ...), and always the last, is recorded for replay; `0` records nothing. All worlds start together, so when this is a whole number of episode lengths, each recording opens an episode instead of showing the end of the episodes that ran out of time |
 | `record_levels` | 4 | Worlds are ranked by their summed reward over the window and split into this many levels |
 | `record_per_level` | 8 | How many worlds of each level are kept, evenly spaced from the level's best to its worst |
 | `record_selection` | `"ranked"` | `"ranked"` keeps the worlds chosen by level; `"first"` keeps the first worlds, as many, so that consecutive recordings show the same worlds |
@@ -260,7 +260,7 @@ runs/2026-10-07_1432_probe/
 ├─ training_log.jsonl   one line of diagnostics per window
 ├─ report.html          the run's summary (unless report = false)
 ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
-├─ recordings/          cycle_0016.npz, ...: replay recordings of training windows
+├─ recordings/          cycle_0001.npz, cycle_0017.npz, ...: replay recordings of training windows
 └─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation,
                         and <the same>_<actor>_seed<seed>.npz recordings
 ```
