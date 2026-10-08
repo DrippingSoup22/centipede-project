@@ -17,8 +17,9 @@ from centipede.diagnostics_category import descriptions, values
 
 def test_each_segment_row_gets_its_own_summary_and_spreads():
     settings = AgentSettings.from_section({"hidden_layers": [4]})
+    # Segment 0 also commands the spine joint behind it.
     segment_agents = [
-        SegmentAgent(index, 2, 3, 1, settings, index) for index in range(2)
+        SegmentAgent(index, 2, 3, 1, settings, index, 7 - index) for index in range(2)
     ]
     with torch.no_grad():
         segment_agents[1].ppo.actor_network.log_std.fill_(math.log(0.25))
@@ -37,3 +38,4 @@ def test_each_segment_row_gets_its_own_summary_and_spreads():
     torch.testing.assert_close(
         learning["action_std"], torch.tensor([[0.5] * 6, [0.25] * 6])
     )
+    assert learning["spine_action_std"].tolist() == [0.5, 0.0]

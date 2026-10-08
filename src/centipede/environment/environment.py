@@ -3,8 +3,8 @@
 It keeps each world's episode state (target, step count, previous positions)
 and coordinates the observation builder, the reward function, the diagnostics,
 and the physics simulation. The interaction loop uses only ``reset`` and
-``step``; the experiment reads ``segment_count`` and ``observation_size`` to
-create the agents. See docs/environment.md.
+``step``; the experiment reads ``segment_count``, ``observation_size``, and the
+action sizes to create the agents. See docs/environment.md.
 """
 
 import torch
@@ -14,7 +14,7 @@ from centipede.environment.observation_builder import (
     ObservationBuilder,
     head_forward_direction,
 )
-from centipede.environment.reward_function import RewardFunction
+from centipede.environment.reward_function import RewardFunction, joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.settings_section import SettingsError
@@ -25,6 +25,11 @@ class Environment:
 
     Every tensor passed in or out has the worlds as its first dimension. When an
     episode ends in a world, ``step`` resets that world by itself.
+
+    ``segment_action_sizes`` lists how many actions each segment takes: six for
+    its legs, and with spine control a seventh, the spine joint behind it, for
+    every segment but the rear. ``action_size`` is the width of the joint
+    action, the largest of them; the rear's seventh column is padding.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -48,8 +53,23 @@ class Environment:
             settings.observation_radius,
             self.world_count,
             self.device,
+            spine_observed=settings.spine_control,
         )
         self.observation_size = self.observation_builder.observation_size
+        spine_count = self.segment_count - 1
+        if settings.spine_control:
+            self.segment_action_sizes = [7] * spine_count + [6]
+        else:
+            self.segment_action_sizes = [6] * self.segment_count
+        self.action_size = max(self.segment_action_sizes)
+        # The joints each segment commands, among its six leg joints and the
+        # spine joint behind it.
+        commanded_joints = torch.ones(
+            (self.segment_count, 7), dtype=torch.float32, device=self.device
+        )
+        commanded_joints[:, 6] = 0.0
+        if settings.spine_control:
+            commanded_joints[:spine_count, 6] = 1.0
         # Arrival under the head counts progress no closer than half the head's
         # width: within the head's reach, nothing pays more.
         self.head_outline = self.simulation.head_outline
@@ -60,6 +80,7 @@ class Environment:
             self.head_outline.half_width_m
             if target.arrival == "head"
             else target.arrival_radius_m,
+            commanded_joints,
         )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
@@ -83,6 +104,11 @@ class Environment:
         )
         self.previous_head_tip_position = torch.zeros(
             (self.world_count, 2), dtype=torch.float32, device=self.device
+        )
+        self.previous_joint_position = torch.zeros(
+            (self.world_count, self.segment_count, 7),
+            dtype=torch.float32,
+            device=self.device,
         )
         # The radius of each world's range circle, around its target; infinite
         # when there is no circle.
@@ -116,7 +142,7 @@ class Environment:
     def step(
         self, joint_action: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Apply the ``(W, N, 6)`` joint action for one 20 ms step.
+        """Apply the ``(W, N, action_size)`` joint action for one 20 ms step.
 
         Returns the observations, the rewards ``(W, N)``, terminated and
         truncated ``(W,)``, and the final observations. Worlds whose episode
@@ -129,9 +155,14 @@ class Environment:
         # overwritten in place by the step.
         self.previous_body_planar_position.copy_(state.body_planar_position)
         self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
+        self.previous_joint_position.copy_(joint_angles(state))
 
-        # 2. Move the body.
-        self.simulation.step(joint_action)
+        # 2. Move the body. With spine control, column 6 holds each segment's
+        # command for the spine joint behind it; without, the spine is passive.
+        if self.settings.spine_control:
+            self.simulation.step(joint_action[..., :6], joint_action[:, :-1, 6])
+        else:
+            self.simulation.step(joint_action)
         self.episode_steps += 1
 
         # 3. Arrival, or a cut: the time limit or leaving the range circle,
@@ -154,6 +185,7 @@ class Environment:
             self.previous_head_tip_position,
             self.target_position,
             terminated,
+            self.previous_joint_position,
         )
         observations = self.observation_builder.build(state, self.target_position)
         self.diagnostics.record_step(

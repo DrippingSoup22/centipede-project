@@ -81,6 +81,12 @@ class PhysicsSimulation:
         """Reset the selected worlds (all if no mask); see the backends' ``reset``."""
         self._backend.reset(world_mask, seed)
 
-    def step(self, leg_actions: torch.Tensor) -> None:
-        """Hold the (W, N, 6) leg actions for one step in every world."""
-        self._backend.step(leg_actions)
+    def step(
+        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+    ) -> None:
+        """Hold the (W, N, 6) leg and (W, N - 1) spine actions for one step.
+
+        Spine command ``i`` drives the joint between segments ``i`` and ``i + 1``;
+        without spine actions, the spine motors receive zero.
+        """
+        self._backend.step(leg_actions, spine_actions)

@@ -120,6 +120,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         loop_settings.rollout_window_steps,
         configuration.agents,
         run_settings.seed,
+        environment.segment_action_sizes,
     )
     completed_cycles = 0
     if checkpoint_path is not None:
@@ -132,7 +133,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
             )
-        agents.load_state_dict(checkpoint["agents"])
+        # A new run may give its agents more to see or command than the run
+        # it starts from, such as the spine: its agents are then widened.
+        agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
     # A recording covers whole windows: the episode length, rounded up.
     recording_windows = math.ceil(
         configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
@@ -551,6 +554,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         1,
         configuration.agents,
         configuration.run.seed,
+        environment.segment_action_sizes,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])
@@ -560,10 +564,10 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     # Each actor is made for a seed: only the random baseline uses it.
     actors: dict[str, Callable[[int], Actor]] = {"agents": lambda seed: agents}
     if "zero" in evaluation.baselines:
-        actors["zero action"] = lambda seed: ZeroActionBaseline()
+        actors["zero action"] = lambda seed: ZeroActionBaseline(environment.action_size)
     if "random" in evaluation.baselines:
         actors["random action"] = lambda seed: RandomActionBaseline(
-            environment.device, seed
+            environment.device, seed, environment.action_size
         )
     print(f"Evaluating {checkpoint_path}")
     print(

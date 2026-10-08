@@ -15,7 +15,7 @@ import torch
 from rl_lib.algorithms.policy_gradient import PPOUpdateSummary
 
 from centipede.agents.diagnostics import AgentDiagnostics
-from centipede.agents.segment_agent import ACTION_SIZE, SegmentAgent
+from centipede.agents.segment_agent import LEG_ACTION_COUNT, SegmentAgent
 from centipede.agents.settings import AgentSettings
 
 
@@ -30,14 +30,21 @@ class Agents:
         rollout_window_steps: int,
         settings: AgentSettings,
         seed: int,
+        segment_action_sizes: list[int] | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
         Every (run seed, segment) pair gets a different agent seed.
+        ``segment_action_sizes`` is the environment's: how many motors each
+        segment commands, six each when not given.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
         self.settings = settings
+        self.segment_action_sizes = (
+            segment_action_sizes or [LEG_ACTION_COUNT] * segment_count
+        )
+        self.action_size = max(self.segment_action_sizes)
 
         self.segment_agents: list[SegmentAgent] = [
             SegmentAgent(
@@ -47,6 +54,7 @@ class Agents:
                 rollout_window_steps=rollout_window_steps,
                 settings=settings,
                 seed=seed * segment_count + segment_index,
+                action_size=self.segment_action_sizes[segment_index],
             )
             for segment_index in range(segment_count)
         ]
@@ -54,11 +62,16 @@ class Agents:
         self.diagnostics = AgentDiagnostics(segment_count, device=self.settings.device)
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
-        """The ``(W, N, 6)`` joint action for ``(W, N, observation_size)`` inputs."""
+        """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.
+
+        A segment with fewer actions than the widest gets zeros after its own,
+        as padding the environment does not use.
+        """
         actions: list[torch.Tensor] = []
         for segment_index, agent in enumerate(self.segment_agents):
-            segment_observations = observations[:, segment_index]
-            actions.append(agent.act(segment_observations, training))
+            segment_actions = agent.act(observations[:, segment_index], training)
+            padding = self.action_size - agent.action_size
+            actions.append(torch.nn.functional.pad(segment_actions, (0, padding)))
         return torch.stack(actions, dim=1)
 
     def record(
@@ -99,49 +112,85 @@ class Agents:
         return {
             "segment_count": self.segment_count,
             "observation_size": self.observation_size,
+            "segment_action_sizes": self.segment_action_sizes,
             "settings": asdict(self.settings),
             "segment_agents": [agent.state_dict() for agent in self.segment_agents],
         }
 
-    def load_state_dict(self, state: dict) -> None:
-        """Restore every agent; a checkpoint made for another body is rejected."""
-        saved_body = (state["segment_count"], state["observation_size"])
-        this_body = (self.segment_count, self.observation_size)
-        if saved_body != this_body:
+    def load_state_dict(self, state: dict, widen: bool = False) -> None:
+        """Restore every agent; a checkpoint made for another body is rejected.
+
+        With ``widen``, as a new run that starts from another run's agents
+        does, agents saved with fewer observations or actions are widened to
+        these agents' sizes (see ``SegmentAgent.load_state_dict``). Checkpoints
+        saved before the spine could be commanded hold six actions per segment.
+        """
+        saved_sizes = state.get(
+            "segment_action_sizes", [LEG_ACTION_COUNT] * state["segment_count"]
+        )
+        saved_body = (state["segment_count"], state["observation_size"], saved_sizes)
+        this_body = (
+            self.segment_count,
+            self.observation_size,
+            self.segment_action_sizes,
+        )
+        fits = saved_body == this_body or (
+            widen
+            and saved_body[0] == this_body[0]
+            and saved_body[1] <= this_body[1]
+            and all(
+                saved <= size
+                for saved, size in zip(saved_sizes, this_body[2], strict=True)
+            )
+        )
+        if not fits:
             raise ValueError(
                 f"The checkpoint is for {saved_body[0]} segments with "
-                f"{saved_body[1]} observations each, but these agents have "
-                f"{this_body[0]} segments with {this_body[1]}"
+                f"{saved_body[1]} observations and {saved_sizes} actions, but these "
+                f"agents have {this_body[0]} segments with {this_body[1]} and "
+                f"{this_body[2]}"
             )
         for agent, agent_state in zip(
             self.segment_agents, state["segment_agents"], strict=True
         ):
-            agent.load_state_dict(agent_state)
+            agent.load_state_dict(agent_state, widen=widen)
 
 
 class ZeroActionBaseline:
-    """Evaluation baseline: every motor is always told zero."""
+    """Evaluation baseline: every motor is always told zero.
+
+    ``action_size`` is the environment's joint action width.
+    """
+
+    def __init__(self, action_size: int = LEG_ACTION_COUNT) -> None:
+        self.action_size = action_size
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
-        """All-zero ``(W, N, 6)`` actions; ``training`` is ignored."""
+        """All-zero ``(W, N, action_size)`` actions; ``training`` is ignored."""
         world_count, segment_count = observations.shape[:2]
         return torch.zeros(
-            (world_count, segment_count, ACTION_SIZE), device=observations.device
+            (world_count, segment_count, self.action_size), device=observations.device
         )
 
 
 class RandomActionBaseline:
-    """Evaluation baseline: uniformly random actions from its own generator."""
+    """Evaluation baseline: uniformly random actions from its own generator.
 
-    def __init__(self, device: torch.device | str, seed: int) -> None:
+    ``action_size`` is the environment's joint action width.
+    """
+
+    def __init__(
+        self, device: torch.device | str, seed: int, action_size: int = LEG_ACTION_COUNT
+    ) -> None:
         """The generator lives on ``device``, where the actions are drawn."""
         self.generator = torch.Generator(device=device).manual_seed(seed)
+        self.action_size = action_size
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
-        """Uniform ``(W, N, 6)`` actions in [-1, 1); ``training`` is ignored."""
+        """Uniform ``(W, N, action_size)`` actions in [-1, 1); ignores ``training``."""
         world_count, segment_count = observations.shape[:2]
         uniform = torch.rand(
-            (world_count, segment_count, ACTION_SIZE),
+            (world_count, segment_count, self.action_size),
             generator=self.generator,
             device=observations.device,
         )

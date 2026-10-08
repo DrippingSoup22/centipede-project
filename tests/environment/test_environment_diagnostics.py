@@ -37,7 +37,9 @@ def make_diagnostics(reward_part_names=("first", "second")) -> EnvironmentDiagno
 
 def step_rewards(value: float) -> StepRewards:
     parts = torch.full((2, 2, 2), value / 2)
-    return StepRewards(parts.sum(dim=-1), parts, torch.full((2, 2), 0.001))
+    return StepRewards(
+        parts.sum(dim=-1), parts, torch.full((2, 2), 0.001), torch.full((2, 2), 0.04)
+    )
 
 
 def record(
@@ -69,6 +71,7 @@ def test_step_facts_describe_the_last_step():
     after.body_height[:] = 0.004
     after.left_foot_ground_contact[1, 1] = True
     after.body_quaternion[1, 1] = torch.tensor([0.0, 1.0, 0.0, 0.0])  # upside down
+    after.spine_yaw_position[:, 0] = -0.1  # bent the other way
 
     record(diagnostics, after, before, step_rewards(-0.2))
     facts = diagnostics.step
@@ -77,6 +80,8 @@ def test_step_facts_describe_the_last_step():
     assert facts.contact_flags[1, 1].tolist() == [True, False, False, False]
     assert facts.contact_flags.sum() == 1
     assert facts.segment_moved[:, 0].tolist() == pytest.approx([0.003, 0.003])
+    assert torch.allclose(facts.joint_movement, torch.full((2, 2), 0.2))  # root
+    assert facts.spine_bend[:, 0].tolist() == pytest.approx([0.1, 0.1])
     assert torch.allclose(facts.body_height, torch.full((2, 2), 0.004))
     assert facts.uprightness.tolist() == [[1.0, 1.0], [1.0, -1.0]]
     assert facts.head_distance.tolist() == pytest.approx(

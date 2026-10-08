@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 import torch
 from rl_lib.algorithms.policy_gradient import PPOUpdateSummary
 
-from centipede.agents.segment_agent import ACTION_SIZE, SegmentAgent
+from centipede.agents.segment_agent import LEG_ACTION_COUNT, SegmentAgent
 from centipede.diagnostics_category import measure
 
 
@@ -42,7 +42,7 @@ class LearningSummary:
         "The optimizers' learning rate in the update, the same for every agent"
     )
     action_std: torch.Tensor = measure(
-        "Each action's learned spread, before squashing, (N, 6)",
+        "Each leg action's learned spread, before squashing, (N, 6)",
         parts=(
             "left shoulder sweep",
             "left shoulder lift",
@@ -51,6 +51,10 @@ class LearningSummary:
             "right shoulder lift",
             "right knee",
         ),
+    )
+    spine_action_std: torch.Tensor = measure(
+        "The learned spread of the command for the spine joint behind the"
+        " segment, before squashing; 0 for a segment without one, (N,)"
     )
 
 
@@ -69,7 +73,8 @@ class AgentDiagnostics:
                 for name in SUMMARY_NAMES
             },
             learning_rate=torch.zeros((), device=device),
-            action_std=torch.zeros((segment_count, ACTION_SIZE), device=device),
+            action_std=torch.zeros((segment_count, LEG_ACTION_COUNT), device=device),
+            spine_action_std=torch.zeros(segment_count, device=device),
         )
 
     def record_update(
@@ -92,5 +97,9 @@ class AgentDiagnostics:
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
                 # The policy clamps the log spread to [-20, 2] before using it.
-                log_std = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0)
-                self.learning.action_std[segment_index].copy_(log_std.exp())
+                spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
+                self.learning.action_std[segment_index].copy_(spread[:LEG_ACTION_COUNT])
+                if agent.action_size > LEG_ACTION_COUNT:
+                    self.learning.spine_action_std[segment_index] = spread[
+                        LEG_ACTION_COUNT
+                    ]

@@ -74,6 +74,8 @@ class CPUBackend:
         self._leg_leg_contact = self.physical_state.leg_leg_contact.numpy()
         self._body_planar_position = self.physical_state.body_planar_position.numpy()
         self._head_tip_position = self.physical_state.head_tip_position.numpy()
+        self._spine_yaw_position = self.physical_state.spine_yaw_position.numpy()
+        self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
@@ -131,17 +133,27 @@ class CPUBackend:
             self._read_world(world_index)
         self.diagnostics.fill_from_cpu(self.world_data)
 
-    def step(self, leg_actions: torch.Tensor) -> None:
-        """Hold each world's leg actions for one 20 ms step.
+    def step(
+        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+    ) -> None:
+        """Hold each world's leg and spine actions for one 20 ms step.
 
         ``leg_actions`` has shape (W, N, 6): every world's segment actions, in
-        action order. Spine motors are never written and stay at zero. Stops the
-        run if the physics fails; afterwards the physical state is refreshed.
+        action order. ``spine_actions`` has shape (W, N - 1), one command per
+        spine joint from the head back; without it the spine motors receive
+        zero. Stops the run if the physics fails; afterwards the physical state
+        is refreshed.
         """
         actions = leg_actions.cpu().numpy()
+        spine_commands = (
+            np.zeros((self.world_count, self.mapping.segment_count - 1))
+            if spine_actions is None
+            else spine_actions.cpu().numpy()
+        )
 
         for world_index, data in enumerate(self.world_data):
             data.ctrl[self.mapping.leg_actuator_ids] = actions[world_index]
+            data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
             for _ in range(self.physics_steps_per_action):
                 mujoco.mj_step(self.model, data)
             self._check_world(world_index)
@@ -187,6 +199,13 @@ class CPUBackend:
         self._leg_joint_position[world_index] = data.qpos[mapping.leg_qpos_addresses]
         self._leg_joint_velocity[world_index] = data.qvel[mapping.leg_dof_addresses]
         self._head_tip_position[world_index] = data.site_xpos[mapping.head_tip_site_id]
+        # Each segment's joint behind it; the rear segment's entry stays zero.
+        self._spine_yaw_position[world_index, :-1] = data.qpos[
+            mapping.spine_qpos_addresses
+        ]
+        self._spine_yaw_velocity[world_index, :-1] = data.qvel[
+            mapping.spine_dof_addresses
+        ]
 
         site_velocity = np.zeros((6,), dtype=np.float64)
 

@@ -26,13 +26,16 @@ all of which conflict with this design.
 
 `W` is the number of worlds and `N` the number of segments. Everything passed in
 and out is a PyTorch tensor on the agents' device. The group is created from
-the environment's `segment_count`, `observation_size`, and `world_count`, the
-interaction loop's `rollout_window_steps`, which sizes the storage, and the
-run's seed. It works for any number of segments.
+the environment's `segment_count`, `observation_size`, `world_count`, and
+`segment_action_sizes`, the interaction loop's `rollout_window_steps`, which
+sizes the storage, and the run's seed. It works for any number of segments.
+Each segment agent has as many actions as its segment commands: six for its
+legs, and with spine control a seventh, the spine joint behind it, for every
+segment but the rear ([environment.md](environment.md#actions-and-timing)).
 
 | Operation | Takes | Returns or does |
 | --- | --- | --- |
-| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
+| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`, or `(W, N, 7)` with spine control, where a segment with fewer actions gets zeros as padding; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
 | `record(rewards, terminated, truncated, final_observations)` | The environment's results for the step just taken | Each segment agent stores its own part |
 | `update()` | Nothing | Each segment agent learns from its own stored data, then clears it |
 | `state_dict()`, `load_state_dict(state)` | — | All segment agents' state, for checkpoints; the experiment writes it to a file |
@@ -131,18 +134,35 @@ never resets the environment; the episode continues in the next window.
 
 A checkpoint is one bundle holding, for every segment agent, its PPO state
 (networks, optimizers, and random generator), normaliser, and training counters,
-plus the settings, the number of segments, and the observation size. It is saved
+plus the settings, the number of segments, the observation size, and each
+segment's number of actions. It is saved
 only after a completed update. A random generator is restored only on the same
 kind of device it was saved on, since CPU and CUDA generators draw different
 sequences; elsewhere, for example when a run trained on a GPU is evaluated on
 the CPU, each agent keeps the sequence its seed gives. Loading it into an environment with a different number of
-segments or observation size fails with a clear error. It holds no stored data,
+segments, observation size, or numbers of actions fails with a clear error,
+except when a new run starts from it (below). It holds no stored data,
 physical state, targets, or unfinished episodes, so continuing from a checkpoint
 starts new episodes. The optimizers' saved state also brings back the
 settings they were saved with, so after loading, each agent applies its own
 weight decay and momentum, and the experiment sets the learning rate before
 every update. A new run that starts from a checkpoint must use the same kind of
 optimizer (see [configuration.md](configuration.md#starting-from-another-run)).
+
+**Widening.** A new run may give its agents more to see or to command than the
+run it starts from, as spine control does: two more inputs, after all the
+others, and a seventh action for every segment but the rear. Its agents are
+then widened from the checkpoint. Every saved weight keeps its place; the
+weights of the new inputs and of the new action start at zero, so at the first
+step each agent acts exactly as the saved one did and commands zero to its new
+motor, which is what the spine received before. The new action's spread starts
+at `initial_action_std`. The saved optimizer state no longer fits the larger
+networks, so the optimizers start fresh, and so does the random generator,
+from the run's seed. The normaliser keeps its statistics and gives each new
+input a mean of 0 and a spread of 1; since the saved statistics count
+millions of observations, the new inputs keep about that scale, the spine's
+angle in radians and its speed in radians per second. Continuing or evaluating
+a run never widens: the sizes must match.
 
 ## Settings
 
@@ -154,7 +174,7 @@ These are the keys of the agents sections of the configuration file (see
 | **`[agents]`** | | |
 | `device` | `cpu` | Where networks and stored data live: `cpu` or `cuda` |
 | `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU) |
-| `initial_action_std` | 0.5 | Starting value of the six learned action spreads |
+| `initial_action_std` | 0.5 | Starting value of every learned action spread, including an action a widened agent gains |
 | `optimizer` | `adam` | Each network's optimizer: `adam`, `adamw` (Adam with decoupled weight decay), or `sgd` |
 | `learning_rate` | 3e-4 | Learning rate of the first update |
 | `learning_rate_schedule` | `constant` | How the rate changes over the run's update cycles: `constant`, `linear`, or `cosine` (half a cosine, slow at both ends) |

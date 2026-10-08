@@ -140,6 +140,11 @@ def reward_weights(
             "    progress is per halving of the head's distance to its target,",
             "    received by every follower too, at follower_progress_share",
         ]
+    if "movement" in per_step:
+        lines.append(
+            "    movement is per step of moving the joints as much as random"
+            " commands do; calm movements pay a small fraction of it"
+        )
     if episode_shares:
         lines.append(
             "  a whole episode of each cost, in arrival rewards:  "

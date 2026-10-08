@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 import torch
@@ -20,6 +21,8 @@ class RewardContext:
     ``(W, N)``: the head's tip to the target for the head, and for every other
     segment its centre to where the segment ahead's centre was before the step.
     ``arrival_radius_m`` is the distance that counts as arrival.
+    ``joint_movement`` is ``(W, N)``: the mean, over the joints each segment
+    commands, of how far each moved on the step, squared, in rad².
     """
 
     physical_state: PhysicalState
@@ -27,6 +30,7 @@ class RewardContext:
     distance_before: torch.Tensor
     distance_after: torch.Tensor
     arrival_radius_m: float
+    joint_movement: torch.Tensor
 
     @classmethod
     def from_step(
@@ -37,13 +41,18 @@ class RewardContext:
         target_position: torch.Tensor,
         arrived: torch.Tensor,
         arrival_radius_m: float,
+        previous_joint_position: torch.Tensor,
+        commanded_joints: torch.Tensor,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
         ``previous_body_planar_position`` is ``(W, N, 2)`` and
         ``previous_head_tip_position`` and ``target_position`` are ``(W, 2)``,
-        all flat on the ground; ``arrived`` is a boolean ``(W,)``. New tensors
-        are built, so neither the physical state nor the saved copies change.
+        all flat on the ground; ``arrived`` is a boolean ``(W,)``.
+        ``previous_joint_position`` is ``(W, N, 7)``, the ``joint_angles``
+        before the step; ``commanded_joints`` is ``(N, 7)``, 1.0 for the joints
+        each segment commands and 0.0 for the others. New tensors are built, so
+        neither the physical state nor the saved copies change.
         """
         # Where each segment was and is: centres, except the head's tip.
         before = previous_body_planar_position.clone()
@@ -57,13 +66,28 @@ class RewardContext:
         goal[:, 0] = target_position
         goal[:, 1:] = previous_body_planar_position[:, :-1]
 
+        squared_movement = (
+            joint_angles(physical_state) - previous_joint_position
+        ).square() * commanded_joints
         return cls(
             physical_state=physical_state,
             arrived=arrived.float(),
             distance_before=(before - goal).norm(dim=-1),
             distance_after=(after - goal).norm(dim=-1),
             arrival_radius_m=arrival_radius_m,
+            joint_movement=squared_movement.sum(dim=-1) / commanded_joints.sum(dim=-1),
         )
+
+
+def joint_angles(physical_state: PhysicalState) -> torch.Tensor:
+    """Each segment's six leg angles and the spine joint behind it, ``(W, N, 7)``."""
+    return torch.cat(
+        (
+            physical_state.leg_joint_position,
+            physical_state.spine_yaw_position.unsqueeze(-1),
+        ),
+        dim=-1,
+    )
 
 
 # -- Reward terms --------------------------------------------------------------
@@ -133,6 +157,19 @@ def leg_contact(context: RewardContext, settings: RewardSettings) -> torch.Tenso
     return -context.physical_state.leg_leg_contact.float()
 
 
+def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−(how far the segment's joints moved on the step)², in random-command units.
+
+    The joints' mean squared movement divided by that of random commands
+    (``random_command_movement_deg``, squared), at most 1: −1 for moving as
+    much as random commands or more, almost 0 for a calm movement, 0 for none.
+    Squaring makes a sudden movement cost more than the same distance in small
+    steps: ten steps of 1° cost a tenth of one step of 10°.
+    """
+    unit = math.radians(settings.random_command_movement_deg) ** 2
+    return -(context.joint_movement / unit).clamp(max=1.0)
+
+
 @dataclass(frozen=True)
 class StepRewards:
     """What the reward function returns for one step; created anew every step.
@@ -141,12 +178,13 @@ class StepRewards:
     term per position along the last dimension, in the order of the reward
     function's term names; the parts add up to ``rewards``.
     ``segment_progress`` is ``(W, N)``: metres each segment came closer to its
-    goal on this step.
+    goal on this step; ``joint_movement`` is the context's, in rad².
     """
 
     rewards: torch.Tensor
     reward_parts: torch.Tensor
     segment_progress: torch.Tensor
+    joint_movement: torch.Tensor
 
 
 # The terms of each reward, in order: the current one, built from its rules,
@@ -158,6 +196,7 @@ TERMS = {
     "efficiency": efficiency,
     "body_contact": body_contact,
     "leg_contact": leg_contact,
+    "movement": movement,
 }
 
 
@@ -175,10 +214,15 @@ class RewardFunction:
         reward_settings: RewardSettings,
         max_episode_steps: int,
         arrival_radius_m: float,
+        commanded_joints: torch.Tensor,
     ) -> None:
-        """Pair every term with its name and weight, in a fixed order."""
+        """Pair every term with its name and weight, in a fixed order.
+
+        ``commanded_joints`` is the ``(N, 7)`` mask of ``RewardContext``.
+        """
         self.settings = reward_settings
         self.arrival_radius_m = arrival_radius_m
+        self.commanded_joints = commanded_joints
         self.weights = reward_settings.weights(max_episode_steps)
         self.reward_terms = [
             (name, weight, TERMS[name])
@@ -193,6 +237,7 @@ class RewardFunction:
         previous_head_tip_position: torch.Tensor,
         target_position: torch.Tensor,
         arrived: torch.Tensor,
+        previous_joint_position: torch.Tensor,
     ) -> StepRewards:
         """Every segment's reward for the step just taken, with its parts.
 
@@ -205,6 +250,8 @@ class RewardFunction:
             target_position,
             arrived,
             self.arrival_radius_m,
+            previous_joint_position,
+            self.commanded_joints,
         )
         reward_parts = torch.stack(
             [
@@ -217,4 +264,5 @@ class RewardFunction:
             rewards=reward_parts.sum(dim=-1),
             reward_parts=reward_parts,
             segment_progress=context.distance_before - context.distance_after,
+            joint_movement=context.joint_movement,
         )

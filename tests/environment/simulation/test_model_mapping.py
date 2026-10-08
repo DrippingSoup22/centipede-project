@@ -49,6 +49,15 @@ def test_mapping_matches_the_elements_found_by_name():
             assert mapping.leg_actuator_ids[segment, action_index] == motor.id
             assert mapping.leg_qpos_addresses[segment, action_index] == joint.qposadr
             assert mapping.leg_dof_addresses[segment, action_index] == joint.dofadr
+    # Spine joint i joins segment i to segment i + 1, whose unit holds its motor.
+    for joint_index in range(7):
+        name = f"segment_{joint_index + 1:02d}_yaw"
+        assert (
+            mapping.spine_actuator_ids[joint_index]
+            == model.actuator(f"{name}_motor").id
+        )
+        assert mapping.spine_qpos_addresses[joint_index] == model.joint(name).qposadr
+        assert mapping.spine_dof_addresses[joint_index] == model.joint(name).dofadr
     assert mapping.head_tip_site_id == model.site("head_tip").id
     assert mapping.root_qpos_address == model.joint("root").qposadr[0]
     # The head seen from above: 2.2 mm behind its centre to its tip 5 mm ahead,

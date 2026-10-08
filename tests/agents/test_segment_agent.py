@@ -121,6 +121,29 @@ def test_a_restored_agent_acts_and_learns_exactly_like_the_original():
         assert torch.equal(restored_value, original_value)
 
 
+def test_a_widened_agent_acts_as_before_and_commands_zero_to_its_new_motor():
+    """A new run that sees and commands more than its parent, such as the spine."""
+    original = make_agent()
+    collect_window(original)
+    original.update()
+    widened = SegmentAgent(
+        0, WORLDS, OBSERVATION_SIZE + 2, WINDOW_STEPS, original.settings, 1, 7
+    )
+
+    widened.load_state_dict(copy.deepcopy(original.state_dict()), widen=True)
+
+    more = torch.cat((observations(9), torch.randn(WORLDS, 2)), dim=-1)
+    actions = widened.act(more, training=False)
+    torch.testing.assert_close(
+        actions[:, :6], original.act(observations(9), training=False)
+    )
+    assert torch.all(actions[:, 6].abs() < 1e-7)
+    spread = widened.ppo.actor_network.log_std.exp()
+    assert spread[6].item() == pytest.approx(original.settings.initial_action_std)
+    assert not widened.ppo.actor_optimizer.state  # the saved state does not fit
+    assert widened.update_count == 1
+
+
 def test_the_seed_alone_decides_the_starting_networks():
     def starting_weights(seed: int) -> list[torch.Tensor]:
         torch.manual_seed(100)  # the same global state for every agent seed

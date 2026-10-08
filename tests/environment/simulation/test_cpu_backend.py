@@ -151,8 +151,9 @@ def test_a_mask_resets_only_the_selected_worlds(model, mapping):
 def test_step_holds_the_actions_for_twenty_milliseconds(model, mapping):
     backend = make_backend(model, mapping, world_count=2)
     actions = random_actions(2, seed=1)
+    spine_actions = torch.rand(2, SEGMENT_COUNT - 1) * 2 - 1
 
-    backend.step(actions)
+    backend.step(actions, spine_actions)
 
     leg_motor_ids = [model.actuator(f"{name}_motor").id for name in leg_joint_names()]
     spine_motor_ids = [
@@ -164,7 +165,10 @@ def test_step_holds_the_actions_for_twenty_milliseconds(model, mapping):
         assert np.allclose(
             data.ctrl[leg_motor_ids], actions[world_index].numpy().ravel()
         )
-        assert not data.ctrl[spine_motor_ids].any()
+        assert np.allclose(data.ctrl[spine_motor_ids], spine_actions[world_index])
+
+    backend.step(actions)  # without spine actions, the spine is passive
+    assert not any(data.ctrl[spine_motor_ids].any() for data in backend.world_data)
 
 
 def test_worlds_do_not_affect_each_other(model, mapping):
@@ -187,7 +191,8 @@ def test_worlds_do_not_affect_each_other(model, mapping):
 def test_physical_state_matches_mujoco(model, mapping):
     backend = make_backend(model, mapping, world_count=2, seed=3)
     for step_index in range(3):
-        backend.step(random_actions(2, seed=10 + step_index))
+        spine_actions = torch.rand(2, SEGMENT_COUNT - 1) * 2 - 1
+        backend.step(random_actions(2, seed=10 + step_index), spine_actions)
     state = backend.physical_state
     qpos_addresses = leg_qpos_addresses(model).reshape(SEGMENT_COUNT, 6)
     dof_addresses = leg_dof_addresses(model).reshape(SEGMENT_COUNT, 6)
@@ -209,7 +214,14 @@ def test_physical_state_matches_mujoco(model, mapping):
                 "leg_joint_velocity": data.qvel[dof_addresses[segment]],
                 "body_angular_velocity": velocity[:3],
                 "body_linear_velocity": velocity[3:],
+                # The joint behind the segment; the rear has none.
+                "spine_yaw_position": 0.0,
+                "spine_yaw_velocity": 0.0,
             }
+            if segment < SEGMENT_COUNT - 1:
+                spine = model.joint(f"segment_{segment + 1:02d}_yaw")
+                expected["spine_yaw_position"] = data.qpos[spine.qposadr[0]]
+                expected["spine_yaw_velocity"] = data.qvel[spine.dofadr[0]]
             for field, value in expected.items():
                 actual = getattr(state, field)[row].numpy()
                 assert np.allclose(actual, value, rtol=1e-6, atol=1e-7), field

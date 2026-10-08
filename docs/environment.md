@@ -17,10 +17,12 @@ in v1). Everything passed in and out is a PyTorch tensor.
 | Operation | Takes | Returns |
 | --- | --- | --- |
 | `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
-| `step(joint_action)` | Actions `(W, N, 6)` | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
+| `step(joint_action)` | Actions `(W, N, 6)`, or `(W, N, 7)` with spine control | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
 
-The environment also reports `segment_count` and `observation_size`, which the
-experiment uses to create the agents. When an episode ends in a world, `step`
+The environment also reports `segment_count`, `observation_size`,
+`segment_action_sizes` (how many actions each segment takes), and
+`action_size` (the joint action's width), which the experiment uses to create
+the agents. When an episode ends in a world, `step`
 resets that world by itself: the observations it returns are already the new
 episode's, and the final observations hold, for that world, the observation the
 episode ended with. A seed given to `reset` makes the starting poses and targets
@@ -53,7 +55,7 @@ target, the step count, and the previous positions that rewards need, and it
 decides which worlds must be reset. **Coordination:** on every `step`, it runs the
 other parts in order:
 
-1. Keep the current body positions as the "previous" positions.
+1. Keep the current body positions and joint angles as the "previous" ones.
 2. The physics simulation applies the actions and advances 20 ms.
 3. Each world is checked for arrival or the time limit.
 4. The reward function computes each segment's reward; the arrival reward
@@ -81,7 +83,10 @@ once when it starts:
 
 It never relies on the order of elements in the XML file. It finds every motor by
 name (`segment_{id:02d}_{side}_{role}_motor`) and stores them in a table of shape
-`(N, 6)`, one row per segment in [action order](#actions-and-timing). It then
+`(N, 6)`, one row per segment in [action order](#actions-and-timing), and the
+spine motors (`segment_{id:02d}_yaw_motor`) in a table of `N − 1` entries,
+entry `i` for the joint between segments `i` and `i + 1`, with their joints'
+addresses. It then
 checks that each motor's name matches the owning segment stored in the XML, that
 it drives the right joint and accepts commands from −1 to 1, and that every motor
 is found exactly once with none left over (`6N + N − 1`, which is 55 for v1). It
@@ -111,11 +116,30 @@ Each segment controls only its own two legs. Its action is six numbers between
 | 4 | Right shoulder lift |
 | 5 | Right knee |
 
+With **spine control** (`spine_control = true`), every segment but the rear
+also commands the spine yaw motor of the joint **behind** it, as a seventh
+action (index 6): the head bends its neck, and each later segment bends the
+segment behind it. The rear has no joint behind it and keeps six actions; the
+joint action is seven wide, and the rear's seventh column is padding that goes
+to no motor. The model stores each spine motor with the unit it sits in, the
+one behind the joint ([model.md](model.md#motors)); which agent commands it is
+the environment's choice. Without spine control, as in every run saved before
+it existed, the spine motors always receive zero and the spine bends passively
+against its springs.
+
+**Why the joint behind.** Only the head sees the target, so it is the head
+that should be able to turn the front of the body: commanding its neck, it can
+point itself at the target directly. Each later segment then sets how the
+segment behind it follows, and it sees what that needs with its neighbours'
+blocks: the bend ahead of it, read from its leader's orientation and its own,
+and its own joint. Commanding the joint ahead instead, as the model's
+ownership would suggest, would leave the head without a spine motor and give
+its neck to segment 1, which cannot see the target. A real centipede's body
+follows its head; nothing here tells the segments to, only that they can.
+
 All segments act at the same time and the body moves once for all of them.
 Actions are never clipped, because the executed action must be exactly the one
-the agent learns from. The spine yaw motors are not controlled in this first
-version: they always receive zero, leaving the spine to bend passively against
-its springs.
+the agent learns from.
 
 An action is held for **20 ms**, or 50 decisions per second: as many physics
 steps as the model's timestep fits into it, 134 steps of 0.149 ms for model v3.
@@ -184,9 +208,13 @@ segment, in the order given by the last column.
 | `leg_leg_contact` | `(W, N)` | One of its legs touches another leg | 26 |
 | `body_planar_position` | `(W, N, 2)` | World `x`, `y` of the centre | Not observed; rewards only |
 | `head_tip_position` | `(W, 3)` | World position of the head's tip | Not observed; rewards and target only |
+| `spine_yaw_position` | `(W, N)` | Angle of the spine joint behind the segment, rad; 0 for the rear | With spine control, after the target values |
+| `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values |
 
 In the block, contact flags become 0 or 1. A segment never observes its position
-in the world, and the spine is not observed in this first version.
+in the world. Without spine control the spine is not observed; with it, each
+segment sees its own spine joint, the one it commands, but not its neighbours',
+which it can read from their orientations.
 
 Contact flags describe the state at the end of the 20 ms step, not contacts that
 happened along the way:
@@ -209,10 +237,15 @@ segments away (`k`, first value 1). Every observation has the same layout:
 3. the blocks of the `k` segments behind, nearest first;
 4. two target values: the target's position relative to the head's tip, turned
    into the head's own direction, in metres. **Forward** is positive in front of
-   the head; **sideways** is positive to its left.
+   the head; **sideways** is positive to its left;
+5. with spine control, the angle and speed of the spine joint behind it.
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
-every segment and any number of segments. A neighbour that does not exist is filled with zeros, and
+every segment and any number of segments, and two more with spine control
+(**85** at radius 1). The spine's values come last so that a run with spine
+control can start from agents trained without it: their inputs keep their
+places, and the new ones are added at the end (see
+[agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
 only the head receives real target values:
 
 | Segment | Ahead | Behind | Target values |
@@ -327,7 +360,7 @@ produce, and the rewards used before, which earlier runs keep.
 Every segment `i` receives, on every step:
 
 ```text
-r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i
+r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i − w_move × M_i
 ```
 
 | Term | Its value on a step | Who receives it |
@@ -337,6 +370,7 @@ r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L
 | **Step cost** | 1 on every step | Every segment |
 | **Body contact** `B_i` | 1 when the segment's body touches the ground | That segment |
 | **Leg contact** `L_i` | 1 when one of its legs touches another leg; both segments involved pay | That segment |
+| **Movement** `M_i` | How far the joints the segment commands moved on the step, squared and averaged over them, in units of how far random commands move a joint (25° for v3, squared); at most 1. Only when `movement_cost_parts` is set | That segment |
 
 Feet on the ground cost nothing, and nothing rewards a particular gait. The
 design is a **team led by the head**: only the head sees the target, but every
@@ -362,6 +396,30 @@ reason: with the distance fixed, two neighbours' velocities differ only when
 the body turns, so it would be blind to speed and would penalise the turns the
 head needs. Sharing the head's progress is a shared reward copied to each
 agent, which keeps every agent's networks, data, and learning separate.
+
+**Why a movement cost.** The far-target runs of 2026-10-08 showed that the
+centipede had no gait: it crawled by jittering its legs with the exploration
+noise, which PPO draws afresh for every 20 ms step. In the recordings each
+leg's angle lost its correlation within 0.1 s and never regained it, left and
+right legs were unrelated, and with the policy's mean action, without noise,
+the head moved 8 mm in 5 s. Nothing made the jitter cost anything, and since it
+moved the body, the noise hardly shrank. The movement cost, chosen with the
+user, charges each segment for how far the joints it commands move in each
+step, squared. The square makes a sudden movement expensive and a calm one
+cheap: ten steps of 1° cost a tenth of one step of 10°, so the same distance
+spread over more steps costs less, and holding still costs nothing. It is
+close to the energy the joints' own friction burns. It is measured on the
+joints the agent observes, so an agent can tell from its own observation what
+a choice will cost; a cost on how much the commands change was considered and
+set aside, because no agent sees its previous command. The unit is how far
+random commands move a joint in one step, 25° for model v3 (the root of the
+mean square over every leg joint, 8 worlds for 3.6 s on the CPU): 1 is as
+erratic as random commands, and anything more counts as 1. Measured on the last
+far-target policy, random commands give 1.00, its training walk 0.64, and its
+mean action 0.003; a calm stroke over half the sweep range, twice a second,
+gives about 0.02. The noise itself pays the cost, so PPO is pushed to shrink it
+as far as that pays: the cost does not say how to walk, it only stops jitter
+being free.
 
 **Why progress counts halvings.** A halving has no unit, so the same rules hold
 for any target distance, and it is worth the same at 16 mm as at 2 mm. Over an
@@ -396,7 +454,7 @@ for leg contact.
   adds up to zero, seen from its start with that discount:
   `γ^(T−1) = (σ + β + λ) / T × (1 − γ^T) / (1 − γ)`. This gives the **cost
   budget** `σ + β + λ = T × (2^(1/T) − 1)`, about ln 2 = 0.69 for any long
-  episode. R1 counts only the costs: every arrival also earns the progress of
+  episode; with the movement cost, its share μ is part of the same budget. R1 counts only the costs: every arrival also earns the progress of
   its approach, which depends only on where it started, and asking the costs to
   cancel that too would make them larger than the arrival itself.
 - **R2. Standing still is a little worse than trying badly.** A centipede that
@@ -417,6 +475,17 @@ for leg contact.
   away, so its interest and the head's never diverge, and with a share of 1
   every segment values the approach equally.
 
+- **R5. Moving costs, but trying still pays.** With the movement cost, R2 must
+  hold even for an attempt that moves as erratically as training's walk did
+  when the cost was introduced, 0.64 of random commands: a whole episode of
+  that, with the legs touching and one halving, must still end above standing
+  still, `λ + 0.64 μ < σ`. With the order of R3 that allows at most 1.56 parts;
+  the largest whole number, 1 part like leg contact, splits the budget
+  **3 : 2 : 1 : 1** (β : σ : λ : μ). Over an episode a calm attempt (about
+  0.02) then ends at −0.10, the same attempt by jittering at −0.16, and
+  standing still at −0.20: jitter no longer pays, and nothing pushes the
+  centipede to freeze before it finds a calmer walk.
+
 Two earlier candidates turned out to be consequences rather than rules. A full
 approach from 20 mm earns `log2(20) × σ ≈ 1.0 A`, about the arrival; every
 arrival still sits a whole `A` above a near miss, and progress cannot be farmed.
@@ -434,6 +503,10 @@ With `A = 1` and 256-step episodes:
 | Leg contact | 0.00045 per step | λ = 1/6 of the budget (0.116) |
 | Progress | 0.231 per halving of the head's distance, to every segment | σ × `head_progress_ratio`, shared at `follower_progress_share` |
 | Discount | 0.9973 | 2^(−1/256) |
+
+With the movement cost at 1 part the budget has seven parts: σ = 0.198,
+β = 0.298, λ = 0.099, and μ = 0.099 (0.00039 per step at the level of random
+commands), and progress is worth 0.198 per halving.
 
 Doubling the episode length halves the per-step costs and sets the discount to
 0.9987; nothing else changes. Every training run prints these weights under its
@@ -531,6 +604,7 @@ These are the keys of the environment sections of the configuration file (see
 | **`[environment]`** | | |
 | `max_episode_steps` | 8,192 | Time limit, in 20 ms steps (about 164 s) |
 | `observation_radius` | 1 | Neighbours seen on each side; 0 means only itself; must be less than `N` |
+| `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; false, as in every run saved before it existed: the spine motors receive zero |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
@@ -550,7 +624,9 @@ These are the keys of the environment sections of the configuration file (see
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |
 | `body_contact_cost_parts` | 3 | Body contact's parts of the cost budget |
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
-| `cost_budget_parts` | The three together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
+| `movement_cost_parts` | 0 | The movement cost's parts of the cost budget; 0 (off) unless a file sets it, so that runs saved before it existed keep their reward |
+| `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
+| `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
 | `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole episodes of step cost |
 | `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
 | `follower_progress_ratio` | Not set | The first runs' followers' own progress toward the spot where the segment ahead had been, as a share of the head's weight; kept for those runs |

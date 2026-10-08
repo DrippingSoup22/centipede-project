@@ -115,6 +115,23 @@ def test_a_saved_file_restores_every_agent_and_rejects_another_body():
         make_agents(observation_size=6).load_state_dict(state)
 
 
+def test_segments_may_command_more_motors_and_a_new_run_widens_saved_agents():
+    """With the spine, every segment but the rear commands a seventh motor."""
+    saved = make_agents().state_dict()
+    wider = Agents(
+        SEGMENTS, OBSERVATION_SIZE + 2, WORLDS, WINDOW_STEPS, SETTINGS, SEED, [7, 7, 6]
+    )
+
+    actions = wider.act(body_tensor(0, OBSERVATION_SIZE + 2), training=False)
+
+    assert actions.shape == (WORLDS, SEGMENTS, 7)
+    assert not actions[:, 2, 6].any()  # the rear's seventh column is padding
+    with pytest.raises(ValueError, match=r"\[6, 6, 6\] actions"):
+        wider.load_state_dict(saved)  # continuing or evaluating needs a match
+    wider.load_state_dict(saved, widen=True)
+    assert [agent.action_size for agent in wider.segment_agents] == [7, 7, 6]
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_baselines_give_zero_and_seeded_uniform_actions(device):
     observations = torch.ones(WORLDS, SEGMENTS, OBSERVATION_SIZE, device=device)
@@ -129,3 +146,7 @@ def test_baselines_give_zero_and_seeded_uniform_actions(device):
     assert torch.equal(
         random, RandomActionBaseline(device, seed=3).act(observations, training=False)
     )
+    # With the spine, the joint action is seven wide.
+    assert ZeroActionBaseline(7).act(observations, training=False).shape[-1] == 7
+    wide = RandomActionBaseline(device, seed=3, action_size=7)
+    assert wide.act(observations, training=False).shape[-1] == 7

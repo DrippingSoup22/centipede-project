@@ -26,6 +26,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
 
     assert settings.max_episode_steps == 8192
     assert settings.observation_radius == 1
+    assert not settings.spine_control  # as in every run saved before it existed
     assert settings.simulation.world_count == 1
     assert settings.target == TargetSettings(
         distance_range_m=(0.030, 0.060),
@@ -47,6 +48,8 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         step_cost_parts=2.0,
         body_contact_cost_parts=3.0,
         leg_contact_cost_parts=1.0,
+        movement_cost_parts=0.0,
+        random_command_movement_deg=25.0,
         cost_budget_parts=6.0,
         head_progress_ratio=1.0,
         follower_progress_share=1.0,

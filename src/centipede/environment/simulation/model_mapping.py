@@ -43,13 +43,18 @@ class ModelMapping:
     """Index tables linking each segment to its parts in a loaded model.
 
     The parts are its motors, joints, body, centre site, and collision shapes;
-    ``head_outline`` is the head's shape seen from above.
+    ``head_outline`` is the head's shape seen from above. The spine tables have
+    one entry per spine joint, ``(N - 1,)``: entry ``i`` is the yaw joint that
+    joins segment ``i`` to segment ``i + 1`` behind it.
     """
 
     segment_count: int
     leg_actuator_ids: np.ndarray
     leg_qpos_addresses: np.ndarray
     leg_dof_addresses: np.ndarray
+    spine_actuator_ids: np.ndarray
+    spine_qpos_addresses: np.ndarray
+    spine_dof_addresses: np.ndarray
     body_ids: np.ndarray
     center_site_ids: np.ndarray
     head_tip_site_id: int
@@ -65,7 +70,10 @@ class ModelMapping:
         leg_actuator_ids, leg_qpos_addresses, leg_dof_addresses = _map_leg_motors(
             model, segment_count
         )
-        _check_all_motors_found(model, leg_actuator_ids, segment_count)
+        spine_actuator_ids, spine_qpos_addresses, spine_dof_addresses = (
+            _map_spine_motors(model, segment_count)
+        )
+        _check_all_motors_found(model, leg_actuator_ids, spine_actuator_ids)
         body_ids, center_site_ids, head_tip_site_id = _map_bodies_and_sites(
             model, segment_count
         )
@@ -81,6 +89,9 @@ class ModelMapping:
             leg_actuator_ids=leg_actuator_ids,
             leg_qpos_addresses=leg_qpos_addresses,
             leg_dof_addresses=leg_dof_addresses,
+            spine_actuator_ids=spine_actuator_ids,
+            spine_qpos_addresses=spine_qpos_addresses,
+            spine_dof_addresses=spine_dof_addresses,
             body_ids=body_ids,
             center_site_ids=center_site_ids,
             head_tip_site_id=head_tip_site_id,
@@ -185,25 +196,39 @@ def _map_leg_motors(
     return motor_ids, qpos_addresses, qvel_addresses
 
 
-def _check_all_motors_found(
-    model: mujoco.MjModel, leg_motor_ids: np.ndarray, segment_count: int
-) -> None:
-    """Check the spine motors, and that the model has no other motors.
+def _map_spine_motors(
+    model: mujoco.MjModel, segment_count: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Find and check every spine yaw motor; return three (segments - 1,) tables.
 
-    Each spine yaw motor belongs to the segment behind its connection, so
-    segments 1 to N - 1 own one each. Spine motors are not stored: no agent
-    controls the spine in this version, and their commands stay at zero.
+    The model stores each spine motor with the segment behind its joint, the
+    unit it sits in, so ``segment_01_yaw_motor`` joins segment 0 to segment 1.
+    Entry ``i`` describes the joint between segments ``i`` and ``i + 1``: the
+    motor's ID and its joint's addresses in ``data.qpos`` and ``data.qvel``.
+    Which agent commands it is the environment's choice.
     """
-    spine_motor_ids: list[int] = []
-    for segment_index in range(1, segment_count):
-        joint_name = f"segment_{segment_index:02d}_yaw"
+    motor_ids = np.zeros(segment_count - 1, dtype=np.int32)
+    qpos_addresses = np.zeros(segment_count - 1, dtype=np.int32)
+    qvel_addresses = np.zeros(segment_count - 1, dtype=np.int32)
+    for joint_index in range(segment_count - 1):
+        joint_name = f"segment_{joint_index + 1:02d}_yaw"
         motor_id = _find_id(
             model, mujoco.mjtObj.mjOBJ_ACTUATOR, "actuator", f"{joint_name}_motor"
         )
-        _check_motor(model, motor_id, segment_index, joint_name)
-        spine_motor_ids.append(motor_id)
+        joint_id = _check_motor(model, motor_id, joint_index + 1, joint_name)
+        motor_ids[joint_index] = motor_id
+        qpos_addresses[joint_index] = model.jnt_qposadr[joint_id]
+        qvel_addresses[joint_index] = model.jnt_dofadr[joint_id]
+    return motor_ids, qpos_addresses, qvel_addresses
 
-    found_motor_ids = set(leg_motor_ids.ravel().tolist()) | set(spine_motor_ids)
+
+def _check_all_motors_found(
+    model: mujoco.MjModel, leg_motor_ids: np.ndarray, spine_motor_ids: np.ndarray
+) -> None:
+    """Check that the model has no motors besides the legs' and the spine's."""
+    found_motor_ids = set(leg_motor_ids.ravel().tolist()) | set(
+        spine_motor_ids.tolist()
+    )
     leftover_motor_ids = set(range(model.nu)) - found_motor_ids
     if leftover_motor_ids:
         leftover_names = sorted(model.actuator(i).name for i in leftover_motor_ids)

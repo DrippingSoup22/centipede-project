@@ -2,7 +2,8 @@
 
 The body lies along the x axis: centres at 0, −4 and −8 mm, the head's tip at
 +5 mm, and the target 15 mm ahead of the tip. World 0 changes nothing during the
-step; world 1 changes what each test describes.
+step; world 1 changes what each test describes. Every segment but the rear
+commands the spine joint behind it, as with spine control.
 """
 
 import math
@@ -20,6 +21,8 @@ SETTINGS = RewardSettings.from_section({})  # the rules' defaults
 CENTRES = torch.tensor([[0.0, 0.0], [-0.004, 0.0], [-0.008, 0.0]])
 TIP = torch.tensor([0.005, 0.0])
 TARGET = torch.tensor([0.020, 0.0])
+COMMANDED_JOINTS = torch.ones(3, 7)
+COMMANDED_JOINTS[2, 6] = 0.0  # the rear has no spine joint behind it
 
 
 def unchanged_state() -> PhysicalState:
@@ -30,13 +33,14 @@ def unchanged_state() -> PhysicalState:
 
 
 def rewards_for(state, arrived=(False, False), settings=SETTINGS):
-    function = RewardFunction(settings, EPISODE_STEPS, ARRIVAL_RADIUS)
+    function = RewardFunction(settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS)
     step = function.compute(
         state,
         previous_body_planar_position=CENTRES.expand(2, 3, 2).clone(),
         previous_head_tip_position=TIP.expand(2, 2).clone(),
         target_position=TARGET.expand(2, 2).clone(),
         arrived=torch.tensor(arrived),
+        previous_joint_position=torch.zeros(2, 3, 7),
     )
     parts = dict(zip(function.term_names, step.reward_parts.unbind(-1), strict=True))
     return step, parts, function.weights.per_step
@@ -117,6 +121,30 @@ def test_costs_and_arrival_take_their_weights_and_add_up():
         [0.0, -weights["leg_contact"], -weights["leg_contact"]]
     )
     assert torch.allclose(step.rewards, step.reward_parts.sum(dim=-1))
+
+
+def test_movement_costs_the_square_of_how_far_the_commanded_joints_moved():
+    settings = RewardSettings.from_section({"movement_cost_parts": 1})
+    state = unchanged_state()
+    state.leg_joint_position[1, 0, 0] = math.radians(10)  # one of the head's 7
+    state.leg_joint_position[1, 1] = math.radians(30)  # all of segment 1's ...
+    state.spine_yaw_position[1, 1] = math.radians(30)  # ... spine joint included
+    state.spine_yaw_position[1, 2] = 0.5  # the rear commands no spine joint
+
+    step, parts, weights = rewards_for(state, settings=settings)
+
+    # The default budget is now the costs' 7 parts, one of them movement's.
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares["movement"] == pytest.approx(shares["step_cost"] / 2)
+    assert sum(shares.values()) == pytest.approx(0.6941, abs=1e-4)
+    # Mean squared movement over the joints, in units of 25° squared, at most 1.
+    assert parts["movement"][1].tolist() == pytest.approx(
+        [-weights["movement"] * (10 / 25) ** 2 / 7, -weights["movement"], 0.0]
+    )
+    assert not parts["movement"][0].any()
+    assert step.joint_movement[1, 0].item() == pytest.approx(math.radians(10) ** 2 / 7)
+    # Switched off, as by default, the term is left out.
+    assert "movement" not in SETTINGS.weights(EPISODE_STEPS).per_step
 
 
 def test_the_reward_used_before_2026_10_08_keeps_its_terms():

@@ -16,8 +16,9 @@ from rl_lib.normalization import ObservationNormalizer
 from centipede.agents.rollout_storage import RolloutStorage
 from centipede.agents.settings import AgentSettings
 
-# Each segment drives the six motors of its two legs.
-ACTION_SIZE = 6
+# Each segment drives the six motors of its two legs; with spine control, the
+# spine joint behind it is a seventh action.
+LEG_ACTION_COUNT = 6
 
 
 class SegmentAgent:
@@ -31,14 +32,17 @@ class SegmentAgent:
         rollout_window_steps: int,
         settings: AgentSettings,
         seed: int,
+        action_size: int = LEG_ACTION_COUNT,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
         The seed sets the networks' starting weights and starts the PPO's own
         generator, which draws its actions and orders its minibatches.
+        ``action_size`` is how many motors the segment commands.
         """
         self.segment_index = segment_index
         self.settings = settings
+        self.action_size = action_size
         device = torch.device(settings.device)
 
         # The starting weights come from PyTorch's global generator. Seed it
@@ -47,7 +51,7 @@ class SegmentAgent:
             torch.manual_seed(seed)
             actor_network = GaussianPolicyNetwork(
                 observation_size=observation_size,
-                action_size=ACTION_SIZE,
+                action_size=action_size,
                 hidden_sizes=settings.hidden_layers,
                 initial_std=settings.initial_action_std,
                 std_mode="global",
@@ -70,8 +74,8 @@ class SegmentAgent:
             entropy_coefficient=settings.ppo.entropy_coefficient,
             seed=seed,
             max_gradient_norm=settings.ppo.max_gradient_norm,
-            action_low=[-1.0] * ACTION_SIZE,
-            action_high=[1.0] * ACTION_SIZE,
+            action_low=[-1.0] * action_size,
+            action_high=[1.0] * action_size,
         )
         self.observation_normaliser = ObservationNormalizer(
             observation_size,
@@ -85,13 +89,13 @@ class SegmentAgent:
             world_count,
             observation_size,
             device=device,
-            action_size=ACTION_SIZE,
+            action_size=action_size,
         )
         # Completed updates, saved with the agent's state.
         self.update_count = 0
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
-        """This segment's ``(W, 6)`` actions for its ``(W, observation_size)`` slice.
+        """This segment's ``(W, action_size)`` actions for its observation slice.
 
         In training the observations first update the normaliser, and the step's
         action side is stored for learning. Otherwise nothing changes, and each
@@ -152,24 +156,105 @@ class SegmentAgent:
             "update_count": self.update_count,
         }
 
-    def load_state_dict(self, state: Mapping[str, Any]) -> None:
+    def load_state_dict(self, state: Mapping[str, Any], widen: bool = False) -> None:
         """Restore what ``state_dict`` saved, onto this agent's device.
 
         Loading an optimizer also brings back the settings it was saved with;
         this agent's own weight decay and momentum replace them, and the
         experiment sets the learning rate before every update.
+
+        With ``widen``, a state saved for fewer observations or actions is
+        widened to this agent's sizes. The saved weights keep their places and
+        the new inputs and outputs start with zero weights, so the agent acts
+        exactly as before and commands zero to its new motors; each new
+        action's spread starts at ``initial_action_std``. The saved optimizers
+        and random generator no longer fit, so the agent keeps its fresh ones,
+        and its normaliser gives each new input a mean of 0 and a spread of 1.
         """
-        self.ppo.load_state_dict(state["ppo"])
-        for optimizer in self._optimizers():
-            for group in optimizer.param_groups:
-                group["weight_decay"] = self.settings.weight_decay
-                if "momentum" in group:
-                    group["momentum"] = self.settings.momentum
-        self.observation_normaliser.load_state_dict(state["observation_normaliser"])
+        ppo_state = state["ppo"]
+        normaliser_state = state["observation_normaliser"]
+        fresh_state = self.ppo.state_dict()
+        if widen and any(
+            saved.shape != fresh.shape
+            for part in ("actor_network", "critic_network")
+            for saved, fresh in zip(
+                ppo_state[part].values(), fresh_state[part].values(), strict=True
+            )
+        ):
+            for part, network in (
+                ("actor_network", self.ppo.actor_network),
+                ("critic_network", self.ppo.critic_network),
+            ):
+                network.load_state_dict(_widened(ppo_state[part], fresh_state[part]))
+            normaliser_state = _widened_normaliser(
+                normaliser_state, self.observation_normaliser.observation_size
+            )
+        else:
+            self.ppo.load_state_dict(ppo_state)
+            for optimizer in self._optimizers():
+                for group in optimizer.param_groups:
+                    group["weight_decay"] = self.settings.weight_decay
+                    if "momentum" in group:
+                        group["momentum"] = self.settings.momentum
+        self.observation_normaliser.load_state_dict(normaliser_state)
         self.update_count = int(state["update_count"])
 
     def _optimizers(self) -> tuple[torch.optim.Optimizer, torch.optim.Optimizer]:
         return self.ppo.actor_optimizer, self.ppo.critic_optimizer
+
+
+def _widened(
+    saved: Mapping[str, torch.Tensor], fresh: Mapping[str, torch.Tensor]
+) -> dict[str, torch.Tensor]:
+    """A network's saved tensors, each in the leading corner of its fresh one.
+
+    Grown parts of weights and biases are zero; grown parts of the log spread
+    keep their fresh value. A saved tensor larger than its fresh one fails.
+    """
+    widened = {}
+    for name, fresh_tensor in fresh.items():
+        saved_tensor = saved[name].to(fresh_tensor.device)
+        if saved_tensor.shape == fresh_tensor.shape:
+            widened[name] = saved_tensor
+            continue
+        if saved_tensor.dim() != fresh_tensor.dim() or any(
+            saved_size > fresh_size
+            for saved_size, fresh_size in zip(
+                saved_tensor.shape, fresh_tensor.shape, strict=True
+            )
+        ):
+            raise ValueError(
+                f"A saved {name} of shape {tuple(saved_tensor.shape)} cannot be"
+                f" widened to {tuple(fresh_tensor.shape)}"
+            )
+        tensor = (
+            fresh_tensor.clone()
+            if name == "log_std"
+            else torch.zeros_like(fresh_tensor)
+        )
+        tensor[tuple(slice(0, size) for size in saved_tensor.shape)] = saved_tensor
+        widened[name] = tensor
+    return widened
+
+
+def _widened_normaliser(
+    saved: Mapping[str, Any], observation_size: int
+) -> dict[str, Any]:
+    """A saved normaliser state with new inputs at the end: mean 0, spread 1."""
+    count = int(saved["observation_count"])
+    added = observation_size - int(saved["observation_size"])
+    mean = torch.as_tensor(saved["mean"], dtype=torch.float64)
+    squared_deviation_sum = torch.as_tensor(
+        saved["squared_deviation_sum"], dtype=torch.float64
+    )
+    return {
+        **saved,
+        "observation_size": observation_size,
+        "mean": torch.cat((mean, mean.new_zeros(added))),
+        "squared_deviation_sum": torch.cat(
+            (squared_deviation_sum, squared_deviation_sum.new_full((added,), count))
+        ),
+    }
 
 
 def _optimizer(

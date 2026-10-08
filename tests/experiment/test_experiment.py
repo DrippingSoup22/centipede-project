@@ -3,7 +3,8 @@
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
 files, continuing a run, starting from another run's agents with its own
-learning rate, and evaluating without changing anything.
+learning rate and, with the spine, more to see and command, and evaluating
+without changing anything.
 """
 
 import json
@@ -162,8 +163,10 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         TRAINING_FILE.replace(
             "[interaction_loop]",
             "[environment.target]\ndistance_range_m = [0.03, 0.04]\n\n"
+            "[environment.rewards]\nmovement_cost_parts = 1\n\n"
             "[interaction_loop]",
         )
+        .replace("max_episode_steps = 3", "max_episode_steps = 3\nspine_control = true")
         .replace(
             'runs_folder = "RUNS"',
             f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
@@ -178,7 +181,10 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
 
     child = run_file(tmp_path, harder_file, NAME="harder")
 
-    # The child's agents continued from the parent's three updates.
+    # The child's agents continued from the parent's three updates, widened to
+    # command the spine joint behind every segment but the rear.
+    checkpoint = torch.load(child / "checkpoints" / "cycle_0003.pt", weights_only=True)
+    assert checkpoint["agents"]["segment_action_sizes"] == [7] * 7 + [6]
     assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
     assert logged_cycles(child) == [1, 2, 3]
     assert not (child / "recordings").exists()  # recording was turned off

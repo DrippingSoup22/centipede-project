@@ -51,14 +51,31 @@ def _apply_leg_actions(
     """Write each world's leg actions into its row of ``ctrl``.
 
     Launched with one thread per (world, segment, leg joint). Each thread copies
-    one action to the motor that drives its joint; the spine motors are never
-    written, so they keep the zero command set by the last reset.
+    one action to the motor that drives its joint.
     """
     world_index, segment_index, leg_joint_index = wp.tid()
     motor_id = leg_actuator_ids[segment_index, leg_joint_index]
     ctrl[world_index, motor_id] = leg_actions[
         world_index, segment_index, leg_joint_index
     ]
+
+
+@wp.kernel
+def _apply_spine_actions(
+    # In
+    spine_actuator_ids: wp.array1d[wp.int32],
+    spine_actions: wp.array2d[float],
+    # Out
+    ctrl: wp.array2d[float],
+) -> None:
+    """Write each world's spine actions into its row of ``ctrl``.
+
+    Launched with one thread per (world, spine joint); joint ``i`` joins
+    segments ``i`` and ``i + 1``.
+    """
+    world_index, joint_index = wp.tid()
+    motor_id = spine_actuator_ids[joint_index]
+    ctrl[world_index, motor_id] = spine_actions[world_index, joint_index]
 
 
 @wp.kernel
@@ -152,6 +169,8 @@ def _read_segment_state(
     body_ids: wp.array1d[int],
     leg_qpos_addresses: wp.array2d[int],
     leg_dof_addresses: wp.array2d[int],
+    spine_qpos_addresses: wp.array1d[int],
+    spine_dof_addresses: wp.array1d[int],
     head_tip_site_id: int,
     # In: model
     site_bodyid: wp.array1d[int],
@@ -173,14 +192,18 @@ def _read_segment_state(
     leg_joint_position: wp.array3d[float],
     leg_joint_velocity: wp.array3d[float],
     head_tip_position: wp.array1d[wp.vec3],
+    spine_yaw_position: wp.array2d[float],
+    spine_yaw_velocity: wp.array2d[float],
 ) -> None:
-    """Copy each segment's position, orientation, leg joints and velocity.
+    """Copy each segment's position, orientation, joints and velocity.
 
     Launched with one thread per (world, segment); each thread writes only its
     own segment's row. The velocity is what ``mj_objectVelocity`` returns for
     the segment's centre site in the site's own axes: MuJoCo stores each body's
     velocity at a shared reference point (the centre of mass of its whole
     tree), so it is first moved to the site, then turned into site axes.
+    The spine joint read is the one behind the segment; the rear segment has
+    none, and its entries stay zero.
     """
     world_index, segment_index = wp.tid()
     site_id = center_site_ids[segment_index]
@@ -201,6 +224,13 @@ def _read_segment_state(
         ]
         leg_joint_velocity[world_index, segment_index, leg_joint_index] = qvel[
             world_index, dof_address
+        ]
+    if segment_index < spine_qpos_addresses.shape[0]:
+        spine_yaw_position[world_index, segment_index] = qpos[
+            world_index, spine_qpos_addresses[segment_index]
+        ]
+        spine_yaw_velocity[world_index, segment_index] = qvel[
+            world_index, spine_dof_addresses[segment_index]
         ]
 
     # The site's body velocity, stored at its tree's centre of mass in world axes.
@@ -332,6 +362,9 @@ class GPUBackend:
         self.leg_actuator_ids = to_gpu(mapping.leg_actuator_ids)
         self.leg_qpos_addresses = to_gpu(mapping.leg_qpos_addresses)
         self.leg_dof_addresses = to_gpu(mapping.leg_dof_addresses)
+        self.spine_actuator_ids = to_gpu(mapping.spine_actuator_ids)
+        self.spine_qpos_addresses = to_gpu(mapping.spine_qpos_addresses)
+        self.spine_dof_addresses = to_gpu(mapping.spine_dof_addresses)
         self.body_ids = to_gpu(mapping.body_ids)
         self.center_site_ids = to_gpu(mapping.center_site_ids)
         self.geom_owner_indices = to_gpu(mapping.geom_owner_indices)
@@ -357,6 +390,8 @@ class GPUBackend:
         self._leg_joint_position = wp.from_torch(state.leg_joint_position)
         self._leg_joint_velocity = wp.from_torch(state.leg_joint_velocity)
         self._head_tip_position = wp.from_torch(state.head_tip_position, dtype=wp.vec3)
+        self._spine_yaw_position = wp.from_torch(state.spine_yaw_position)
+        self._spine_yaw_velocity = wp.from_torch(state.spine_yaw_velocity)
         self._left_foot_ground_contact = wp.from_torch(state.left_foot_ground_contact)
         self._right_foot_ground_contact = wp.from_torch(state.right_foot_ground_contact)
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
@@ -385,9 +420,17 @@ class GPUBackend:
         self.reset_counts = torch.zeros(
             world_count, dtype=torch.int32, device=torch_device
         )
+        # The spine commands of a step that gives none.
+        self.passive_spine_actions = torch.zeros(
+            (world_count, self.segment_count - 1), device=torch_device
+        )
 
-    def step(self, leg_actions: torch.Tensor) -> None:
-        """Hold the (W, N, 6) leg actions for 20 ms in every world at once.
+    def step(
+        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+    ) -> None:
+        """Hold the (W, N, 6) leg and (W, N - 1) spine actions for 20 ms.
+
+        Without spine actions, the spine motors receive zero.
 
         The actions are written into ``ctrl`` once, then the physics runs its
         steps for the action (134 for model v3). Launched from Python, each
@@ -402,11 +445,22 @@ class GPUBackend:
         updates the values derived from the new positions, such as site
         positions and contacts, before the physical state is refreshed.
         """
-        leg_action_view = wp.from_torch(leg_actions)
         wp.launch(
             kernel=_apply_leg_actions,
             dim=(self.world_count, self.segment_count, 6),
-            inputs=[self.leg_actuator_ids, leg_action_view],
+            inputs=[self.leg_actuator_ids, wp.from_torch(leg_actions.contiguous())],
+            outputs=[self.gpu_data.ctrl],
+            device=self.device,
+        )
+        if spine_actions is None:
+            spine_actions = self.passive_spine_actions
+        wp.launch(
+            kernel=_apply_spine_actions,
+            dim=(self.world_count, self.segment_count - 1),
+            inputs=[
+                self.spine_actuator_ids,
+                wp.from_torch(spine_actions.contiguous()),
+            ],
             outputs=[self.gpu_data.ctrl],
             device=self.device,
         )
@@ -542,6 +596,8 @@ class GPUBackend:
                 self.body_ids,
                 self.leg_qpos_addresses,
                 self.leg_dof_addresses,
+                self.spine_qpos_addresses,
+                self.spine_dof_addresses,
                 self.head_tip_site_id,
                 self.gpu_model.site_bodyid,
                 self.gpu_model.body_rootid,
@@ -562,6 +618,8 @@ class GPUBackend:
                 self._leg_joint_position,
                 self._leg_joint_velocity,
                 self._head_tip_position,
+                self._spine_yaw_position,
+                self._spine_yaw_velocity,
             ],
             device=self.device,
         )

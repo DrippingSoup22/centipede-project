@@ -77,6 +77,8 @@ PROPORTION_KEYS = (
     "step_cost_parts",
     "body_contact_cost_parts",
     "leg_contact_cost_parts",
+    "movement_cost_parts",
+    "random_command_movement_deg",
     "cost_budget_parts",
     "head_progress_ratio",
     "follower_progress_share",
@@ -104,12 +106,16 @@ class RewardSettings:
     Everything is a proportion of ``arrival_reward``; docs/environment.md
     explains the rules. The worst-case cost budget, what a whole episode of
     every cost adds up to, is split into ``cost_budget_parts`` equal parts (by
-    default the sum of the three costs' parts), and each cost takes its own
-    number of parts. ``head_progress_ratio`` is what one halving of the head's
-    distance to its target is worth, in whole episodes of step cost, and
-    ``follower_progress_share`` the share of the head's progress that every
-    follower receives as well (1: the same). A cost of zero parts is switched
-    off.
+    default the sum of the costs' parts), and each cost takes its own number of
+    parts. The movement cost charges each segment for how far the joints it
+    commands move in a step, squared, in units of
+    ``random_command_movement_deg``: how far a joint moves in a step under
+    random commands. It is off (0 parts) unless a file sets it, so runs saved
+    before it existed keep their reward. ``head_progress_ratio`` is what one
+    halving of the head's distance to its target is worth, in whole episodes of
+    step cost, and ``follower_progress_share`` the share of the head's progress
+    that every follower receives as well (1: the same). A cost of zero parts is
+    switched off.
 
     ``follower_progress_ratio`` belongs to the first runs of the rules, on
     2026-10-08, whose followers were paid for halving their distance to the spot
@@ -129,6 +135,8 @@ class RewardSettings:
     step_cost_parts: float | None
     body_contact_cost_parts: float | None
     leg_contact_cost_parts: float | None
+    movement_cost_parts: float | None
+    random_command_movement_deg: float | None
     cost_budget_parts: float | None
     head_progress_ratio: float | None
     follower_progress_share: float | None
@@ -158,6 +166,8 @@ class RewardSettings:
                 step_cost_parts=None,
                 body_contact_cost_parts=None,
                 leg_contact_cost_parts=None,
+                movement_cost_parts=None,
+                random_command_movement_deg=None,
                 cost_budget_parts=None,
                 head_progress_ratio=None,
                 follower_progress_share=None,
@@ -180,6 +190,7 @@ class RewardSettings:
                     ("step_cost_parts", 2.0),
                     ("body_contact_cost_parts", 3.0),
                     ("leg_contact_cost_parts", 1.0),
+                    ("movement_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
@@ -197,6 +208,10 @@ class RewardSettings:
                 step_cost_parts=parts[0],
                 body_contact_cost_parts=parts[1],
                 leg_contact_cost_parts=parts[2],
+                movement_cost_parts=parts[3],
+                random_command_movement_deg=section.positive_number(
+                    "random_command_movement_deg", default=25.0
+                ),
                 cost_budget_parts=budget_parts,
                 head_progress_ratio=section.number(
                     "head_progress_ratio", default=1.0, minimum=0.0
@@ -231,7 +246,8 @@ class RewardSettings:
         ln 2: with the agents' discount at ``2^(−1/T)``, an episode that pays
         every cost on every step and arrives on its last step adds up to zero,
         seen from its start (rules R0 and R1 of docs/environment.md). Each cost
-        takes its parts of the budget, spread evenly over the episode's steps.
+        takes its parts of the budget, spread evenly over the episode's steps;
+        the movement cost appears only when it has parts.
         """
         arrival = self.arrival_reward
         if self.uses_per_step_weights:
@@ -252,17 +268,18 @@ class RewardSettings:
                 ("step_cost", self.step_cost_parts),
                 ("body_contact", self.body_contact_cost_parts),
                 ("leg_contact", self.leg_contact_cost_parts),
+                ("movement", self.movement_cost_parts),
             )
         }
+        if not shares["movement"]:
+            del shares["movement"]
         return RewardWeights(
             per_step={
                 "arrival": arrival,
                 # Per halving of the head's distance; the term itself gives the
                 # followers their share of it.
                 "progress": self.head_progress_ratio * shares["step_cost"] * arrival,
-                "step_cost": shares["step_cost"] * arrival / steps,
-                "body_contact": shares["body_contact"] * arrival / steps,
-                "leg_contact": shares["leg_contact"] * arrival / steps,
+                **{name: share * arrival / steps for name, share in shares.items()},
             },
             episode_shares=shares,
         )
@@ -273,11 +290,15 @@ class EnvironmentSettings:
     """The [environment] section, with its three nested sections.
 
     ``observation_radius`` is how many neighbours a segment sees on each side;
-    0 means it sees only itself.
+    0 means it sees only itself. With ``spine_control`` each segment but the
+    rear also commands the spine joint behind it and observes its angle and
+    speed; without it, as in every run saved before it existed, the spine
+    motors receive zero.
     """
 
     max_episode_steps: int
     observation_radius: int
+    spine_control: bool
     simulation: SimulationSettings
     target: TargetSettings
     rewards: RewardSettings
@@ -297,6 +318,7 @@ class EnvironmentSettings:
             observation_radius=section.integer(
                 "observation_radius", default=1, minimum=0
             ),
+            spine_control=section.boolean("spine_control", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
             rewards=RewardSettings.from_section(section.table("rewards")),

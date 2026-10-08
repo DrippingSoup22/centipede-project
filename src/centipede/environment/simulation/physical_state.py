@@ -10,7 +10,9 @@ class PhysicalState:
     Shapes use W for the number of worlds and N for the number of segments; see
     the physical state table in docs/environment.md for each field's meaning.
     The first ten fields form each segment's observation block, in order; the
-    last two are used only for rewards and targets.
+    next two are used only for rewards and targets. The spine fields describe,
+    for each segment, the yaw joint that joins it to the segment behind; the
+    rear segment has none, and its entries stay zero.
 
     The tensors are created once and overwritten in place by every ``step()``
     and ``reset()``. After either returns, they describe the current state of
@@ -30,6 +32,8 @@ class PhysicalState:
     leg_leg_contact: torch.Tensor  # (W, N), bool
     body_planar_position: torch.Tensor  # (W, N, 2), world x and y
     head_tip_position: torch.Tensor  # (W, 3), world position
+    spine_yaw_position: torch.Tensor  # (W, N), joint behind the segment, rad
+    spine_yaw_velocity: torch.Tensor  # (W, N), joint behind the segment, rad/s
 
     @classmethod
     def allocate(
@@ -56,4 +60,6 @@ class PhysicalState:
             leg_leg_contact=zeros(n, dtype=torch.bool),
             body_planar_position=zeros(n, 2),
             head_tip_position=zeros(3),
+            spine_yaw_position=zeros(n),
+            spine_yaw_velocity=zeros(n),
         )

@@ -70,6 +70,16 @@ class StepFacts:
     segment_moved: torch.Tensor = measure(
         "Flat distance the segment's centre moved, (W, N)", "m"
     )
+    joint_movement: torch.Tensor = measure(
+        "How far the joints the segment commands moved on the step, as the root"
+        " of their mean squared movement, (W, N)",
+        "rad",
+    )
+    spine_bend: torch.Tensor = measure(
+        "Angle of the spine joint behind the segment, either way; 0 for the"
+        " rear, (W, N)",
+        "rad",
+    )
     body_height: torch.Tensor = measure("Height of the segment's centre, (W, N)", "m")
     uprightness: torch.Tensor = measure(
         "1 upright, 0 on its side, -1 upside down, (W, N)"
@@ -188,6 +198,8 @@ class EnvironmentDiagnostics:
             contact_flags=zeros(segment_count, 4, dtype=torch.bool),
             segment_progress=zeros(segment_count),
             segment_moved=zeros(segment_count),
+            joint_movement=zeros(segment_count),
+            spine_bend=zeros(segment_count),
             body_height=zeros(segment_count),
             uprightness=zeros(segment_count),
             head_distance=zeros(),
@@ -299,6 +311,8 @@ class EnvironmentDiagnostics:
                 dim=-1
             )
         )
+        step.joint_movement.copy_(step_rewards.joint_movement.sqrt())
+        step.spine_bend.copy_(physical_state.spine_yaw_position.abs())
         step.body_height.copy_(physical_state.body_height)
         # The z component of each segment's up axis: 1 - 2(x² + y²).
         step.uprightness.copy_(

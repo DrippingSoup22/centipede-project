@@ -93,15 +93,19 @@ def test_step_holds_each_worlds_actions_for_twenty_milliseconds(model, mapping):
     """A step takes about 10 s on a pre-Volta GPU, so physics runs sparingly here."""
     backend = GPUBackend(model, mapping, 2, STEPS, SOLVER, 128, 512)
     actions = torch.rand(2, mapping.segment_count, 6, device="cuda") * 2 - 1
+    spine_actions = torch.rand(2, mapping.segment_count - 1, device="cuda") * 2 - 1
 
-    backend.step(actions)
+    backend.step(actions, spine_actions)
 
     ctrl = backend.gpu_data.ctrl.numpy()
     leg_motor_ids = mapping.leg_actuator_ids
     for world_index in range(2):
         world_actions = actions[world_index].cpu().numpy()
         assert np.array_equal(ctrl[world_index, leg_motor_ids], world_actions)
-    assert not np.delete(ctrl, leg_motor_ids.ravel(), axis=1).any()
+        assert np.array_equal(
+            ctrl[world_index, mapping.spine_actuator_ids],
+            spine_actions[world_index].cpu().numpy(),
+        )
     assert np.allclose(backend.gpu_data.time.numpy(), ACTION_DURATION_S)
 
 
@@ -240,7 +244,17 @@ def test_physical_state_matches_cpu_mujoco(model, mapping):
                 ],
                 "body_angular_velocity": velocity[:3],
                 "body_linear_velocity": velocity[3:],
+                # The joint behind the segment; the rear has none.
+                "spine_yaw_position": 0.0,
+                "spine_yaw_velocity": 0.0,
             }
+            if segment_index < mapping.segment_count - 1:
+                expected["spine_yaw_position"] = data.qpos[
+                    mapping.spine_qpos_addresses[segment_index]
+                ]
+                expected["spine_yaw_velocity"] = data.qvel[
+                    mapping.spine_dof_addresses[segment_index]
+                ]
             for field, value in expected.items():
                 actual = getattr(state, field)[world_index, segment_index]
                 assert np.allclose(actual.cpu().numpy(), value, atol=1e-5), field

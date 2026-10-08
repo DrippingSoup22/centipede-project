@@ -10,6 +10,7 @@ import pytest
 import torch
 
 from centipede.environment.environment import Environment
+from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.settings_section import SettingsError
 
@@ -126,6 +127,34 @@ def test_progress_is_measured_from_the_positions_before_the_step():
     assert torch.all(moved > 0)
     assert torch.allclose(facts.segment_progress[:, 0], head_progress, atol=1e-9)
     assert torch.allclose(facts.segment_moved, moved, atol=1e-9)
+
+
+def test_with_spine_control_each_segment_but_the_rear_bends_the_joint_behind_it():
+    env = environment(
+        world_count=2, spine_control=True, rewards={"movement_cost_parts": 1}
+    )
+    assert env.segment_action_sizes == [7] * 7 + [6] and env.action_size == 7
+    assert env.observation_size == environment().observation_size + 2
+    env.reset(seed=2)
+    state = env.simulation.physical_state
+    action = torch.zeros(2, env.segment_count, 7)
+    action[0, :, 6] = 1.0  # world 0 bends every joint; the rear's 7th is padding
+
+    for _ in range(5):
+        angles_before = joint_angles(state).clone()
+        observations, *_ = env.step(action)
+
+    bend = state.spine_yaw_position
+    assert torch.all(bend[0, :-1] > bend[1, :-1].abs())
+    assert not bend[:, -1].any()  # the rear has no joint behind it
+    assert torch.equal(observations[..., -2], bend)  # each sees its own, last
+    # The movement is measured from the angles before the step, over the joints
+    # each segment commands.
+    squared = (joint_angles(state) - angles_before).square()
+    expected = torch.cat(
+        (squared[:, :-1].mean(dim=-1), squared[:, -1:, :6].mean(dim=-1)), dim=1
+    )
+    assert torch.allclose(env.diagnostics.step.joint_movement, expected.sqrt())
 
 
 def test_an_observation_radius_reaching_past_the_body_is_rejected():

@@ -4,6 +4,8 @@ from centipede.environment.simulation import PhysicalState
 
 BLOCK_SIZE = 27
 TARGET_VALUE_COUNT = 2
+# With spine control: the angle and speed of the spine joint behind the segment.
+SPINE_VALUE_COUNT = 2
 
 
 def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
@@ -26,8 +28,10 @@ class ObservationBuilder:
 
     Each segment sees its own block of 27 values, the blocks of the segments up
     to ``observation_radius`` ahead and behind (nearest first), and two target
-    values that are real only for the head. A missing neighbour is a block of
-    zeros. The layout is fixed in docs/environment.md.
+    values that are real only for the head; with ``spine_observed``, last, the
+    angle and speed of the spine joint behind it (zero for the rear segment).
+    A missing neighbour is a block of zeros. The layout is fixed in
+    docs/environment.md.
     """
 
     def __init__(
@@ -36,6 +40,7 @@ class ObservationBuilder:
         observation_radius: int,
         world_count: int,
         device: torch.device | str,
+        spine_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -46,6 +51,7 @@ class ObservationBuilder:
         """
         self.world_count = world_count
         self.segment_count = segment_count
+        self.spine_observed = spine_observed
         missing_neighbour = segment_count
 
         neighbour_rows = []
@@ -74,8 +80,10 @@ class ObservationBuilder:
             device=device,
         )
         self.observation_size = (
-            2 * observation_radius + 1
-        ) * BLOCK_SIZE + TARGET_VALUE_COUNT
+            (2 * observation_radius + 1) * BLOCK_SIZE
+            + TARGET_VALUE_COUNT
+            + (SPINE_VALUE_COUNT if spine_observed else 0)
+        )
 
     def build(
         self, physical_state: PhysicalState, target_position: torch.Tensor
@@ -115,4 +123,15 @@ class ObservationBuilder:
         target_values[:, 0, 0] = (offset * forward).sum(dim=-1)
         target_values[:, 0, 1] = (offset * left).sum(dim=-1)
 
-        return torch.cat((neighbour_blocks, target_values), dim=-1)
+        parts = [neighbour_blocks, target_values]
+        if self.spine_observed:
+            parts.append(
+                torch.stack(
+                    (
+                        physical_state.spine_yaw_position,
+                        physical_state.spine_yaw_velocity,
+                    ),
+                    dim=-1,
+                )
+            )
+        return torch.cat(parts, dim=-1)

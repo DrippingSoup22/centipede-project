@@ -105,6 +105,22 @@ def test_target_values_are_in_the_heads_frame_and_only_for_the_head(heading_deg)
     assert not target_values[:, 1:].any()
 
 
+def test_with_the_spine_each_segment_sees_its_own_joint_last():
+    plain = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu")
+    builder = ObservationBuilder(
+        SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", spine_observed=True
+    )
+    state = distinct_state("cpu")
+    targets = torch.zeros(WORLD_COUNT, 2)
+
+    observations = builder.build(state, targets)
+
+    assert builder.observation_size == plain.observation_size + 2
+    assert torch.equal(observations[..., :-2], plain.build(state, targets))
+    assert torch.equal(observations[..., -2], state.spine_yaw_position)
+    assert torch.equal(observations[..., -1], state.spine_yaw_velocity)
+
+
 def test_forward_direction_survives_a_head_pointing_straight_up():
     nose_up = torch.tensor([[math.cos(-math.pi / 4), 0.0, math.sin(-math.pi / 4), 0.0]])
 
