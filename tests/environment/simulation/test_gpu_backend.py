@@ -47,8 +47,10 @@ def mapping(model):
     return ModelMapping.from_model(model)
 
 
-def make_backend(model, mapping, world_count, seed=0):
-    backend = GPUBackend(model, mapping, world_count, STEPS, SOLVER, 128, 512)
+def make_backend(model, mapping, world_count, seed=0, heading_range=0.0):
+    backend = GPUBackend(
+        model, mapping, world_count, STEPS, SOLVER, 128, 512, heading_range
+    )
     backend.reset(seed=seed)
     return backend
 
@@ -166,6 +168,25 @@ def test_seeds_make_resets_reproducible(model, mapping):
     second.reset()
     assert not np.array_equal(positions(first), first_reset)
     assert np.array_equal(positions(first), positions(second))
+
+
+def test_a_start_heading_range_turns_the_whole_body(model, mapping):
+    """Only the root's orientation changes, by a turn about the vertical within
+    the range; the legs draw the same noise as without it."""
+    straight = make_backend(model, mapping, world_count=4, seed=2)
+    turned = make_backend(model, mapping, world_count=4, seed=2, heading_range=0.5)
+    address = mapping.root_qpos_address + 3
+    plain, qpos = positions(straight), positions(turned)
+    w, x, y, z = (qpos[:, address + index] for index in range(4))
+    assert not x.any() and not y.any()
+    headings = 2 * np.arctan2(z, w)
+    assert np.abs(headings).max() <= 0.5 + 1e-6
+    assert len(set(headings.tolist())) == 4
+    root_quaternion = range(address, address + 4)
+    others = [index for index in range(qpos.shape[1]) if index not in root_quaternion]
+    assert np.array_equal(qpos[:, others], plain[:, others])
+    head = turned.physical_state.body_quaternion[:, 0].cpu().numpy()
+    assert np.allclose(2 * np.arctan2(head[:, 3], head[:, 0]), headings, atol=1e-5)
 
 
 def test_a_mask_resets_only_the_selected_worlds(model, mapping):

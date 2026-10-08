@@ -22,6 +22,7 @@ def test_defaults_fill_everything_but_the_required_keys():
         gpu_solver="newton",
         contacts_per_world=128,
         constraints_per_world=512,
+        start_heading_range_deg=0.0,
     )
 
 
@@ -38,6 +39,10 @@ def test_section_rules_are_enforced():
         SimulationSettings.from_section({**REQUIRED_ONLY, "backend": "tpu"})
     with pytest.raises(SettingsError, match="gpu_solver must be one of"):
         SimulationSettings.from_section({**REQUIRED_ONLY, "gpu_solver": "pgs"})
+    with pytest.raises(SettingsError, match="start_heading_range_deg must be at most"):
+        SimulationSettings.from_section(
+            {**REQUIRED_ONLY, "start_heading_range_deg": 270}
+        )
     with pytest.raises(SettingsError, match="world_count must be at least 1"):
         SimulationSettings.from_section({**REQUIRED_ONLY, "world_count": 0})
     with pytest.raises(SettingsError, match="unknown settings: world_cuont"):

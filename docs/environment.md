@@ -228,10 +228,24 @@ Normalising observations is the agents' job, not the environment's.
 
 ## Episodes
 
-**Start.** A reset returns the body to the pose stored in the model, varying only
+**Start.** A reset returns the body to the pose stored in the model, varying
 the legs: each leg angle moves by a random amount between −2° and +2°, and each
-leg joint starts with a random speed (mean 0, spread 0.05 rad/s). Each world has
-its own random sequence, and a fixed seed repeats it. Targets use a separate
+leg joint starts with a random speed (mean 0, spread 0.05 rad/s). With
+`start_heading_range_deg` above 0, the whole body is then turned about the
+vertical by a random angle within that range, by turning the free joint of the
+head's body, the root of the body tree. Each world has its own random sequence,
+and a fixed seed repeats it; the heading is drawn after the legs, so the legs
+start the same with or without it.
+
+The heading matters because each segment observes its orientation in the
+world, which includes the direction it faces. Targets are placed relative to
+the head, so with a fixed starting heading the direction a segment faces
+carries no information about the task, yet the networks only ever see the few
+directions near the start: a centipede that turns far from it gives its
+networks inputs they were never trained on. Random headings make the facing
+direction uninformative everywhere, so the networks learn to ignore it. The
+starting position on the floor is not varied: no segment observes it, and the
+floor is the same everywhere. Targets use a separate
 random sequence, so changing how targets are chosen never changes starting
 poses. A reset gives no reward, and its pose counts as the "previous" state for
 the first step.
@@ -321,6 +335,7 @@ These are the keys of the environment sections of the configuration file (see
 | `gpu_solver` | `newton` | Constraint solver, GPU only: `newton`, or `cg` for GPUs older than Volta |
 | `contacts_per_world` | 128 | Reserved contact memory, GPU only |
 | `constraints_per_world` | 512 | Reserved constraint memory, GPU only |
+| `start_heading_range_deg` | 0 | A reset turns the whole body about the vertical by a random angle within ± this many degrees; 180 allows any heading |
 | **`[environment.target]`** | | |
 | `distance_range_m` | 0.010 to 0.020 | Distance of a new target from the head's tip |
 | `bearing_range_deg` | −15 to 15 | Direction of a new target from straight ahead |
@@ -351,7 +366,7 @@ Left for after the first version works, one change at a time:
 
 - Targets farther away, at wider angles, or behind the head.
 - A new target after arrival, without a reset.
-- More variation in the starting pose.
+- More variation in the starting pose than the heading.
 - Agents controlling and observing the spine.
 - A larger observation radius, which is only a configuration change.
 - A body with more segments: a new model version. The code adapts, but trained

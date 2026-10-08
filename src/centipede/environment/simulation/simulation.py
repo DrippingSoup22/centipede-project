@@ -1,3 +1,5 @@
+import math
+
 import mujoco
 import torch
 
@@ -41,9 +43,14 @@ class PhysicsSimulation:
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
 
+        start_heading_range_rad = math.radians(settings.start_heading_range_deg)
         if settings.backend == "cpu":
             self._backend = CPUBackend(
-                model, mapping, settings.world_count, steps_per_action
+                model,
+                mapping,
+                settings.world_count,
+                steps_per_action,
+                start_heading_range_rad,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -58,6 +65,7 @@ class PhysicsSimulation:
                 settings.gpu_solver,
                 settings.contacts_per_world,
                 settings.constraints_per_world,
+                start_heading_range_rad,
             )
 
         self.segment_count = mapping.segment_count

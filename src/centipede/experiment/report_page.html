@@ -284,6 +284,8 @@ const SETTING_CHIPS = [
   { keys: ["environment.simulation.backend", "environment.simulation.gpu_solver", "environment.simulation.world_count"],
     text: ({ environment: { simulation: s } }) => `${s.backend.toUpperCase()}${s.backend === "gpu" ? ` · ${s.gpu_solver}` : ""} · ${count(s.world_count)} worlds` },
   { keys: ["environment.simulation.model_path"], text: (s) => `model ${s.environment.simulation.model_path.split(/[\\/]/).pop()}` },
+  { keys: ["environment.simulation.start_heading_range_deg"], text: ({ environment: { simulation: s } }) =>
+    (s.start_heading_range_deg ? `starts facing ${s.start_heading_range_deg >= 180 ? "any direction" : `within ±${number(s.start_heading_range_deg)}°`}` : null) },
   { keys: ["environment.max_episode_steps"], text: (s) => {
     const seconds = s.environment.max_episode_steps * STEP_SECONDS;
     return `episodes up to ${seconds < 600 ? withUnit(seconds, "s") : duration(seconds)}`;
@@ -1471,6 +1473,7 @@ function settingChips(settings, setKeys, note) {
   for (const chip of SETTING_CHIPS) {
     let text;
     try { text = chip.text(settings); } catch (error) { continue; }  // a setting this run does not have
+    if (!text) continue;  // a setting left at a value that needs no chip
     const isSet = [...setKeys].some((key) => chip.keys.some((prefix) => key === prefix || key.startsWith(`${prefix}.`)));
     chips.push(html("span", { class: `chip${isSet ? " set" : ""}` }, text));
   }

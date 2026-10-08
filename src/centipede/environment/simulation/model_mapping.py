@@ -39,6 +39,7 @@ class ModelMapping:
     body_ids: np.ndarray
     center_site_ids: np.ndarray
     head_tip_site_id: int
+    root_qpos_address: int
     geom_owner_indices: np.ndarray
     geom_categories: np.ndarray
 
@@ -53,6 +54,7 @@ class ModelMapping:
         body_ids, center_site_ids, head_tip_site_id = _map_bodies_and_sites(
             model, segment_count
         )
+        root_qpos_address = _find_root_joint(model, int(body_ids[0]))
         geom_owner_indices, geom_categories = _read_geom_metadata(model, segment_count)
         return cls(
             segment_count=segment_count,
@@ -62,6 +64,7 @@ class ModelMapping:
             body_ids=body_ids,
             center_site_ids=center_site_ids,
             head_tip_site_id=head_tip_site_id,
+            root_qpos_address=root_qpos_address,
             geom_owner_indices=geom_owner_indices,
             geom_categories=geom_categories,
         )
@@ -204,6 +207,25 @@ def _map_bodies_and_sites(
         )
     head_tip_site_id = _find_id(model, mujoco.mjtObj.mjOBJ_SITE, "site", "head_tip")
     return body_ids, center_site_ids, head_tip_site_id
+
+
+def _find_root_joint(model: mujoco.MjModel, head_body_id: int) -> int:
+    """Return the position address of the free joint that carries the body.
+
+    The head's body must be the root of the body tree, with a free joint (its
+    position and orientation in the world), so that turning that joint turns
+    the whole centipede.
+    """
+    first_joint_id = model.body_jntadr[head_body_id]
+    if (
+        model.body_parentid[head_body_id] != 0
+        or first_joint_id < 0
+        or model.jnt_type[first_joint_id] != mujoco.mjtJoint.mjJNT_FREE
+    ):
+        raise ModelContractError(
+            "segment_00 must be a child of the world with a free joint"
+        )
+    return int(model.jnt_qposadr[first_joint_id])
 
 
 def _read_geom_metadata(

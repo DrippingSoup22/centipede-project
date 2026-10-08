@@ -124,6 +124,7 @@ world_count = 4
 # gpu_solver = "newton"               # GPU only: "newton" or "cg"
 # contacts_per_world = 128            # GPU only
 # constraints_per_world = 512         # GPU only
+# start_heading_range_deg = 0         # 180: every reset faces a random direction
 
 [environment.target]
 distance_range_m = [0.010, 0.020]

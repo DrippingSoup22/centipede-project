@@ -42,7 +42,10 @@ v2 changes three things and nothing else:
 - Each leg has three hinges: shoulder sweep, shoulder lift, and knee.
 - Seven flexible connections between units, each with a yaw and a pitch hinge;
   rolling between units is locked.
-- A free root, so the whole body can move and rotate in 3D.
+- A free root, so the whole body can move and rotate in 3D. It is the free
+  joint of the head's body, `segment_00`, which must be a child of the world:
+  turning it turns the whole centipede, which is how a reset varies the
+  starting heading.
 - 69 position coordinates, 68 velocity coordinates, and 55 motors.
 - Total mass 643.4 mg.
 

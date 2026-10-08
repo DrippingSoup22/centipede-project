@@ -33,8 +33,10 @@ def mapping(model):
     return ModelMapping.from_model(model)
 
 
-def make_backend(model, mapping, world_count, seed=0):
-    backend = CPUBackend(model, mapping, world_count, physics_steps_per_action(model))
+def make_backend(model, mapping, world_count, seed=0, heading_range=0.0):
+    backend = CPUBackend(
+        model, mapping, world_count, physics_steps_per_action(model), heading_range
+    )
     backend.reset(seed=seed)
     return backend
 
@@ -101,6 +103,29 @@ def test_seeds_make_resets_reproducible(model, mapping):
     second.reset()
     assert not np.array_equal(first.world_data[0].qpos, first_reset)
     assert np.array_equal(first.world_data[0].qpos, second.world_data[0].qpos)
+
+
+def test_a_start_heading_range_turns_the_whole_body(model, mapping):
+    """Only the root's orientation changes, by a turn about the vertical within
+    the range; the legs draw the same noise as without it."""
+    straight = make_backend(model, mapping, world_count=4, seed=2)
+    turned = make_backend(model, mapping, world_count=4, seed=2, heading_range=0.5)
+    address = model.joint("root").qposadr[0] + 3
+    headings = []
+    for plain, data in zip(straight.world_data, turned.world_data, strict=True):
+        w, x, y, z = data.qpos[address : address + 4]
+        assert x == y == 0.0
+        headings.append(2 * np.arctan2(z, w))
+        assert np.array_equal(
+            np.delete(data.qpos, range(address, address + 4)),
+            np.delete(plain.qpos, range(address, address + 4)),
+        )
+        assert np.array_equal(data.qvel, plain.qvel)
+    assert np.abs(headings).max() <= 0.5
+    assert len(set(headings)) == 4
+    # The physical state follows: the head faces its new heading.
+    head = turned.physical_state.body_quaternion[0, 0].numpy()
+    assert np.isclose(2 * np.arctan2(head[3], head[0]), headings[0], atol=1e-5)
 
 
 def test_a_mask_resets_only_the_selected_worlds(model, mapping):

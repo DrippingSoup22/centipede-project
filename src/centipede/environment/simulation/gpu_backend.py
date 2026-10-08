@@ -103,6 +103,49 @@ def _add_leg_reset_noise(
 
 
 @wp.kernel
+def _turn_reset_heading(
+    # In
+    world_mask: wp.array1d[wp.bool],
+    reset_seeds: wp.array1d[wp.int32],
+    reset_counts: wp.array1d[wp.int32],
+    root_quaternion_address: int,
+    leg_thread_count: int,
+    heading_range: float,
+    # Out
+    qpos: wp.array2d[float],
+) -> None:
+    """Turn the whole body of each masked world about the vertical.
+
+    Launched with one thread per world, after ``_add_leg_reset_noise``. Each
+    turns its world's root orientation, MuJoCo's (w, x, y, z) quaternion in
+    ``qpos``, by a uniform angle within ``heading_range``. Its random stream is
+    numbered after the leg joints' threads, so the legs draw the same numbers
+    with or without the turn.
+    """
+    world_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+
+    reset_seed = wp.int32(
+        wp.rand_init(reset_seeds[world_index], reset_counts[world_index])
+    )
+    random_state = wp.rand_init(reset_seed, leg_thread_count + world_index)
+    half_angle = 0.5 * wp.randf(random_state, -heading_range, heading_range)
+    turn_w = wp.cos(half_angle)
+    turn_z = wp.sin(half_angle)
+
+    # The turn (cos, 0, 0, sin) times the root's orientation (w, x, y, z).
+    w = qpos[world_index, root_quaternion_address]
+    x = qpos[world_index, root_quaternion_address + 1]
+    y = qpos[world_index, root_quaternion_address + 2]
+    z = qpos[world_index, root_quaternion_address + 3]
+    qpos[world_index, root_quaternion_address] = turn_w * w - turn_z * z
+    qpos[world_index, root_quaternion_address + 1] = turn_w * x - turn_z * y
+    qpos[world_index, root_quaternion_address + 2] = turn_w * y + turn_z * x
+    qpos[world_index, root_quaternion_address + 3] = turn_w * z + turn_z * w
+
+
+@wp.kernel
 def _read_segment_state(
     # In: tables
     center_site_ids: wp.array1d[int],
@@ -251,15 +294,17 @@ class GPUBackend:
         solver: str,
         contacts_per_world: int,
         constraints_per_world: int,
+        start_heading_range_rad: float = 0.0,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
-        one 20 ms action. ``solver`` is "newton" or "cg"; it is set on the host
-        model before the copy, because MuJoCo Warp reads it while building the
-        GPU model. The
-        contact and constraint capacities are reserved here once: contacts in
-        one pool shared by all worlds, constraints separately for each world.
+        one 20 ms action, and ``start_heading_range_rad`` how far a reset may
+        turn the body about the vertical. ``solver`` is "newton" or "cg"; it is
+        set on the host model before the copy, because MuJoCo Warp reads it
+        while building the GPU model. The contact and constraint capacities are
+        reserved here once: contacts in one pool shared by all worlds,
+        constraints separately for each world.
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
@@ -274,6 +319,8 @@ class GPUBackend:
         self.world_count = world_count
         self.segment_count = mapping.segment_count
         self.physics_steps_per_action = physics_steps_per_action
+        self.start_heading_range_rad = start_heading_range_rad
+        self.root_quaternion_address = mapping.root_qpos_address + 3
 
         # The Warp device that holds the model and data, and its PyTorch name.
         self.device = wp.get_device()
@@ -386,6 +433,8 @@ class GPUBackend:
         reset; ``None`` resets every world. A ``seed`` restarts the selected
         worlds' random sequences, so the same seed repeats the same resets;
         without one, each world's sequence continues with its next reset count.
+        With a start heading range, the whole body is then turned about the
+        vertical by a uniform angle within it.
         """
         if world_mask is None:
             mask = torch.ones(
@@ -417,6 +466,21 @@ class GPUBackend:
             ],
             device=self.device,
         )
+        if self.start_heading_range_rad > 0:
+            wp.launch(
+                _turn_reset_heading,
+                dim=self.world_count,
+                inputs=[
+                    mask_view,
+                    self.reset_seeds,
+                    self.reset_counts,
+                    self.root_quaternion_address,
+                    self.world_count * self.segment_count * 6,
+                    self.start_heading_range_rad,
+                ],
+                outputs=[self.gpu_data.qpos],
+                device=self.device,
+            )
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()

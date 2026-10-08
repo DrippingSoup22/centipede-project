@@ -32,12 +32,14 @@ class CPUBackend:
         mapping: ModelMapping,
         world_count: int,
         physics_steps_per_action: int,
+        start_heading_range_rad: float = 0.0,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
-        one 20 ms action. The generators start from seed 0 until ``reset`` is
-        given a seed. Each
+        one 20 ms action, and ``start_heading_range_rad`` how far a reset may
+        turn the body about the vertical. The generators start from seed 0
+        until ``reset`` is given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
         """
@@ -45,6 +47,7 @@ class CPUBackend:
         self.mapping = mapping
         self.world_count = world_count
         self.physics_steps_per_action = physics_steps_per_action
+        self.start_heading_range_rad = start_heading_range_rad
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -81,9 +84,12 @@ class CPUBackend:
         ``world_mask`` is a boolean tensor of shape (W,) marking the worlds to
         reset; ``None`` resets every world. A ``seed`` restarts the selected
         worlds' random sequences, so the same seed repeats the same resets;
-        without one, each world's sequence simply continues. Only the leg joints
+        without one, each world's sequence simply continues. The leg joints
         are varied: each angle by up to 2 degrees, each speed by a small normal
-        amount. The selected worlds' rows of the physical state are refreshed.
+        amount. With a start heading range, the whole body is then turned about
+        the vertical by a uniform angle within it; the turn is drawn after the
+        legs, so the legs' noise is the same with or without it. The selected
+        worlds' rows of the physical state are refreshed.
         """
         if world_mask is None:
             selected_world_indices = range(self.world_count)
@@ -107,6 +113,19 @@ class CPUBackend:
             data.qvel[self.mapping.leg_dof_addresses] = generator.normal(
                 0.0, LEG_SPEED_NOISE_RAD_S, noise_shape
             )
+            if self.start_heading_range_rad > 0:
+                heading = generator.uniform(
+                    -self.start_heading_range_rad, self.start_heading_range_rad
+                )
+                # Turning the root's orientation about the world's vertical
+                # turns the whole body tree with it.
+                address = self.mapping.root_qpos_address + 3
+                turn = np.array([np.cos(heading / 2), 0.0, 0.0, np.sin(heading / 2)])
+                mujoco.mju_mulQuat(
+                    data.qpos[address : address + 4],
+                    turn,
+                    data.qpos[address : address + 4].copy(),
+                )
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)

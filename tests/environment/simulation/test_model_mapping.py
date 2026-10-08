@@ -50,6 +50,7 @@ def test_mapping_matches_the_elements_found_by_name():
             assert mapping.leg_qpos_addresses[segment, action_index] == joint.qposadr
             assert mapping.leg_dof_addresses[segment, action_index] == joint.dofadr
     assert mapping.head_tip_site_id == model.site("head_tip").id
+    assert mapping.root_qpos_address == model.joint("root").qposadr[0]
 
     for name, owner, category in [
         ("floor", -1, FLOOR_CATEGORY),
@@ -103,6 +104,7 @@ def test_v1_is_rejected_because_its_feet_share_one_category():
             "belong to no leg or spine joint: segment_03_tail_motor",
         ),
         ('name="head_tip"', 'name="head_point"', "no site named head_tip"),
+        ('<freejoint name="root" />', "", "segment_00 must be a child of the world"),
         (
             'contype="2" conaffinity="1" user="3 1"',
             'contype="2" conaffinity="1" user="3 9"',
@@ -117,6 +119,7 @@ def test_v1_is_rejected_because_its_feet_share_one_category():
         "missing spine motor",
         "extra motor",
         "missing site",
+        "fixed head",
         "unknown category",
     ],
 )
