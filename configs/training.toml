@@ -16,8 +16,9 @@ mode = "train"
 name = "training"
 seed = 1
 checkpoint_every_cycles = 16
-# The window before each checkpoint is recorded for replay (record_every_cycles
-# defaults to checkpoint_every_cycles), keeping 4 levels x 8 worlds by rank.
+# No replay recordings: one whole episode (8,192 steps) of 1,024 worlds would
+# need about 2.4 GiB of GPU memory while it is recorded.
+record_every_episodes = 0
 
 [environment.simulation]
 model_path = "models/assembly_v3.xml"

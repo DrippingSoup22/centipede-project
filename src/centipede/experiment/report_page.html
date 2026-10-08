@@ -66,9 +66,9 @@
   section > h2 .number { color: var(--muted); font-weight: 500; margin-right: 6px; }
   section.minor > h2 { font-size: 16px; }
   .row { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
-  .w12 { grid-column: span 12; } .w8 { grid-column: span 8; } .w6 { grid-column: span 6; }
-  .w4 { grid-column: span 4; } .w3 { grid-column: span 3; }
-  @media (max-width: 900px) { .w8, .w6, .w4 { grid-column: span 12; } .w3 { grid-column: span 6; } }
+  .w12 { grid-column: span 12; } .w8 { grid-column: span 8; } .w7 { grid-column: span 7; } .w6 { grid-column: span 6; }
+  .w5 { grid-column: span 5; } .w4 { grid-column: span 4; } .w3 { grid-column: span 3; }
+  @media (max-width: 900px) { .w8, .w7, .w6, .w5, .w4 { grid-column: span 12; } .w3 { grid-column: span 6; } }
   @media (max-width: 520px) { .w3 { grid-column: span 12; } }
 
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px 12px; min-width: 0; }
@@ -92,14 +92,26 @@
   [popover].about .source { color: var(--muted); font-size: 12px; margin: 0; }
 
   /* Headline tiles. */
-  .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(var(--tile-count, 5), minmax(0, 1fr)); gap: 14px; margin-bottom: 14px; }
   @media (max-width: 1000px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 640px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .tiles.in-row { margin-bottom: 0; }
   .tile .label { color: var(--ink-2); font-size: 13px; }
   .tile .value { font-size: 28px; font-weight: 650; line-height: 1.15; margin-top: 2px; }
   .tile .from { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .tile .others { color: var(--ink-2); font-size: 12px; margin-top: 4px; }
   .tile svg { margin-top: 6px; }
+  .tile .change { font-weight: 700; }
+  .tile .change.better { color: var(--series-1); }
+  .tile .change.worse { color: var(--series-2); }
+  .card.small.tile .value { font-size: 22px; }
+
+  /* Switches between two views of one card. */
+  .toggles { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+  .toggle { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); }
+  .toggle.on { background: var(--chip); color: var(--chip-ink); border-color: transparent; font-weight: 600; }
+  .toggle:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
 
   svg { display: block; width: 100%; height: auto; overflow: visible; }
   svg text { fill: var(--muted); font: 11px system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -197,6 +209,8 @@ const METRICS = {
     about: "How the episodes spread over the distance they closed, in 10% bins: each bin's share of the episodes that ended. A mean of 40% can be every episode closing 40%, or some arriving while the rest move away; the spread tells them apart. Bins at the ends also hold the episodes beyond them." },
   "episode_distributions.length_steps": { label: "Episode length, every episode", source: "episodes.length_steps", better: "lower",
     about: "How the episodes spread over their length, in bins that grow by about 1.5 times, so short arrivals and long ones are both visible. Episodes that ran out of time fill the bin that starts at the time limit; arrivals fill the bins before it." },
+  "episode_distributions.final_distance": { label: "Distance at the end, every episode", source: "episodes.final_distance", better: "lower",
+    about: "How far from its target each episode's head ended. Arrivals end within the arrival radius; the episodes that ran out of time end wherever the head was. Counting episodes in bins shows what most centipedes did, which a mean distance hides: a few that wander far away pull a mean up however well the others did." },
   "episode_distributions.upside_down_share": { label: "Head upside down, every episode", source: "episodes.upside_down_share", better: "lower",
     about: "How the episodes spread over the share of their steps with the head upside down, in 10% bins. It tells a few episodes that flipped over and stayed there from many that flipped briefly." },
 
@@ -320,14 +334,8 @@ const SETTING_CHIPS = [
 // of many, and the line is drawn as it is.
 const SMOOTH_BELOW = { episodes: 100, step_facts: 10000 };
 
-const TILES = ["episodes.arrived", "episodes.final_distance", "report.reward_per_step", "report.mean_return", "episodes.length_steps"];
-
-// Episode values in training are taken over the last full episode length of
-// windows, so that every world's episode is counted whether it arrived early or
-// ran out of time. All worlds start together, so their time-outs come in waves
-// one episode length apart; a single window holds either a wave of time-outs or
-// only the few early arrivals.
-const EPISODE_SPAN_NOTE = (span, steps) => `Episode values are taken over the last ${span} windows (${count(steps)} steps, one episode length), so every world's episode counts, whether it arrived or ran out of time; they begin once that many windows exist.`;
+// The evaluation's headline values, one tile each.
+const EVALUATION_TILES = ["episodes.arrived", "episodes.final_distance", "report.reward_per_step", "report.mean_return", "episodes.length_steps"];
 
 const BODY_VALUES = [
   { key: "step_facts.contact_flags", part: 2, title: "Body on the ground" },
@@ -353,72 +361,70 @@ const PROFILE_COLUMNS = [
 
 const PROFILE_ABOUT = "Exact values of how each segment behaves, one row per segment with the head at the top. Each column is coloured on its own scale, darker meaning more. Left foot, right foot, body: share of steps touching the ground. Legs touching: share of steps its legs touch another leg. Height: of the segment's centre. Upright: 1 upright, 0 on its side, −1 upside down. Speed: how fast the segment's centre moves. Toward goal: the part of that speed that brings it closer to its goal.";
 
-const BODY_ABOUT = "One value along the body, head on the left: the average of the first windows (grey, dashed), of the windows midway (light), and of the last windows (dark). Lines that move apart show the body changing how it behaves, segment by segment.";
-
 const USEFUL_ABOUT = "The share of each segment's movement that brought it closer to its goal: its speed toward the goal divided by its speed. 100% means every millimetre moved went toward the goal, 0% that the movement went sideways or back and forth, and below 0% that the segment moved away from its goal. The goal is the target for the head, and for every other segment the spot where the segment ahead of it was.";
-
-// The moments drawn along the body in training: name, colour, and line style.
-const BODY_MOMENTS = [["start", "first windows", "var(--muted)", { dashed: true }], ["middle", "midway", "var(--series-1)", { opacity: 0.4 }],
-  ["end", "last windows", "var(--series-1)", {}]];
 
 const USEFUL_CARD = { title: "Useful share of movement", subtitle: "Speed toward the goal ÷ speed, per segment, in percent",
   keys: ["step_facts.segment_progress", "step_facts.segment_moved"] };
 
-const HISTOGRAM_ABOUT = " Grey bars are the episodes that ended in the first episode length of windows, blue bars those of the last; each bar is its share of those episodes. Over a whole episode length every world's episode ends at least once, so arrivals and time-outs are both counted.";
+// Where episodes ended, in classes made of the distance histogram's bins: an
+// arrival, then how far from its target an episode that ran out of time ended.
+// "quality" places each class on the red-to-blue scale of good and bad.
+const ENDING_CLASSES = [
+  { upTo: 0.001, name: "arrived", quality: 1 },
+  { upTo: 0.005, name: "within 5 mm", quality: 0.8 },
+  { upTo: 0.01, name: "5–10 mm", quality: 0.64 },
+  { upTo: 0.02, name: "10–20 mm", quality: 0.5 },
+  { upTo: 0.05, name: "20–50 mm", quality: 0.3 },
+  { upTo: Infinity, name: "50 mm or more", quality: 0.06 },
+];
 
+const RESULTS_INTRO = (span, steps) => `Episode values are taken over whole episode lengths of windows (${span} windows, ${count(steps)} steps, ${withUnit(steps * STEP_SECONDS, "s")}): all worlds start together, so in each of them every centipede ends at least one episode, by arriving or by running out of time. "First" is the first episode length of training, and the large values are the last.`;
+
+// The training report's sections. Results start with numbers (the tiles), then
+// the charts that show progress. A card with width "auto" shares its row with
+// the others left by "onlyIf".
 const TRAINING_LAYOUT = [
-  { title: "Results", intro: "How well the run went. Charts run over the world steps collected; dotted vertical lines mark where a training session resumed.",
-    episodeNote: true,
+  { title: "Results", tiles: true,
     rows: [
-      [{ kind: "lines", width: "w12", size: "large", title: "Getting closer to the target",
-         subtitle: "The head's distance to its target, in mm: averaged over every window, and at the start and the end of the episodes of the last episode length (the gap shaded)",
-         about: "The line is the head's distance to its target averaged over every world and step of each window, so it exists for every window; it rises within an episode length when heads wander away, and drops when the worlds get new targets. The other two lines are the distance when episodes started and when they ended, averaged over the episodes of the last episode length of windows, so they begin once that many windows exist. The shaded gap between them is the distance closed; where the end lies above the start, the heads ended farther away than they started. An end line falling below the start line means the centipede is learning to move toward its target, even before it reaches it.",
-         series: [{ key: "step_facts.head_distance", name: "every window", color: "var(--series-1)" },
-                  { key: "episodes.start_distance", name: "episode start", color: "var(--baseline-1)" },
-                  { key: "episodes.final_distance", name: "episode end", color: "var(--series-2)" }],
-         fillBetween: [1, 2] }],
-      [{ kind: "lines", width: "w6", size: "large", key: "episodes.arrived", title: "Arrival share over training",
-         subtitle: "Share of the episodes that reached the target, over the last episode length of windows" },
-       { kind: "outcomes", width: "w6", size: "large", title: "Episodes ended, per window",
-         subtitle: "Arrived, and ran out of time; time-outs come in waves, one episode length apart",
-         about: "How many episodes ended in each window: those whose head reached the target, and those that ran out of time. All worlds start their first episode together, so the episodes that run out of time end together too, in a wave every episode length; the windows between the waves hold only the early arrivals. That is why the episode values elsewhere are taken over whole episode lengths." }],
-      [{ kind: "stack", width: "w6", size: "large", key: "step_facts.reward_parts", title: "Where the reward comes from", totalName: "reward per step" },
-       { kind: "heatmap", width: "w6", size: "large", key: "episodes.segment_return" }],
-      ["distance_closed", "length_steps", "upside_down_share"]
-        .map((name) => ({ kind: "histogram", width: "w4", size: "small", key: `episode_distributions.${name}` })),
+      [{ kind: "endings", width: "w7", size: "large" },
+       { kind: "ending_bins", width: "w5", size: "large" }],
+      [{ kind: "stack", width: "w7", size: "small", key: "step_facts.reward_parts", title: "Where the reward comes from", totalName: "reward per step",
+         subtitle: "Per step, mean over segments; the line is their sum. The scale depends on the run's reward settings" },
+       { kind: "arrival_times", width: "w5", size: "small" }],
     ] },
-  { title: "Learning", minor: true, intro: "How each segment agent's update went: the line is the segments' mean, the band their range.",
+  { title: "Learning", minor: true, intro: "How each segment agent's update went, over training: the line is the segments' mean, the band their range.",
+    rows: [[
+      { kind: "health", width: "auto", size: "small", key: "learning.explained_variance" },
+      { kind: "health", width: "auto", size: "small", key: "learning.action_std" },
+      { kind: "health", width: "auto", size: "small", key: "learning.approximate_kl" },
+      { kind: "lines", width: "auto", size: "small", key: "learning.learning_rate",
+        onlyIf: (settings) => (settings.agents.learning_rate_schedule || "constant") !== "constant" },
+    ]] },
+  { title: "Behaviour", minor: true, intro: "How the centipede moved, over one episode length of windows: the last, or the first to compare.",
     rows: [
-      ["learning.explained_variance", "learning.approximate_kl", "learning.clip_fraction", "learning.action_std"]
-        .map((key) => ({ kind: "health", width: "w3", size: "small", key })),
-      [{ kind: "lines", width: "w3", size: "small", key: "learning.learning_rate" },
-       ...["learning.entropy", "learning.critic_loss", "learning.actor_loss"]
-        .map((key) => ({ kind: "health", width: "w3", size: "small", key }))],
+      [{ kind: "body_table", width: "w12", size: "small" }],
+      [{ kind: "stat", width: "w4", key: "step_facts.heading_error", better: "lower",
+         note: "0° points at the target, 180° straight away from it" },
+       { kind: "stat", width: "w4", key: "episodes.head_path_length", note: "length of the head's path per episode" },
+       { kind: "stat", width: "w4", key: "episodes.upside_down_share", better: "lower", note: "share of an episode's steps" }],
     ] },
-  { title: "Behaviour", minor: true, intro: "How the centipede moved: contacts, posture, and movement along the body, and steering. Along the body, head on the left: grey dashed is the first windows, light blue midway, dark blue the last windows.",
-    rows: [
-      BODY_VALUES.slice(0, 4).map((value) => ({ kind: "body", width: "w3", size: "small", ...value })),
-      BODY_VALUES.slice(4).map((value) => ({ kind: "body", width: "w3", size: "small", ...value })),
-      [{ kind: "useful", width: "w4", size: "small" },
-       { kind: "lines", width: "w4", size: "small", key: "step_facts.heading_error" },
-       { kind: "lines", width: "w4", size: "small", key: "episodes.upside_down_share" }],
-    ] },
-  { title: "Run", minor: true, intro: "Where the run's time went.",
-    rows: [
-      [{ kind: "speed", width: "w6", size: "small", key: "timing.transitions_per_second" },
-       { kind: "stack", width: "w6", size: "small", title: "Where the time goes", parts: ["timing.collecting_seconds", "timing.learning_seconds"],
-         subtitle: "Seconds per window, collecting and learning",
-         about: "The seconds each window spent collecting (acting, simulating, and storing) and learning (the update after it), stacked: their total is the window's time." }],
-    ] },
+  { title: "Run", minor: true,
+    rows: [[{ kind: "run_stats", width: "w12" }]] },
 ];
 
 // Under "Show details": these groups first, then every value not placed anywhere.
 const TRAINING_DETAILS = [
-  { title: "Physics", intro: "How close the physics came to the memory the GPU backend reserves, and how hard the solver worked.",
-    cards: ["physics.contact_count", "physics.constraint_rows", "physics.solver_iterations"]
-      .map((key) => ({ kind: "lines", width: "w4", size: "small", key })) },
+  { title: "Learning, every value", cards: ["learning.entropy", "learning.clip_fraction", "learning.critic_loss", "learning.actor_loss"]
+      .map((key) => ({ kind: "health", width: "w3", size: "small", key })) },
+  { title: "Distance to the target, as means", intro: "Means over every world, so a few centipedes that wander far away pull them up however well the others did; the results above count episodes instead. The line is the distance at every step of each window; the other two are the distance at the start and at the end of the episodes of the last episode length of windows.",
+    cards: [{ kind: "lines", width: "w12", size: "small", title: "Head's distance to its target",
+      subtitle: "Mean over the worlds, in mm",
+      series: [{ key: "step_facts.head_distance", name: "every step", color: "var(--series-1)" },
+               { key: "episodes.start_distance", name: "episode start", color: "var(--baseline-1)" },
+               { key: "episodes.final_distance", name: "episode end", color: "var(--series-2)" }] }] },
   { title: "Each segment over training", intro: "The behaviour values per segment and window: one row per segment, head at the top.",
     cards: [
+      { kind: "heatmap", width: "w3", size: "small", key: "episodes.segment_return" },
       ...[0, 1, 2, 3].map((part) => ({ kind: "heatmap", width: "w3", size: "small", key: "step_facts.contact_flags", part,
         title: ["Left foot on the ground", "Right foot on the ground", "Body on the ground", "Legs touching"][part] })),
       ...["step_facts.body_height", "step_facts.uprightness", "step_facts.segment_moved", "step_facts.segment_progress"]
@@ -426,21 +432,27 @@ const TRAINING_DETAILS = [
     ] },
   { title: "Each window's episodes", intro: "How many episodes ended in each window, and how they spread: each column is one window's episodes, with bad bins in red, good ones in blue, and stronger colours holding more episodes. With few worlds a column holds only a few episodes.",
     cards: [
-      { kind: "lines", width: "w3", size: "small", key: "episodes.episode_ended" },
-      ...["distance_closed", "length_steps", "upside_down_share"]
-        .map((name) => ({ kind: "distribution", width: "w3", size: "small", key: `episode_distributions.${name}` })),
+      { kind: "lines", width: "w4", size: "small", key: "episodes.episode_ended" },
+      ...["final_distance", "distance_closed", "length_steps", "upside_down_share"]
+        .map((name) => ({ kind: "distribution", width: "w4", size: "small", key: `episode_distributions.${name}` })),
     ] },
-  { title: "The body at the end of training", cards: [{ kind: "profile", width: "w12", size: "small", title: "The body, segment by segment",
-      subtitle: "Average of the last windows, per segment", about: PROFILE_ABOUT, columns: PROFILE_COLUMNS }] },
+  { title: "The run over training", cards: [
+      { kind: "speed", width: "w6", size: "small", key: "timing.transitions_per_second" },
+      { kind: "stack", width: "w6", size: "small", title: "Where the time goes", parts: ["timing.collecting_seconds", "timing.learning_seconds"],
+        subtitle: "Seconds per window, collecting and learning",
+        about: "The seconds each window spent collecting (acting, simulating, and storing) and learning (the update after it), stacked: their total is the window's time." }] },
+  { title: "Physics", intro: "How close the physics came to the memory the GPU backend reserves, and how hard the solver worked.",
+    cards: ["physics.contact_count", "physics.constraint_rows", "physics.solver_iterations"]
+      .map((key) => ({ kind: "lines", width: "w4", size: "small", key })) },
 ];
 
 const EVALUATION_LAYOUT = [
   { title: "Results", intro: "The trained agents, and any baselines listed, on the same seeds. Each value is the mean over the seeds, with the lowest and highest seed.",
     rows: [
       ["tiles"],
-      [{ kind: "histogram", width: "w4", size: "small", key: "episode_distributions.distance_closed" },
-       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.length_steps" },
-       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.upside_down_share" }],
+      [{ kind: "histogram", width: "w4", size: "small", key: "episode_distributions.final_distance" },
+       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.distance_closed" },
+       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.length_steps" }],
       [{ kind: "segments", width: "w6", size: "large", key: "episodes.segment_return" },
        { kind: "segments", width: "w6", size: "large", key: "step_facts.reward_parts", byPart: true, title: "Reward per step, by term",
          subtitle: "Mean over segments, per term" }],
@@ -646,7 +658,7 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 // Reward terms: arrival in green; the three costs in warm colours.
 const PART_COLORS = ["var(--series-3)", "var(--series-4)", "var(--series-2)", "var(--series-5)"];
 // Each chart is drawn about as wide as its card, so its text stays readable.
-const CHART_WIDTH = { w12: 1100, w8: 730, w6: 550, w4: 360, w3: 270 };
+const CHART_WIDTH = { w12: 1100, w8: 730, w7: 640, w6: 550, w5: 450, w4: 360, w3: 270 };
 let nextId = 0;
 
 function html(tag, attributes = {}, ...children) {
@@ -1091,6 +1103,89 @@ function histogramChart(allEdges, allSeries, options) {
   return chart;
 }
 
+// Bars of shares that add up to 100%, one per column, stacked in the order of
+// the classes from the bottom. Each column is { label, cycle, perClass, total }.
+function shareBars(columns, classes, width) {
+  const height = 230, left = 40, right = 8, top = 8, bottom = 36;
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  const py = (share) => top + (1 - share / 100) * (height - top - bottom);
+  for (const tick of [0, 25, 50, 75, 100]) {
+    chart.append(svg("line", { x1: left, x2: width - right, y1: py(tick), y2: py(tick), style: "stroke:var(--grid)" }));
+    chart.append(svg("text", { x: left - 6, y: py(tick) + 4, "text-anchor": "end" }, `${tick}%`));
+  }
+  const slot = (width - left - right) / columns.length;
+  const barWidth = Math.max(1, Math.min(44, slot * 0.78));
+  columns.forEach((column, index) => {
+    const x = left + index * slot + (slot - barWidth) / 2;
+    const lines = classes.map((c, k) => `${c.name}: ${count(column.perClass[k])} (${number((100 * column.perClass[k]) / column.total)}%)`).join("\n");
+    const text = `${column.label}, ${count(column.total)} episodes\n${lines}`;
+    let below = 0;
+    classes.forEach((c, k) => {
+      const share = (100 * column.perClass[k]) / column.total;
+      if (share > 0) chart.append(svg("rect", { x, y: py(below + share), width: barWidth, height: py(below) - py(below + share), style: `fill:${c.color}` }, hoverText(text)));
+      below += share;
+    });
+  });
+  const marks = new Set([0, columns.length - 1, ...[0.25, 0.5, 0.75].map((f) => Math.round(f * (columns.length - 1)))]);
+  for (const index of marks) chart.append(svg("text", { x: left + (index + 0.5) * slot, y: height - 20, "text-anchor": "middle" }, String(columns[index].cycle)));
+  chart.append(svg("text", { x: left + (width - left - right) / 2, y: height - 4, "text-anchor": "middle" }, "update cycle at the end of each episode length"));
+  return chart;
+}
+
+// Counts per category as horizontal bars, one row per label and one bar per
+// series; the last series' count is written at the end of its bar.
+function horizontalBars(labels, series, width) {
+  const rowHeight = series.length > 1 ? 26 : 22, left = 104, right = 44, top = 4;
+  const height = top + labels.length * rowHeight + 4;
+  const high = Math.max(1, ...series.flatMap((s) => s.values));
+  const px = (v) => left + (v / high) * (width - left - right);
+  const barHeight = (rowHeight - 6) / series.length;
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  labels.forEach((label, row) => {
+    const y = top + row * rowHeight;
+    chart.append(svg("text", { x: left - 8, y: y + rowHeight / 2 + 2, "text-anchor": "end", class: "label" }, label));
+    series.forEach((s, k) => {
+      const value = s.values[row];
+      if (!value) return;
+      chart.append(svg("rect", { x: left, y: y + 1 + k * barHeight, width: Math.max(1.5, px(value) - left), height: barHeight - 1, rx: 2, style: `fill:${s.color}` },
+        hoverText(`${s.name} · ${label}: ${count(value)} of ${count(s.total)} episodes (${number((100 * value) / s.total)}%)`)));
+    });
+    const lastSeries = series[series.length - 1];
+    const value = lastSeries.values[row];
+    chart.append(svg("text", { x: px(value || 0) + 5, y: y + 1 + (series.length - 0.5) * barHeight + 4, class: "label" }, count(value || 0)));
+  });
+  chart.append(svg("line", { x1: left, x2: left, y1: top, y2: height - 4, style: "stroke:var(--axis)" }));
+  return chart;
+}
+
+// A number with its value in the first episode length of windows, and an arrow
+// coloured by whether it changed for the better.
+function statTile({ title, about, keys, unit, latest, first, better, note, small = false, width = "" }) {
+  const [heading, popover] = cardTitle(title, about, keys);
+  const compare = first !== undefined && first !== null && latest !== null;
+  let change = null;
+  if (compare && better && Math.abs(latest - first) > 1e-9 * Math.max(1, Math.abs(first))) {
+    const improved = (latest > first) === (better === "higher");
+    change = html("span", { class: `change ${improved ? "better" : "worse"}` }, latest > first ? "▲ " : "▼ ");
+  }
+  return html("div", { class: `card tile${small ? " small" : ""} ${width}`.trim() },
+    html("div", { class: "label" }, heading.firstChild), popover,
+    html("div", { class: "value" }, withUnit(latest, unit)),
+    compare ? html("div", { class: "from" }, change, `first: ${withUnit(first, unit)}`) : null,
+    note ? html("div", { class: "from" }, note) : null);
+}
+
+// The ending classes, each with the histogram bins it holds and its colour.
+function endingClasses(settings, edges) {
+  const classes = ENDING_CLASSES.map((c, index) => ({ ...c, bins: [], color: qualityColor(c.quality),
+    name: index === 0 && settings.environment.target.arrival_radius_m !== 0.001 ? "within 1 mm" : c.name }));
+  for (let bin = 0; bin < edges.length - 1; bin++) {
+    const upper = bin === edges.length - 2 ? Infinity : edges[bin + 1];
+    classes.find((c) => c.upTo >= upper - 1e-9).bins.push(bin);
+  }
+  return classes.filter((c) => c.bins.length);
+}
+
 // The actors compared on one value: one horizontal bar each, from zero, with
 // the seeds' range as a thin line.
 function actorBars(actors, size, width = 420) {
@@ -1276,16 +1371,35 @@ function trainingReport(root) {
     const category = key.startsWith("report.") ? (key === "report.reward_per_step" ? "step_facts" : "episodes") : key.split(".")[0];
     return category === "step_facts" && worldSteps < SMOOTH_BELOW.step_facts;
   };
-  // The windows of the first and the last full episode length, for histograms
-  // and for the values at the start and at the end.
-  const spanEnds = log.map((_, index) => index).filter((index) => spanStart(index) !== null);
-  const spanIndices = (end) => (end === undefined ? [] : Array.from({ length: span }, (_, i) => end - span + 1 + i));
-  const firstSpan = spanIndices(spanEnds[0]), lastSpan = spanIndices(spanEnds[spanEnds.length - 1]);
+  // Blocks of whole episode lengths: the windows of cycles k·span + 1 to
+  // (k + 1)·span, all in one training session. All worlds start together, so
+  // in each block every world ends at least one episode; the first and the
+  // last block are what "first" and "last" mean.
+  const indexOfCycle = new Map(log.map((record, index) => [record.cycle, index]));
+  const blocks = [];
+  const lastCycle = log.length ? log[log.length - 1].cycle : 0;
+  for (let start = 1; start + span - 1 <= lastCycle; start += span) {
+    const indices = Array.from({ length: span }, (_, i) => indexOfCycle.get(start + i));
+    const resumedInside = sessionStarts.some((first) => first >= start && first <= start + span - 2);
+    if (indices.every((index) => index !== undefined) && !resumedInside) blocks.push(indices);
+  }
+  const firstSpan = blocks[0] || [], lastSpan = blocks[blocks.length - 1] || [];
+  const blockLabel = (indices) => `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}`;
+  const episodesIn = (indices) => indices.reduce((sum, index) => sum + episodeCounts[index], 0);
+  // Over a block: an episode value as its windows' means, each counted by its
+  // episodes; a step value as the mean of its windows; bin counts added up.
+  const episodeMeanOver = (indices, key) => weightedMeanOfValues(indices.map((i) => shown(log[i], key)), indices.map((i) => episodeCounts[i]));
+  const stepMeanOver = (indices, key) => meanOfValues(indices.map((i) => shown(log[i], key)));
+  const countsOver = (indices, key) => {
+    const present = indices.map((i) => raw(log[i], key)).filter((c) => c !== null);
+    return present.length ? present[0].map((_, bin) => present.reduce((sum, c) => sum + c[bin], 0)) : null;
+  };
   // Where a later training session resumed the run.
   const markers = sessions.slice(1).map((session, index) => ({ x: session.first_cycle * stepsPerCycle,
     label: `Session ${index + 2} started at cycle ${session.first_cycle} (${session.started})` }));
-  const context = { x, log, series, smoothFor, markers, cycleAt, settings, sessions, span, firstSpan, lastSpan,
-    episodeCounts, hover: (c) => `cycle ${cycleAt(c)} · ${count(c)} steps` };
+  const context = { x, log, series, smoothFor, markers, cycleAt, settings, sessions, span, firstSpan, lastSpan, blocks,
+    blockLabel, episodesIn, episodeMeanOver, stepMeanOver, countsOver, used, episodeCounts,
+    hover: (c) => `cycle ${cycleAt(c)} · ${count(c)} steps` };
 
   // Header: what the run is, how far it got, and its settings.
   const last = log[log.length - 1];
@@ -1299,43 +1413,22 @@ function trainingReport(root) {
   const written = new Set(sessions.flatMap((session) => session.settings_written || []));
   root.append(...settingChips(settings, written, "Highlighted: set in the run's configuration files; the others are defaults."));
   if (!log.length) return;
-  if (!spanEnds.length) {
+  if (!blocks.length) {
     root.append(html("p", { class: "warning" }, `The episode values need one full episode length of windows (${span}); this run has ${log.length}. ` +
       "Episodes end at the target or at the time limit, so until then only the early arrivals have ended. The values measured at every step are shown already."));
   }
-
-  // Headline tiles: the latest value, the value at the start, and the trend.
-  // Episode values compare the first and the last full episode length.
-  const limitSeconds = settings.environment.max_episode_steps * STEP_SECONDS;
-  const cycles = (indices) => `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}`;
-  const episodesIn = (indices) => indices.reduce((sum, index) => sum + episodeCounts[index], 0);
-  root.append(html("div", { class: "tiles" }, ...TILES.map((key) => {
-    const metric = info(key), values = series(key);
-    const fromEpisodes = isEpisodeMean(key);
-    const present = values.filter((v) => v !== null);
-    const latest = fromEpisodes ? (present.length ? present[present.length - 1] : null) : momentMean(values, "end");
-    const first = fromEpisodes ? (present.length ? present[0] : null) : momentMean(values, "start");
-    let detail = fromEpisodes && firstSpan.length
-      ? `${cycles(lastSpan)}, ${count(episodesIn(lastSpan))} episodes · ${cycles(firstSpan)}: ${withUnit(first, metric.unit)}`
-      : `at the start ${withUnit(first, metric.unit)}`;
-    if (key === "episodes.length_steps") detail += ` · limit ${withUnit(limitSeconds, "s")}`;
-    if (key === "episodes.final_distance" && latest !== null) {
-      const started = series("episodes.start_distance").filter((v) => v !== null).pop();
-      detail = `started ${withUnit(started, "mm")} away · ${detail}`;
-    }
-    const [title, popover] = cardTitle(metric.label, metric.about, [key]);
-    return html("div", { class: "card tile" },
-      html("div", { class: "label" }, title.firstChild), popover,
-      html("div", { class: "value" }, withUnit(latest, metric.unit)),
-      html("div", { class: "from" }, detail),
-      lineChart(x, [{ name: metric.label, values, color: "var(--series-1)", smooth: smoothFor(key) }], { size: "tiny" }));
-  })));
+  series("learning.learning_rate");  // charted only when it changes; the chips give it otherwise
 
   // Results, learning, behaviour, and the run, as the layout says.
   TRAINING_LAYOUT.forEach((layout, index) => {
-    const spec = layout.episodeNote ? { ...layout, intro: `${layout.intro} ${EPISODE_SPAN_NOTE(span, span * windowSteps)}` } : layout;
-    root.append(section(index + 1, spec, ...spec.rows.map((row) =>
-      html("div", { class: "row" }, ...row.map((item) => trainingCard(item, context))))));
+    const spec = layout.tiles ? { ...layout, intro: RESULTS_INTRO(span, span * windowSteps) } : layout;
+    const content = spec.tiles ? [trainingTiles(context)] : [];
+    for (const row of spec.rows) {
+      const items = row.filter((item) => !item.onlyIf || item.onlyIf(settings));
+      const autoWidth = `w${Math.floor(12 / items.length)}`;
+      content.push(html("div", { class: "row" }, ...items.map((item) => trainingCard(item.width === "auto" ? { ...item, width: autoWidth } : item, context))));
+    }
+    root.append(section(index + 1, spec, ...content));
   });
 
   // Details: physics, per-segment heatmaps, everything else, tables, settings.
@@ -1359,6 +1452,55 @@ function trainingReport(root) {
   details.push(html("h3", { class: "group" }, "Run"), factsTable(data.run_facts),
     html("h3", { class: "group" }, "Settings"), settingsTable(settings, written));
   root.append(detailsBlock(...details));
+}
+
+// The headline numbers: each over the last episode length of windows, with its
+// value over the first.
+function trainingTiles(context) {
+  const { settings, firstSpan, lastSpan, episodeMeanOver, stepMeanOver, countsOver, episodesIn, used } = context;
+  const limitSeconds = settings.environment.max_episode_steps * STEP_SECONDS;
+  // Episodes that ran out of time last exactly the time limit, so the mean
+  // length of those that arrived follows from the mean length and the share.
+  const arrivalSeconds = (indices) => {
+    const share = episodeMeanOver(indices, "episodes.arrived"), length = episodeMeanOver(indices, "episodes.length_steps");
+    if (share === null || length === null || share <= 0) return null;
+    return (length - (1 - share / 100) * limitSeconds) / (share / 100);
+  };
+  const closerShare = (indices) => {
+    const counts = countsOver(indices, "episode_distributions.distance_closed");
+    if (!counts) return null;
+    const from = info("episode_distributions.distance_closed").edges.findIndex((edge) => edge >= 0);
+    const total = counts.reduce((a, b) => a + b, 0);
+    return total ? (100 * counts.slice(from).reduce((a, b) => a + b, 0)) / total : null;
+  };
+  const tiles = [
+    { title: "Arrived", unit: "%", better: "higher", keys: ["episodes.arrived"],
+      about: "The share of episodes in which the head reached its target rather than running out of time: the task's measure of success.",
+      value: (b) => episodeMeanOver(b, "episodes.arrived"),
+      note: (b) => {
+        const share = episodeMeanOver(b, "episodes.arrived");
+        return share === null ? "" : `${count(Math.round((episodesIn(b) * share) / 100))} of ${count(episodesIn(b))} episodes`;
+      } },
+    { title: "Time to arrive", unit: "s", better: "lower", keys: ["episodes.length_steps", "episodes.arrived"],
+      about: `How long the episodes that arrived took, on average, in seconds of simulated time. Every episode that runs out of time lasts exactly the time limit (${withUnit(limitSeconds, "s")}), so this follows exactly from the mean episode length and the arrival share.`,
+      value: arrivalSeconds, note: (b) => (arrivalSeconds(b) === null ? "no arrivals" : `time limit ${withUnit(limitSeconds, "s")}`) },
+    { title: "Ended closer than they started", unit: "%", better: "higher", keys: ["episode_distributions.distance_closed"],
+      about: "The share of episodes whose head ended closer to its target than it started, arrivals included. A centipede that wanders far away counts once, as one that did not get closer, instead of pulling a mean distance up.",
+      value: closerShare, note: () => "arrivals included" },
+    { title: "Body on the ground", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
+      about: "The share of steps in which a segment's body touched the ground, averaged over the segments.",
+      value: (b) => overall(stepMeanOver(b, "step_facts.contact_flags"), 2), note: () => "share of steps" },
+    { title: "Legs touching", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
+      about: "The share of steps in which a segment's legs touched another leg, averaged over the segments.",
+      value: (b) => overall(stepMeanOver(b, "step_facts.contact_flags"), 3), note: () => "share of steps" },
+    { title: "Speed toward goal", unit: "mm/s", better: "higher", keys: ["step_facts.segment_progress"],
+      about: "How fast the segments move toward their goals, averaged over the segments: the head toward its target, every other segment toward the spot where the segment ahead of it was. It rises when the centipede walks forward, even before it steers.",
+      value: (b) => overall(stepMeanOver(b, "step_facts.segment_progress")), note: () => "mean over segments" },
+  ];
+  tiles.forEach((tile) => tile.keys.forEach((key) => used.add(key)));
+  const compare = firstSpan.length && firstSpan !== lastSpan;
+  return html("div", { class: "tiles", style: `--tile-count:${tiles.length}` }, ...tiles.map((tile) => statTile({ ...tile,
+    latest: lastSpan.length ? tile.value(lastSpan) : null, first: compare ? tile.value(firstSpan) : undefined, note: lastSpan.length ? tile.note(lastSpan) : "" })));
 }
 
 function trainingCard(item, context) {
@@ -1428,50 +1570,122 @@ function trainingCard(item, context) {
         cellColor: (value, row) => mixColors(surface, binColor(row), 0.2 + (0.8 * value) / largest) }));
   }
 
-  if (item.kind === "body") {
-    const values = series(item.key).map((v) => perSegment(v, item.part));
-    const lines = BODY_MOMENTS.map(([moment, name, color, style]) => ({ name, color, ...style, values: momentMean(values, moment) }))
-      .filter((line) => line.values !== null);
-    if (!lines.length) return card(item, empty());
-    return card({ ...item, about: `${metric.about} ${BODY_ABOUT}` },
-      alongBody(lines, metric, width));
+  if (item.kind === "endings") {
+    const key = "episode_distributions.final_distance";
+    context.used.add(key);
+    const spec = { ...item, title: "Where episodes ended", keys: [key],
+      subtitle: `Every episode of each episode length: arrived, or how far from its target it ran out of time. Targets start ${targetRange(context.settings)} away`,
+      about: "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad; the grey band is about as far as targets start. A bar that fills with blue from the bottom means the centipedes get to their targets." };
+    if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run: runs from 8 October 2026 on log where each episode ended"));
+    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
+    const classes = endingClasses(context.settings, info(key).edges);
+    const columns = context.blocks.map((indices) => {
+      const counts = context.countsOver(indices, key);
+      const perClass = classes.map((c) => c.bins.reduce((sum, bin) => sum + counts[bin], 0));
+      return { label: context.blockLabel(indices), cycle: log[indices[indices.length - 1]].cycle, perClass, total: perClass.reduce((a, b) => a + b, 0) };
+    }).filter((column) => column.total > 0);
+    return card(spec, legend(classes.map((c) => c.name), classes.map((c) => c.color)), shareBars(columns, classes, width));
   }
 
-  if (item.kind === "useful") {
-    const speeds = series("step_facts.segment_moved"), progress = series("step_facts.segment_progress");
-    const lines = BODY_MOMENTS.map(([moment, name, color, style]) => ({ name, color, ...style,
-      values: usefulShare(momentMean(speeds, moment), momentMean(progress, moment)) })).filter((line) => line.values !== null);
-    return card({ ...USEFUL_CARD, size: item.size, width: item.width, about: `${USEFUL_ABOUT} ${BODY_ABOUT}` },
-      lines.length ? alongBody(lines, { unit: "%" }, width) : empty());
-  }
-
-  if (item.kind === "outcomes") {
-    const arrived = log.map((record, i) => Math.round(context.episodeCounts[i] * (raw(record, "episodes.arrived") || 0)));
-    const parts = [
-      { name: "arrived", values: arrived, color: "var(--series-1)" },
-      { name: "ran out of time", values: arrived.map((n, i) => context.episodeCounts[i] - n), color: "var(--series-2)" },
-    ];
-    return card({ ...item, keys: ["episodes.episode_ended", "episodes.arrived"] }, legend(parts.map((p) => p.name), parts.map((p) => p.color)),
-      stackChart(x, parts, { ...common, totalName: "episodes", showTotal: false, bars: true }));
-  }
-
-  if (item.kind === "histogram") {
-    // The episodes of the first and the last full episode length of windows.
-    const counts = log.map((record) => raw(record, item.key));
-    const label = binLabeller(item.key);
-    const groups = [[context.firstSpan, "first", "var(--baseline-1)"], [context.lastSpan, "last", "var(--series-1)"]].map(([indices, name, color]) => {
-      const present = indices.filter((i) => counts[i]);
-      const summed = present.length ? counts[present[0]].map((_, bin) => present.reduce((sum, i) => sum + counts[i][bin], 0)) : [];
-      const total = summed.reduce((a, b) => a + b, 0);
-      const cycles = indices.length ? `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}` : "";
-      return { name: `${cycles}, ${count(total)} episodes`, color, counts: summed, total, shares: summed.map((n) => (total ? (100 * n) / total : 0)) };
+  if (item.kind === "ending_bins") {
+    const key = "episode_distributions.final_distance";
+    const spec = { ...item, title: "Where episodes ended: first and last", keys: [key],
+      subtitle: "Episodes of the first and the last episode length, by the distance at which they ended; the number is the last's count",
+      about: `${info(key).about} The grey bars are the first episode length of training, the blue bars the last.` };
+    if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run"));
+    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
+    const edges = info(key).edges;
+    const mm = (edge) => number(edge * 1000);
+    const labels = edges.slice(0, -1).map((edge, bin) => (bin === 0
+      ? (context.settings.environment.target.arrival_radius_m === 0.001 ? "arrived" : `under ${mm(edges[1])} mm`)
+      : bin === edges.length - 2 ? `${mm(edge)} mm or more` : `${mm(edge)}–${mm(edges[bin + 1])} mm`));
+    const groups = (context.firstSpan === context.lastSpan ? [[context.lastSpan, "var(--series-1)"]]
+      : [[context.firstSpan, "var(--baseline-1)"], [context.lastSpan, "var(--series-1)"]]).map(([indices, color]) => {
+      const values = context.countsOver(indices, key);
+      return { name: context.blockLabel(indices), color, values, total: values.reduce((a, b) => a + b, 0) };
     });
-    if (!sampleOf(counts)) return card({ ...item, subtitle: "" }, empty("Not logged by this run"));
-    if (!groups[0].total) return card({ ...item, subtitle: "" }, empty(`Needs one full episode length of windows (${context.span})`));
-    const markEdge = item.key.endsWith("length_steps") ? { edge: context.settings.environment.max_episode_steps, label: "time limit" } : null;
-    return card({ ...item, subtitle: "Share of the episodes in each bin: the first and the last episode length of training", about: `${metric.about}${HISTOGRAM_ABOUT}` },
-      legend(groups.map((g) => g.name), groups.map((g) => g.color)),
-      histogramChart(metric.edges, groups, { width, label, markEdge }));
+    return card(spec, legend(groups.map((g) => `${g.name}: ${count(g.total)} episodes`), groups.map((g) => g.color)),
+      horizontalBars(labels, groups, width));
+  }
+
+  if (item.kind === "arrival_times") {
+    const key = "episode_distributions.length_steps";
+    context.used.add(key);
+    const spec = { ...item, title: "How long arrivals took", keys: [key],
+      subtitle: "The episodes that arrived, by how long they took, fastest first; grey the first episode length, blue the last",
+      about: "The episodes that reached their target, counted by how long they took, in seconds of simulated time, the fastest at the top. Bars that move toward the top mean arrivals get faster. Episodes that ran out of time are left out." };
+    const edges = info(key).edges, limit = context.settings.environment.max_episode_steps;
+    const arrivalBins = edges.findIndex((edge) => edge >= limit);
+    if (!log.some((record) => raw(record, key) !== null) || arrivalBins < 1) return card(spec, empty("Not logged by this run"));
+    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
+    const seconds = (edge) => number(edge * STEP_SECONDS);
+    const labels = Array.from({ length: arrivalBins }, (_, bin) => `${seconds(edges[bin])}–${seconds(Math.min(edges[bin + 1], limit))} s`);
+    const groups = (context.firstSpan === context.lastSpan ? [[context.lastSpan, "var(--series-1)"]]
+      : [[context.firstSpan, "var(--baseline-1)"], [context.lastSpan, "var(--series-1)"]]).map(([indices, color]) => {
+      const values = context.countsOver(indices, key).slice(0, arrivalBins);
+      return { name: context.blockLabel(indices), color, values, total: values.reduce((a, b) => a + b, 0) };
+    });
+    if (groups.every((g) => !g.total)) return card(spec, empty("No episode arrived"));
+    // Only the rows from the fastest to the slowest arrival.
+    const held = labels.map((_, bin) => groups.some((g) => g.values[bin] > 0));
+    const from = held.indexOf(true), to = held.lastIndexOf(true) + 1;
+    return card(spec, legend(groups.map((g) => `${g.name}: ${count(g.total)} arrivals`), groups.map((g) => g.color)),
+      horizontalBars(labels.slice(from, to), groups.map((g) => ({ ...g, values: g.values.slice(from, to) })), width));
+  }
+
+  if (item.kind === "body_table") {
+    PROFILE_COLUMNS.forEach((column) => series(column.key));
+    const spec = { ...item, title: "The body, segment by segment", about: PROFILE_ABOUT, keys: PROFILE_COLUMNS.map((column) => column.key),
+      subtitle: "Average over one episode length of windows, one row per segment; both views share their colours, so switching shows the change" };
+    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
+    const moments = context.firstSpan === context.lastSpan ? [["Last", context.lastSpan]]
+      : [["First", context.firstSpan], ["Last", context.lastSpan]];
+    const valuesOver = (indices) => (key) => context.stepMeanOver(indices, key);
+    const sharedScale = (column) => moments.flatMap(([, indices]) => perSegment(valuesOver(indices)(column.key), column.part) || []);
+    const holder = html("div", {});
+    const buttons = moments.map(([name, indices]) => html("button", { class: "toggle", type: "button" }, `${name} episode length · ${context.blockLabel(indices)}`));
+    const show = (which) => {
+      holder.replaceChildren(profileTable(PROFILE_COLUMNS, valuesOver(moments[which][1]), sharedScale));
+      buttons.forEach((button, i) => button.classList.toggle("on", i === which));
+    };
+    buttons.forEach((button, i) => button.addEventListener("click", () => show(i)));
+    show(moments.length - 1);
+    return card(spec, moments.length > 1 ? html("div", { class: "toggles" }, ...buttons) : null, holder);
+  }
+
+  if (item.kind === "stat") {
+    series(item.key);
+    const over = item.key.startsWith("episodes.") ? context.episodeMeanOver : context.stepMeanOver;
+    const at = (indices) => (indices.length ? overall(over(indices, item.key), item.part) : null);
+    const compare = context.firstSpan.length && context.firstSpan !== context.lastSpan;
+    return statTile({ title: item.title || metric.label, about: item.about || metric.about, keys: [item.key], unit: metric.unit,
+      latest: at(context.lastSpan), first: compare ? at(context.firstSpan) : undefined, better: item.better, note: item.note, small: true, width: item.width });
+  }
+
+  if (item.kind === "run_stats") {
+    ["timing.collecting_seconds", "timing.learning_seconds", "timing.transitions_per_second"].forEach((key) => context.used.add(key));
+    const startUp = new Set(context.sessions.map((session) => session.first_cycle + 1));
+    const steady = log.filter((record) => !startUp.has(record.cycle));
+    const collecting = median(steady.map((r) => r.timing.collecting_seconds)), learning = median(steady.map((r) => r.timing.learning_seconds));
+    const speed = median(steady.map((r) => r.timing.transitions_per_second));
+    const total = log.reduce((sum, r) => sum + (r.timing.collecting_seconds || 0) + (r.timing.learning_seconds || 0), 0);
+    const episodes = context.episodeCounts.reduce((a, b) => a + b, 0);
+    const stats = [
+      { title: "Per update cycle", value: collecting === null ? null : collecting + learning, unit: "s",
+        note: `collecting ${withUnit(collecting, "s")}, learning ${withUnit(learning, "s")}`,
+        about: "The typical seconds one update cycle took: collecting its window (acting, simulating, storing) and learning from it. Medians, without each session's first window, which includes start-up." },
+      { title: "Simulation speed", value: speed, unit: "steps/s", note: "world steps per second while collecting",
+        about: "World steps collected per second while collecting, the median over the windows without each session's first." },
+      { title: "Training time", text: duration(total), note: `${count(log.length)} update cycles`,
+        about: "The time spent collecting and learning, added up over every window of every session." },
+      { title: "Episodes", text: count(episodes), note: `${count(log[log.length - 1].transitions)} world steps`,
+        about: "Every episode that ended during training, by arriving or by running out of time." },
+    ];
+    return html("div", { class: `tiles in-row ${item.width}`, style: `--tile-count:${stats.length}` }, ...stats.map((stat) => {
+      const tile = statTile({ ...stat, keys: [], latest: stat.value ?? null, small: true });
+      if (stat.text) tile.querySelector(".value").textContent = stat.text;
+      return tile;
+    }));
   }
 
   if (item.kind === "health") {
@@ -1496,10 +1710,6 @@ function trainingCard(item, context) {
         { ...common, unit: "steps/s" }));
   }
 
-  if (item.kind === "profile") {
-    item.columns.forEach((column) => series(column.key));
-    return card(item, profileTable(item.columns, (key) => momentMean(log.map((r) => shown(r, key)), "end")));
-  }
   return empty(`Unknown card kind ${item.kind}`);
 }
 
@@ -1526,6 +1736,11 @@ function genericCard(key, context) {
   return card({ ...spec, subtitle: `Mean over segments${metric.unit ? `, in ${metric.unit}` : ""}` },
     legend(parts, SERIES), lineChart(x, parts.map((name, part) => ({ name, color: SERIES[part % SERIES.length], smooth,
       values: values.map((v) => (v === null ? null : mean(perSegment(v, part)))) })), options));
+}
+
+function targetRange(settings) {
+  const [near, far] = settings.environment.target.distance_range_m;
+  return `${number(near * 1000)}–${number(far * 1000)} mm`;
 }
 
 function transpose(values) {
@@ -1579,7 +1794,7 @@ function evaluationReport(root) {
 
   EVALUATION_LAYOUT.forEach((spec, index) => {
     root.append(section(index + 1, spec, ...spec.rows.map((row) => {
-      if (row[0] === "tiles") return html("div", { class: "tiles" }, ...TILES.map((key) => evaluationTile(key, context)));
+      if (row[0] === "tiles") return html("div", { class: "tiles" }, ...EVALUATION_TILES.map((key) => evaluationTile(key, context)));
       return html("div", { class: "row" }, ...row.map((item) => evaluationCard(item, context)));
     })));
   });

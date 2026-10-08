@@ -1,13 +1,16 @@
-"""Recording the poses of a window, for replay in MujocoReplay.
+"""Recording the poses of a stretch of steps, for replay in MujocoReplay.
 
 ``WindowRecorder`` belongs to the loop's diagnostics. The experiment arms it
-before a window it wants recorded; the loop's diagnostics start it when the
-window starts and feed it after every step; the experiment takes the result
-between cycles and writes the file. While a window is recorded, every step
+for a number of steps before the window where they begin; the loop's
+diagnostics start it when that window starts and feed it after every step, and
+a recording that needs more steps carries on through the following windows
+until it is ``complete``. The experiment takes the result between cycles and
+writes the file: in training a whole episode length, which spans several
+windows. While a recording runs, every step
 copies the simulation's ``qpos`` of every world into a device buffer and adds
 the step's rewards to each world's score: a few small tensor operations that
 never wait for the GPU. Only the worlds chosen by rank are copied to the CPU,
-after the window, outside the timed parts. The file format and the rank rule
+after the recording, outside the timed parts. The file format and the rank rule
 are MujocoReplay's (its docs/recording-format.md).
 """
 
@@ -24,7 +27,7 @@ SELECTIONS = ("ranked", "first", "all")
 
 @dataclass(frozen=True)
 class RecordedWindow:
-    """The chosen worlds' frames of one window, as NumPy arrays on the CPU.
+    """The chosen worlds' frames of one recording, as NumPy arrays on the CPU.
 
     ``K`` worlds in rank order (best first) over ``T`` frames: ``qpos (T, K,
     nq)``, ``score (K,)``, ``world_ids (K,)``, ``level (K,)``, ``episode_start
@@ -45,7 +48,7 @@ class RecordedWindow:
 
 
 class WindowRecorder:
-    """Captures every world's poses over one window, on the device."""
+    """Captures every world's poses over the armed steps, on the device."""
 
     def __init__(self, diagnostics: EnvironmentDiagnostics, world_count: int) -> None:
         """Prepare to record from the environment's categories; allocate nothing."""
@@ -57,6 +60,7 @@ class WindowRecorder:
         self._armed_frames = 0
         self._recording = False
         self._frame = 0
+        self._frames = 0
         self._capacity = 0
         self._qpos = torch.empty(0)
         self._episode_start = torch.empty(0)
@@ -65,32 +69,41 @@ class WindowRecorder:
 
     @property
     def recording(self) -> bool:
-        """Whether the current window is being recorded."""
+        """Whether a recording is running: started, and not yet taken."""
         return self._recording
 
+    @property
+    def complete(self) -> bool:
+        """Whether the running recording holds all the steps it was armed for."""
+        return self._recording and self._frame == self._frames
+
     def arm(self, frames: int) -> None:
-        """Record the next window, with room for ``frames`` steps."""
+        """Record ``frames`` steps, from the start of the next window."""
         self._armed_frames = frames
 
     def start_window(self) -> None:
-        """Begin recording if armed; otherwise this window is skipped."""
+        """Begin recording if armed, or carry on with an unfinished recording;
+        otherwise this window is skipped."""
+        if self._recording and not self.complete:
+            return
         if not self._armed_frames:
             self._recording = False
             return
         if self._armed_frames > self._capacity:
             self._allocate(self._armed_frames)
+        self._frames = self._armed_frames
         self._armed_frames = 0
         self._frame = 0
         self._score.zero_()
         self._recording = True
 
     def step_taken(self, counted_worlds: torch.Tensor | None = None) -> None:
-        """Keep the step just taken, if this window is recorded.
+        """Keep the step just taken, if a recording is running and not complete.
 
         ``counted_worlds`` is the ``(W,)`` mask of the worlds whose rewards
         count toward their score, for evaluation; in training every world's do.
         """
-        if not self._recording:
+        if not self._recording or self.complete:
             return
         frame = self._frame
         self._qpos[frame].copy_(self._simulation.qpos)
@@ -103,11 +116,11 @@ class WindowRecorder:
         self._frame += 1
 
     def take(self, levels: int, per_level: int, selection: str) -> RecordedWindow:
-        """The recorded window's chosen worlds, copied to the CPU; ends recording.
+        """The recording's chosen worlds, copied to the CPU; ends it, complete or not.
 
         ``"ranked"`` keeps the worlds at MujocoReplay's ``selected_ranks`` of
         the summed reward; ``"first"`` keeps the first worlds, as many as the
-        ranked choice would, for continuity across windows; ``"all"`` keeps
+        ranked choice would, for continuity across recordings; ``"all"`` keeps
         every world. Worlds come out in rank order, best first.
         """
         self._recording = False

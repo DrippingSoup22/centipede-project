@@ -10,7 +10,7 @@ name = "smoke"
 seed = 1
 checkpoint_every_cycles = 1
 report = false
-record_every_cycles = 1
+record_every_episodes = 1
 
 [environment]
 max_episode_steps = 8

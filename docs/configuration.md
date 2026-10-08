@@ -91,7 +91,7 @@ The `[run]` settings of a training file:
 | `report` | `true` | Whether to write the run's report; the smoke test turns it off |
 | `runs_folder` | `"runs"` | Where run folders are created; created if missing |
 | `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
-| `record_every_cycles` | `checkpoint_every_cycles` | The first window of every block of this many cycles (cycles 1, 1 + this, ...), and always the last, is recorded for replay; `0` records nothing. All worlds start together, so when this is a whole number of episode lengths, each recording opens an episode instead of showing the end of the episodes that ran out of time |
+| `record_every_episodes` | 1 | One episode length of windows is recorded for replay every this many episode lengths, as one file: cycles 1 to 4, then 5 to 8, ... for 256-step episodes and 64-step windows. All worlds start together, so each file holds every world's whole episode from its first step, or several episodes for the worlds that arrived early. `0` records nothing |
 | `record_levels` | 4 | Worlds are ranked by their summed reward over the window and split into this many levels |
 | `record_per_level` | 8 | How many worlds of each level are kept, evenly spaced from the level's best to its worst |
 | `record_selection` | `"ranked"` | `"ranked"` keeps the worlds chosen by level; `"first"` keeps the first worlds, as many, so that consecutive recordings show the same worlds |
@@ -108,7 +108,7 @@ checkpoint_every_cycles = 16
 report = true
 # runs_folder = "runs"
 # start_from = "runs/2026-10-07_1432_easy"
-# record_every_cycles = 16           # defaults to checkpoint_every_cycles
+# record_every_episodes = 1          # one file per episode length
 # record_levels = 4
 # record_per_level = 8
 # record_selection = "ranked"
@@ -260,7 +260,7 @@ runs/2026-10-07_1432_probe/
 ├─ training_log.jsonl   one line of diagnostics per window
 ├─ report.html          the run's summary (unless report = false)
 ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
-├─ recordings/          cycle_0001.npz, cycle_0017.npz, ...: replay recordings of training windows
+├─ recordings/          cycles_0001-0004.npz, cycles_0005-0008.npz, ...: replays, one episode length each
 └─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation,
                         and <the same>_<actor>_seed<seed>.npz recordings
 ```
@@ -301,16 +301,21 @@ see [diagnostics.md](diagnostics.md#episode-summary)). Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
 
-The **recordings** hold the poses of the recorded windows for replay in the
-sibling MujocoReplay project: `recordings/cycle_NNNN.npz` is the window
-collected in cycle `NNNN`, by the agents after `NNNN − 1` updates, with the
-worlds chosen by level; an evaluation's recordings hold every world of each
+The **recordings** hold the poses of the recorded steps for replay in the
+sibling MujocoReplay project: `recordings/cycles_AAAA-BBBB.npz` holds the
+windows collected in cycles `AAAA` to `BBBB`, one episode length, with the
+worlds chosen by level; the agents update after every window, so the file
+marks each update as an event and each frame with the updates done before
+it. The last file of a session can be shorter, where the session ended.
+An evaluation's recordings hold every world of each
 actor and seed, from the first episode's first step until the last world's
 first episode ended. Each file carries the model, the targets as markers, and
 the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
-training run records one window of 32 worlds before each checkpoint, 2.3 MB
-each for models v2 and v3. To watch a run's recordings, in order, with
+training run records every episode length, 32 worlds each: about 2.3 MB per
+256 steps for models v2 and v3, so 9 MB for a 1,024-step episode. While a
+file is recorded, every world's poses stay in device memory; a run that would
+need more than 1 GiB for it is refused, with the settings to change. To watch a run's recordings, in order, with
 MujocoReplay installed:
 
 ```powershell
@@ -333,45 +338,48 @@ The report is ordered by priority, and the size of each part follows it.
   rewards, window and cycles, network, PPO, seed). Chips that include a setting
   the configuration file set itself are highlighted; the others show defaults.
   Every setting is listed in the details.
-- **1 · Results.** Five tiles: arrival share, distance at the end (with the
-  distance at the start), reward per step, return, and episode length, each
-  with its latest value, its value at the start, and a small trend line.
-  Episode values in training are taken over whole episode lengths: each
-  window's value is the mean over the episodes that ended in the last
-  `max_episode_steps / rollout_window_steps` windows (16 for 1,024-step
-  episodes and 64-step windows), within one training session. All worlds
-  start together, so their time-outs come in waves one episode length apart;
-  a single window holds either a wave of time-outs or only the few early
-  arrivals, while over a whole episode length every world's episode is
-  counted. Episode values therefore begin once that many windows exist, and
-  "at the start" and "latest" compare the first and the last episode length.
-  Below the tiles, the largest chart: the head's distance to its target in
-  every window, with the distances at the start and the end of the episodes
-  and the gap between them shaded. Then the arrival share over training, next
-  to the episodes that ended per window (arrived, and ran out of time, as
-  bars, which shows the waves); the reward per step split into its terms,
-  next to the return of each segment; and the three episode histograms,
-  comparing the episodes of the first and the last episode length. A
-  histogram's end bars also hold the values beyond them (`<−90%`, `≥90%`),
-  and the episode length histogram ends at the time limit, whose bar holds
-  the episodes that ran out of time.
-- **2 · Learning** (smaller). Critic accuracy, policy change (KL), clipped
-  samples, and action spread; then the learning rate, entropy, critic loss,
-  and policy loss. Each per-segment value is drawn as the segments' mean with
-  their range.
-- **3 · Behaviour** (smaller). Eight values along the body (body and legs
-  touching, each foot on the ground, height, uprightness, speed, speed toward
-  the goal), each early, midway, and late in training; the useful share of
-  movement (speed toward the goal ÷ speed) along the body in the same way;
-  heading error; and the share of time the head is upside down.
-- **4 · Run** (small). Steps per second, and the time each window spent
-  collecting and learning.
-- **Details,** behind a "Show details" button: each behaviour value per segment over training, the number of episodes that ended
-  per window and the three histograms window by window (readable only with many
-  worlds), the physics' contacts, constraint rows, and solver iterations, a
-  table of the body at the end of training, every other logged value, a table
-  of every value at the start and at the end, the training sessions, the run's
-  facts, and all settings.
+- **1 · Results.** Numbers first, then the charts that show progress. Episode
+  values are taken over whole episode lengths of windows
+  (`max_episode_steps / rollout_window_steps` windows: 4 for 256-step episodes
+  and 64-step windows), the blocks of cycles 1 to 4, 5 to 8, and so on, each
+  within one training session. All worlds start together, so in each block
+  every centipede ends at least one episode, by arriving or by running out of
+  time; the first block is "first", and the large values are the last block.
+  Six tiles: the arrival share (with the number of episodes); the time the
+  arrivals took, exact because every episode that runs out of time lasts the
+  time limit; the share of episodes that ended closer than they started,
+  arrivals included; the share of steps with a body on the ground and with
+  legs touching; and the segments' speed toward their goals, which rises when
+  the centipede walks forward even before it steers. Each tile shows its value
+  in the first block, with an arrow coloured blue when the change is for the
+  better and orange when it is for the worse. Below them, the largest chart,
+  **where episodes ended**: one bar per block, stacked to 100%, holding the
+  share that arrived (at the bottom) and the episodes that ran out of time by
+  how far from their target they ended (within 5 mm, 5–10, 10–20, 20–50, and
+  50 mm or more), blue for good and red for bad. Next to it the same episodes
+  of the first and the last block as counts per distance bin. Then the reward
+  per step split into its terms, whose scale depends on the reward settings,
+  next to how long the arrivals of the first and the last block took. These
+  count episodes rather than average distances, so that a few centipedes
+  that wander far away do not hide what the others did.
+- **2 · Learning** (smaller). Charts over training: critic accuracy, action
+  spread, and policy change (KL), each as the segments' mean with their range,
+  and the learning rate when a schedule changes it.
+- **3 · Behaviour** (smaller). A table of the body, one row per segment (feet,
+  body, and legs touching, height, uprightness, speed, speed toward the goal),
+  averaged over the last block, with a switch to the first; both views share
+  their colours. Then three numbers: the heading error, the length of the
+  head's path per episode, and the share of time the head is upside down.
+- **4 · Run** (small). Four numbers: the time per update cycle (collecting
+  and learning), the simulation speed, the training time, and the episodes.
+- **Details,** behind a "Show details" button: the other learning values
+  (entropy, clipped samples, critic loss, policy loss); the head's distance to
+  its target as means over the worlds; each behaviour value per segment over
+  training; the episodes that ended per window and the four histograms window
+  by window (readable only with many worlds); the speed and the time per
+  window over training; the physics' contacts, constraint rows, and solver
+  iterations; every other logged value; a table of every value at the start
+  and at the end; the training sessions; the run's facts; and all settings.
 
 Charts over training run along the world steps collected, so that runs with
 different numbers of worlds can be compared; hovering shows the cycle too.

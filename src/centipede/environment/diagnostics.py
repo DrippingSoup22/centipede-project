@@ -16,7 +16,7 @@ from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.diagnostics import SimulationFacts
 
-# Histogram bins of three episode values, fixed so that every run, CPU or GPU,
+# Histogram bins of four episode values, fixed so that every run, CPU or GPU,
 # counts in the same bins. Episode lengths, in steps, grow in steps of about
 # 1.5x and include every power of two; a time limit on an edge, such as 1,024
 # or 8,192 steps, starts its own bin, so time-outs are not mixed with arrivals.
@@ -30,6 +30,12 @@ LENGTH_EDGES_STEPS = (0,) + tuple(
 DISTANCE_CLOSED_EDGES = tuple(round(-1 + 0.1 * index, 1) for index in range(21))
 # Shares of an episode's steps, in 10% bins.
 SHARE_EDGES = tuple(round(0.1 * index, 1) for index in range(11))
+# The head's distance to its target at the end of an episode, in metres: the
+# first bin, below 1 mm, holds the arrivals when the arrival radius is 1 mm;
+# the others tell how far the episodes that ran out of time ended, finely near
+# the targets (placed 10 to 20 mm away) and coarsely far from them. Farther
+# endings count in the last bin.
+FINAL_DISTANCE_EDGES_M = (0.0, 0.001, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.1, 0.2)
 
 
 @dataclass(frozen=True)
@@ -93,7 +99,9 @@ class EpisodeSummary:
         "Head's distance to the target at the start, (W,)", "m"
     )
     final_distance: torch.Tensor = measure(
-        "Head's distance to the target at the end, (W,)", "m"
+        "Head's distance to the target at the end, (W,)",
+        "m",
+        histogram_edges=FINAL_DISTANCE_EDGES_M,
     )
     distance_closed: torch.Tensor = measure(
         "Share of the start distance closed by the end: 1 - final / start, (W,)",

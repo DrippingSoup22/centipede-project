@@ -66,6 +66,25 @@ def test_only_armed_windows_are_recorded_and_worlds_are_ranked():
     assert not recorder.recording
 
 
+def test_a_recording_carries_on_through_windows_until_complete():
+    recorder, diagnostics = make_recorder()
+    recorder.arm(frames=3)
+    recorder.start_window()
+    take_steps(recorder, diagnostics, [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    assert recorder.recording and not recorder.complete
+
+    recorder.start_window()  # the next window continues the recording
+    take_steps(recorder, diagnostics, [[1.0, 0.0, 0.0]] * 2, start_frame=2)
+    assert recorder.complete  # the fourth step was not kept
+
+    window = recorder.take(levels=1, per_level=1, selection="ranked")
+    assert window.qpos.shape == (3, 1, POSITIONS)
+    np.testing.assert_allclose(window.qpos[2, 0], [20.0, 21.0])  # frame 2, world 0
+    np.testing.assert_allclose(window.score, [3.0])
+    recorder.start_window()  # not armed again: nothing is recorded
+    assert not recorder.recording
+
+
 def test_first_and_all_keep_the_asked_worlds_with_their_levels():
     recorder, diagnostics = make_recorder()
     recorder.arm(frames=4)

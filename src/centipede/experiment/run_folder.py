@@ -8,7 +8,7 @@ A training run's folder, under ``runs_folder``::
     ├─ training_log.jsonl   one line of diagnostics per window
     ├─ report.html          the run's summary, unless the run turned it off
     ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
-    ├─ recordings/          cycle_0016.npz, ...: replays of training windows
+    ├─ recordings/          cycles_0001-0016.npz, ...: replays of episode lengths
     └─ evaluations/         results, report, and replays of each evaluation
 
 Folders are created only when they do not exist yet, and an existing run is

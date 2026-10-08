@@ -1,4 +1,4 @@
-"""Turning a recorded window into a MujocoReplay recording.
+"""Turning what the recorder kept into a MujocoReplay recording.
 
 The interaction loop's recorder gives the chosen worlds' poses; this module
 adds what a replay needs to stand alone: the model as one XML document, the
@@ -7,6 +7,7 @@ file format is MujocoReplay's (its docs/recording-format.md); the run folder
 writes the result.
 """
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -48,45 +49,58 @@ class RecordingScene:
 
 def training_recording(
     scene: RecordingScene,
-    window: RecordedWindow,
-    cycle: int,
+    recorded: RecordedWindow,
+    first_cycle: int,
     total_cycles: int,
     configuration: Configuration,
     folder: RunFolder,
 ) -> Recording:
-    """The window collected in ``cycle``, by the agents after ``cycle - 1`` updates."""
-    frames = window.qpos.shape[0]
+    """The windows collected from ``first_cycle`` on, usually one episode length.
+
+    The agents update after every window, so the frames record which update
+    each step was taken after, and each update is an event.
+    """
+    frames = recorded.qpos.shape[0]
     window_steps = configuration.interaction_loop.rollout_window_steps
-    steps_per_world = (cycle - 1) * window_steps + np.arange(1, frames + 1)
+    last_cycle = first_cycle + math.ceil(frames / window_steps) - 1
+    frame_indices = np.arange(frames)
+    updates_done = first_cycle - 1 + frame_indices // window_steps
+    steps_per_world = (first_cycle - 1) * window_steps + frame_indices + 1
+    update_frames = np.arange(window_steps, frames + 1, window_steps)
     session = _last_session(folder)
     return Recording(
         model_xml=scene.model_xml,
         frame_seconds=scene.frame_seconds,
-        qpos=window.qpos,
-        score=window.score,
+        qpos=recorded.qpos,
+        score=recorded.score,
         score_name=SCORE_NAME,
-        world_ids=window.world_ids,
-        level=window.level,
-        episode_start=window.episode_start,
-        level_count=window.level_count,
-        rank=window.rank,
-        ranked_worlds=window.ranked_worlds,
+        world_ids=recorded.world_ids,
+        level=recorded.level,
+        episode_start=recorded.episode_start,
+        level_count=recorded.level_count,
+        rank=recorded.rank,
+        ranked_worlds=recorded.ranked_worlds,
         marker_names=(TARGET_MARKER,),
-        marker_positions=_target_markers(window.target, scene.marker_radius),
+        marker_positions=_target_markers(recorded.target, scene.marker_radius),
         marker_radius=np.array([scene.marker_radius]),
         frame_info_names=("updates", "steps per world"),
         frame_info=np.stack(
-            (np.full(frames, cycle - 1, dtype=np.float64), steps_per_world), axis=1
+            (updates_done.astype(np.float64), steps_per_world.astype(np.float64)),
+            axis=1,
         ),
-        event_frames=np.array([frames]),
-        event_labels=(f"update {cycle}",),
-        title=f"{folder.path.name} · cycle {cycle} of {total_cycles}",
+        event_frames=update_frames,
+        event_labels=tuple(
+            f"update {first_cycle + index}" for index in range(len(update_frames))
+        ),
+        title=(
+            f"{folder.path.name} · cycles {first_cycle}–{last_cycle} of {total_cycles}"
+        ),
         setup={
             "run": folder.path.name,
-            "cycle": cycle,
-            "updates done": cycle - 1,
+            "cycles": f"{first_cycle}–{last_cycle}",
+            "updates done at the start": first_cycle - 1,
             "worlds": configuration.environment.simulation.world_count,
-            "worlds recorded": int(window.qpos.shape[1]),
+            "worlds recorded": int(recorded.qpos.shape[1]),
             "device": session.get("device"),
             "code version": session.get("git_commit"),
             "configuration": configuration.training_values(),

@@ -78,13 +78,14 @@ ended, and every other value as a mean over those episodes.
 | `foot_contact_share` | `(W, N, 2)` | Share of steps each foot was on the ground |
 | `upside_down_share` | `(W,)` | Share of steps with the head upside down |
 
-Three of these values are also counted in **histograms**, so that the report
+Four of these values are also counted in **histograms**, so that the report
 can show how the episodes spread and not only their mean. With many worlds, a
 mean hides whether every episode went halfway or some arrived while the rest
 flipped over. The bins are fixed, the same for every run:
 
 | Value | Bins |
 | --- | --- |
+| `final_distance` | Edges at 0, 1, 5, 10, 15, 20, 30, 50, 100, and 200 mm: below 1 mm are the arrivals, with the 1 mm arrival radius; the others tell how far the episodes that ran out of time ended |
 | `distance_closed` | From −100% to 100% in steps of 10% |
 | `length_steps` | Edges at 0, 16, 24, 32, 48, 64, … 12,288, 16,384 steps: each about 1.5 times the last, including every power of two, so that a time limit such as 1,024 or 8,192 steps starts its own bin and time-outs are not mixed with arrivals |
 | `upside_down_share` | From 0% to 100% in steps of 10% |
@@ -168,16 +169,21 @@ episode summary.
 
 ## Recordings
 
-A recording keeps the poses of a window for replay, so that what the worlds
-did can be watched afterwards without rendering anything during the run. The
-interaction loop's recorder (`interaction_loop/recording.py`) is armed by the
-experiment before a window it wants recorded. While that window runs, every
-step copies the simulation's `qpos` of every world into a buffer on the device
-and adds the step's rewards to each world's score; the step facts' target and
-the episode summary's `episode_ended` are kept alongside. These are a few small
-tensor operations that never wait for the GPU. After the window, between
-cycles, the experiment takes the chosen worlds and writes the file: the worlds
-are ranked by their summed reward and chosen by level with MujocoReplay's
+A recording keeps the poses of a stretch of steps for replay, so that what the
+worlds did can be watched afterwards without rendering anything during the
+run. In training the stretch is one episode length of windows: all worlds
+start together, so it holds every world's whole episode from its first step
+(or several episodes for the worlds that arrived early). The interaction
+loop's recorder (`interaction_loop/recording.py`) is armed by the experiment
+for that many steps before the first of those windows, and carries on through
+the following windows until it is complete. While it runs, every step copies
+the simulation's `qpos` of every world into a buffer on the device and adds
+the step's rewards to each world's score; the step facts' target and the
+episode summary's `episode_ended` are kept alongside. These are a few small
+tensor operations that never wait for the GPU. When the recording is complete,
+or the session ends, the experiment takes the chosen worlds between cycles and
+writes the file: the worlds are ranked by their summed reward over the whole
+recording and chosen by level with MujocoReplay's
 `selected_ranks`, so that the file holds the best, the middle, and the worst
 (`record_levels` and `record_per_level` in [configuration.md](configuration.md#training-files)).
 Only the chosen worlds are copied to the CPU. Each file also gives every
@@ -192,7 +198,7 @@ the last world's first episode has ended.
 
 The file format belongs to the sibling MujocoReplay project, which replays
 the files (`../MujocoReplay/docs/recording-format.md`); `experiment/recordings.py`
-builds each file from the recorded window, the model, and the run's facts.
+builds each file from the recorded steps, the model, and the run's facts.
 
 ## Files
 
@@ -201,8 +207,8 @@ builds each file from the recorded window, the model, and the run's facts.
 | `src/centipede/diagnostics_category.py` | Shared helper: describing values and summarising them over a window, written once for every category |
 | `diagnostics.py` in a component's folder | That component's category and how it is filled |
 | `src/centipede/environment/simulation/diagnostics.py` | The simulation's category, filled by the backends |
-| `src/centipede/interaction_loop/recording.py` | The recorder: the poses of an armed window, and the choice of worlds |
-| `src/centipede/experiment/recordings.py` | Turning a recorded window into a MujocoReplay recording file |
+| `src/centipede/interaction_loop/recording.py` | The recorder: the poses of the armed steps, across windows, and the choice of worlds |
+| `src/centipede/experiment/recordings.py` | Turning the recorded steps into a MujocoReplay recording file |
 
 A component fills its category with one call, at the point where it already
 has the values. A value whose last dimension has named entries, such as the

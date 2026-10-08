@@ -6,8 +6,8 @@
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
-  the first window of every ``record_every_cycles`` cycles, and the last, are
-  written as replay recordings.
+  every ``record_every_episodes`` episode lengths it writes one episode length
+  of windows as a replay recording.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -22,6 +22,7 @@ This is the only component that deals with files. See docs/architecture.md and
 docs/configuration.md.
 """
 
+import math
 import platform
 import subprocess
 import time
@@ -66,6 +67,10 @@ from centipede.settings_section import SettingsError
 
 # What evaluation can run: the trained agents or a baseline, all with ``act``.
 Actor = Agents | ZeroActionBaseline | RandomActionBaseline
+
+# The most device memory a training recording may hold while it runs: the
+# poses of every world for one episode length.
+RECORDING_MEMORY_LIMIT_BYTES = 1 << 30
 
 # Recorded with every training session, so a result can be traced to its tools.
 RECORDED_PACKAGES = (
@@ -126,6 +131,13 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 checkpoint, configuration.agents, checkpoint_path
             )
         agents.load_state_dict(checkpoint["agents"])
+    # A recording covers whole windows: the episode length, rounded up.
+    recording_windows = math.ceil(
+        configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
+    )
+    recording_frames = recording_windows * loop_settings.rollout_window_steps
+    if run_settings.record_every_episodes:
+        _check_recording_fits(environment, recording_frames)
 
     if continue_from is not None:
         folder = RunFolder.open(continue_from)
@@ -173,25 +185,26 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     categories = _training_categories(loop, agents, environment)
     transitions_per_cycle = environment.world_count * loop_settings.rollout_window_steps
 
-    # Recording: the recorder is armed before each window to record, and its
-    # result is taken after that window, both between cycles.
+    # Recording: one episode length of windows per file. All worlds start
+    # together, so a recording that starts at a multiple of the episode length
+    # holds every world's whole episode, from its first step to its last,
+    # unless the world arrived earlier and restarted. The recorder is armed
+    # before the recording's first window and taken once it is complete, or
+    # when the session ends; both happen between cycles.
     recorder = loop.diagnostics.recorder
-    record_every = run_settings.record_every_cycles
+    record_every = run_settings.record_every_episodes
+    recording_first_cycle = 0
 
-    # The first window of each block of record_every cycles: all worlds start
-    # together, so when the block spans whole episode lengths, it opens an
-    # episode for every world that has not arrived early, rather than showing
-    # the end of episodes that ran out of time. The last window is always kept.
-    def recorded(cycle: int) -> bool:
-        return record_every > 0 and (
-            (cycle - 1) % record_every == 0 or cycle == total_cycles
-        )
+    def recording_starts(cycle: int) -> bool:
+        blocks = recording_windows * record_every
+        return record_every > 0 and (cycle - 1) % blocks == 0
 
     scene = (
         RecordingScene.from_run(configuration, environment) if record_every else None
     )
-    if recorded(completed_cycles + 1):
-        recorder.arm(loop_settings.rollout_window_steps)
+    if recording_starts(completed_cycles + 1):
+        recorder.arm(recording_frames)
+        recording_first_cycle = completed_cycles + 1
 
     # Wall-clock time per cycle in this session, everything included, for the
     # time remaining and the time limit.
@@ -228,20 +241,28 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             and cycle < total_cycles
             and time.monotonic() - session_start + seconds_per_cycle > time_limit_s
         )
-        if recorded(cycle):
+        if recorder.recording and (
+            recorder.complete or cycle == total_cycles or out_of_time
+        ):
             window = recorder.take(
                 run_settings.record_levels,
                 run_settings.record_per_level,
                 run_settings.record_selection,
             )
             folder.write_recording(
-                f"cycle_{cycle:04d}",
+                f"cycles_{recording_first_cycle:04d}-{cycle:04d}",
                 training_recording(
-                    scene, window, cycle, total_cycles, configuration, folder
+                    scene,
+                    window,
+                    recording_first_cycle,
+                    total_cycles,
+                    configuration,
+                    folder,
                 ),
             )
-        if cycle < total_cycles and recorded(cycle + 1):
-            recorder.arm(loop_settings.rollout_window_steps)
+        if cycle < total_cycles and recording_starts(cycle + 1):
+            recorder.arm(recording_frames)
+            recording_first_cycle = cycle + 1
         if (
             cycle % run_settings.checkpoint_every_cycles == 0
             or cycle == total_cycles
@@ -266,6 +287,20 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         f" overall: {folder.path}"
     )
     return folder.path
+
+
+def _check_recording_fits(environment: Environment, frames: int) -> None:
+    """Fail clearly where recording one episode length would take too much
+    device memory: the poses, targets, and episode starts of every world."""
+    world_count, position_count = environment.diagnostics.simulation.qpos.shape
+    needed = frames * world_count * (4 * (position_count + 2) + 1)
+    if needed > RECORDING_MEMORY_LIMIT_BYTES:
+        raise SettingsError(
+            f"Recording one episode length ({frames:,} steps of {world_count:,}"
+            f" worlds) needs {needed / 2**30:.1f} GiB of device memory, more than"
+            f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: shorten the episodes,"
+            " use fewer worlds, or set [run] record_every_episodes = 0"
+        )
 
 
 def _check_agents_can_start_from(

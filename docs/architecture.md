@@ -95,7 +95,7 @@ file, or a new function next to `train` and `evaluate`.
 | `configuration.py` | Reading the three kinds of file, the checks across sections, and saving the complete configuration |
 | `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, recordings, and evaluation results |
 | `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
-| `recordings.py` | Turning a recorded window into a replay recording for the sibling MujocoReplay project |
+| `recordings.py` | Turning the recorded steps, one episode length in training, into a replay recording for the sibling MujocoReplay project |
 | `progress.py` | The terminal's view of training: one line per window, with a bar of `#` and `.` that fills as the window is collected (told each step by the loop's diagnostics), then the window's results |
 
 The command `python -m centipede CONFIG.toml` lives in `src/centipede/__main__.py`.

@@ -73,11 +73,18 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert logged_cycles(folder) == [1, 2, 3]
     assert "/*REPORT_DATA*/" not in (folder / "report.html").read_text(encoding="utf-8")
 
-    # The first window of every two cycles, and the last, are recorded: both
-    # worlds, 2 frames each.
+    # Every episode length (3 steps, so two windows of 2) is one recording of
+    # both worlds; the last is cut short where the run ends.
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycle_0001.npz", "cycle_0003.npz"]
-    recording = read_recording(folder / "recordings" / "cycle_0003.npz")
+    assert recordings == ["cycles_0001-0002.npz", "cycles_0003-0003.npz"]
+    whole = read_recording(folder / "recordings" / "cycles_0001-0002.npz")
+    assert whole.qpos.shape == (4, 2, 69)
+    assert whole.frame_info[:, 0].tolist() == [0, 0, 1, 1]  # updates done
+    assert (whole.event_frames.tolist(), whole.event_labels) == (
+        [2, 4],
+        ("update 1", "update 2"),
+    )
+    recording = read_recording(folder / "recordings" / "cycles_0003-0003.npz")
     assert recording.qpos.shape == (2, 2, 69)
     assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
     assert (recording.rank.tolist(), recording.ranked_worlds) == ([1, 2], 2)
@@ -89,7 +96,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
         [2],
         ("update 3",),
     )
-    assert recording.setup["configuration"]["run"]["record_every_cycles"] == 2
+    assert recording.setup["configuration"]["run"]["record_every_episodes"] == 1
     assert "<include" not in recording.model_xml
 
     continuing = (
@@ -153,7 +160,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         .replace(
             'runs_folder = "RUNS"',
             f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
-            "record_every_cycles = 0",
+            "record_every_episodes = 0",
         )
         .replace(
             "hidden_layers = [8]",

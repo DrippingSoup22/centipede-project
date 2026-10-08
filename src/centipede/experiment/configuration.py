@@ -47,7 +47,8 @@ class RunSettings:
 
     ``start_from`` is a run folder (its latest checkpoint) or a checkpoint
     file whose agents the new run begins with. The ``record_*`` settings say
-    which windows are recorded for replay and which worlds are kept.
+    which episode lengths are recorded for replay, each as one file, and which
+    worlds are kept.
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
     with a checkpoint, before a cycle that would end after it. See
     docs/configuration.md.
@@ -59,7 +60,7 @@ class RunSettings:
     report: bool
     runs_folder: Path
     start_from: Path | None
-    record_every_cycles: int
+    record_every_episodes: int
     record_levels: int
     record_per_level: int
     record_selection: str
@@ -80,8 +81,8 @@ class RunSettings:
             report=section.boolean("report", default=True),
             runs_folder=section.path("runs_folder", default=Path("runs")),
             start_from=section.path("start_from", default=None),
-            record_every_cycles=section.integer(
-                "record_every_cycles", default=checkpoint_every_cycles, minimum=0
+            record_every_episodes=section.integer(
+                "record_every_episodes", default=1, minimum=0
             ),
             record_levels=section.positive_integer("record_levels", default=4),
             record_per_level=section.positive_integer("record_per_level", default=8),
@@ -230,7 +231,7 @@ def _continuing_configuration(
     _allow_only_sections(
         file_values, ("run", "interaction_loop"), "A file with continue_from"
     )
-    saved = read_toml(run_folder_of(continue_from) / SAVED_CONFIGURATION_NAME)
+    saved = _saved_configuration(continue_from)
     changes = {"interaction_loop": file_values.get("interaction_loop", {})}
     if time_limit_hours is not None:
         changes["run"] = {"time_limit_hours": time_limit_hours}
@@ -265,7 +266,7 @@ def _evaluation_configuration(
         source,
         _dotted(environment_changes),
     )
-    saved = read_toml(run_folder_of(source) / SAVED_CONFIGURATION_NAME)
+    saved = _saved_configuration(source)
     values = _merged(saved, {"environment": environment_changes})
     simulation = values["environment"]["simulation"]
     simulation["world_count"] = evaluation.episodes_per_seed
@@ -298,6 +299,21 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
 
 
 # -- Helpers --------------------------------------------------------------------
+
+
+# Settings that older runs saved and the current code no longer has, by
+# section. record_every_cycles recorded single windows; record_every_episodes
+# replaced it, with its own default.
+RETIRED_SETTINGS = {"run": ("record_every_cycles",)}
+
+
+def _saved_configuration(source: Path) -> dict:
+    """A saved run's configuration, without the settings retired since."""
+    values = read_toml(run_folder_of(source) / SAVED_CONFIGURATION_NAME)
+    for section, keys in RETIRED_SETTINGS.items():
+        for key in keys:
+            values.get(section, {}).pop(key, None)
+    return values
 
 
 def _allow_only_sections(values: dict, allowed: tuple[str, ...], kind: str) -> None:
