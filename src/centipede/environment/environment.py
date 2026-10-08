@@ -108,7 +108,9 @@ class Environment:
         self._place_targets(every_world)
         self.episode_steps.zero_()
         state = self.simulation.physical_state
-        self.diagnostics.start_episodes(every_world, state, self.target_position)
+        self.diagnostics.start_episodes(
+            every_world, state, self.target_position, self.range_radius
+        )
         return self.observation_builder.build(state, self.target_position)
 
     def step(
@@ -173,7 +175,9 @@ class Environment:
             self.simulation.reset(ended)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
-            self.diagnostics.start_episodes(ended, state, self.target_position)
+            self.diagnostics.start_episodes(
+                ended, state, self.target_position, self.range_radius
+            )
             observations = self.observation_builder.build(state, self.target_position)
 
         return (

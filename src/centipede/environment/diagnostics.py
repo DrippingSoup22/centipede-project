@@ -85,6 +85,12 @@ class StepFacts:
         "m",
         summary="recorded",
     )
+    range_radius: torch.Tensor = measure(
+        "Radius of each world's range circle around its target, infinite without"
+        " one, (W,); kept for recordings",
+        "m",
+        summary="recorded",
+    )
 
 
 @dataclass(frozen=True)
@@ -187,6 +193,7 @@ class EnvironmentDiagnostics:
             head_distance=zeros(),
             heading_error=zeros(),
             target_position=zeros(2),
+            range_radius=zeros(),
         )
         self.episode = EpisodeSummary(
             episode_ended=zeros(dtype=torch.bool),
@@ -224,10 +231,12 @@ class EnvironmentDiagnostics:
         world_mask: torch.Tensor,
         physical_state: PhysicalState,
         target_position: torch.Tensor,
+        range_radius: torch.Tensor,
     ) -> None:
         """Clear the totals of the masked worlds and note their start distance.
 
-        Called after those worlds were reset and given new targets.
+        Called after those worlds were reset and given new targets, with every
+        world's range circle radius.
         """
         for total in (
             self._steps,
@@ -244,6 +253,9 @@ class EnvironmentDiagnostics:
         # world's target matches its pose.
         self.step.target_position.copy_(
             torch.where(world_mask[:, None], target_position, self.step.target_position)
+        )
+        self.step.range_radius.copy_(
+            torch.where(world_mask, range_radius, self.step.range_radius)
         )
 
     def record_step(

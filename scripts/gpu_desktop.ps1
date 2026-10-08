@@ -5,6 +5,7 @@
 $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $Project = "$HOME\Projects\Centipede"
+$Replay = "$HOME\Projects\MujocoReplay"
 $Python = "$HOME\.venvs\Centipede\Scripts\python.exe"
 $Launched = "$Project\runs\launched"
 # The last line of every run's output, written after its process ends,
@@ -12,12 +13,17 @@ $Launched = "$Project\runs\launched"
 $EndMarker = 'run ended with exit code'
 Set-Location $Project
 
-# Pulls the pushed code, but never new commits while a run or queue runs: each
+# Pulls the pushed code of this project and of MujocoReplay beside it, which
+# writes the recordings, but never new commits while a run or queue runs: each
 # run of a queue starts with the code on disk, so its next runs would change.
 function Update-Code {
-    git fetch -q
-    if ($LASTEXITCODE) { Write-Output 'git fetch failed on the desktop'; exit 1 }
-    $behind = [int](git rev-list --count 'HEAD..@{upstream}')
+    $repositories = @($Project, $Replay)
+    $behind = 0
+    foreach ($repository in $repositories) {
+        git -C $repository fetch -q
+        if ($LASTEXITCODE) { Write-Output "git fetch failed in $repository"; exit 1 }
+        $behind += [int](git -C $repository rev-list --count 'HEAD..@{upstream}')
+    }
     $running = @(Get-Runs)
     if ($behind -and $running.Count) {
         $names = ($running | ForEach-Object { Get-RunName $_ } | Sort-Object -Unique) -join ', '
@@ -25,9 +31,12 @@ function Update-Code {
         Write-Output 'starts next would use them. Try again when it has ended.'
         exit 1
     }
-    git pull --ff-only -q
-    if ($LASTEXITCODE) { Write-Output 'git pull failed on the desktop'; exit 1 }
-    Write-Output ('code ' + (git log --oneline -1))
+    foreach ($repository in $repositories) {
+        git -C $repository pull --ff-only -q
+        if ($LASTEXITCODE) { Write-Output "git pull failed in $repository"; exit 1 }
+    }
+    Write-Output ('code ' + (git log --oneline -1) + ' + MujocoReplay ' +
+        (git -C $Replay log --oneline -1 --format=%h))
 }
 
 function Invoke-Tests {

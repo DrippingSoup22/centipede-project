@@ -16,6 +16,7 @@ from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.diagnostics import SimulationDiagnostics
 
 TARGET = torch.tensor([[0.020, 0.0], [0.0, 0.010]])  # ahead of world 0, left of 1
+RANGE = torch.tensor([0.0375, 0.0275])  # 2.5 x each head's start distance
 NO = torch.tensor([False, False])
 
 
@@ -90,7 +91,7 @@ def test_step_facts_describe_the_last_step():
 def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     diagnostics = make_diagnostics()
     state = upright_state()
-    diagnostics.start_episodes(torch.tensor([True, True]), state, TARGET)
+    diagnostics.start_episodes(torch.tensor([True, True]), state, TARGET, RANGE)
     state.body_ground_contact[:, 0] = True
     record(diagnostics, state, state, step_rewards(-1.0))
     state.body_ground_contact[:] = False
@@ -123,7 +124,7 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     assert episode.upside_down_share[1] == 0.0
     assert episode.length_steps[0] == 0  # world 0's episode is still running
 
-    diagnostics.start_episodes(torch.tensor([False, True]), moved, TARGET)
+    diagnostics.start_episodes(torch.tensor([False, True]), moved, TARGET, RANGE)
     record(
         diagnostics,
         moved,
@@ -153,9 +154,13 @@ def test_the_target_follows_the_worlds_just_reset():
     assert torch.equal(diagnostics.step.target_position, TARGET)
 
     new_targets = torch.tensor([[0.050, 0.0], [0.060, 0.0]])
-    diagnostics.start_episodes(torch.tensor([True, False]), state, new_targets)
+    new_ranges = torch.tensor([0.1125, 0.1375])
+    diagnostics.start_episodes(
+        torch.tensor([True, False]), state, new_targets, new_ranges
+    )
 
     assert torch.equal(
         diagnostics.step.target_position, torch.tensor([[0.050, 0.0], [0.0, 0.010]])
     )
+    assert diagnostics.step.range_radius.tolist() == pytest.approx([0.1125, 0.0])
     assert diagnostics.simulation.qpos.shape == (2, 4)

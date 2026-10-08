@@ -142,7 +142,8 @@ python scripts/gpu_desktop.py watch
 python scripts/gpu_desktop.py status
 ```
 
-`run` makes the desktop pull the pushed code, sends it the configuration file
+`run` makes the desktop pull the pushed code (this project's and
+MujocoReplay's, never while a run or queue is running), sends it the configuration file
 as it is on the laptop, starts the run there, independently of the SSH
 connection, and shows its output as it is written: one line per window, with
 a bar of `#` and `.` that fills as the window is collected. The folder's

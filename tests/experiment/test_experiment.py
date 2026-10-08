@@ -8,6 +8,7 @@ learning rate, and evaluating without changing anything.
 
 import json
 
+import numpy as np
 import pytest
 import torch
 from mujoco_replay.recording import read_recording
@@ -89,7 +90,13 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
     assert (recording.rank.tolist(), recording.ranked_worlds) == ([1, 2], 2)
     assert recording.level_count == 4
-    assert recording.marker_positions.shape == (2, 2, 1, 3)
+    # The target, and the range circle as a ring of 2.5 x the start distance.
+    assert recording.marker_names == ("target", "range")
+    assert recording.marker_shapes == ("sphere", "ring")
+    assert recording.marker_positions.shape == (2, 2, 2, 3)
+    ring = recording.marker_radius[..., 1]
+    assert recording.marker_radius.shape == (2, 2, 2)
+    assert np.all((ring >= 2.5 * 0.030 - 1e-6) & (ring <= 2.5 * 0.060 + 1e-6))
     assert recording.frame_info[:, 0].tolist() == [2, 2]  # updates done
     assert recording.frame_info[:, 1].tolist() == [5, 6]  # steps per world
     assert (recording.event_frames.tolist(), recording.event_labels) == (

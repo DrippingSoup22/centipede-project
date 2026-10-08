@@ -31,7 +31,9 @@ class RecordedWindow:
 
     ``K`` worlds in rank order (best first) over ``T`` frames: ``qpos (T, K,
     nq)``, ``score (K,)``, ``world_ids (K,)``, ``level (K,)``, ``episode_start
-    (T, K)``, and ``target (T, K, 2)``. ``rank (K,)`` is each world's rank
+    (T, K)``, ``target (T, K, 2)``, and ``range_radius (T, K)``, the radius of
+    each world's range circle around its target (infinite without one).
+    ``rank (K,)`` is each world's rank
     among all ``ranked_worlds`` worlds, 1 for the best, and ``level_count`` is
     the number of levels the worlds were split into.
     """
@@ -42,6 +44,7 @@ class RecordedWindow:
     level: np.ndarray
     episode_start: np.ndarray
     target: np.ndarray
+    range_radius: np.ndarray
     rank: np.ndarray
     ranked_worlds: int
     level_count: int
@@ -65,6 +68,7 @@ class WindowRecorder:
         self._qpos = torch.empty(0)
         self._episode_start = torch.empty(0)
         self._target = torch.empty(0)
+        self._range_radius = torch.empty(0)
         self._score = torch.empty(0)
 
     @property
@@ -109,6 +113,7 @@ class WindowRecorder:
         self._qpos[frame].copy_(self._simulation.qpos)
         self._episode_start[frame].copy_(self._episode.episode_ended)
         self._target[frame].copy_(self._step_facts.target_position)
+        self._range_radius[frame].copy_(self._step_facts.range_radius)
         rewards = self._step_facts.reward_parts.sum(dim=(1, 2))
         if counted_worlds is not None:
             rewards = rewards * counted_worlds
@@ -149,6 +154,7 @@ class WindowRecorder:
             level=level,
             episode_start=self._episode_start[:frames, chosen].cpu().numpy(),
             target=self._target[:frames, chosen].cpu().numpy(),
+            range_radius=self._range_radius[:frames, chosen].cpu().numpy(),
             rank=np.asarray(ranks, dtype=np.int64) + 1,
             ranked_worlds=self._world_count,
             level_count=levels,
@@ -163,5 +169,6 @@ class WindowRecorder:
             (frames, world_count), dtype=torch.bool, device=device
         )
         self._target = torch.zeros((frames, world_count, 2), device=device)
+        self._range_radius = torch.zeros((frames, world_count), device=device)
         self._score = torch.zeros(world_count, device=device)
         self._capacity = frames

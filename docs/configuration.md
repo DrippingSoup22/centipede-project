@@ -319,7 +319,10 @@ marks each update as an event and each frame with the updates done before
 it. The last file of a session can be shorter, where the session ended.
 An evaluation's recordings hold every world of each
 actor and seed, from the first episode's first step until the last world's
-first episode ended. Each file carries the model, the targets as markers, and
+first episode ended. Each file carries the model, the targets as markers (with
+the range circle as a ring around each, whose radius changes when a world starts
+a new episode: MujocoReplay's format 2, which needs MujocoReplay `71ffe42` or
+later to open), and
 the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
 training run records every episode length and every world. A file takes about

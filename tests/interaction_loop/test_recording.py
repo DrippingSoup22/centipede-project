@@ -32,6 +32,7 @@ def take_steps(recorder, diagnostics, rewards_per_world, start_frame=0, counted=
             torch.tensor(reward)[:, None, None].expand(WORLDS, SEGMENTS, 1) / SEGMENTS
         )
         diagnostics.step.target_position.fill_(float(frame))
+        diagnostics.step.range_radius.fill_(0.1 + frame)
         diagnostics.episode.episode_ended.copy_(
             torch.tensor([False, frame == 1, False])
         )
@@ -63,6 +64,7 @@ def test_only_armed_windows_are_recorded_and_worlds_are_ranked():
     np.testing.assert_allclose(window.qpos[1, 0], [12.0, 13.0])  # frame 1, world 1
     assert window.episode_start.tolist() == [[False, False], [True, False]]
     assert window.target.shape == (2, 2, 2) and window.target[1].max() == 1.0
+    np.testing.assert_allclose(window.range_radius, [[0.1, 0.1], [1.1, 1.1]])
     assert not recorder.recording
 
 

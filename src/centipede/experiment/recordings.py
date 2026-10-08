@@ -2,7 +2,8 @@
 
 The interaction loop's recorder gives the chosen worlds' poses; this module
 adds what a replay needs to stand alone: the model as one XML document, the
-frame period, the target as a marker, the run's facts, and the events. The
+frame period, the target as a marker (and the range circle as a ring around
+it, when the run has one), the run's facts, and the events. The
 file format is MujocoReplay's (its docs/recording-format.md); the run folder
 writes the result.
 """
@@ -24,17 +25,23 @@ from centipede.interaction_loop.recording import RecordedWindow
 SCORE_NAME = "summed reward"
 FIRST_EPISODE_SCORE_NAME = "first episode's summed reward"
 TARGET_MARKER = "target"
+RANGE_MARKER = "range"
 # The target's radius in replays when arrival is under the head.
 TARGET_MARKER_RADIUS_M = 0.001
 
 
 @dataclass(frozen=True)
 class RecordingScene:
-    """What every recording of a run shares: the model, timing, and the target."""
+    """What every recording of a run shares: the model, timing, and the markers.
+
+    ``range_circle`` says whether the run's episodes have a range circle, drawn
+    as a ring around each world's target.
+    """
 
     model_xml: str
     frame_seconds: float
     marker_radius: float
+    range_circle: bool
 
     @classmethod
     def from_run(
@@ -48,6 +55,7 @@ class RecordingScene:
             frame_seconds=environment.simulation.step_duration_s,
             # With arrival under the head, the target is only a point to see.
             marker_radius=target.arrival_radius_m or TARGET_MARKER_RADIUS_M,
+            range_circle=bool(target.range_circle_ratio),
         )
 
 
@@ -84,9 +92,7 @@ def training_recording(
         level_count=recorded.level_count,
         rank=recorded.rank,
         ranked_worlds=recorded.ranked_worlds,
-        marker_names=(TARGET_MARKER,),
-        marker_positions=_target_markers(recorded.target, scene.marker_radius),
-        marker_radius=np.array([scene.marker_radius]),
+        **_markers(scene, recorded),
         frame_info_names=("updates", "steps per world"),
         frame_info=np.stack(
             (updates_done.astype(np.float64), steps_per_world.astype(np.float64)),
@@ -136,9 +142,7 @@ def evaluation_recording(
         score_name=FIRST_EPISODE_SCORE_NAME,
         world_ids=window.world_ids,
         episode_start=window.episode_start,
-        marker_names=(TARGET_MARKER,),
-        marker_positions=_target_markers(window.target, scene.marker_radius),
-        marker_radius=np.array([scene.marker_radius]),
+        **_markers(scene, window),
         title=(
             f"{folder.path.name} · {checkpoint_path.stem} · {actor_name} · seed {seed}"
         ),
@@ -154,10 +158,32 @@ def evaluation_recording(
     )
 
 
-def _target_markers(target: np.ndarray, radius: float) -> np.ndarray:
-    """The ``(T, K, 2)`` targets as ``(T, K, 1, 3)`` points resting on the ground."""
+def _markers(scene: RecordingScene, recorded: RecordedWindow) -> dict[str, Any]:
+    """The marker keys of a recording: the target, and the range ring if any.
+
+    The target is a sphere resting on the ground. The ring lies flat around the
+    same point, with each world's radius at each frame, which changes when a
+    world starts a new episode; such a file is MujocoReplay's format 2.
+    """
+    radius = scene.marker_radius
+    target = recorded.target
     height = np.full(target.shape[:2] + (1,), radius, dtype=np.float32)
-    return np.concatenate((target, height), axis=-1)[:, :, None, :]
+    on_ground = np.concatenate((target, height), axis=-1)[:, :, None, :]
+    if not scene.range_circle:
+        return {
+            "marker_names": (TARGET_MARKER,),
+            "marker_positions": on_ground,
+            "marker_radius": np.array([radius]),
+        }
+    radii = np.stack(
+        (np.full(recorded.range_radius.shape, radius), recorded.range_radius), axis=-1
+    ).astype(np.float32)
+    return {
+        "marker_names": (TARGET_MARKER, RANGE_MARKER),
+        "marker_positions": np.repeat(on_ground, 2, axis=2),
+        "marker_radius": radii,
+        "marker_shapes": ("sphere", "ring"),
+    }
 
 
 def _last_session(folder: RunFolder) -> dict[str, Any]:
