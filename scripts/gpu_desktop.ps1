@@ -67,11 +67,23 @@ function Get-RunState($console) {
     'ended without its last line'
 }
 
-# The name of the latest launched run whose name contains $pattern.
+# The latest launched run whose name contains $pattern, after 'queue' or
+# 'run'. A queue keeps its folder in runs\launched, and its runs are named
+# after it: where a queue matches, its runs are left out, since the queue is
+# the one meant.
 function Find-Run($pattern) {
-    $consoles = @(Get-ChildItem "$Launched\*$pattern*.txt" -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTime)
-    if ($consoles.Count) { Write-Output $consoles[-1].BaseName }
+    $consoles = @(Get-ChildItem "$Launched\*$pattern*.txt" -ErrorAction SilentlyContinue)
+    $queues = @($consoles | Where-Object { Test-Path "$Launched\$($_.BaseName)" -PathType Container } |
+        ForEach-Object { $_.BaseName })
+    $consoles = @($consoles | Where-Object {
+        $name = $_.BaseName
+        -not ($queues | Where-Object { $name.StartsWith("${_}_") })
+    } | Sort-Object LastWriteTime)
+    if ($consoles.Count) {
+        $name = $consoles[-1].BaseName
+        $kind = if ($queues -contains $name) { 'queue' } else { 'run' }
+        Write-Output "$kind $name"
+    }
 }
 
 # The run folder a launched run wrote into, from the paths it printed:
