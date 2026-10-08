@@ -43,7 +43,7 @@ Refreshed on every step, for every world.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |
-| `reward_parts` | `(W, N, 4)` | Arrival, efficiency, body-contact cost, leg-contact cost; they add up to the reward | Mean |
+| `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact (runs before 2026-10-08: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
 | `contact_flags` | `(W, N, 4)` | Left foot, right foot, and body on the ground; legs touching | Share of steps |
 | `segment_progress` | `(W, N)` | Metres gained toward the segment's goal: the target for the head, the spot where the segment ahead was for the others | Mean |
 | `segment_moved` | `(W, N)` | Metres the segment's centre moved, measured flat on the ground | Mean |

@@ -164,7 +164,7 @@ These are the keys of the agents sections of the configuration file (see
 | `normaliser_epsilon` | 1e-8 | Keeps observation normalisation well defined |
 | `observation_clip` | 10.0 | Normalised observations are clipped to ± this value |
 | **`[agents.ppo]`** | | |
-| `discount` | 0.999 | Discount factor γ |
+| `discount` | 2^(−1/episode length) | Discount factor γ; the configuration fills it in from `max_episode_steps` (rule R0 of the reward, see [environment.md](environment.md#the-rules)), 0.9973 for 256-step episodes. Built on their own, the agents' settings default to 0.999 |
 | `gae_lambda` | 0.95 | GAE λ |
 | `clip_ratio` | 0.2 | PPO clip ratio |
 | `update_epochs` | 4 | Passes over the stored data per update |

@@ -39,6 +39,7 @@ leg_contact_cost = 0.0025
 device = "cuda"
 
 [agents.ppo]
+discount = 0.999                     # the default when this file was written
 minibatch_size = 512
 
 [interaction_loop]

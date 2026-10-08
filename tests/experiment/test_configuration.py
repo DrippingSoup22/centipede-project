@@ -52,6 +52,9 @@ def test_the_saved_configuration_reads_back_identically(saved_run):
     assert read_configuration(run_folder / "configuration.toml") == configuration
     assert configuration.interaction_loop.update_cycles == 6
     assert configuration.run.seed == 0  # a default, now written out
+    # Unset, the discount follows the episode length (rule R0): an arrival on
+    # the last of 8,192 steps is worth half.
+    assert configuration.agents.ppo.discount == 2 ** (-1 / 8192)
 
 
 def test_files_that_name_a_run_start_from_its_saved_configuration(saved_run, tmp_path):

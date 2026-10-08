@@ -49,6 +49,7 @@ from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
     duration,
+    reward_weights,
     training_settings,
 )
 from centipede.experiment.recordings import (
@@ -168,6 +169,17 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     print(
         training_settings(
             configuration.training_values(), set(dotted_keys(configuration_path))
+        ),
+        end="\n\n",
+    )
+    weights = configuration.environment.rewards.weights(
+        configuration.environment.max_episode_steps
+    )
+    print(
+        reward_weights(
+            weights.per_step,
+            weights.episode_shares,
+            configuration.agents.ppo.discount,
         ),
         end="\n\n",
     )

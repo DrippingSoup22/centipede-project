@@ -3,6 +3,7 @@
 from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
+    reward_weights,
     training_settings,
 )
 
@@ -82,3 +83,19 @@ def test_the_settings_header_names_the_six_training_settings_and_what_they_make(
     assert "131,072 samples" in lines[11]
     assert "  [run]  seed* = 1" in lines
     assert "  [environment]  max_episode_steps = 1024" in lines
+
+
+def test_the_reward_weights_follow_the_settings_header():
+    text = reward_weights(
+        {"arrival": 1.0, "progress": 0.2314, "step_cost": 0.000904},
+        {"step_cost": 0.2314, "body_contact": 0.3471},
+        discount=0.99729,
+    )
+
+    lines = text.splitlines()
+    assert lines[1].split() == [
+        *("per", "step:", "arrival", "1", "progress", "0.231"),
+        *("step_cost", "0.000904"),
+    ]
+    assert lines[4].endswith("step_cost 0.231  body_contact 0.347  (budget 0.579)")
+    assert lines[5] == "  discount 0.99729"

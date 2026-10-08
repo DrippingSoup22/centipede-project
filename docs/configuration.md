@@ -24,7 +24,7 @@ hidden afterwards.
 | `[environment]` | Environment | Episode length and observation radius |
 | `[environment.simulation]` | Physics simulation | Model file, backend, number of worlds, GPU memory |
 | `[environment.target]` | Environment | Where targets are placed and when the head has arrived |
-| `[environment.rewards]` | Environment | Reward and cost values |
+| `[environment.rewards]` | Environment | The reward's proportions, from which every weight follows |
 | `[agents]` | Agents | Device, networks, learning rate, normalisation |
 | `[agents.ppo]` | Agents | PPO settings |
 | `[interaction_loop]` | Interaction loop | Steps per window and number of update cycles |
@@ -37,8 +37,14 @@ and the [architecture](architecture.md) for the interaction loop. The `[run]` an
 
 ## Checks across sections
 
-Each component checks its own section. The experiment adds the checks that
-need two sections at once:
+Each component checks its own section. The experiment adds the checks and the
+defaults that need two sections at once:
+
+- A file that sets no `[agents.ppo] discount` gets `2^(−1/max_episode_steps)`,
+  rule R0 of the reward ([environment.md](environment.md#the-rules)): an
+  arrival on an episode's last step is then worth half of one on its first,
+  which the reward's cost budget relies on. The value is saved with the run, so
+  continuing or evaluating it keeps it.
 
 - The physics and the agents run on the same kind of device: `backend = "cpu"`
   requires `[agents] device = "cpu"`, and `backend = "gpu"` requires
@@ -131,12 +137,14 @@ distance_range_m = [0.010, 0.020]
 bearing_range_deg = [-15, 15]
 arrival_radius_m = 0.001
 
-[environment.rewards]
-arrival_reward = 1.0
-efficiency_cost = 0.003
-body_contact_cost = 0.010
-leg_contact_cost = 0.005
-distance_ratio_epsilon_m = 1e-6
+[environment.rewards]                 # proportions; see docs/environment.md
+arrival_reward = 1.0                  # the unit of every other weight
+step_cost_parts = 2                   # the cost budget is split 3 : 2 : 1
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+# cost_budget_parts = 6               # default: the costs' parts together
+head_progress_ratio = 1               # a halving = one episode of step cost
+follower_progress_ratio = 0.1         # followers' progress, share of the head's
 
 [agents]
 device = "cpu"                        # "cpu" or "cuda", matching the backend
@@ -152,7 +160,7 @@ normaliser_epsilon = 1e-8
 observation_clip = 10.0
 
 [agents.ppo]
-discount = 0.999
+# discount = 0.9973                   # default: 2^(-1/max_episode_steps), rule R0
 gae_lambda = 0.95
 clip_ratio = 0.2
 update_epochs = 4

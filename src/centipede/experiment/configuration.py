@@ -278,11 +278,16 @@ def _evaluation_configuration(
 def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configuration:
     """Hand each section to its owner, then make the checks across sections."""
     file_section = SettingsSection(values, "file")
+    environment = EnvironmentSettings.from_section(file_section.table("environment"))
     configuration = Configuration(
         mode=mode,
         run=RunSettings.from_section(file_section.table("run")),
-        environment=EnvironmentSettings.from_section(file_section.table("environment")),
-        agents=AgentSettings.from_section(file_section.table("agents")),
+        environment=environment,
+        agents=AgentSettings.from_section(
+            _with_episode_discount(
+                file_section.table("agents"), environment.max_episode_steps
+            )
+        ),
         interaction_loop=InteractionLoopSettings.from_section(
             file_section.table("interaction_loop")
         ),
@@ -299,6 +304,19 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
 
 
 # -- Helpers --------------------------------------------------------------------
+
+
+def _with_episode_discount(agents_values: dict, max_episode_steps: int) -> dict:
+    """The agents' values, with the discount ``2^(−1/T)`` when they set none.
+
+    Rule R0 of docs/environment.md: an arrival on an episode's last step is
+    worth half the arrival reward from its first, which the reward's cost
+    budget relies on. The value is then saved with the run like any other.
+    """
+    ppo = agents_values.get("ppo", {})
+    if not isinstance(ppo, dict) or "discount" in ppo:
+        return agents_values
+    return _merged(agents_values, {"ppo": {"discount": 2 ** (-1 / max_episode_steps)}})
 
 
 # Settings that older runs saved and the current code no longer has, by

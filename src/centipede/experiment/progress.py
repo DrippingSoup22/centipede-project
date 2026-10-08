@@ -112,6 +112,34 @@ def training_settings(values: dict[str, Any], written_keys: set[str]) -> str:
     return "\n".join(lines)
 
 
+def reward_weights(
+    per_step: dict[str, float], episode_shares: dict[str, float], discount: float
+) -> str:
+    """The weights the reward's rules give each term, printed under the settings.
+
+    ``per_step`` and ``episode_shares`` are those of ``RewardWeights``; the
+    agents' ``discount`` is shown with them, since the rules rely on it.
+    """
+    lines = [
+        "Reward weights (from [environment.rewards]; rules in docs/environment.md)",
+        "  per step:  "
+        + "  ".join(f"{name} {weight:.3g}" for name, weight in per_step.items()),
+    ]
+    if "progress" in per_step:
+        lines += [
+            "    progress is per halving of the head's distance to its target;",
+            "    a follower's halvings count at follower_progress_ratio",
+        ]
+    if episode_shares:
+        lines.append(
+            "  a whole episode of each cost, in arrival rewards:  "
+            + "  ".join(f"{name} {share:.3g}" for name, share in episode_shares.items())
+            + f"  (budget {sum(episode_shares.values()):.3g})"
+        )
+    lines.append(f"  discount {discount:.6g}")
+    return "\n".join(lines)
+
+
 def _settings_tables(values: dict[str, Any], prefix: str = ""):
     """Each table's own settings, as (dotted table name, settings), in file order."""
     own = {key: value for key, value in values.items() if not isinstance(value, dict)}

@@ -50,7 +50,11 @@ class Environment:
             self.device,
         )
         self.observation_size = self.observation_builder.observation_size
-        self.reward_function = RewardFunction(settings.rewards)
+        self.reward_function = RewardFunction(
+            settings.rewards,
+            settings.max_episode_steps,
+            settings.target.arrival_radius_m,
+        )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
             self.segment_count,

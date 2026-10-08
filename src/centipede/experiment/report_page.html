@@ -205,7 +205,7 @@ const METRICS = {
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
-    about: "The average reward per step, split into its four terms and averaged over the segments. The terms are stacked: arrival, the only positive term, above zero; the three costs (efficiency, body contact, leg contact) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing." },
+    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the segments come closer to their goals) above it, the costs (step cost, body contact, leg contact, and progress while they move away) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. Runs from before 8 October 2026 had one efficiency term in place of progress and the step cost." },
 
   // -- How the episodes spread -------------------------------------------------
   "episode_distributions.distance_closed": { label: "Distance closed, every episode", source: "episodes.distance_closed", better: "higher",
@@ -295,7 +295,13 @@ const SETTING_CHIPS = [
       `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, arrival within ${number(t.arrival_radius_m * 1000)} mm` },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   { keys: ["environment.rewards"],
-    text: ({ environment: { rewards: r } }) => `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}` },
+    text: ({ environment: { rewards: r } }) => {
+      // Runs from before 8 October 2026 set per-step weights instead of proportions.
+      if (r.step_cost_parts === undefined) return `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}`;
+      const used = r.body_contact_cost_parts + r.step_cost_parts + r.leg_contact_cost_parts;
+      return `rewards: arrival ${r.arrival_reward} · costs body ${number(r.body_contact_cost_parts)} : step ${number(r.step_cost_parts)} : legs ${number(r.leg_contact_cost_parts)}` +
+        `${r.cost_budget_parts !== used ? ` of ${number(r.cost_budget_parts)} parts` : ""} · progress: head ${number(r.head_progress_ratio)} × step cost, followers ${number(r.follower_progress_ratio)} × head`;
+    } },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
             "agents.final_learning_rate", "agents.weight_decay", "agents.momentum", "agents.initial_action_std"],
@@ -308,7 +314,7 @@ const SETTING_CHIPS = [
       return `network ${a.hidden_layers.join("×")} · ${optimizer}, learning rate ${a.learning_rate}${schedule}${decay} · initial spread ${a.initial_action_std}`;
     } },
   { keys: ["agents.ppo"],
-    text: ({ agents: { ppo: p } }) => `PPO: ${p.update_epochs} epochs · minibatch ${count(p.minibatch_size)} · γ ${p.discount} · λ ${p.gae_lambda} · clip ${p.clip_ratio} · entropy ${p.entropy_coefficient}` },
+    text: ({ agents: { ppo: p } }) => `PPO: ${p.update_epochs} epochs · minibatch ${count(p.minibatch_size)} · γ ${Number(p.discount.toPrecision(5))} · λ ${p.gae_lambda} · clip ${p.clip_ratio} · entropy ${p.entropy_coefficient}` },
   { keys: ["run.seed"], text: (s) => `seed ${s.run.seed}` },
 ];
 
@@ -734,8 +740,14 @@ const BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", 
 const RED = ["#9a2525", "#c13433", "#e34948", "#ec7c7b", "#f4a9a8"];
 const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
-// Reward terms: arrival in green; the three costs in warm colours.
-const PART_COLORS = ["var(--series-3)", "var(--series-4)", "var(--series-2)", "var(--series-5)"];
+// Reward terms by name: arrival green, progress blue, the step cost grey, and
+// the posture costs warm; efficiency is the term of the reward used before
+// 8 October 2026, which held the step cost and progress together.
+const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
+  efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)" };
+function partColor(name, index) {
+  return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
+}
 // Each chart is drawn about as wide as its card, so its text stays readable.
 const CHART_WIDTH = { w12: 1100, w8: 730, w7: 640, w6: 550, w5: 450, w4: 360, w3: 270 };
 let nextId = 0;
@@ -1655,7 +1667,7 @@ function trainingCard(item, context) {
         stackChart(x, parts, { ...common, unit: info(item.parts[0]).unit }));
     }
     const values = series(item.key);  // one value's parts, averaged over the segments
-    const parts = metric.parts.map((name, part) => ({ name, color: PART_COLORS[part % PART_COLORS.length],
+    const parts = metric.parts.map((name, part) => ({ name, color: partColor(name, part),
       values: values.map((v) => overall(v, part)) }));
     series("report.reward_per_step");  // the line drawn is this value, so it is placed
     return card({ ...item, subtitle: item.subtitle || "Per step, mean over segments; the line is their sum" },
@@ -1983,13 +1995,13 @@ function evaluationCard(item, context) {
     const key = "step_facts.reward_parts", parts = info(key).parts;
     const spec = { ...item, key, title: "Where the reward comes from",
       subtitle: "Reward per step by term, mean over segments, steps, and seeds; the mark across each bar is their sum",
-      about: "The average reward per step, split into its four terms and averaged over the segments, the steps, and the seeds: arrival, the only positive term, to the right of zero; the three costs (efficiency, body contact, leg contact) to the left. The mark across each bar and the number are their sum, the reward per step. Next to the baselines, it shows which terms make the difference." };
+      about: "The average reward per step, split into its terms and averaged over the segments, the steps, and the seeds: the terms above zero (arrival, and progress when the segments came closer to their goals) to the right, the costs to the left. The mark across each bar and the number are their sum, the reward per step. Next to the baselines, it shows which terms make the difference." };
     const rows = actors.map((label, i) => {
       const values = samples[i].stepMean(key);
       return { label, values: values === null ? null : parts.map((_, part) => overall(values, part)) };
     }).filter((row) => row.values !== null);
     if (!rows.length) return card(spec, empty());
-    const colors = parts.map((_, part) => PART_COLORS[part % PART_COLORS.length]);
+    const colors = parts.map((name, part) => partColor(name, part));
     return card(spec, legend([...parts, "sum"], [...colors, "var(--ink)"]),
       termRows(rows, parts.map((name, part) => ({ name, color: colors[part] })), width, info(key).unit));
   }
