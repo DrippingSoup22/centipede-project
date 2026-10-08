@@ -7,25 +7,35 @@ from centipede.experiment.progress import (
     training_settings,
 )
 
+# Step facts of two segments, as the log holds them: the head moves 0.4 mm per
+# 20 ms step, 0.3 mm of it toward its target.
+STEP_FACTS = {
+    "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
+    "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
+    "segment_moved": [0.0004, 0.0002],
+    "segment_progress": [0.0003, 0.0001],
+}
+
+
+def window(endings):
+    return {
+        "timing": {"collecting_seconds": 20.5, "learning_seconds": 2.6},
+        "step_facts": STEP_FACTS,
+        "episode_distributions": {"ending": endings},
+    }
+
 
 def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys):
-    progress = TrainingProgress(first_cycle=3, total_cycles=12, window_steps=4)
+    # Episodes of two windows: the endings count the last two windows.
+    progress = TrainingProgress(
+        first_cycle=3, total_cycles=12, window_steps=4, episode_steps=8
+    )
     for steps_taken in range(1, 5):
         progress.step(steps_taken)
     progress.learning()
-    progress.finish(
-        {
-            "timing": {"collecting_seconds": 20.5, "learning_seconds": 2.6},
-            # Two segments; reward parts and contact flags as the log holds them.
-            "step_facts": {
-                "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
-                "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
-                "head_distance": 0.0567,
-            },
-            "episodes": {"episode_ended": 4, "arrived": 0.25, "left_range": 0.25},
-        },
-        remaining_s=402,
-    )
+    progress.finish(window([1, 0, 0, 1, 2, 0]))
+    progress.finish(window([0, 0, 0, 0, 0, 0]))
+    progress.finish(window([0, 1, 0, 0, 0, 1]))
 
     output = capsys.readouterr().out
     drawings = output.split("\r")[1:]
@@ -34,9 +44,11 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert drawings[5].endswith("\n")  # the results end the window's line
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
     assert drawings[5].split() == [
-        *("3/12", "[####################]", "20.5", "s", "2.6", "s", "6m42s", "|"),
-        *("-0.00300", "57", "mm", "25%", "1", "2", "1"),  # arrived, timed out, too far
+        *("3/12", "23.1", "s", "|", "-0.00300", "20.0", "mm/s", "15.0", "mm/s"),
+        *("25%", "|", "4", "25%", "0%", "0%", "25%", "50%", "0%"),
     ]
+    assert drawings[6].split()[-7:] == ["4", "25%", "0%", "0%", "25%", "50%", "0%"]
+    assert drawings[7].split()[-7:] == ["2", "0%", "50%", "0%", "0%", "0%", "50%"]
 
 
 def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
@@ -48,21 +60,21 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
         progress.step(steps_taken)
     progress.finish(
         {
-            "episodes": {
-                "arrived": 0.5,
-                "segment_return": [1, -3],
-                "final_distance": 0.0123,
-            }
+            "step_facts": STEP_FACTS,
+            "episode_distributions": {"ending": [1, 1, 0, 0, 0, 0]},
         }
     )
 
     drawings = capsys.readouterr().out.split("\r")[1:]
     assert drawings[0].startswith(" 1/2  agents, seed 7  ")
     assert "[##..................]  1/10 steps" in drawings[0]
-    # Finished early: the bar is full, and the row holds the first episodes.
+    # Finished early, and the row holds the first episodes.
     row = drawings[-1].split()
-    assert row[:5] == ["1/2", "agents,", "seed", "7", "[" + "#" * 20 + "]"]
-    assert row[-5:] == ["|", "50%", "-1", "12.3", "mm"]
+    assert row[:4] == ["1/2", "agents,", "seed", "7"]
+    assert row[-13:] == [
+        *("|", "20.0", "mm/s", "15.0", "mm/s", "25%", "|"),
+        *("50%", "50%", "0%", "0%", "0%", "0%"),
+    ]
 
 
 def test_the_settings_header_names_the_six_training_settings_and_what_they_make():

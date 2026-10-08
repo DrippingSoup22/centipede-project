@@ -290,19 +290,30 @@ world over the whole run (update cycles × rollout window), also in episode
 lengths. Last comes every setting of the run, defaults included, with a `*` on
 those the file sets itself.
 
-The terminal then shows one line per pass, under a header, drawn again in place
-as a bar of `#` and `.` fills. In training a pass is a window: the bar fills
-as its steps are collected and shows `learning` during the update; the line
-then holds the collecting and learning times, the time the remaining cycles
-will take, and values of every step of every world (the reward per step, the
-head's distance to its target, the share of steps with a body on the ground),
-with the episodes that ended counted as arrivals and time-outs. The last line
-gives the session's time and overall speed. In evaluation a pass is one actor
-and seed: the bar fills toward the time limit, with the most time the
-evaluation can still take, and jumps to full when every world's first episode
-has ended; the line then holds the time it took, the time left, and its first
-episodes (the share that arrived, their mean return, and the head's distance
-to its target at the end).
+The terminal then shows one line per pass, under a short legend and the column
+names, drawn again in place as a bar of `#` and `.` fills; when the pass ends,
+its results replace the bar. In training a pass is a window: the bar fills as
+its steps are collected and shows `learning` during the update. The line then
+holds:
+
+- the time the window took, collecting and learning;
+- values of every step of every world, which do not depend on where each world
+  is in its episode: the reward per step, averaged over the segments; the
+  head's speed along the ground and how fast it closes on its target, which
+  together tell walking from steering; and the share of steps with a body on
+  the ground;
+- how episodes ended, as shares: arrived; ran out of time with less than a
+  quarter of the start distance left, less than half, less than all of it
+  (closer), or no closer; or left the range circle. All worlds start together,
+  so their episodes end in waves; the shares therefore count the episodes that
+  ended over the last episode length of windows, in which every world ends at
+  least one, and the line says how many those are.
+
+The last line gives the session's time and overall speed. In evaluation a pass
+is one actor and seed: the bar fills toward the time limit and jumps to full
+when every world's first episode has ended; the line then holds the time it
+took, the same speeds and body share over the steps of those first episodes,
+and how they ended.
 
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,

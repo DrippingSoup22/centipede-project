@@ -14,33 +14,42 @@ results. Lines are redrawn in place with a carriage return, only when the bar
 grows, so a terminal, or the GPU desktop's launcher passing the output
 through, shows one line per pass.
 
-In training a pass is one window. Its results are values of every step of
-every world, so they move smoothly from window to window: the reward per step,
-the head's distance to its target, and the share of steps with a body on the
-ground; episodes are only counted, as arrivals and time-outs, because all
-worlds start together and their time-outs come in waves.
+In training a pass is one window. Its results are the time it took, values of
+every step of every world, which do not depend on where each world is in its
+episode and so move smoothly from window to window (the reward per step, the
+head's speed along the ground and toward its target, and the share of steps
+with a body on the ground), and how episodes ended. All worlds start
+together, so their episodes end in waves; the endings are therefore shares of
+the episodes that ended over the last episode length of windows, in which
+every world ends at least one.
 
 In evaluation a pass is one actor and seed: every world runs its first
-episode, which ends at the target or at the time limit, so the bar fills
-toward the time limit and jumps to full when every world has finished sooner.
-Its results are those first episodes: the share that arrived, their mean
-return, and the head's distance to its target at the end.
+episode, which ends at the target, out of the range circle, or at the time
+limit, so the bar fills toward the time limit and jumps to full when every
+world has finished sooner. Its results are the same values over the steps of
+those first episodes, and how they ended.
 """
 
 import math
 import time
+from collections import deque
 from typing import Any
+
+from centipede.experiment.report import STEP_SECONDS
 
 BAR_WIDTH = 20
 SETTINGS_LINE_WIDTH = 100
+# How episodes end, in the order of the environment's ending histogram: at the
+# target; out of time with less than a quarter of the start distance left,
+# less than half, less than all of it, or no closer; out of the range circle.
+ENDINGS = ("arrived", "<1/4", "<1/2", "closer", "not closer", "left circle")
 TRAINING_COLUMNS = (
-    "{cycle}  {bar}  {collect:>7}  {learn:>6}  {left:>7}"
-    "  |  {reward:>11}  {distance:>9}  {body_down:>9}  {arrived:>7}  {timed_out:>9}"
-    "  {too_far:>7}"
+    "{cycle}  {took:>6}  |  {reward:>11}  {speed:>9}  {toward:>9}  {body_down:>9}"
+    "  |  {episodes:>8}  {endings}"
 )
 EVALUATION_COLUMNS = (
-    "{number}  {actor:<26}  {bar}  {took:>6}  {left:>7}"
-    "  |  {arrived:>7}  {mean_return:>11}  {distance:>12}"
+    "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
+    "  |  {endings}"
 )
 # Where the body-on-ground flag sits among a segment's contact flags.
 BODY_ON_GROUND = 2
@@ -183,6 +192,40 @@ def _bar(filled: int) -> str:
     return "[" + "#" * filled + "." * (BAR_WIDTH - filled) + "]"
 
 
+def _legend(counted_episodes: str) -> str:
+    """What the speeds and the endings mean, printed above the column names."""
+    return (
+        "speed: the head's, along the ground; toward: how fast it closes on its"
+        f" target.\nEndings: shares of {counted_episodes}. Those out of time are"
+        " split by how much of\nthe start distance was left: <1/4, <1/2, closer"
+        " (less than all of it), or not closer."
+    )
+
+
+def _speed(metres_per_step: float) -> str:
+    return f"{metres_per_step * 1000 / STEP_SECONDS:.1f} mm/s"
+
+
+def _behaviour(step: dict[str, Any]) -> dict[str, str]:
+    """The head's speeds and the share of steps with a body down, from step facts."""
+    flags = step["contact_flags"]
+    body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
+    return {
+        "speed": _speed(step["segment_moved"][0]),
+        "toward": _speed(step["segment_progress"][0]),
+        "body_down": f"{body_down:.0%}",
+    }
+
+
+def _endings(counts: list[float]) -> str:
+    """Each ending's share of the counted episodes, under its column name."""
+    total = sum(counts)
+    shares = [f"{count / total:.0%}" if total else "-" for count in counts]
+    return "  ".join(
+        share.rjust(len(name)) for share, name in zip(shares, ENDINGS, strict=True)
+    )
+
+
 class _RedrawnLine:
     """A terminal line drawn again in place, as a pass's bar grows."""
 
@@ -198,7 +241,7 @@ class _RedrawnLine:
             self._filled = filled
             self._write(
                 f"{self._label()}  {_bar(filled)}"
-                f"  {steps_taken}/{self._steps_per_pass} steps{self._estimate()}",
+                f"  {steps_taken}/{self._steps_per_pass} steps",
                 end="",
             )
 
@@ -207,9 +250,6 @@ class _RedrawnLine:
 
     def _label(self) -> str:
         raise NotImplementedError
-
-    def _estimate(self) -> str:
-        return ""
 
     def _end_pass(self, row: str) -> None:
         """Replace the line with the pass's results and start a new one."""
@@ -226,58 +266,58 @@ class _RedrawnLine:
 class TrainingProgress(_RedrawnLine):
     """One line per window: a filling bar while it runs, then its results."""
 
-    def __init__(self, first_cycle: int, total_cycles: int, window_steps: int) -> None:
+    def __init__(
+        self, first_cycle: int, total_cycles: int, window_steps: int, episode_steps: int
+    ) -> None:
         super().__init__(window_steps)
         self._cycle = first_cycle
         self._total_cycles = total_cycles
         self._cycle_width = max(len("cycle"), 2 * len(str(total_cycles)) + 1)
+        # The ending counts of the windows that make the last episode length.
+        self._recent_endings: deque[list[float]] = deque(
+            maxlen=math.ceil(episode_steps / window_steps)
+        )
 
     def header(self) -> None:
-        """The column names, once before the first window."""
+        """The legend and the column names, once before the first window."""
+        span = self._recent_endings.maxlen
+        print(
+            _legend(
+                f"the episodes that ended in the last {span} windows, one episode"
+                " length,\nin which every world ends at least one"
+            ),
+            flush=True,
+        )
         print(
             TRAINING_COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
-                bar="window".ljust(BAR_WIDTH + 2),
-                collect="collect",
-                learn="learn",
-                left="left",
+                took="took",
                 reward="reward/step",
-                distance="to target",
+                speed="speed",
+                toward="toward",
                 body_down="body down",
-                arrived="arrived",
-                timed_out="timed out",
-                too_far="too far",
+                episodes="episodes",
+                endings="  ".join(ENDINGS),
             ),
             flush=True,
         )
 
-    def finish(self, record: dict[str, Any], remaining_s: float) -> None:
+    def finish(self, record: dict[str, Any]) -> None:
         """Replace the line with the window's results."""
-        timing, episodes, step = (
-            record["timing"],
-            record["episodes"],
-            record["step_facts"],
-        )
+        timing, step = record["timing"], record["step_facts"]
         segments = step["reward_parts"]
         reward_per_step = sum(sum(parts) for parts in segments) / len(segments)
-        flags = step["contact_flags"]
-        body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
-        ended = episodes["episode_ended"]
-        arrived = round(ended * episodes["arrived"]) if ended else 0
-        too_far = round(ended * episodes["left_range"]) if ended else 0
+        self._recent_endings.append(record["episode_distributions"]["ending"])
+        counts = [sum(column) for column in zip(*self._recent_endings, strict=True)]
+        took = timing["collecting_seconds"] + timing["learning_seconds"]
         self._end_pass(
             TRAINING_COLUMNS.format(
                 cycle=self._label(),
-                bar=_bar(BAR_WIDTH),
-                collect=f"{timing['collecting_seconds']:.1f} s",
-                learn=f"{timing['learning_seconds']:.1f} s",
-                left=duration(remaining_s),
+                took=f"{took:.1f} s",
                 reward=f"{reward_per_step:+.5f}",
-                distance=f"{step['head_distance'] * 1000:.0f} mm",
-                body_down=f"{body_down:.0%}",
-                arrived=f"{arrived}",
-                timed_out=f"{round(ended) - arrived - too_far}",
-                too_far=f"{too_far}",
+                **_behaviour(step),
+                episodes=f"{round(sum(counts))}",
+                endings=_endings(counts),
             )
         )
         self._cycle += 1
@@ -294,22 +334,21 @@ class EvaluationProgress(_RedrawnLine):
         self._total_passes = total_passes
         self._number_width = max(len("pass"), 2 * len(str(total_passes)) + 1)
         self._done = 0
-        self._seconds_done = 0.0
         self._actor = ""
         self._started = time.monotonic()
 
     def header(self) -> None:
-        """The column names, once before the first pass."""
+        """The legend and the column names, once before the first pass."""
+        print(_legend("every world's first episode"), flush=True)
         print(
             EVALUATION_COLUMNS.format(
                 number="pass".rjust(self._number_width),
                 actor="actor and seed",
-                bar="first episodes".ljust(BAR_WIDTH + 2),
                 took="took",
-                left="left",
-                arrived="arrived",
-                mean_return="mean return",
-                distance="end distance",
+                speed="speed",
+                toward="toward",
+                body_down="body down",
+                endings="  ".join(ENDINGS),
             ),
             flush=True,
         )
@@ -323,20 +362,13 @@ class EvaluationProgress(_RedrawnLine):
         took = time.monotonic() - self._started
         number = self._number()
         self._done += 1
-        self._seconds_done += took
-        episodes = record["episodes"]
-        returns = episodes["segment_return"]
-        remaining = self._total_passes - self._done
         self._end_pass(
             EVALUATION_COLUMNS.format(
                 number=number,
                 actor=self._actor,
-                bar=_bar(BAR_WIDTH),
                 took=duration(took),
-                left=duration(remaining * self._seconds_done / self._done),
-                arrived=f"{episodes['arrived']:.0%}",
-                mean_return=f"{sum(returns) / len(returns):+.3g}",
-                distance=f"{episodes['final_distance'] * 1000:.1f} mm",
+                **_behaviour(record["step_facts"]),
+                endings=_endings(record["episode_distributions"]["ending"]),
             )
         )
 
@@ -345,14 +377,3 @@ class EvaluationProgress(_RedrawnLine):
 
     def _label(self) -> str:
         return f"{self._number()}  {self._actor:<26}"
-
-    def _estimate(self) -> str:
-        """The evaluation's time left, at most: this pass to the time limit, and
-        the passes after it at the average so far (or at this pass's pace)."""
-        if self._filled <= 0:
-            return ""
-        elapsed = time.monotonic() - self._started
-        this_pass = elapsed * BAR_WIDTH / self._filled
-        later = self._total_passes - self._done - 1
-        per_pass = self._seconds_done / self._done if self._done else this_pass
-        return f"  at most {duration(this_pass - elapsed + later * per_pass)} left"

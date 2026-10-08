@@ -233,14 +233,17 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         recording_first_cycle = completed_cycles + 1
 
     # Wall-clock time per cycle in this session, everything included, for the
-    # time remaining and the time limit.
+    # time limit.
     time_limit_s = (
         None
         if run_settings.time_limit_hours is None
         else run_settings.time_limit_hours * 3600
     )
     progress = TrainingProgress(
-        completed_cycles + 1, total_cycles, loop_settings.rollout_window_steps
+        completed_cycles + 1,
+        total_cycles,
+        loop_settings.rollout_window_steps,
+        configuration.environment.max_episode_steps,
     )
     loop.diagnostics.progress = progress
     progress.header()
@@ -260,8 +263,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 configuration.agents.learning_rate_at(cycle + 1, total_cycles)
             )
         seconds_per_cycle = (time.monotonic() - cycles_start) / (session_cycle + 1)
-        remaining_s = (total_cycles - cycle) * seconds_per_cycle
-        progress.finish(record, remaining_s)
+        progress.finish(record)
         out_of_time = (
             time_limit_s is not None
             and cycle < total_cycles
