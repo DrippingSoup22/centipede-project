@@ -417,14 +417,13 @@ Each kind of chart is used for one kind of question:
 
 | Question | Chart | Why |
 | --- | --- | --- |
+| What is the value, and is it better? | A number, with the first episode length's value (training) or each baseline's (evaluation) below it, and an arrow coloured by whether it is better | One value is read exactly as a number; a chart adds nothing to it |
 | How did a value change over training? | Line over world steps | Positions along one axis are read most precisely; world steps make runs of different sizes comparable |
-| What makes up a total? | Stacked areas, positive parts above zero and costs below, with the total as a line | The reward terms add up to the reward, so stacking shows the total and what drives it at once |
-| How did each segment change over training? | Heatmap: one row per segment, one column per window | Eight lines would tangle; colour shows the pattern along the body and over time together |
-| How did the episodes spread? | Histogram: early against late in training, or one per actor | A mean hides two groups of outcomes or a few failures; counting the episodes of many windows together keeps the bars readable with few worlds |
-| How does a value differ along the body? | Line along the segments, head first, early, midway, and late in training | One axis for all moments, so the change can be read directly |
-| How do two values relate? | Their ratio, as a line along the body | The useful share of movement (speed toward the goal ÷ speed) answers the question directly; a scatter of the two speeds was tried, but speed toward the goal is about a tenth of the speed, so its reference diagonal was unreadable |
-| What is the current value? | Tile with a trend line | The headline number and its direction |
-| How do the actors compare? | Bars from zero | Lengths compare quantities; used only when there are at least two actors |
+| Where did the episodes end? | Bars stacked to 100%: arrived, then the episodes that ran out of time by how far from the target they ended; one per episode length in training, one per actor (and seed) in an evaluation | Each episode counts once, so a few centipedes that wander far away cannot hide what the others did, and arrivals stay apart from the episodes that ran out of time |
+| How did the episodes spread over a value? | Counts per bin as horizontal bars, first against last or one bar per actor; whole histograms in the details | A mean hides two groups of outcomes or a few failures |
+| What makes up a total? | Stacked parts, positive parts above (or right of) zero and costs below (or left of) it, with the total marked | The reward terms add up to the reward, so stacking shows the total and what drives it at once; areas over training, one bar per actor in an evaluation |
+| How does each segment behave? | Table, one row per segment, each column coloured on its own scale, with a switch between first and last, or between actors | Eight segments and eight values read best as a coloured table; shared colours make the switch show the change |
+| How did each segment change over training? | Heatmap: one row per segment, one column per window, in the details | Eight lines would tangle; colour shows the pattern along the body and over time together |
 | What is the exact value? | Table, in the details only | Tables are for looking values up, not for seeing patterns |
 
 A pair plot is not used: over training every pair of values moves with time, so
@@ -434,23 +433,42 @@ its panels would suggest relationships that are not there.
 
 The layout and the explanations are declared at the start of the page's script
 in `src/centipede/experiment/report_page.html` (`METRICS`, `SETTING_CHIPS`,
-`TRAINING_LAYOUT`, `EVALUATION_LAYOUT`), so changing the report means editing
-those lists. A value added to a diagnostics category that no layout places
+`RESULT_TILES` and `BEHAVIOUR_STATS`, which both reports share,
+`TRAINING_LAYOUT`, `TRAINING_DETAILS`, `EVALUATION_LAYOUT`, and
+`EVALUATION_DETAILS`), so changing the report means editing those lists. A value added to a diagnostics category that no layout places
 appears among the details automatically. The layout is a baseline for later
 work: values may be moved or resized and new ones added, but what it shows
 stays.
 
 ### The evaluation report
 
-An **evaluation report** follows the same priorities and does not need
-baselines. Its header lists the seeds and episodes, its chips mark the settings
-changed for the evaluation, and its results show the five headline values as
-tiles (the mean over the seeds and the lowest to highest seed), the three
-episode histograms, and bars of the return per segment and of the reward terms.
-When baselines are listed, each tile adds one bar per actor, the histograms
-show every actor side by side, and the charts draw the baselines in grey. Its
-behaviour section has the eight values along the body and the useful share of
-movement, each with one line per actor, and the steering values,
-as bars when there are actors to compare and as numbers otherwise. Its details
-hold every value per actor, one table of the body per actor (coloured on shared
-scales so that they can be compared), the evaluation's facts, and the settings.
+An **evaluation report** follows the same plan as the training report, with
+each actor next to the others where training puts the first episode length
+next to the last; it does not need baselines. Its header lists the seeds and
+episodes, and its chips mark the settings changed for the evaluation. Every
+value counts each world's first episode, and every actor starts from the same
+poses and targets, which the seeds decide.
+
+- **1 · Results.** The same six tiles as in training, each holding the agents'
+  value over every seed and the lowest and highest seed. When baselines are
+  listed, each baseline's value follows below a line, with an arrow pointing up
+  where the agents' value is higher, blue when that is better and orange when it
+  is worse. Below them, **where episodes ended**: one bar per actor stacked to
+  100%, with the classes and colours of training, and under it a thin bar per
+  seed when there are several, which shows whether the result holds on every
+  seed. Next to it, how long the arrivals took, per actor. Then where the
+  reward comes from: one bar per actor, the arrival term to the right of zero
+  and the three costs to the left, with their sum, the reward per step, marked
+  across the bar; and the return per episode as a number.
+- **2 · Behaviour** (smaller). The body table, with a switch between the
+  actors that keeps each column's colours, then the heading error, the length
+  of the head's path per episode, and the share of time the head is upside
+  down, as numbers with the baselines below.
+- **Details,** behind a "Show details" button: the four episode histograms
+  with the actors side by side, each segment's return per actor, every value
+  per actor (the mean over seeds, with the lowest to highest seed), the
+  evaluation's facts, and the settings.
+
+Evaluations made before the end distance was recorded (before 8 October 2026,
+10:00) show everything else and say that where each episode ended was not
+recorded.

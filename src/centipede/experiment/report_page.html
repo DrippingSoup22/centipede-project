@@ -105,6 +105,9 @@
   .tile .change.better { color: var(--series-1); }
   .tile .change.worse { color: var(--series-2); }
   .card.small.tile .value { font-size: 22px; }
+  .tile .value .unit { font-size: 15px; font-weight: 550; color: var(--ink-2); margin-left: 4px; }
+  .tile .versus { border-top: 1px solid var(--grid); margin-top: 8px; padding-top: 5px; }
+  .tile .versus .from { color: var(--ink-2); }
 
   /* Switches between two views of one card. */
   .toggles { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
@@ -308,24 +311,33 @@ const SETTING_CHIPS = [
 ];
 
 // =============================================================================
-// 2. The layouts. Each card names the values it shows and how. Card kinds:
+// 2. The layouts. Each card names the values it shows and how. Card kinds, in
+// both reports unless a report is named:
+//   endings       where episodes ended: arrived, or how far from the target
+//                 (training: one bar per episode length; evaluation: per actor)
+//   ending_bins   training: the first and the last episode length, per bin
+//   arrival_times how long the episodes that arrived took
+//   body_table    one row per segment, with a switch between views
+//   stat          one number, compared with the first episode length or the baselines
+//   reward_terms  evaluation: the reward per step by term, one bar per actor
+//   run_stats     training: the run's own numbers
 //   lines         one or more values over training
 //   stack         values that add up, stacked over training (diverging at zero)
 //   heatmap       one value per segment over training (part: which part)
 //   distribution  how each window's episodes spread over a value's bins
-//   body          one value along the body, early, midway, and late in training
-//   useful        the share of each segment's movement toward its goal, along the body
-//   histogram     how episodes spread over a value's bins (training: early and late)
 //   health        a learning value: the segments' mean, with their range
 //   speed         steps per second, with each session's start-up apart
+//   histogram     evaluation: how each actor's episodes spread over a value's bins
+//   segments      evaluation: one value per segment, one bar per actor
 //   column        cards placed on top of each other in one column
 // Sizes: "large" for results, "small" for everything else.
 //
-// Which chart answers which question (docs/configuration.md): a line for how a
-// value changed over training; a stack for parts of a whole; a heatmap for how
-// each segment changed; a histogram for how episodes spread; a line along the
-// body for differences between segments, including the ratio of two of them;
-// bars to compare actors; tables only for looking up exact values.
+// Which chart answers which question (docs/configuration.md): numbers first,
+// and a chart only where it shows what a number cannot. A line for how a value
+// changed over training; a stack for parts of a whole; counts of episodes for
+// how they spread, so that a few that wander far away do not hide what the
+// others did; a heatmap for how each segment changed; tables to look up exact
+// values.
 // =============================================================================
 
 // Episode values rest on few episodes when a run has few worlds, and step
@@ -334,18 +346,40 @@ const SETTING_CHIPS = [
 // of many, and the line is drawn as it is.
 const SMOOTH_BELOW = { episodes: 100, step_facts: 10000 };
 
-// The evaluation's headline values, one tile each.
-const EVALUATION_TILES = ["episodes.arrived", "episodes.final_distance", "report.reward_per_step", "report.mean_return", "episodes.length_steps"];
+// The headline numbers of both reports, one tile each. Each is computed from a
+// sample of log records (see recordSample): one episode length of training
+// windows, or every seed of one evaluated actor.
+const RESULT_TILES = [
+  { title: "Arrived", unit: "%", better: "higher", keys: ["episodes.arrived"],
+    about: () => "The share of episodes in which the head reached its target rather than running out of time: the task's measure of success.",
+    value: (sample) => sample.episodeMean("episodes.arrived"),
+    note: (sample) => {
+      const share = sample.episodeMean("episodes.arrived");
+      return share === null ? "" : `${count(Math.round((sample.episodes * share) / 100))} of ${count(sample.episodes)} episodes`;
+    } },
+  { title: "Time to arrive", unit: "s", better: "lower", keys: ["episodes.length_steps", "episodes.arrived"],
+    about: (settings) => `How long the episodes that arrived took, on average, in seconds of simulated time. Every episode that runs out of time lasts exactly the time limit (${withUnit(timeLimit(settings), "s")}), so this follows exactly from the mean episode length and the arrival share.`,
+    value: arrivalSeconds,
+    note: (sample, settings) => (arrivalSeconds(sample, settings) === null ? "no arrivals" : `time limit ${withUnit(timeLimit(settings), "s")}`) },
+  { title: "Ended closer", unit: "%", better: "higher", keys: ["episode_distributions.distance_closed"],
+    about: () => "The share of episodes whose head ended closer to its target than it started, arrivals included. A centipede that wanders far away counts once, as one that did not get closer, instead of pulling a mean distance up.",
+    value: closerShare, note: () => "than they started, arrivals included" },
+  { title: "Body on the ground", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
+    about: () => "The share of steps in which a segment's body touched the ground, averaged over the segments.",
+    value: (sample) => overall(sample.stepMean("step_facts.contact_flags"), 2), note: () => "share of steps" },
+  { title: "Legs touching", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
+    about: () => "The share of steps in which a segment's legs touched another leg, averaged over the segments.",
+    value: (sample) => overall(sample.stepMean("step_facts.contact_flags"), 3), note: () => "share of steps" },
+  { title: "Speed toward goal", unit: "mm/s", better: "higher", keys: ["step_facts.segment_progress"],
+    about: () => "How fast the segments move toward their goals, averaged over the segments: the head toward its target, every other segment toward the spot where the segment ahead of it was. It rises when the centipede walks forward, even before it steers.",
+    value: (sample) => overall(sample.stepMean("step_facts.segment_progress")), note: () => "mean over segments" },
+];
 
-const BODY_VALUES = [
-  { key: "step_facts.contact_flags", part: 2, title: "Body on the ground" },
-  { key: "step_facts.contact_flags", part: 3, title: "Legs touching" },
-  { key: "step_facts.contact_flags", part: 0, title: "Left foot on the ground" },
-  { key: "step_facts.contact_flags", part: 1, title: "Right foot on the ground" },
-  { key: "step_facts.body_height" },
-  { key: "step_facts.uprightness" },
-  { key: "step_facts.segment_moved" },
-  { key: "step_facts.segment_progress" },
+// The numbers under the body table of both reports.
+const BEHAVIOUR_STATS = [
+  { kind: "stat", width: "w4", key: "step_facts.heading_error", better: "lower", note: "0° points at the target, 180° straight away from it" },
+  { kind: "stat", width: "w4", key: "episodes.head_path_length", note: "length of the head's path per episode" },
+  { kind: "stat", width: "w4", key: "episodes.upside_down_share", better: "lower", note: "share of an episode's steps" },
 ];
 
 const PROFILE_COLUMNS = [
@@ -360,11 +394,6 @@ const PROFILE_COLUMNS = [
 ];
 
 const PROFILE_ABOUT = "Exact values of how each segment behaves, one row per segment with the head at the top. Each column is coloured on its own scale, darker meaning more. Left foot, right foot, body: share of steps touching the ground. Legs touching: share of steps its legs touch another leg. Height: of the segment's centre. Upright: 1 upright, 0 on its side, −1 upside down. Speed: how fast the segment's centre moves. Toward goal: the part of that speed that brings it closer to its goal.";
-
-const USEFUL_ABOUT = "The share of each segment's movement that brought it closer to its goal: its speed toward the goal divided by its speed. 100% means every millimetre moved went toward the goal, 0% that the movement went sideways or back and forth, and below 0% that the segment moved away from its goal. The goal is the target for the head, and for every other segment the spot where the segment ahead of it was.";
-
-const USEFUL_CARD = { title: "Useful share of movement", subtitle: "Speed toward the goal ÷ speed, per segment, in percent",
-  keys: ["step_facts.segment_progress", "step_facts.segment_moved"] };
 
 // Where episodes ended, in classes made of the distance histogram's bins: an
 // arrival, then how far from its target an episode that ran out of time ended.
@@ -403,10 +432,7 @@ const TRAINING_LAYOUT = [
   { title: "Behaviour", minor: true, intro: "How the centipede moved, over one episode length of windows: the last, or the first to compare.",
     rows: [
       [{ kind: "body_table", width: "w12", size: "small" }],
-      [{ kind: "stat", width: "w4", key: "step_facts.heading_error", better: "lower",
-         note: "0° points at the target, 180° straight away from it" },
-       { kind: "stat", width: "w4", key: "episodes.head_path_length", note: "length of the head's path per episode" },
-       { kind: "stat", width: "w4", key: "episodes.upside_down_share", better: "lower", note: "share of an episode's steps" }],
+      BEHAVIOUR_STATS,
     ] },
   { title: "Run", minor: true,
     rows: [[{ kind: "run_stats", width: "w12" }]] },
@@ -446,25 +472,34 @@ const TRAINING_DETAILS = [
       .map((key) => ({ kind: "lines", width: "w4", size: "small", key })) },
 ];
 
+const EVALUATION_INTRO = (baselines, seeds) => "Each world's first episode. Every actor starts from the same poses and targets, which the seeds decide, " +
+  "and the agents act with their policy's mean action, without exploration. The large numbers are the agents'" +
+  (seeds > 1 ? ", over every seed, with the lowest and the highest seed" : "") +
+  (baselines ? "; below them each baseline's, with an arrow pointing up where the agents' number is higher, blue when that is better and orange when it is worse." : ".");
+
+// The evaluation report's sections: the same numbers as training, each actor
+// next to the others instead of the first episode length next to the last.
 const EVALUATION_LAYOUT = [
-  { title: "Results", intro: "The trained agents, and any baselines listed, on the same seeds. Each value is the mean over the seeds, with the lowest and highest seed.",
+  { title: "Results", tiles: true,
     rows: [
-      ["tiles"],
-      [{ kind: "histogram", width: "w4", size: "small", key: "episode_distributions.final_distance" },
-       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.distance_closed" },
-       { kind: "histogram", width: "w4", size: "small", key: "episode_distributions.length_steps" }],
-      [{ kind: "segments", width: "w6", size: "large", key: "episodes.segment_return" },
-       { kind: "segments", width: "w6", size: "large", key: "step_facts.reward_parts", byPart: true, title: "Reward per step, by term",
-         subtitle: "Mean over segments, per term" }],
+      [{ kind: "endings", width: "w7", size: "large" },
+       { kind: "arrival_times", width: "w5", size: "small" }],
+      [{ kind: "reward_terms", width: "w8", size: "small" },
+       { kind: "stat", width: "w4", key: "report.mean_return", better: "higher", note: "per episode, mean over segments" }],
     ] },
-  { title: "Behaviour", minor: true, intro: "How each actor moved, averaged over the steps of every episode.",
+  { title: "Behaviour", minor: true, intro: "How the centipede moved, averaged over the steps of each world's first episode and over the seeds.",
     rows: [
-      BODY_VALUES.slice(0, 4).map((value) => ({ kind: "body", width: "w3", size: "small", ...value })),
-      BODY_VALUES.slice(4).map((value) => ({ kind: "body", width: "w3", size: "small", ...value })),
-      [{ kind: "useful", width: "w6", size: "small" },
-       { kind: "column", width: "w6", cards: ["step_facts.heading_error", "episodes.upside_down_share", "episodes.head_path_length"]
-         .map((key) => ({ kind: "value", size: "small", key })) }],
+      [{ kind: "body_table", width: "w12", size: "small" }],
+      BEHAVIOUR_STATS,
     ] },
+];
+
+// Under "Show details", before the table of every value.
+const EVALUATION_DETAILS = [
+  { title: "Every episode, in bins", intro: "How each actor's episodes spread over a value's bins, every seed together: the share of its episodes in each bin, the actors side by side.",
+    cards: ["final_distance", "distance_closed", "length_steps", "upside_down_share"]
+      .map((name) => ({ kind: "histogram", width: "w6", size: "small", key: `episode_distributions.${name}` })) },
+  { title: "Each segment's return", cards: [{ kind: "segments", width: "w12", size: "small", key: "episodes.segment_return" }] },
 ];
 
 // =============================================================================
@@ -595,6 +630,48 @@ function momentMean(values, moment) {
 // Whether a value is a mean over the episodes that ended in each window.
 function isEpisodeMean(key) {
   return (key.startsWith("episodes.") && key !== "episodes.episode_ended") || key === "report.distance_closed" || key === "report.mean_return";
+}
+
+// Log records taken together, with the episodes each holds: one episode
+// length of training windows, or every seed of one evaluated actor. Episode
+// values are means over its episodes, step values means over its records,
+// and the bin counts of histograms are added up.
+function recordSample(records, episodeCounts) {
+  return {
+    episodes: episodeCounts.reduce((a, b) => a + b, 0),
+    episodeMean: (key) => weightedMeanOfValues(records.map((record) => shown(record, key)), episodeCounts),
+    stepMean: (key) => meanOfValues(records.map((record) => shown(record, key))),
+    counts: (key) => {
+      const present = records.map((record) => raw(record, key)).filter((counts) => counts !== null);
+      return present.length ? present[0].map((_, bin) => present.reduce((sum, counts) => sum + counts[bin], 0)) : null;
+    },
+  };
+}
+
+// One number for a value over a sample: the mean over the segments (or one part).
+function sampleValue(sample, key, part) {
+  return overall(isEpisodeMean(key) ? sample.episodeMean(key) : sample.stepMean(key), part);
+}
+
+function timeLimit(settings) {
+  return settings.environment.max_episode_steps * STEP_SECONDS;
+}
+
+// Episodes that ran out of time last exactly the time limit, so the mean
+// length of those that arrived follows from the mean length and the share.
+function arrivalSeconds(sample, settings) {
+  const share = sample.episodeMean("episodes.arrived"), length = sample.episodeMean("episodes.length_steps");
+  if (share === null || length === null || share <= 0) return null;
+  return (length - (1 - share / 100) * timeLimit(settings)) / (share / 100);
+}
+
+// The share of episodes whose head ended closer to its target than it started.
+function closerShare(sample) {
+  const counts = sample.counts("episode_distributions.distance_closed");
+  if (!counts) return null;
+  const from = info("episode_distributions.distance_closed").edges.findIndex((edge) => edge >= 0);
+  const total = counts.reduce((a, b) => a + b, 0);
+  return total ? (100 * counts.slice(from).reduce((a, b) => a + b, 0)) / total : null;
 }
 
 // =============================================================================
@@ -798,20 +875,17 @@ function empty(text = "No values yet") { return html("div", { class: "empty" }, 
 // -- Charts --------------------------------------------------------------------
 
 // Lines over an x axis. Each series is { name, values, color }, its values
-// lined up with x; "smooth" draws faint points under a moving average, "pointsOnly"
-// only points, "dashed" and "opacity" change the line. Options: unit, size,
+// lined up with x; "smooth" draws faint points under a moving average, and
+// "pointsOnly" only points. Options: unit, size,
 // width, band (a range per x), fillBetween (two series' indices), markers
-// (vertical lines at { x, label }), xFormat and xName (tick labels and the
-// axis name), xTicks (explicit tick positions), hover (x to text), range (a
-// fixed range for the values), and includeZero. Percentages never go below 0.
+// (vertical lines at { x, label }), hover (x to text), and range (a fixed
+// range for the values). Percentages never go below 0.
 function lineChart(x, series, options) {
   const { unit = "", size = "large", band = null, markers = [], fillBetween = null } = options;
-  const xFormat = options.xFormat || axisCount, xName = options.xName !== undefined ? options.xName : "steps";
-  const hover = options.hover || ((c) => `${count(c)} ${xName}`);
-  const tiny = size === "tiny";
-  const width = tiny ? 240 : options.width || 420;
-  const height = tiny ? 46 : size === "large" ? (width > 800 ? 250 : 210) : 130;
-  const left = tiny ? 2 : 46, right = tiny ? 2 : 12, top = tiny ? 4 : 10, bottom = tiny ? 4 : 24;
+  const hover = options.hover || ((c) => `${count(c)} steps`);
+  const width = options.width || 420;
+  const height = size === "large" ? (width > 800 ? 250 : 210) : 130;
+  const left = 46, right = 12, top = 10, bottom = 24;
   const prepared = series.map((s) => {
     const points = x.map((c, i) => [c, s.values[i]]).filter(([, v]) => v !== null && Number.isFinite(v));
     const smooth = s.smooth && points.length > 2;
@@ -819,33 +893,29 @@ function lineChart(x, series, options) {
     return { ...s, points, line, smooth };
   });
   const all = prepared.flatMap((s) => s.points.map((p) => p[1]))
-    .concat(band ? band.flatMap((b) => [b.low, b.high]).filter((v) => v !== null) : [])
-    .concat(options.includeZero && prepared.some((s) => s.points.length) ? [0] : []);
+    .concat(band ? band.flatMap((b) => [b.low, b.high]).filter((v) => v !== null) : []);
   if (!all.length) return empty();
   let low = Math.min(...all), high = Math.max(...all);
   if (options.range) [low, high] = options.range;
   if (unit === "%" && low >= 0) { low = 0; if (high === 0) high = 1; }
   // Angles are marked in steps of 45° so that a 0–180° range ends on a tick.
-  const ticks = unit === "°" && options.range ? niceTicks(low / 45, high / 45, 4).map((t) => t * 45) : niceTicks(low, high, tiny ? 2 : 4);
+  const ticks = unit === "°" && options.range ? niceTicks(low / 45, high / 45, 4).map((t) => t * 45) : niceTicks(low, high, 4);
   const yLow = ticks[0], yHigh = ticks[ticks.length - 1];
   const xLow = Math.min(...x), xHigh = Math.max(Math.max(...x), xLow + 1);
   const px = (c) => left + ((c - xLow) / (xHigh - xLow)) * (width - left - right);
   const py = (v) => top + (1 - (v - yLow) / (yHigh - yLow || 1)) * (height - top - bottom);
   const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
-  if (!tiny) {
-    for (const tick of ticks) {
-      chart.append(svg("line", { x1: left, x2: width - right, y1: py(tick), y2: py(tick), style: "stroke:var(--grid)" }));
-      chart.append(svg("text", { x: left - 6, y: py(tick) + 4, "text-anchor": "end" }, withUnit(tick, unit === "%" || unit === "°" ? unit : "")));
-    }
-    const xTicks = options.xTicks || niceTicks(xLow, xHigh, Math.max(2, Math.round(width / 140))).filter((t) => t >= xLow && t <= xHigh);
-    for (const tick of xTicks) {
-      chart.append(svg("text", { x: px(tick), y: height - 8, "text-anchor": "middle" }, xFormat(tick)));
-    }
-    if (xName) chart.append(svg("text", { x: left - 6, y: height - 8, "text-anchor": "end" }, xName));
-    for (const marker of markers) {
-      chart.append(svg("line", { x1: px(marker.x), x2: px(marker.x), y1: top, y2: height - bottom,
-        style: "stroke:var(--muted);stroke-dasharray:2 3" }, hoverText(marker.label)));
-    }
+  for (const tick of ticks) {
+    chart.append(svg("line", { x1: left, x2: width - right, y1: py(tick), y2: py(tick), style: "stroke:var(--grid)" }));
+    chart.append(svg("text", { x: left - 6, y: py(tick) + 4, "text-anchor": "end" }, withUnit(tick, unit === "%" || unit === "°" ? unit : "")));
+  }
+  for (const tick of niceTicks(xLow, xHigh, Math.max(2, Math.round(width / 140))).filter((t) => t >= xLow && t <= xHigh)) {
+    chart.append(svg("text", { x: px(tick), y: height - 8, "text-anchor": "middle" }, axisCount(tick)));
+  }
+  chart.append(svg("text", { x: left - 6, y: height - 8, "text-anchor": "end" }, "steps"));
+  for (const marker of markers) {
+    chart.append(svg("line", { x1: px(marker.x), x2: px(marker.x), y1: top, y2: height - bottom,
+      style: "stroke:var(--muted);stroke-dasharray:2 3" }, hoverText(marker.label)));
   }
   const path = (points) => points.map(([c, v], i) => `${i ? "L" : "M"}${px(c).toFixed(1)},${py(v).toFixed(1)}`).join("");
   if (band) {
@@ -860,17 +930,16 @@ function lineChart(x, series, options) {
     }
   }
   for (const s of prepared) {
-    const opacity = s.opacity !== undefined ? s.opacity : 1;
     const radius = size === "large" ? 2.6 : 2;
     if (s.smooth) for (const [c, v] of s.points) chart.append(svg("circle", { cx: px(c), cy: py(v), r: radius, style: `fill:${s.color};opacity:0.3` }));
     if (!s.pointsOnly && s.line.length > 1) {
-      chart.append(svg("path", { d: path(s.line), style: `fill:none;stroke:${s.color};stroke-width:${tiny ? 1.6 : 2};` +
-        `stroke-linejoin:round;stroke-linecap:round;opacity:${opacity};${s.dashed ? "stroke-dasharray:4 3;" : ""}` }));
+      chart.append(svg("path", { d: path(s.line), style: `fill:none;stroke:${s.color};stroke-width:2;` +
+        "stroke-linejoin:round;stroke-linecap:round" }));
     }
-    if (!s.smooth && !tiny && (s.pointsOnly || s.points.length <= 60 || s.line.length === 1)) {
-      for (const [c, v] of s.points) chart.append(svg("circle", { cx: px(c), cy: py(v), r: radius, style: `fill:${s.color};opacity:${opacity}` }));
+    if (!s.smooth && (s.pointsOnly || s.points.length <= 60 || s.line.length === 1)) {
+      for (const [c, v] of s.points) chart.append(svg("circle", { cx: px(c), cy: py(v), r: radius, style: `fill:${s.color}` }));
     }
-    if (!tiny) for (const [c, v] of s.points) {
+    for (const [c, v] of s.points) {
       chart.append(svg("circle", { cx: px(c), cy: py(v), r: 8, style: "fill:transparent" },
         hoverText(`${hover(c)}${series.length > 1 ? ` · ${s.name}` : ""}: ${withUnit(v, unit)}`)));
     }
@@ -1017,21 +1086,6 @@ function colorKey(scale, unit, size) {
   return key;
 }
 
-// Lines along the body, head on the left. Shares start at zero; a value with
-// a fixed range keeps it.
-function alongBody(lines, metric, width) {
-  const segments = lines[0].values.map((_, segment) => segment);
-  return lineChart(segments, lines, { unit: metric.unit, size: "small", width, xName: "", xTicks: segments,
-    includeZero: metric.unit === "%", range: metric.range || null,
-    xFormat: (segment) => (segment === 0 ? "head" : String(segment)), hover: (segment) => `segment ${segment}` });
-}
-
-// Each segment's speed toward its goal as a share of its speed, in percent.
-function usefulShare(speed, toward) {
-  if (speed === null || toward === null) return null;
-  return speed.map((value, segment) => (value > 0 && toward[segment] !== null ? (100 * toward[segment]) / value : null));
-}
-
 // The values one bin holds; the first and last bins also hold those beyond them.
 function binRange(edges, bin, label) {
   const bins = edges.length - 1;
@@ -1132,10 +1186,87 @@ function shareBars(columns, classes, width) {
   return chart;
 }
 
+// Bars of shares that add up to 100%, one row each, stacked from the left in
+// the order of the classes. Each row is { label, perClass, total, minor }:
+// minor rows, such as single seeds, are thinner and sit under the row before
+// them. Parts wide enough have their share written inside.
+function shareRows(rows, classes, width) {
+  const left = 108, right = 10, axis = 20;
+  let bottom = 0;
+  const placed = rows.map((row, index) => {
+    bottom += index === 0 ? 0 : row.minor ? 3 : 12;
+    const top = bottom, height = row.minor ? 9 : 26;
+    bottom += height;
+    return { ...row, top, height };
+  });
+  const height = bottom + axis;
+  const px = (share) => left + (share / 100) * (width - left - right);
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  for (const tick of [0, 25, 50, 75, 100]) {
+    chart.append(svg("line", { x1: px(tick), x2: px(tick), y1: 0, y2: bottom, style: "stroke:var(--grid)" }));
+    chart.append(svg("text", { x: px(tick), y: height - 5, "text-anchor": "middle" }, `${tick}%`));
+  }
+  for (const row of placed) {
+    chart.append(svg("text", { x: left - 8, y: row.top + row.height / 2 + 4, "text-anchor": "end", class: row.minor ? "" : "label" }, row.label));
+    const lines = classes.map((c, k) => `${c.name}: ${count(row.perClass[k])} (${number((100 * row.perClass[k]) / row.total)}%)`).join("\n");
+    const text = `${row.label}, ${count(row.total)} episodes\n${lines}`;
+    let from = 0;
+    classes.forEach((c, k) => {
+      const share = (100 * row.perClass[k]) / row.total;
+      if (share <= 0) return;
+      const x1 = px(from), x2 = px(from + share);
+      chart.append(svg("rect", { x: x1, y: row.top, width: x2 - x1, height: row.height, style: `fill:${c.color}` }, hoverText(text)));
+      if (!row.minor && x2 - x1 >= 30) {
+        chart.append(svg("text", { x: (x1 + x2) / 2, y: row.top + row.height / 2 + 4, "text-anchor": "middle", "pointer-events": "none",
+          style: `fill:${isDark(c.color) ? "#ffffff" : "#0b0b0b"}` }, `${Math.round(share)}%`));
+      }
+      from += share;
+    });
+  }
+  return chart;
+}
+
+// Values that add up, one horizontal bar per row: positive parts to the right
+// of zero and negative ones to the left, with their sum as a mark across the
+// bar and a number. Each row is { label, values }, one value per part.
+function termRows(rows, parts, width, unit) {
+  const left = 108, right = 70, rowHeight = 24, gap = 14, axis = 20;
+  const placed = rows.map((row, index) => {
+    let above = 0, below = 0;
+    const layers = row.values.map((value) => {
+      if (value >= 0) { above += value; return [above - value, above]; }
+      below += value; return [below, below - value];
+    });
+    return { ...row, layers, above, below, total: row.values.reduce((a, b) => a + b, 0), top: 4 + index * (rowHeight + gap) };
+  });
+  const ticks = niceTicks(Math.min(0, ...placed.map((row) => row.below)), Math.max(0, ...placed.map((row) => row.above)), 4);
+  const low = ticks[0], high = ticks[ticks.length - 1];
+  const px = (value) => left + ((value - low) / (high - low || 1)) * (width - left - right);
+  const bottom = placed[placed.length - 1].top + rowHeight + 4, height = bottom + axis;
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  for (const tick of ticks) {
+    chart.append(svg("line", { x1: px(tick), x2: px(tick), y1: 0, y2: bottom, style: `stroke:var(${tick === 0 ? "--axis" : "--grid"})` }));
+    chart.append(svg("text", { x: px(tick), y: height - 5, "text-anchor": "middle" }, withUnit(tick, unit === "%" ? unit : "")));
+  }
+  for (const row of placed) {
+    const text = `${row.label}\nsum: ${withUnit(row.total, unit)}\n${parts.map((part, k) => `${part.name}: ${withUnit(row.values[k], unit)}`).join("\n")}`;
+    chart.append(svg("text", { x: left - 8, y: row.top + rowHeight / 2 + 4, "text-anchor": "end", class: "label" }, row.label));
+    row.layers.forEach(([from, to], k) => {
+      if (to > from) chart.append(svg("rect", { x: px(from), y: row.top, width: Math.max(0.5, px(to) - px(from)), height: rowHeight,
+        style: `fill:${parts[k].color};opacity:0.85` }, hoverText(text)));
+    });
+    chart.append(svg("line", { x1: px(row.total), x2: px(row.total), y1: row.top - 3, y2: row.top + rowHeight + 3,
+      style: "stroke:var(--ink);stroke-width:2.5" }, hoverText(text)));
+    chart.append(svg("text", { x: Math.max(px(row.above), px(row.total)) + 7, y: row.top + rowHeight / 2 + 4, class: "label" }, withUnit(row.total, unit)));
+  }
+  return chart;
+}
+
 // Counts per category as horizontal bars, one row per label and one bar per
-// series; the last series' count is written at the end of its bar.
-function horizontalBars(labels, series, width) {
-  const rowHeight = series.length > 1 ? 26 : 22, left = 104, right = 44, top = 4;
+// series; the count of the series at index `numbered` is written at the right,
+// in its colour.
+function horizontalBars(labels, series, width, numbered = series.length - 1) {
+  const rowHeight = series.length === 1 ? 22 : 14 + 6 * series.length, left = 104, right = 44, top = 4;
   const height = top + labels.length * rowHeight + 4;
   const high = Math.max(1, ...series.flatMap((s) => s.values));
   const px = (v) => left + (v / high) * (width - left - right);
@@ -1150,29 +1281,36 @@ function horizontalBars(labels, series, width) {
       chart.append(svg("rect", { x: left, y: y + 1 + k * barHeight, width: Math.max(1.5, px(value) - left), height: barHeight - 1, rx: 2, style: `fill:${s.color}` },
         hoverText(`${s.name} · ${label}: ${count(value)} of ${count(s.total)} episodes (${number((100 * value) / s.total)}%)`)));
     });
-    const lastSeries = series[series.length - 1];
-    const value = lastSeries.values[row];
-    chart.append(svg("text", { x: px(value || 0) + 5, y: y + 1 + (series.length - 0.5) * barHeight + 4, class: "label" }, count(value || 0)));
+    chart.append(svg("text", { x: width - 2, y: y + rowHeight / 2 + 2, "text-anchor": "end",
+      style: `fill:${series[numbered].color};font-weight:600` }, count(series[numbered].values[row] || 0)));
   });
   chart.append(svg("line", { x1: left, x2: left, y1: top, y2: height - 4, style: "stroke:var(--axis)" }));
   return chart;
 }
 
-// A number with its value in the first episode length of windows, and an arrow
-// coloured by whether it changed for the better.
-function statTile({ title, about, keys, unit, latest, first, better, note, small = false, width = "" }) {
+// A number, with notes on it and the values it is compared with: its value in
+// the first episode length of training, or each baseline's in an evaluation,
+// which "versus" sets apart below the notes. Each comparison has an arrow
+// pointing up where the number is higher, blue when that is better and orange
+// when it is worse.
+function statTile({ title, about, keys, unit, value, comparisons = [], versus = false, better, notes = [], small = false, width = "" }) {
   const [heading, popover] = cardTitle(title, about, keys);
-  const compare = first !== undefined && first !== null && latest !== null;
-  let change = null;
-  if (compare && better && Math.abs(latest - first) > 1e-9 * Math.max(1, Math.abs(first))) {
-    const improved = (latest > first) === (better === "higher");
-    change = html("span", { class: `change ${improved ? "better" : "worse"}` }, latest > first ? "▲ " : "▼ ");
-  }
+  const lines = comparisons.map((other) => {
+    let arrow = null;
+    if (better && value !== null && other.value !== null && Math.abs(value - other.value) > 1e-9 * Math.max(1, Math.abs(other.value))) {
+      const improved = (value > other.value) === (better === "higher");
+      arrow = html("span", { class: `change ${improved ? "better" : "worse"}` }, value > other.value ? "▲ " : "▼ ");
+    }
+    return html("div", { class: "from" }, arrow, `${other.name}: ${withUnit(other.value, unit)}`);
+  });
+  const noteLines = notes.filter(Boolean).map((note) => html("div", { class: "from" }, note));
+  // Percent and degree signs stay with the number; other units are smaller.
+  const inline = !unit || unit === "%" || unit === "°" || value === null;
   return html("div", { class: `card tile${small ? " small" : ""} ${width}`.trim() },
     html("div", { class: "label" }, heading.firstChild), popover,
-    html("div", { class: "value" }, withUnit(latest, unit)),
-    compare ? html("div", { class: "from" }, change, `first: ${withUnit(first, unit)}`) : null,
-    note ? html("div", { class: "from" }, note) : null);
+    html("div", { class: "value" }, inline ? withUnit(value, unit) : number(value), inline ? null : html("span", { class: "unit" }, unit)),
+    ...(versus ? noteLines : lines),
+    ...(versus ? (lines.length ? [html("div", { class: "versus" }, ...lines)] : []) : noteLines));
 }
 
 // The ending classes, each with the histogram bins it holds and its colour.
@@ -1186,31 +1324,53 @@ function endingClasses(settings, edges) {
   return classes.filter((c) => c.bins.length);
 }
 
-// The actors compared on one value: one horizontal bar each, from zero, with
-// the seeds' range as a thin line.
-function actorBars(actors, size, width = 420) {
-  const rowHeight = size === "small" ? 26 : 34, left = 92, right = 58, top = 4;
-  const height = top + actors.length * rowHeight + 4;
-  const values = actors.flatMap((a) => [a.value, a.low, a.high]).filter((v) => v !== null);
-  if (!values.length) return empty("No values");
-  const low = Math.min(0, ...values), high = Math.max(0, ...values);
-  const px = (v) => left + ((v - low) / (high - low || 1)) * (width - left - right);
-  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
-  chart.append(svg("line", { x1: px(0), x2: px(0), y1: top, y2: height - 2, style: "stroke:var(--axis)" }));
-  actors.forEach((actor, i) => {
-    const y = top + i * rowHeight, barHeight = rowHeight - 12;
-    chart.append(svg("text", { x: left - 8, y: y + barHeight / 2 + 4, "text-anchor": "end", class: "label" }, actor.name));
-    if (actor.value === null) return;
-    const from = Math.min(px(0), px(actor.value)), length = Math.max(Math.abs(px(actor.value) - px(0)), 1.5);
-    chart.append(svg("rect", { x: from, y, width: length, height: barHeight, rx: 3, style: `fill:${actor.color}` },
-      hoverText(`${actor.name}: ${withUnit(actor.value, actor.unit)} (seeds ${withUnit(actor.low, actor.unit)} to ${withUnit(actor.high, actor.unit)})`)));
-    if (actor.low !== null && actor.high !== actor.low) {
-      chart.append(svg("line", { x1: px(actor.low), x2: px(actor.high), y1: y + barHeight / 2, y2: y + barHeight / 2, style: "stroke:var(--ink-2);stroke-width:1.5" }));
-    }
-    const end = Math.max(px(actor.value), px(0), actor.high !== null ? px(actor.high) : 0);
-    chart.append(svg("text", { x: end + 6, y: y + barHeight / 2 + 4, class: "label" }, withUnit(actor.value, actor.unit)));
+// The ending classes of each sample: rows for shareRows or columns for shareBars.
+function endingCounts(sample, classes) {
+  const counts = sample.counts("episode_distributions.final_distance");
+  if (!counts) return null;
+  const perClass = classes.map((c) => c.bins.reduce((sum, bin) => sum + counts[bin], 0));
+  return { perClass, total: perClass.reduce((a, b) => a + b, 0) };
+}
+
+// How long the episodes that arrived took, for each group { name, color,
+// sample }: counts per length bin, the fastest at the top, from the fastest
+// arrival to the slowest. The count of the group at index `numbered` is written.
+function arrivalTimesCard(spec, groups, settings, numbered, missing) {
+  const key = "episode_distributions.length_steps";
+  const titled = { ...spec, title: "How long arrivals took", keys: [key] };
+  const edges = info(key).edges, limit = settings.environment.max_episode_steps;
+  const arrivalBins = edges.findIndex((edge) => edge >= limit);
+  const counted = groups.map((group) => ({ ...group, values: group.sample.counts(key) }));
+  if (counted.every((group) => group.values === null) || arrivalBins < 1) return card(titled, empty(missing));
+  const seconds = (edge) => number(edge * STEP_SECONDS);
+  const labels = Array.from({ length: arrivalBins }, (_, bin) => `${seconds(edges[bin])}–${seconds(Math.min(edges[bin + 1], limit))} s`);
+  const series = counted.map((group) => {
+    const values = (group.values || []).slice(0, arrivalBins);
+    return { ...group, values, total: values.reduce((a, b) => a + b, 0) };
   });
-  return chart;
+  if (series.every((s) => !s.total)) return card(titled, empty("No episode arrived"));
+  const held = labels.map((_, bin) => series.some((s) => s.values[bin] > 0));
+  const from = held.indexOf(true), to = held.lastIndexOf(true) + 1;
+  return card(titled, legend(series.map((s) => `${s.name}: ${count(s.total)} arrivals`), series.map((s) => s.color)),
+    horizontalBars(labels.slice(from, to), series.map((s) => ({ ...s, values: s.values.slice(from, to) })), CHART_WIDTH[spec.width], numbered));
+}
+
+// The body table, with a switch between views, such as the first and the last
+// episode length or the actors: each view is { name, sample }. All views share
+// each column's colours, so that switching shows the change.
+function bodyTableCard(spec, views, initial) {
+  const valuesOf = (view) => (key) => view.sample.stepMean(key);
+  const sharedScale = (column) => views.flatMap((view) => perSegment(valuesOf(view)(column.key), column.part) || []);
+  const holder = html("div", {});
+  const buttons = views.map((view) => html("button", { class: "toggle", type: "button" }, view.name));
+  const show = (which) => {
+    holder.replaceChildren(profileTable(PROFILE_COLUMNS, valuesOf(views[which]), sharedScale));
+    buttons.forEach((button, i) => button.classList.toggle("on", i === which));
+  };
+  buttons.forEach((button, i) => button.addEventListener("click", () => show(i)));
+  show(initial);
+  return card({ ...spec, title: "The body, segment by segment", about: PROFILE_ABOUT, keys: PROFILE_COLUMNS.map((column) => column.key) },
+    views.length > 1 ? html("div", { class: "toggles" }, ...buttons) : null, holder);
 }
 
 // Grouped bars: one group per label, one bar per actor.
@@ -1385,20 +1545,16 @@ function trainingReport(root) {
   }
   const firstSpan = blocks[0] || [], lastSpan = blocks[blocks.length - 1] || [];
   const blockLabel = (indices) => `cycles ${log[indices[0]].cycle}–${log[indices[indices.length - 1]].cycle}`;
-  const episodesIn = (indices) => indices.reduce((sum, index) => sum + episodeCounts[index], 0);
-  // Over a block: an episode value as its windows' means, each counted by its
-  // episodes; a step value as the mean of its windows; bin counts added up.
-  const episodeMeanOver = (indices, key) => weightedMeanOfValues(indices.map((i) => shown(log[i], key)), indices.map((i) => episodeCounts[i]));
-  const stepMeanOver = (indices, key) => meanOfValues(indices.map((i) => shown(log[i], key)));
-  const countsOver = (indices, key) => {
-    const present = indices.map((i) => raw(log[i], key)).filter((c) => c !== null);
-    return present.length ? present[0].map((_, bin) => present.reduce((sum, c) => sum + c[bin], 0)) : null;
-  };
+  // A block's windows, each counted by the episodes that ended in it.
+  const blockSample = (indices) => recordSample(indices.map((i) => log[i]), indices.map((i) => episodeCounts[i]));
+  // The first and the last block, to compare; only the last while they are one.
+  const moments = !lastSpan.length ? [] : firstSpan === lastSpan ? [["Last", lastSpan, "var(--series-1)"]]
+    : [["First", firstSpan, "var(--baseline-1)"], ["Last", lastSpan, "var(--series-1)"]];
   // Where a later training session resumed the run.
   const markers = sessions.slice(1).map((session, index) => ({ x: session.first_cycle * stepsPerCycle,
     label: `Session ${index + 2} started at cycle ${session.first_cycle} (${session.started})` }));
   const context = { x, log, series, smoothFor, markers, cycleAt, settings, sessions, span, firstSpan, lastSpan, blocks,
-    blockLabel, episodesIn, episodeMeanOver, stepMeanOver, countsOver, used, episodeCounts,
+    blockLabel, blockSample, moments, used, episodeCounts,
     hover: (c) => `cycle ${cycleAt(c)} · ${count(c)} steps` };
 
   // Header: what the run is, how far it got, and its settings.
@@ -1457,50 +1613,15 @@ function trainingReport(root) {
 // The headline numbers: each over the last episode length of windows, with its
 // value over the first.
 function trainingTiles(context) {
-  const { settings, firstSpan, lastSpan, episodeMeanOver, stepMeanOver, countsOver, episodesIn, used } = context;
-  const limitSeconds = settings.environment.max_episode_steps * STEP_SECONDS;
-  // Episodes that ran out of time last exactly the time limit, so the mean
-  // length of those that arrived follows from the mean length and the share.
-  const arrivalSeconds = (indices) => {
-    const share = episodeMeanOver(indices, "episodes.arrived"), length = episodeMeanOver(indices, "episodes.length_steps");
-    if (share === null || length === null || share <= 0) return null;
-    return (length - (1 - share / 100) * limitSeconds) / (share / 100);
-  };
-  const closerShare = (indices) => {
-    const counts = countsOver(indices, "episode_distributions.distance_closed");
-    if (!counts) return null;
-    const from = info("episode_distributions.distance_closed").edges.findIndex((edge) => edge >= 0);
-    const total = counts.reduce((a, b) => a + b, 0);
-    return total ? (100 * counts.slice(from).reduce((a, b) => a + b, 0)) / total : null;
-  };
-  const tiles = [
-    { title: "Arrived", unit: "%", better: "higher", keys: ["episodes.arrived"],
-      about: "The share of episodes in which the head reached its target rather than running out of time: the task's measure of success.",
-      value: (b) => episodeMeanOver(b, "episodes.arrived"),
-      note: (b) => {
-        const share = episodeMeanOver(b, "episodes.arrived");
-        return share === null ? "" : `${count(Math.round((episodesIn(b) * share) / 100))} of ${count(episodesIn(b))} episodes`;
-      } },
-    { title: "Time to arrive", unit: "s", better: "lower", keys: ["episodes.length_steps", "episodes.arrived"],
-      about: `How long the episodes that arrived took, on average, in seconds of simulated time. Every episode that runs out of time lasts exactly the time limit (${withUnit(limitSeconds, "s")}), so this follows exactly from the mean episode length and the arrival share.`,
-      value: arrivalSeconds, note: (b) => (arrivalSeconds(b) === null ? "no arrivals" : `time limit ${withUnit(limitSeconds, "s")}`) },
-    { title: "Ended closer than they started", unit: "%", better: "higher", keys: ["episode_distributions.distance_closed"],
-      about: "The share of episodes whose head ended closer to its target than it started, arrivals included. A centipede that wanders far away counts once, as one that did not get closer, instead of pulling a mean distance up.",
-      value: closerShare, note: () => "arrivals included" },
-    { title: "Body on the ground", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
-      about: "The share of steps in which a segment's body touched the ground, averaged over the segments.",
-      value: (b) => overall(stepMeanOver(b, "step_facts.contact_flags"), 2), note: () => "share of steps" },
-    { title: "Legs touching", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
-      about: "The share of steps in which a segment's legs touched another leg, averaged over the segments.",
-      value: (b) => overall(stepMeanOver(b, "step_facts.contact_flags"), 3), note: () => "share of steps" },
-    { title: "Speed toward goal", unit: "mm/s", better: "higher", keys: ["step_facts.segment_progress"],
-      about: "How fast the segments move toward their goals, averaged over the segments: the head toward its target, every other segment toward the spot where the segment ahead of it was. It rises when the centipede walks forward, even before it steers.",
-      value: (b) => overall(stepMeanOver(b, "step_facts.segment_progress")), note: () => "mean over segments" },
-  ];
-  tiles.forEach((tile) => tile.keys.forEach((key) => used.add(key)));
-  const compare = firstSpan.length && firstSpan !== lastSpan;
-  return html("div", { class: "tiles", style: `--tile-count:${tiles.length}` }, ...tiles.map((tile) => statTile({ ...tile,
-    latest: lastSpan.length ? tile.value(lastSpan) : null, first: compare ? tile.value(firstSpan) : undefined, note: lastSpan.length ? tile.note(lastSpan) : "" })));
+  const { settings, firstSpan, lastSpan, blockSample, used } = context;
+  RESULT_TILES.forEach((tile) => tile.keys.forEach((key) => used.add(key)));
+  const last = lastSpan.length ? blockSample(lastSpan) : null;
+  const first = firstSpan.length && firstSpan !== lastSpan ? blockSample(firstSpan) : null;
+  return html("div", { class: "tiles", style: `--tile-count:${RESULT_TILES.length}` }, ...RESULT_TILES.map((tile) => statTile({
+    title: tile.title, about: tile.about(settings), keys: tile.keys, unit: tile.unit, better: tile.better,
+    value: last ? tile.value(last, settings) : null,
+    comparisons: first ? [{ name: "first", value: tile.value(first, settings) }] : [],
+    notes: last ? [tile.note(last, settings)] : [] })));
 }
 
 function trainingCard(item, context) {
@@ -1576,21 +1697,18 @@ function trainingCard(item, context) {
     const spec = { ...item, title: "Where episodes ended", keys: [key],
       subtitle: `Every episode of each episode length: arrived, or how far from its target it ran out of time. Targets start ${targetRange(context.settings)} away`,
       about: "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad; the grey band is about as far as targets start. A bar that fills with blue from the bottom means the centipedes get to their targets." };
-    if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run: runs from 8 October 2026 on log where each episode ended"));
+    if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run: older runs did not log where each episode ended"));
     if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
     const classes = endingClasses(context.settings, info(key).edges);
-    const columns = context.blocks.map((indices) => {
-      const counts = context.countsOver(indices, key);
-      const perClass = classes.map((c) => c.bins.reduce((sum, bin) => sum + counts[bin], 0));
-      return { label: context.blockLabel(indices), cycle: log[indices[indices.length - 1]].cycle, perClass, total: perClass.reduce((a, b) => a + b, 0) };
-    }).filter((column) => column.total > 0);
+    const columns = context.blocks.map((indices) => ({ label: context.blockLabel(indices), cycle: log[indices[indices.length - 1]].cycle,
+      ...endingCounts(context.blockSample(indices), classes) })).filter((column) => column.total > 0);
     return card(spec, legend(classes.map((c) => c.name), classes.map((c) => c.color)), shareBars(columns, classes, width));
   }
 
   if (item.kind === "ending_bins") {
     const key = "episode_distributions.final_distance";
     const spec = { ...item, title: "Where episodes ended: first and last", keys: [key],
-      subtitle: "Episodes of the first and the last episode length, by the distance at which they ended; the number is the last's count",
+      subtitle: "Episodes of the first and the last episode length, by the distance at which they ended; the blue numbers count the last",
       about: `${info(key).about} The grey bars are the first episode length of training, the blue bars the last.` };
     if (!log.some((record) => raw(record, key) !== null)) return card(spec, empty("Not logged by this run"));
     if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
@@ -1599,9 +1717,8 @@ function trainingCard(item, context) {
     const labels = edges.slice(0, -1).map((edge, bin) => (bin === 0
       ? (context.settings.environment.target.arrival_radius_m === 0.001 ? "arrived" : `under ${mm(edges[1])} mm`)
       : bin === edges.length - 2 ? `${mm(edge)} mm or more` : `${mm(edge)}–${mm(edges[bin + 1])} mm`));
-    const groups = (context.firstSpan === context.lastSpan ? [[context.lastSpan, "var(--series-1)"]]
-      : [[context.firstSpan, "var(--baseline-1)"], [context.lastSpan, "var(--series-1)"]]).map(([indices, color]) => {
-      const values = context.countsOver(indices, key);
+    const groups = context.moments.map(([, indices, color]) => {
+      const values = context.blockSample(indices).counts(key);
       return { name: context.blockLabel(indices), color, values, total: values.reduce((a, b) => a + b, 0) };
     });
     return card(spec, legend(groups.map((g) => `${g.name}: ${count(g.total)} episodes`), groups.map((g) => g.color)),
@@ -1609,57 +1726,29 @@ function trainingCard(item, context) {
   }
 
   if (item.kind === "arrival_times") {
-    const key = "episode_distributions.length_steps";
-    context.used.add(key);
-    const spec = { ...item, title: "How long arrivals took", keys: [key],
-      subtitle: "The episodes that arrived, by how long they took, fastest first; grey the first episode length, blue the last",
+    context.used.add("episode_distributions.length_steps");
+    const spec = { ...item, subtitle: "The episodes that arrived, by how long they took, fastest first; grey the first episode length, blue the last, which the numbers count",
       about: "The episodes that reached their target, counted by how long they took, in seconds of simulated time, the fastest at the top. Bars that move toward the top mean arrivals get faster. Episodes that ran out of time are left out." };
-    const edges = info(key).edges, limit = context.settings.environment.max_episode_steps;
-    const arrivalBins = edges.findIndex((edge) => edge >= limit);
-    if (!log.some((record) => raw(record, key) !== null) || arrivalBins < 1) return card(spec, empty("Not logged by this run"));
-    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
-    const seconds = (edge) => number(edge * STEP_SECONDS);
-    const labels = Array.from({ length: arrivalBins }, (_, bin) => `${seconds(edges[bin])}–${seconds(Math.min(edges[bin + 1], limit))} s`);
-    const groups = (context.firstSpan === context.lastSpan ? [[context.lastSpan, "var(--series-1)"]]
-      : [[context.firstSpan, "var(--baseline-1)"], [context.lastSpan, "var(--series-1)"]]).map(([indices, color]) => {
-      const values = context.countsOver(indices, key).slice(0, arrivalBins);
-      return { name: context.blockLabel(indices), color, values, total: values.reduce((a, b) => a + b, 0) };
-    });
-    if (groups.every((g) => !g.total)) return card(spec, empty("No episode arrived"));
-    // Only the rows from the fastest to the slowest arrival.
-    const held = labels.map((_, bin) => groups.some((g) => g.values[bin] > 0));
-    const from = held.indexOf(true), to = held.lastIndexOf(true) + 1;
-    return card(spec, legend(groups.map((g) => `${g.name}: ${count(g.total)} arrivals`), groups.map((g) => g.color)),
-      horizontalBars(labels.slice(from, to), groups.map((g) => ({ ...g, values: g.values.slice(from, to) })), width));
+    if (!context.blocks.length) return card({ ...spec, title: "How long arrivals took" }, empty(`Needs one full episode length of windows (${context.span})`));
+    const groups = context.moments.map(([, indices, color]) => ({ name: context.blockLabel(indices), color, sample: context.blockSample(indices) }));
+    return arrivalTimesCard(spec, groups, context.settings, groups.length - 1, "Not logged by this run");
   }
 
   if (item.kind === "body_table") {
     PROFILE_COLUMNS.forEach((column) => series(column.key));
-    const spec = { ...item, title: "The body, segment by segment", about: PROFILE_ABOUT, keys: PROFILE_COLUMNS.map((column) => column.key),
-      subtitle: "Average over one episode length of windows, one row per segment; both views share their colours, so switching shows the change" };
-    if (!context.blocks.length) return card(spec, empty(`Needs one full episode length of windows (${context.span})`));
-    const moments = context.firstSpan === context.lastSpan ? [["Last", context.lastSpan]]
-      : [["First", context.firstSpan], ["Last", context.lastSpan]];
-    const valuesOver = (indices) => (key) => context.stepMeanOver(indices, key);
-    const sharedScale = (column) => moments.flatMap(([, indices]) => perSegment(valuesOver(indices)(column.key), column.part) || []);
-    const holder = html("div", {});
-    const buttons = moments.map(([name, indices]) => html("button", { class: "toggle", type: "button" }, `${name} episode length · ${context.blockLabel(indices)}`));
-    const show = (which) => {
-      holder.replaceChildren(profileTable(PROFILE_COLUMNS, valuesOver(moments[which][1]), sharedScale));
-      buttons.forEach((button, i) => button.classList.toggle("on", i === which));
-    };
-    buttons.forEach((button, i) => button.addEventListener("click", () => show(i)));
-    show(moments.length - 1);
-    return card(spec, moments.length > 1 ? html("div", { class: "toggles" }, ...buttons) : null, holder);
+    const spec = { ...item, subtitle: "Average over one episode length of windows, one row per segment; both views share their colours, so switching shows the change" };
+    if (!context.blocks.length) return card({ ...spec, title: "The body, segment by segment" }, empty(`Needs one full episode length of windows (${context.span})`));
+    const views = context.moments.map(([name, indices]) => ({ name: `${name} episode length · ${context.blockLabel(indices)}`, sample: context.blockSample(indices) }));
+    return bodyTableCard(spec, views, views.length - 1);
   }
 
   if (item.kind === "stat") {
     series(item.key);
-    const over = item.key.startsWith("episodes.") ? context.episodeMeanOver : context.stepMeanOver;
-    const at = (indices) => (indices.length ? overall(over(indices, item.key), item.part) : null);
+    const at = (indices) => (indices.length ? sampleValue(context.blockSample(indices), item.key, item.part) : null);
     const compare = context.firstSpan.length && context.firstSpan !== context.lastSpan;
     return statTile({ title: item.title || metric.label, about: item.about || metric.about, keys: [item.key], unit: metric.unit,
-      latest: at(context.lastSpan), first: compare ? at(context.firstSpan) : undefined, better: item.better, note: item.note, small: true, width: item.width });
+      value: at(context.lastSpan), comparisons: compare ? [{ name: "first", value: at(context.firstSpan) }] : [],
+      better: item.better, notes: [item.note], small: true, width: item.width });
   }
 
   if (item.kind === "run_stats") {
@@ -1682,7 +1771,7 @@ function trainingCard(item, context) {
         about: "Every episode that ended during training, by arriving or by running out of time." },
     ];
     return html("div", { class: `tiles in-row ${item.width}`, style: `--tile-count:${stats.length}` }, ...stats.map((stat) => {
-      const tile = statTile({ ...stat, keys: [], latest: stat.value ?? null, small: true });
+      const tile = statTile({ ...stat, keys: [], value: stat.value ?? null, notes: [stat.note], small: true });
       if (stat.text) tile.querySelector(".value").textContent = stat.text;
       return tile;
     }));
@@ -1777,29 +1866,42 @@ function evaluationReport(root) {
   const actors = Object.keys(data.results);
   const facts = data.run_facts;
   const settings = data.settings;
+  const seedCount = facts.seeds.length;
   root.append(html("h1", {}, data.title), html("p", { class: "status" },
-    `Evaluation of cycle ${facts.cycles_trained} · ${facts.seeds.length} seeds × ${count(facts.episodes_per_seed)} episodes · ` +
+    `Evaluation of cycle ${facts.cycles_trained} · ${seedCount} seed${seedCount === 1 ? "" : "s"} × ${count(facts.episodes_per_seed)} episodes · ` +
     (actors.length > 1 ? `compared with ${actors.slice(1).join(" and ")}` : "no baselines")));
   const changes = Object.keys(facts.changed_from_training || {}).map((key) => `environment.${key}`);
   root.append(...settingChips(settings, new Set(changes), "Highlighted: changed for this evaluation; the others are as in training."));
 
-  // Per actor and value: the mean over seeds and the seeds' range.
+  // Each actor's seeds, together and one by one. Every seed holds one episode
+  // per world, each world's first.
+  const seedSample = (record) => recordSample([record], [facts.episodes_per_seed]);
+  const samples = actors.map((actor) => recordSample(data.results[actor], data.results[actor].map(() => facts.episodes_per_seed)));
+  const seedSamples = actors.map((actor) => data.results[actor].map(seedSample));
+  // Per actor and value, for the details: the mean over seeds and the seeds' range.
   const perSeed = (actor, key) => data.results[actor].map((record) => shown(record, key));
   const summary = (actor, key, reduce = (v) => v) => {
     const values = perSeed(actor, key).map((v) => (v === null ? null : reduce(v))).filter((v) => v !== null);
     return { value: mean(values), low: values.length ? Math.min(...values) : null, high: values.length ? Math.max(...values) : null };
   };
   const actorColors = actors.map((_, i) => ACTOR_COLORS[i] || SERIES[i]);
-  const context = { actors, perSeed, summary, actorColors, settings };
+  const context = { actors, samples, seedSamples, perSeed, summary, actorColors, settings, facts };
 
-  EVALUATION_LAYOUT.forEach((spec, index) => {
-    root.append(section(index + 1, spec, ...spec.rows.map((row) => {
-      if (row[0] === "tiles") return html("div", { class: "tiles" }, ...EVALUATION_TILES.map((key) => evaluationTile(key, context)));
-      return html("div", { class: "row" }, ...row.map((item) => evaluationCard(item, context)));
-    })));
+  EVALUATION_LAYOUT.forEach((layout, index) => {
+    const spec = layout.tiles ? { ...layout, intro: EVALUATION_INTRO(actors.length > 1, seedCount) } : layout;
+    const content = spec.tiles ? [html("div", { class: "tiles", style: `--tile-count:${RESULT_TILES.length}` },
+      ...RESULT_TILES.map((tile) => evaluationStat(tile, context)))] : [];
+    for (const row of spec.rows) content.push(html("div", { class: "row" }, ...row.map((item) => evaluationCard(item, context))));
+    root.append(section(index + 1, spec, ...content));
   });
 
-  // Details: every value per actor, the body's exact values, the evaluation's facts, and the settings.
+  // Details: the episodes in bins, each segment's return, every value per
+  // actor, the evaluation's facts, and the settings.
+  const details = [];
+  for (const group of EVALUATION_DETAILS) {
+    details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);
+    details.push(html("div", { class: "row" }, ...group.cards.map((item) => evaluationCard(item, context))));
+  }
   const rows = [];
   const keys = [...Object.keys(DESCRIPTIONS), "report.reward_per_step", "report.mean_return"];
   for (const key of keys) {
@@ -1816,100 +1918,106 @@ function evaluationReport(root) {
       })]);
     });
   }
-  // The body tables share each column's colours, so that actors can be compared.
-  const bodyValues = (actor, key) => meanOfValues(perSeed(actor, key));
-  const sharedScale = (column) => actors.flatMap((actor) => perSegment(bodyValues(actor, column.key), column.part) || []);
-  root.append(detailsBlock(
-    html("h3", { class: "group" }, "Every value"),
+  details.push(html("h3", { class: "group" }, "Every value"),
     html("p", { class: "note" }, "Mean over seeds, with the lowest to highest seed below; per-segment values are averaged over the segments."),
     table(["Value", "Unit", ...actors], rows, 2),
-    html("h3", { class: "group" }, "The body, segment by segment"),
-    html("div", { class: "row" }, ...actors.map((actor) => card(
-      { width: actors.length >= 2 ? "w6" : "w12", size: "small", title: `The body: ${actor}`, subtitle: "Average over the seeds, per segment; colours compare across actors",
-        about: PROFILE_ABOUT },
-      profileTable(PROFILE_COLUMNS, (key) => bodyValues(actor, key), sharedScale)))),
     html("h3", { class: "group" }, "Evaluation"), factsTable(facts),
-    html("h3", { class: "group" }, "Settings"), settingsTable(settings, new Set(changes))));
+    html("h3", { class: "group" }, "Settings"), settingsTable(settings, new Set(changes)));
+  root.append(detailsBlock(...details));
 }
 
-// A headline value: the agents' mean over seeds and the seeds' range, with the
-// baselines, when listed, as smaller lines and bars below.
-function evaluationTile(key, context) {
-  const { actors, summary, actorColors } = context;
-  const metric = info(key);
-  const results = actors.map((actor, i) => ({ name: actor, color: actorColors[i], unit: metric.unit, ...summary(actor, key) }));
-  const [title, popover] = cardTitle(metric.label, metric.about, [key]);
-  const agents = results[0];
-  return html("div", { class: "card tile" },
-    html("div", { class: "label" }, title.firstChild), popover,
-    html("div", { class: "value" }, withUnit(agents.value, metric.unit)),
-    html("div", { class: "from" }, agents.low === agents.high ? "same on every seed" : `seeds ${withUnit(agents.low, metric.unit)} to ${withUnit(agents.high, metric.unit)}`),
-    results.length > 1 ? actorBars(results, "small", 270) : null);
+// A number of an evaluation: the agents' over every seed, with the seeds'
+// range, and each baseline's below it. "tile" is as in RESULT_TILES.
+function evaluationStat(tile, context, { small = false, width = "" } = {}) {
+  const { actors, samples, seedSamples, settings } = context;
+  const valueOf = (sample) => tile.value(sample, settings);
+  const seeds = seedSamples[0].map(valueOf).filter((value) => value !== null);
+  let spread = null;
+  if (seeds.length > 1) {
+    const [low, high] = [Math.min(...seeds), Math.max(...seeds)].map((value) => withUnit(value, tile.unit));
+    spread = low === high ? "the same on every seed" : `seeds ${low} to ${high}`;
+  }
+  return statTile({ title: tile.title, about: tile.about(settings), keys: tile.keys, unit: tile.unit, better: tile.better,
+    value: valueOf(samples[0]), notes: [tile.note(samples[0], settings), spread],
+    comparisons: actors.slice(1).map((name, i) => ({ name, value: valueOf(samples[i + 1]) })), versus: true, small, width });
 }
 
 function evaluationCard(item, context) {
-  const { actors, perSeed, summary, actorColors } = context;
+  const { actors, samples, seedSamples, perSeed, summary, actorColors, settings } = context;
   if (item.kind === "column") return html("div", { class: item.width, style: "display:grid;gap:14px;align-content:start" },
     ...item.cards.map((inner) => evaluationCard({ ...inner, chartWidth: CHART_WIDTH[item.width] }, context)));
   const width = item.chartWidth || CHART_WIDTH[item.width] || 420;
   const metric = item.key ? info(item.key) : null;
+  const several = actors.length > 1;
+
+  if (item.kind === "stat") {
+    return evaluationStat({ title: item.title || metric.label, about: () => item.about || metric.about, keys: [item.key], unit: metric.unit,
+      better: item.better, value: (sample) => sampleValue(sample, item.key, item.part), note: () => item.note }, context, { small: true, width: item.width });
+  }
+
+  if (item.kind === "endings") {
+    const key = "episode_distributions.final_distance";
+    const spec = { ...item, title: "Where episodes ended", keys: [key],
+      subtitle: `${several ? "Each actor's" : "The agents'"} episodes: arrived, or how far from its target the head ran out of time. Targets start ${targetRange(settings)} away`,
+      about: "One bar per actor, holding its episodes of every seed: the share that arrived (left), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad, and grey about as far as the targets of training start." +
+        (context.facts.seeds.length > 1 ? " The thin bars under it are the seeds one by one: alike, they show that the result holds on every seed." : "") };
+    if (samples.every((sample) => sample.counts(key) === null)) return card(spec, empty("Not recorded by this evaluation: older evaluations did not record where each episode ended"));
+    const classes = endingClasses(settings, info(key).edges);
+    const rows = actors.flatMap((actor, i) => [{ label: actor, ...endingCounts(samples[i], classes) },
+      ...(seedSamples[i].length > 1 ? seedSamples[i].map((sample, k) => ({ label: `seed ${data.results[actor][k].seed}`, minor: true, ...endingCounts(sample, classes) })) : [])])
+      .filter((row) => row.total > 0);
+    return card(spec, legend(classes.map((c) => c.name), classes.map((c) => c.color)), shareRows(rows, classes, width));
+  }
+
+  if (item.kind === "arrival_times") {
+    const spec = { ...item, subtitle: `The episodes that arrived, by how long they took, fastest first; the blue numbers count the agents'`,
+      about: "The episodes that reached their target, counted by how long they took, in seconds of simulated time, the fastest at the top, every seed together. Episodes that ran out of time are left out." };
+    const groups = actors.map((name, i) => ({ name, color: actorColors[i], sample: samples[i] }));
+    return arrivalTimesCard(spec, groups, settings, 0, "Not recorded by this evaluation");
+  }
+
+  if (item.kind === "reward_terms") {
+    const key = "step_facts.reward_parts", parts = info(key).parts;
+    const spec = { ...item, key, title: "Where the reward comes from",
+      subtitle: "Reward per step by term, mean over segments, steps, and seeds; the mark across each bar is their sum",
+      about: "The average reward per step, split into its four terms and averaged over the segments, the steps, and the seeds: arrival, the only positive term, to the right of zero; the three costs (efficiency, body contact, leg contact) to the left. The mark across each bar and the number are their sum, the reward per step. Next to the baselines, it shows which terms make the difference." };
+    const rows = actors.map((label, i) => {
+      const values = samples[i].stepMean(key);
+      return { label, values: values === null ? null : parts.map((_, part) => overall(values, part)) };
+    }).filter((row) => row.values !== null);
+    if (!rows.length) return card(spec, empty());
+    const colors = parts.map((_, part) => PART_COLORS[part % PART_COLORS.length]);
+    return card(spec, legend([...parts, "sum"], [...colors, "var(--ink)"]),
+      termRows(rows, parts.map((name, part) => ({ name, color: colors[part] })), width, info(key).unit));
+  }
+
+  if (item.kind === "body_table") {
+    const spec = { ...item, subtitle: `Average over the steps of every seed, one row per segment${several ? "; the actors share each column's colours, so switching compares them" : ""}` };
+    return bodyTableCard(spec, actors.map((name, i) => ({ name, sample: samples[i] })), 0);
+  }
 
   if (item.kind === "histogram") {
     const label = binLabeller(item.key);
-    // Each actor's episodes of every seed, counted together.
-    const summed = actors.map((actor) => {
-      const counts = data.results[actor].map((record) => raw(record, item.key)).filter((c) => c !== null);
-      return counts.length ? counts[0].map((_, bin) => counts.reduce((sum, c) => sum + c[bin], 0)) : null;
-    });
+    const summed = samples.map((sample) => sample.counts(item.key));
     if (summed.every((c) => c === null)) return card({ ...item, subtitle: "" }, empty("Not recorded by this evaluation"));
     const shown = actors.map((name, i) => {
       const counts = summed[i] || [], total = counts.reduce((a, b) => a + b, 0);
       return { name, color: actorColors[i], counts, total, shares: counts.map((n) => (total ? (100 * n) / total : 0)) };
     });
-    const markEdge = item.key.endsWith("length_steps") ? { edge: context.settings.environment.max_episode_steps, label: "time limit" } : null;
+    const markEdge = item.key.endsWith("length_steps") ? { edge: settings.environment.max_episode_steps, label: "time limit" } : null;
     return card({ ...item, subtitle: "Share of each actor's episodes in each bin" },
-      actors.length > 1 ? legend(actors, actorColors) : null,
+      several ? legend(actors, actorColors) : null,
       histogramChart(metric.edges, shown, { width, label, markEdge }));
   }
 
   if (item.kind === "segments") {
-    // Grouped bars: by segment, or by part averaged over the segments.
+    // Grouped bars: one group per segment, one bar per actor.
     const sample = sampleOf(actors.flatMap((actor) => perSeed(actor, item.key)));
     if (sample === undefined) return card(item, empty());
-    const labels = item.byPart ? metric.parts : sample.map((_, s) => (s === 0 ? "0 head" : String(s)));
-    const values = (actor) => labels.map((_, i) => {
-      const pick = item.byPart ? (v) => mean(perSegment(v, i)) : (v) => v[i];
-      return summary(actor, item.key, pick).value;
-    });
-    return card(item, actors.length > 1 ? legend(actors, actorColors) : null,
+    const labels = sample.map((_, s) => (s === 0 ? "0 head" : String(s)));
+    const values = (actor) => labels.map((_, i) => summary(actor, item.key, (v) => v[i]).value);
+    return card(item, several ? legend(actors, actorColors) : null,
       groupedBars(labels, actors.map((actor, i) => ({ name: actor, color: actorColors[i], values: values(actor) })), metric.unit, width));
-  }
-
-  if (item.kind === "body") {
-    const lines = actors.map((actor, i) => ({ name: actor, color: actorColors[i], dashed: i === 2, values: perSegment(meanOfValues(perSeed(actor, item.key)), item.part) }))
-      .filter((line) => line.values !== null);
-    if (!lines.length) return card(item, empty());
-    return card({ ...item, about: `${metric.about} One line per actor along the body, head on the left, averaged over the seeds.` },
-      lines.length > 1 ? legend(lines.map((l) => l.name), lines.map((l) => l.color), true) : null,
-      alongBody(lines, metric, width));
-  }
-
-  if (item.kind === "useful") {
-    const lines = actors.map((actor, i) => ({ name: actor, color: actorColors[i], dashed: i === 2,
-      values: usefulShare(meanOfValues(perSeed(actor, "step_facts.segment_moved")), meanOfValues(perSeed(actor, "step_facts.segment_progress"))) }))
-      .filter((line) => line.values !== null);
-    return card({ ...USEFUL_CARD, size: item.size, width: item.width, about: `${USEFUL_ABOUT} One line per actor, averaged over the seeds.` },
-      lines.length > 1 ? legend(lines.map((l) => l.name), lines.map((l) => l.color), true) : null,
-      lines.length ? alongBody(lines, { unit: "%" }, width) : empty());
-  }
-
-  if (item.kind === "value") {
-    // One number per actor: bars when there is something to compare, the number alone otherwise.
-    const results = actors.map((actor, i) => ({ name: actor, color: actorColors[i], unit: metric.unit, ...summary(actor, item.key) }));
-    if (results.length > 1) return card(item, actorBars(results, "small", width));
-    const [only] = results;
-    return card(item, html("div", { class: "tile" }, html("div", { class: "value" }, withUnit(only.value, metric.unit)),
-      html("div", { class: "from" }, only.low === only.high ? "same on every seed" : `seeds ${withUnit(only.low, metric.unit)} to ${withUnit(only.high, metric.unit)}`)));
   }
   return empty(`Unknown card kind ${item.kind}`);
 }
