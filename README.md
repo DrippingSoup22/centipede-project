@@ -64,6 +64,7 @@ Centipede/
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
+├─ results/          The report's data: small files of the runs it uses, by study
 ├─ scripts/          Controlling the GPU desktop and Kaggle from the laptop
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
@@ -73,7 +74,9 @@ Centipede/
 
 `runs/`, `benchmarks/results/`, and `archive/` stay on this computer and are not
 part of the repository.
-Back up results that must survive separately.
+Back up results that must survive separately. The runs the report uses are
+kept in `results/`, which is part of the repository, without their recordings
+and checkpoints; [`results/README.md`](results/README.md) explains its layout.
 
 ## Setup
 
@@ -205,7 +208,7 @@ command-line tool, installed in the project's environment and signed in once
 Then, from the repository root with the project's Python:
 
 ```powershell
-python scripts/kaggle_gpu.py run configs/spine_movement/02_movement_1.toml
+python scripts/kaggle_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
 python scripts/kaggle_gpu.py watch
 python scripts/kaggle_gpu.py status
 python scripts/kaggle_gpu.py fetch
@@ -214,11 +217,14 @@ python scripts/kaggle_gpu.py fetch
 `run` checks that the code is pushed, since the session clones it at the
 laptop's commit, uploads the run that the file starts from as a private
 dataset the first time, and sends the configuration file as it is on the
-laptop, with the `evaluation.toml` beside it. The session,
+laptop, with the `evaluation.toml` beside it. With `--seeds`, the session
+trains the file once per seed at the same time, one run on each of the
+machine's two T4s, named with `_seed<N>`. The session,
 [`scripts/kaggle_session.py`](scripts/kaggle_session.py), runs the tests
-(`--skip-tests` leaves them out), trains, and evaluates the new run. `run`
-shows its output as Kaggle streams it, one line per window, and when it ends
-copies the run folder into `runs/` and the console output of every step into
+(`--skip-tests` leaves them out), trains, and evaluates each new run. `run`
+shows its output as Kaggle streams it, one line per window, marked with its
+seed, and when it ends copies the run folders into `runs/` and the console
+output of every step into
 `runs/kaggle/<launch>/`, so Kaggle's web page is not needed. Ctrl+C stops
 watching, not the session; `watch` follows it again, `status` tells whether it
 is queued, running, or ended, and `fetch` copies its results at any time,

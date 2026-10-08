@@ -1,0 +1,13 @@
+# Evaluation after each run of this queue: the queue replaces source with the
+# run's folder. One seed of 32 worlds, each world's first episode, up to the
+# run's episode length; the agents act with their policy's mean action, which
+# so far barely walks, so expect few arrivals here even when training reaches
+# its targets.
+
+[run]
+mode = "evaluate"
+source = "runs/2026-10-08_1603_far_01_stand_far_256"
+
+[evaluation]
+seeds = [101]
+episodes_per_seed = 32

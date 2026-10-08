@@ -1,13 +1,15 @@
 """Train on Kaggle's GPUs from the laptop, while the GPU desktop cannot be reached.
 
-Each launch is one training run and its evaluation, in one session of the
-private Kaggle notebook ``<user>/centipede-training``: a script that runs on
-a T4 in the background, for up to 12 hours, whether or not the laptop is on.
-This script, run on the laptop from the repository root with the project's
-Python, controls it through Kaggle's command-line tool, installed in the
-project's environment and signed in once with ``kaggle auth login``:
+Each launch is one session of the private Kaggle notebook
+``<user>/centipede-training``: a script that runs on a machine with two T4s
+in the background, for up to 12 hours, whether or not the laptop is on, and
+trains one configuration file, or the same file with two seeds at once, one
+per GPU, each run followed by its evaluation. This script, run on the laptop
+from the repository root with the project's Python, controls it through
+Kaggle's command-line tool, installed in the project's environment and
+signed in once with ``kaggle auth login``:
 
-    python scripts/kaggle_gpu.py run configs/spine_movement/02_movement_1.toml
+    python scripts/kaggle_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
     python scripts/kaggle_gpu.py watch    # follow the session, then fetch
     python scripts/kaggle_gpu.py status   # queued, running, complete, or error
     python scripts/kaggle_gpu.py fetch    # copy its results here once it ends
@@ -17,14 +19,16 @@ since Kaggle clones it from there at the laptop's commit. If the file starts
 from another run, that run (its configuration and checkpoints) is uploaded
 once as a private Kaggle dataset. ``run`` then pushes ``kaggle_session.py``,
 filled in with the configuration file as it is on the laptop and with the
-``evaluation.toml`` beside it, if there is one, which evaluates the new run.
-The session first runs the tests, and trains only if they pass;
-``--skip-tests`` leaves them out.
+``evaluation.toml`` beside it, if there is one, which evaluates each new run.
+With ``--seeds``, each run gets one of the seeds and the file's name with
+``_seed<N>`` added. The session first runs the tests, and trains only if
+they pass; ``--skip-tests`` leaves them out.
 
 ``run`` then watches, like ``watch``: it shows the session's output as
-Kaggle streams it, one line per window once the window is done, and when the
-session ends copies its output into the laptop's ``runs/``: the run folder,
-as on the desktop, and ``runs/kaggle/<launch>/`` with the console output of
+Kaggle streams it, one line per window once the window is done, marked with
+its seed when there are two, and when the session ends copies its output
+into the laptop's ``runs/``: the run folders, as on the desktop, and
+``runs/kaggle/<launch>/`` with the console output of
 every step and the session's whole output. Ctrl+C stops watching, not the
 session; its output stays on Kaggle, and ``fetch`` copies it at any time,
 waiting first while it runs. Only the latest session is followed or fetched,
@@ -66,6 +70,11 @@ UNFINISHED = (*WAITING, "running", "cancel_requested")
 STATUS = re.compile(r'has status "(?:\w+\.)?(\w+)"')
 NOT_FOUND = re.compile(r"404|403|was denied")
 RUN_LINE = re.compile(r"^\[run\][ \t]*$", re.MULTILINE)
+SECTION_LINE = re.compile(r"^\[", re.MULTILINE)
+# Where a session writes its runs, so that Kaggle keeps them as its output.
+SESSION_RUNS_FOLDER = "/kaggle/working"
+# Kaggle's T4 machine has two GPUs: at most one run on each.
+GPUS = 2
 WAIT_SECONDS = 60
 DATASET_WAIT_SECONDS = 10
 DATASET_ATTEMPTS = 60
@@ -170,16 +179,26 @@ def start_run_dataset(start_from: Path, user: str) -> dict[str, str]:
     return {"folder": folder.as_posix(), "dataset": slug, "checkpoint": checkpoint.name}
 
 
-def with_session_runs_folder(text: str) -> str:
-    """The training file, its run written to the session's output folder."""
-    if "runs_folder" in tomllib.loads(text)["run"]:
-        sys.exit("A Kaggle session sets [run] runs_folder itself; leave it out.")
-    text, count = RUN_LINE.subn(
-        '[run]\nruns_folder = "/kaggle/working"  # set by kaggle_gpu.py', text, count=1
-    )
-    if not count:
+def with_run_values(text: str, values: dict[str, str | int]) -> str:
+    """The training file with these [run] values, its comments kept.
+
+    A value the file sets is replaced on its line; any other is added under
+    the [run] header.
+    """
+    header = RUN_LINE.search(text)
+    if not header:
         sys.exit("The file's [run] header must stand alone on its line.")
-    return text
+    next_header = SECTION_LINE.search(text, header.end())
+    end = next_header.start() if next_header else len(text)
+    section, added = text[header.end() : end], ""
+    for key, value in values.items():
+        line = f"{key} = {json.dumps(value)}  # set by kaggle_gpu.py"
+        section, count = re.subn(
+            rf"^{key}\s*=.*$", line, section, count=1, flags=re.MULTILINE
+        )
+        if not count:
+            added += f"\n{line}"
+    return text[: header.end()] + added + section + text[end:]
 
 
 def push(notebook: str, launch: dict, datasets: list[str]) -> None:
@@ -321,6 +340,9 @@ def run(arguments: argparse.Namespace) -> int:
         run_values = tomllib.loads(evaluation_text).get("run", {})
         if run_values.get("mode") != "evaluate" or "source" not in run_values:
             sys.exit(f'{evaluation} needs mode = "evaluate" and a source in [run].')
+    seeds = arguments.seeds or [None]
+    if len(seeds) > GPUS:
+        sys.exit(f"At most {GPUS} seeds per session, one per GPU.")
     require_pushed_code()
     user = username()
     notebook = f"{user}/{NOTEBOOK_SLUG}"
@@ -329,20 +351,41 @@ def run(arguments: argparse.Namespace) -> int:
     start_from = configuration.run.start_from
     start_runs = [start_run_dataset(start_from, user)] if start_from else []
     name = f"{datetime.now():%Y-%m-%d_%H%M%S}_{configuration_path.stem}"
+    text = configuration_path.read_text(encoding="utf-8")
+    runs = []
+    for seed in seeds:
+        values: dict[str, str | int] = {"runs_folder": SESSION_RUNS_FOLDER}
+        label = ""
+        if seed is not None:
+            label = f"seed{seed}"
+            values |= {"seed": seed, "name": f"{configuration.run.name}_{label}"}
+        runs.append(
+            {
+                "name": f"{name}_{label}" if label else name,
+                "label": label,
+                "training": with_run_values(text, values),
+            }
+        )
     commit = git("rev-parse", "HEAD")
     launch = {
         "name": name,
         "commit": commit,
         "tests": not arguments.skip_tests,
-        "training": with_session_runs_folder(
-            configuration_path.read_text(encoding="utf-8")
-        ),
+        "runs": runs,
         "evaluation": evaluation_text,
         "start_runs": start_runs,
     }
     push(notebook, launch, [f"{user}/{start['dataset']}" for start in start_runs])
     print(f"Started {name} on Kaggle")
     print(f"  configuration  {configuration_path.as_posix()}")
+    print(
+        "  seeds          "
+        + (
+            ", ".join(f"{seed} on GPU {gpu}" for gpu, seed in enumerate(seeds))
+            if arguments.seeds
+            else "the file's"
+        )
+    )
     print(f"  evaluation     {evaluation.as_posix() if evaluation_text else 'none'}")
     print(f"  tests          {'first' if launch['tests'] else 'skipped'}")
     print(f"  code           {commit[:7]}")
@@ -380,9 +423,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     commands = parser.add_subparsers(required=True)
     run_parser = commands.add_parser(
-        "run", help="start a training and its evaluation on Kaggle, watch, then fetch"
+        "run", help="start training and evaluating on Kaggle, watch, then fetch"
     )
     run_parser.add_argument("configuration", type=Path, help="a training TOML file")
+    run_parser.add_argument(
+        "--seeds",
+        type=int,
+        nargs="+",
+        metavar="SEED",
+        help=f"train the file with each seed at once, one per GPU (at most {GPUS})",
+    )
     run_parser.add_argument(
         "--skip-tests", action="store_true", help="train without running the tests"
     )

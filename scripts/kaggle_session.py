@@ -1,16 +1,17 @@
-"""One training run and its evaluation on a Kaggle T4, started by kaggle_gpu.py.
+"""Training runs and their evaluations on Kaggle's T4s, started by kaggle_gpu.py.
 
 ``kaggle_gpu.py run`` pushes this file to Kaggle as a script, with ``LAUNCH``
 filled in, and Kaggle runs it in the background. The session clones
 Centipede at the laptop's commit, and RL_lib and MujocoReplay as they are on
-GitHub, installs them, runs the tests, places the run that training starts
-from, trains, and evaluates the new run.
+GitHub, installs them, runs the tests, and places the run that training
+starts from. Then it trains its runs, one per GPU at the same time (the same
+file with different seeds), and evaluates each run when its training ends.
 
 Kaggle keeps whatever is in ``/kaggle/working`` as the session's output, and
-that folder mirrors the laptop's ``runs/``: the run folder, whose
+that folder mirrors the laptop's ``runs/``: the run folders, whose
 ``launched/`` holds the configuration file and console output of the
 training and of its evaluation, as on the desktop, and ``kaggle/<launch>/``
-with the console output of every step, so that a failure before the run
+with the console output of every step, so that a failure before a run
 folder exists is kept too. The code goes to ``/tmp``, outside the output.
 """
 
@@ -19,6 +20,7 @@ import re
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Filled in by kaggle_gpu.py when it pushes this file.
@@ -39,14 +41,18 @@ def shell(command: str) -> None:
     subprocess.run(command.split(), cwd=CODE if CODE.exists() else None, check=True)
 
 
-def run_logged(command: list[str], console_path: Path) -> int:
-    """Run a command, keeping its whole output in ``console_path``; its exit code.
+def run_logged(
+    command: list[str], console_path: Path, gpu: int = 0, label: str = ""
+) -> int:
+    """Run a command on one GPU, keeping its whole output in ``console_path``.
 
-    The session's own output, which ``kaggle_gpu.py watch`` follows, gets each
-    line once it is finished: the progress line redraws itself with carriage
-    returns, and only its last drawing is passed on.
+    Returns its exit code. The session's own output, which ``kaggle_gpu.py
+    watch`` follows, gets each line once it is finished, after ``label``: the
+    progress line redraws itself with carriage returns, and only its last
+    drawing is passed on.
     """
-    environment = {**os.environ, "PYTHONUTF8": "1"}
+    environment = {**os.environ, "PYTHONUTF8": "1", "CUDA_VISIBLE_DEVICES": str(gpu)}
+    prefix = f"[{label}] " if label else ""
     with console_path.open("wb") as console:
         process = subprocess.Popen(
             command,
@@ -63,21 +69,25 @@ def run_logged(command: list[str], console_path: Path) -> int:
             *lines, unfinished = (unfinished + chunk).split(b"\n")
             for line in lines:
                 drawn = line.rstrip(b"\r").rsplit(b"\r", 1)[-1]
-                print(drawn.decode(errors="replace"), flush=True)
+                print(prefix + drawn.decode(errors="replace"), flush=True)
         if unfinished:
-            print(unfinished.rsplit(b"\r", 1)[-1].decode(errors="replace"), flush=True)
+            drawn = unfinished.rsplit(b"\r", 1)[-1]
+            print(prefix + drawn.decode(errors="replace"), flush=True)
         return process.wait()
 
 
-def launch(name: str, text: str, console: Path) -> tuple[int, Path | None]:
-    """Run one configuration file with ``python -m centipede``.
+def launch(
+    name: str, text: str, console: Path, gpu: int, label: str
+) -> tuple[int, Path | None]:
+    """Run one configuration file with ``python -m centipede`` on one GPU.
 
     Returns its exit code and the run folder it named, if any.
     """
     file = console / f"{name}.toml"
     file.write_text(text, encoding="utf-8")
     output = console / f"{name}.txt"
-    exit_code = run_logged([sys.executable, "-u", "-m", "centipede", str(file)], output)
+    command = [sys.executable, "-u", "-m", "centipede", str(file)]
+    exit_code = run_logged(command, output, gpu, label)
     found = RUN_FOLDER.search(output.read_text(encoding="utf-8", errors="replace"))
     return exit_code, Path(found.group(1)) if found else None
 
@@ -111,8 +121,9 @@ def install() -> None:
     shell(f"{sys.executable} -m pip install --quiet -e .[gpu,dev]")
 
 
-def check_gpu() -> None:
-    """Stop unless the GPU can compile MuJoCo Warp's Newton solver (Volta or newer)."""
+def check_gpus() -> None:
+    """Stop unless there is a GPU per run, each able to compile MuJoCo Warp's
+    Newton solver (Volta or newer)."""
     answer = subprocess.run(
         [
             "nvidia-smi",
@@ -124,8 +135,11 @@ def check_gpu() -> None:
         check=True,
     ).stdout
     print(answer, flush=True)
-    if float(answer.split(",")[1]) < 7.0:
-        sys.exit("This GPU is older than Volta; the session needs a T4.")
+    gpus = answer.strip().splitlines()
+    if len(gpus) < len(LAUNCH["runs"]):
+        sys.exit(f"{len(LAUNCH['runs'])} runs need as many GPUs; found {len(gpus)}.")
+    if min(float(gpu.split(",")[1]) for gpu in gpus) < 7.0:
+        sys.exit("A GPU is older than Volta; the session needs T4s.")
 
 
 def place_start_runs() -> None:
@@ -153,11 +167,31 @@ def place_start_runs() -> None:
         print(f"Start run {start['folder']}, from {start['dataset']}", flush=True)
 
 
+def train_and_evaluate(run: dict, gpu: int, console: Path) -> str:
+    """Train one run on one GPU, then evaluate it; how both ended."""
+    name, label = run["name"], run["label"]
+    exit_code, folder = launch(name, run["training"], console, gpu, label)
+    trained = "finished" if exit_code == 0 else f"failed ({exit_code})"
+    evaluated = "none"
+    if folder is not None:
+        keep_launched(name, console, folder)
+    if exit_code == 0 and folder is not None and LAUNCH["evaluation"]:
+        evaluation = f"{name}_evaluation"
+        text = SOURCE_LINE.sub(f'source = "{folder.as_posix()}"', LAUNCH["evaluation"])
+        evaluation_code, _ = launch(evaluation, text, console, gpu, label)
+        keep_launched(evaluation, console, folder)
+        evaluated = f"failed ({evaluation_code})" if evaluation_code else "finished"
+    return (
+        f"{label or name}: training {trained}, evaluation {evaluated},"
+        f" run folder {folder.name if folder else '-'}"
+    )
+
+
 def main() -> None:
     name = LAUNCH["name"]
     console = OUTPUT / "kaggle" / name
     console.mkdir(parents=True)
-    check_gpu()
+    check_gpus()
     fetch_code()
     install()
     if LAUNCH["tests"]:
@@ -167,30 +201,17 @@ def main() -> None:
             console / "tests.txt",
         )
         if failed:
-            print(
-                f"\nSession finished: the tests failed, nothing was trained ({name})."
-            )
+            print(f"\nSession finished: tests failed, nothing trained ({name}).")
             return
     place_start_runs()
 
-    print(f"\n=== training {name} ===\n", flush=True)
-    exit_code, folder = launch(name, LAUNCH["training"], console)
-    trained = "finished" if exit_code == 0 else f"failed ({exit_code})"
-    evaluated = "none"
-    if folder is not None:
-        keep_launched(name, console, folder)
-    if exit_code == 0 and folder is not None and LAUNCH["evaluation"]:
-        print(f"\n=== evaluating {folder.name} ===\n", flush=True)
-        evaluation = f"{name}_evaluation"
-        text = SOURCE_LINE.sub(f'source = "{folder.as_posix()}"', LAUNCH["evaluation"])
-        evaluation_code, _ = launch(evaluation, text, console)
-        keep_launched(evaluation, console, folder)
-        evaluated = f"failed ({evaluation_code})" if evaluation_code else "finished"
-    print(
-        f"\nSession finished: training {trained}, evaluation {evaluated},"
-        f" run folder {folder.name if folder else '-'} ({name}).",
-        flush=True,
-    )
+    runs = LAUNCH["runs"]
+    print(f"\n=== training {', '.join(run['name'] for run in runs)} ===\n", flush=True)
+    with ThreadPoolExecutor(max_workers=len(runs)) as pool:
+        endings = list(
+            pool.map(train_and_evaluate, runs, range(len(runs)), [console] * len(runs))
+        )
+    print(f"\nSession finished: {'; '.join(endings)} ({name}).", flush=True)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,50 @@
+{
+  "sessions": [
+    {
+      "started": "2026-10-08 21:47",
+      "configuration_file": "/kaggle/working/kaggle/2026-10-08_234620_03_movement_2/2026-10-08_234620_03_movement_2.toml",
+      "settings_written": [
+        "agents.device",
+        "agents.ppo.minibatch_size",
+        "environment.max_episode_steps",
+        "environment.rewards.arrival_reward",
+        "environment.rewards.body_contact_cost_parts",
+        "environment.rewards.follower_progress_share",
+        "environment.rewards.head_progress_ratio",
+        "environment.rewards.leg_contact_cost_parts",
+        "environment.rewards.movement_cost_parts",
+        "environment.rewards.random_command_movement_deg",
+        "environment.rewards.step_cost_parts",
+        "environment.simulation.backend",
+        "environment.simulation.model_path",
+        "environment.simulation.world_count",
+        "environment.spine_control",
+        "environment.target.arrival",
+        "environment.target.bearing_range_deg",
+        "environment.target.distance_range_m",
+        "environment.target.range_circle_ratio",
+        "interaction_loop.rollout_window_steps",
+        "interaction_loop.update_cycles",
+        "run.checkpoint_every_cycles",
+        "run.mode",
+        "run.name",
+        "run.runs_folder",
+        "run.seed",
+        "run.start_from"
+      ],
+      "first_cycle": 0,
+      "checkpoint": "runs/2026-10-07_2221_baseline_stage2/checkpoints/cycle_0032.pt",
+      "git_commit": "f957e38",
+      "python": "3.13.15",
+      "packages": {
+        "centipede": "0.1.0",
+        "rl_lib": "0.1.0",
+        "torch": "2.11.0+cu128",
+        "mujoco": "3.12.0",
+        "mujoco-warp": "3.14.0",
+        "warp-lang": "1.17.0+cu12"
+      },
+      "device": "Tesla T4"
+    }
+  ]
+}

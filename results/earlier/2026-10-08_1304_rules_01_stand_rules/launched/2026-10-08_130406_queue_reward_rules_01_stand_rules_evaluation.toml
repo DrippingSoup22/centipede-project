@@ -1,0 +1,11 @@
+# Evaluation after each run of this queue: the queue replaces source with the
+# run's folder. One seed of 32 worlds, each world's first episode of up to 256
+# steps, about 1 minute; the agents act with their policy's mean action.
+
+[run]
+mode = "evaluate"
+source = "runs/2026-10-08_1304_rules_01_stand_rules"
+
+[evaluation]
+seeds = [101]
+episodes_per_seed = 32
