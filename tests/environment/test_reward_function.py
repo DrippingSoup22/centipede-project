@@ -32,7 +32,7 @@ def unchanged_state() -> PhysicalState:
     return state
 
 
-def rewards_for(state, arrived=(False, False), settings=SETTINGS):
+def rewards_for(state, arrived=(False, False), settings=SETTINGS, joint_action=None):
     function = RewardFunction(settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS)
     step = function.compute(
         state,
@@ -41,6 +41,7 @@ def rewards_for(state, arrived=(False, False), settings=SETTINGS):
         target_position=TARGET.expand(2, 2).clone(),
         arrived=torch.tensor(arrived),
         previous_joint_position=torch.zeros(2, 3, 7),
+        joint_action=torch.zeros(2, 3, 7) if joint_action is None else joint_action,
     )
     parts = dict(zip(function.term_names, step.reward_parts.unbind(-1), strict=True))
     return step, parts, function.weights.per_step
@@ -145,6 +146,30 @@ def test_movement_costs_the_square_of_how_far_the_commanded_joints_moved():
     assert step.joint_movement[1, 0].item() == pytest.approx(math.radians(10) ** 2 / 7)
     # Switched off, as by default, the term is left out.
     assert "movement" not in SETTINGS.weights(EPISODE_STEPS).per_step
+
+
+def test_command_cost_charges_the_mean_squared_command_outside_the_budget():
+    settings = RewardSettings.from_section({"command_cost_ratio": 4})
+    joint_action = torch.zeros(2, 3, 7)
+    joint_action[1, 0] = -1.0  # the head: every command at full
+    joint_action[1, 1, :6] = 0.5  # segment 1: legs at half, spine at zero
+    joint_action[1, 2, 6] = 1.0  # the rear's seventh column is padding
+
+    _, parts, weights = rewards_for(
+        unchanged_state(), settings=settings, joint_action=joint_action
+    )
+
+    assert weights["command"] == pytest.approx(4 * weights["step_cost"])
+    assert parts["command"][1].tolist() == pytest.approx(
+        [-weights["command"], -weights["command"] * 0.25 * 6 / 7, 0.0]
+    )
+    assert not parts["command"][0].any()
+    # The budget keeps its shares; switched off, as by default, the term is
+    # left out.
+    default_weights = SETTINGS.weights(EPISODE_STEPS)
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares == default_weights.episode_shares
+    assert "command" not in default_weights.per_step
 
 
 def test_the_reward_used_before_2026_10_08_keeps_its_terms():

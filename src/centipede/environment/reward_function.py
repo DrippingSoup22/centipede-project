@@ -23,6 +23,8 @@ class RewardContext:
     ``arrival_radius_m`` is the distance that counts as arrival.
     ``joint_movement`` is ``(W, N)``: the mean, over the joints each segment
     commands, of how far each moved on the step, squared, in rad².
+    ``command_size`` is ``(W, N)``: the mean, over the same joints, of the
+    segment's command for the step, squared, from 0 (none) to 1 (full).
     """
 
     physical_state: PhysicalState
@@ -31,6 +33,7 @@ class RewardContext:
     distance_after: torch.Tensor
     arrival_radius_m: float
     joint_movement: torch.Tensor
+    command_size: torch.Tensor
 
     @classmethod
     def from_step(
@@ -43,6 +46,7 @@ class RewardContext:
         arrival_radius_m: float,
         previous_joint_position: torch.Tensor,
         commanded_joints: torch.Tensor,
+        joint_action: torch.Tensor,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
@@ -51,8 +55,10 @@ class RewardContext:
         all flat on the ground; ``arrived`` is a boolean ``(W,)``.
         ``previous_joint_position`` is ``(W, N, 7)``, the ``joint_angles``
         before the step; ``commanded_joints`` is ``(N, 7)``, 1.0 for the joints
-        each segment commands and 0.0 for the others. New tensors are built, so
-        neither the physical state nor the saved copies change.
+        each segment commands and 0.0 for the others; ``joint_action`` is the
+        step's ``(W, N, 6 or 7)`` command, as ``Environment.step`` receives it.
+        New tensors are built, so neither the physical state nor the saved
+        copies change.
         """
         # Where each segment was and is: centres, except the head's tip.
         before = previous_body_planar_position.clone()
@@ -69,13 +75,19 @@ class RewardContext:
         squared_movement = (
             joint_angles(physical_state) - previous_joint_position
         ).square() * commanded_joints
+        # Without spine control the action has no seventh column.
+        squared_command = (
+            joint_action.square() * commanded_joints[:, : joint_action.shape[-1]]
+        )
+        joint_count = commanded_joints.sum(dim=-1)
         return cls(
             physical_state=physical_state,
             arrived=arrived.float(),
             distance_before=(before - goal).norm(dim=-1),
             distance_after=(after - goal).norm(dim=-1),
             arrival_radius_m=arrival_radius_m,
-            joint_movement=squared_movement.sum(dim=-1) / commanded_joints.sum(dim=-1),
+            joint_movement=squared_movement.sum(dim=-1) / joint_count,
+            command_size=squared_command.sum(dim=-1) / joint_count,
         )
 
 
@@ -170,6 +182,17 @@ def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     return -(context.joint_movement / unit).clamp(max=1.0)
 
 
+def command(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−(the segment's commands)²: −1 for full commands, 0 for none.
+
+    The mean, over the joints the segment commands, of its command squared,
+    like the control cost of Gymnasium's Ant (half the sum of its squared
+    commands). Unlike the movement cost, it charges what the segment asks for,
+    exploration noise included, rather than how far its joints move.
+    """
+    return -context.command_size
+
+
 @dataclass(frozen=True)
 class StepRewards:
     """What the reward function returns for one step; created anew every step.
@@ -197,6 +220,7 @@ TERMS = {
     "body_contact": body_contact,
     "leg_contact": leg_contact,
     "movement": movement,
+    "command": command,
 }
 
 
@@ -238,6 +262,7 @@ class RewardFunction:
         target_position: torch.Tensor,
         arrived: torch.Tensor,
         previous_joint_position: torch.Tensor,
+        joint_action: torch.Tensor,
     ) -> StepRewards:
         """Every segment's reward for the step just taken, with its parts.
 
@@ -252,6 +277,7 @@ class RewardFunction:
             self.arrival_radius_m,
             previous_joint_position,
             self.commanded_joints,
+            joint_action,
         )
         reward_parts = torch.stack(
             [

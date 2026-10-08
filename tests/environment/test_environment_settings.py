@@ -50,6 +50,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         leg_contact_cost_parts=1.0,
         movement_cost_parts=0.0,
         random_command_movement_deg=25.0,
+        command_cost_ratio=0.0,
         cost_budget_parts=6.0,
         head_progress_ratio=1.0,
         follower_progress_share=1.0,

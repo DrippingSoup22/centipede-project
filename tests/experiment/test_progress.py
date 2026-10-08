@@ -43,12 +43,15 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert drawings[4].startswith(" 3/12  [####################]  learning")
     assert drawings[5].endswith("\n")  # the results end the window's line
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
+    # The time left: the 9 windows after window 3 at 23.1 s each.
     assert drawings[5].split() == [
         *("3/12", "23.1", "s", "|", "-0.00300", "20.0", "mm/s", "15.0", "mm/s"),
-        *("25%", "|", "4", "25%", "0%", "0%", "25%", "50%", "0%"),
+        *("25%", "|", "4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m28s"),
     ]
-    assert drawings[6].split()[-7:] == ["4", "25%", "0%", "0%", "25%", "50%", "0%"]
-    assert drawings[7].split()[-7:] == ["2", "0%", "50%", "0%", "0%", "0%", "50%"]
+    assert drawings[6].split()[-9:] == [
+        *("4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m05s")
+    ]
+    assert drawings[7].split()[-9:-2] == ["2", "0%", "50%", "0%", "0%", "0%", "50%"]
 
 
 def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(

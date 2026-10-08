@@ -76,6 +76,7 @@ class SegmentAgent:
             max_gradient_norm=settings.ppo.max_gradient_norm,
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
+            noise_beta=settings.exploration_noise_beta,
         )
         self.observation_normaliser = ObservationNormalizer(
             observation_size,

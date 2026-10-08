@@ -79,6 +79,7 @@ PROPORTION_KEYS = (
     "leg_contact_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
+    "command_cost_ratio",
     "cost_budget_parts",
     "head_progress_ratio",
     "follower_progress_share",
@@ -111,11 +112,16 @@ class RewardSettings:
     commands move in a step, squared, in units of
     ``random_command_movement_deg``: how far a joint moves in a step under
     random commands. It is off (0 parts) unless a file sets it, so runs saved
-    before it existed keep their reward. ``head_progress_ratio`` is what one
-    halving of the head's distance to its target is worth, in whole episodes of
-    step cost, and ``follower_progress_share`` the share of the head's progress
-    that every follower receives as well (1: the same). A cost of zero parts is
-    switched off.
+    before it existed keep their reward. The command cost, also off unless set,
+    lies outside the budget: each step it charges ``command_cost_ratio`` times
+    the step cost's weight, times the segment's mean squared command (from 0
+    to 1). Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands
+    against a reward of 1 for every step it stays healthy: a ratio of 4. Being
+    outside the budget, it breaks rule R1 when set. ``head_progress_ratio`` is
+    what one halving of the head's distance to its target is worth, in whole
+    episodes of step cost, and ``follower_progress_share`` the share of the
+    head's progress that every follower receives as well (1: the same). A cost
+    of zero parts is switched off.
 
     ``follower_progress_ratio`` belongs to the first runs of the rules, on
     2026-10-08, whose followers were paid for halving their distance to the spot
@@ -137,6 +143,7 @@ class RewardSettings:
     leg_contact_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
+    command_cost_ratio: float | None
     cost_budget_parts: float | None
     head_progress_ratio: float | None
     follower_progress_share: float | None
@@ -168,6 +175,7 @@ class RewardSettings:
                 leg_contact_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
+                command_cost_ratio=None,
                 cost_budget_parts=None,
                 head_progress_ratio=None,
                 follower_progress_share=None,
@@ -211,6 +219,9 @@ class RewardSettings:
                 movement_cost_parts=parts[3],
                 random_command_movement_deg=section.positive_number(
                     "random_command_movement_deg", default=25.0
+                ),
+                command_cost_ratio=section.number(
+                    "command_cost_ratio", default=0.0, minimum=0.0
                 ),
                 cost_budget_parts=budget_parts,
                 head_progress_ratio=section.number(
@@ -273,16 +284,17 @@ class RewardSettings:
         }
         if not shares["movement"]:
             del shares["movement"]
-        return RewardWeights(
-            per_step={
-                "arrival": arrival,
-                # Per halving of the head's distance; the term itself gives the
-                # followers their share of it.
-                "progress": self.head_progress_ratio * shares["step_cost"] * arrival,
-                **{name: share * arrival / steps for name, share in shares.items()},
-            },
-            episode_shares=shares,
-        )
+        per_step = {
+            "arrival": arrival,
+            # Per halving of the head's distance; the term itself gives the
+            # followers their share of it.
+            "progress": self.head_progress_ratio * shares["step_cost"] * arrival,
+            **{name: share * arrival / steps for name, share in shares.items()},
+        }
+        # Outside the budget, so not among the episode shares.
+        if self.command_cost_ratio:
+            per_step["command"] = self.command_cost_ratio * per_step["step_cost"]
+        return RewardWeights(per_step=per_step, episode_shares=shares)
 
 
 @dataclass(frozen=True)

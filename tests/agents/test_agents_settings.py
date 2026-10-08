@@ -17,6 +17,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         device="cpu",
         hidden_layers=(64, 64),
         initial_action_std=0.5,
+        exploration_noise_beta=0.0,
         optimizer="adam",
         learning_rate=3e-4,
         learning_rate_schedule="constant",

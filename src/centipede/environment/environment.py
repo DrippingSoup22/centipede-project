@@ -186,6 +186,7 @@ class Environment:
             self.target_position,
             terminated,
             self.previous_joint_position,
+            joint_action,
         )
         observations = self.observation_builder.build(state, self.target_position)
         self.diagnostics.record_step(

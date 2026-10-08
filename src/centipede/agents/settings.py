@@ -52,16 +52,21 @@ class AgentSettings:
     """The [agents] section, with its nested PPO section.
 
     ``device`` is where networks and stored data live. ``initial_action_std``
-    is the starting value of the six learned action spreads, and normalised
-    observations are clipped to plus or minus ``observation_clip``. Actor and
-    critic each get their own ``optimizer``, with ``weight_decay`` (and, for
-    SGD, ``momentum``); their learning rate follows ``learning_rate_schedule``
-    over the run's update cycles (``learning_rate_at``).
+    is the starting value of the six learned action spreads, and
+    ``exploration_noise_beta`` colors the exploration noise over time: 0 is
+    white noise, fresh at every step; 0.5 is the PPO default of Hollenstein et
+    al. (AAAI 2024) and 1 pink noise (RL_lib's ``SquashedGaussianPolicy``).
+    Normalised observations are clipped to plus or minus ``observation_clip``.
+    Actor and critic each get their own ``optimizer``, with ``weight_decay``
+    (and, for SGD, ``momentum``); their learning rate follows
+    ``learning_rate_schedule`` over the run's update cycles
+    (``learning_rate_at``).
     """
 
     device: str
     hidden_layers: tuple[int, ...]
     initial_action_std: float
+    exploration_noise_beta: float
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
@@ -101,6 +106,9 @@ class AgentSettings:
             ),
             initial_action_std=section.positive_number(
                 "initial_action_std", default=0.5
+            ),
+            exploration_noise_beta=section.number(
+                "exploration_noise_beta", default=0.0, minimum=0.0, maximum=2.0
             ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,

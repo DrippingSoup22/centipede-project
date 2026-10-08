@@ -45,7 +45,7 @@ SETTINGS_LINE_WIDTH = 100
 ENDINGS = ("arrived", "<1/4", "<1/2", "closer", "not closer", "left circle")
 TRAINING_COLUMNS = (
     "{cycle}  {took:>6}  |  {reward:>11}  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {episodes:>8}  {endings}"
+    "  |  {episodes:>8}  {endings}  |  {left:>6}"
 )
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
@@ -278,6 +278,9 @@ class TrainingProgress(_RedrawnLine):
         self._cycle = first_cycle
         self._total_cycles = total_cycles
         self._cycle_width = max(len("cycle"), 2 * len(str(total_cycles)) + 1)
+        # The time the windows so far took, for the training time left.
+        self._seconds_taken = 0.0
+        self._windows_taken = 0
         # The ending counts of the windows that make the last episode length.
         self._recent_endings: deque[list[float]] = deque(
             maxlen=math.ceil(episode_steps / window_steps)
@@ -303,6 +306,7 @@ class TrainingProgress(_RedrawnLine):
                 body_down="body down",
                 episodes="episodes",
                 endings="  ".join(ENDINGS),
+                left="left",
             ),
             flush=True,
         )
@@ -315,6 +319,11 @@ class TrainingProgress(_RedrawnLine):
         self._recent_endings.append(record["episode_distributions"]["ending"])
         counts = [sum(column) for column in zip(*self._recent_endings, strict=True)]
         took = timing["collecting_seconds"] + timing["learning_seconds"]
+        # The training time left, at the mean time of the windows so far.
+        self._seconds_taken += took
+        self._windows_taken += 1
+        windows_left = self._total_cycles - self._cycle
+        left = windows_left * self._seconds_taken / self._windows_taken
         self._end_pass(
             TRAINING_COLUMNS.format(
                 cycle=self._label(),
@@ -323,6 +332,7 @@ class TrainingProgress(_RedrawnLine):
                 **_behaviour(step),
                 episodes=f"{round(sum(counts))}",
                 endings=_endings(counts),
+                left=duration(left),
             )
         )
         self._cycle += 1

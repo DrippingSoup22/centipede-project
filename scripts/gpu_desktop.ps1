@@ -6,6 +6,7 @@ $ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $Project = "$HOME\Projects\Centipede"
 $Replay = "$HOME\Projects\MujocoReplay"
+$RLLib = "$HOME\Projects\RL_lib"
 $Python = "$HOME\.venvs\Centipede\Scripts\python.exe"
 $Launched = "$Project\runs\launched"
 # The last line of every run's output, written after its process ends,
@@ -13,11 +14,12 @@ $Launched = "$Project\runs\launched"
 $EndMarker = 'run ended with exit code'
 Set-Location $Project
 
-# Pulls the pushed code of this project and of MujocoReplay beside it, which
-# writes the recordings, but never new commits while a run or queue runs: each
-# run of a queue starts with the code on disk, so its next runs would change.
+# Pulls the pushed code of this project, of RL_lib, whose PPO the agents use,
+# and of MujocoReplay, which writes the recordings, but never new commits while
+# a run or queue runs: each run of a queue starts with the code on disk, so its
+# next runs would change.
 function Update-Code {
-    $repositories = @($Project, $Replay)
+    $repositories = @($Project, $RLLib, $Replay)
     $behind = 0
     foreach ($repository in $repositories) {
         git -C $repository fetch -q
@@ -35,7 +37,8 @@ function Update-Code {
         git -C $repository pull --ff-only -q
         if ($LASTEXITCODE) { Write-Output "git pull failed in $repository"; exit 1 }
     }
-    Write-Output ('code ' + (git log --oneline -1) + ' + MujocoReplay ' +
+    Write-Output ('code ' + (git log --oneline -1) + ' + RL_lib ' +
+        (git -C $RLLib log --oneline -1 --format=%h) + ' + MujocoReplay ' +
         (git -C $Replay log --oneline -1 --format=%h))
 }
 

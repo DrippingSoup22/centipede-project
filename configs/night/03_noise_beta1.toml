@@ -1,0 +1,50 @@
+﻿# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
+# short tests one at a time while the user sleeps, each on the reward-study
+# baseline with 256 worlds (test 01) and one change, judged by the evaluation
+# with the policy's mean action.
+#
+# Test 03: pink exploration noise, beta 1 (Eberhard et al., ICLR 2023):
+# successive steps' noise correlates 0.77, and changes from step to step half
+# as much as white noise. Hollenstein et al. found the best beta grows with the
+# number of parallel environments; this run has 256.
+[run]
+mode = "train"
+name = "night_03_noise_beta1"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+exploration_noise_beta = 1.0
+
+[agents.ppo]
+minibatch_size = 2048
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 32
