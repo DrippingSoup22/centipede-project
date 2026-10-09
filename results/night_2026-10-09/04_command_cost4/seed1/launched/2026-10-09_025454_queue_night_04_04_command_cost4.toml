@@ -1,0 +1,53 @@
+# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
+# short tests one at a time while the user sleeps, each on the reward-study
+# baseline with 256 worlds (test 01) and one change, judged by the evaluation
+# with the policy's mean action.
+#
+# Test 04: the command cost, Gymnasium Ant's control cost: each step every
+# segment pays 4 times the step cost's weight times its mean squared command,
+# outside the cost budget. With today's spread (about 0.44) a segment's mean
+# squared command is about 0.2, so the cost is about 0.8 step costs per step.
+# Question: does charging the commands calm the jitter and push the mean
+# action to do the work instead of the noise?
+
+[run]
+mode = "train"
+name = "night_04_command_cost4"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+command_cost_ratio = 4
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 2048
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 32

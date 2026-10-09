@@ -35,8 +35,8 @@ seed only when it looks promising.
 | 02 | 01 + colored noise, beta 0.5 | 1 | 3080 | Done |
 | 03 | 01 + pink noise, beta 1 | 1, 2 | Kaggle | Ran; results still on Kaggle (login expired) |
 | 05 | 03 for 96 cycles | 1 | 3080 | Done |
-| 04 | 01 + command cost, ratio 4 | 1 | 3080 | Running |
-| 07 | 05 + command cost, ratio 4 | 1 | 3080 | Planned |
+| 04 | 01 + command cost, ratio 4 | 1 | 3080 | Done |
+| 07 | 05 + command cost, ratio 4 | 1 | 3080 | Running |
 
 ## Results
 
@@ -53,6 +53,7 @@ while the training arrivals ended at 19-20%.
 | 01 (256 worlds) | 0% | 8.4% | 22.9 mm | 22.5% | 1.25° | 0.01 |
 | 02 (beta 0.5) | 0% | **24.6%** | 20.7 mm | 6.1% | 2.26° | 0.03 |
 | 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
+| 04 (command cost 4) | 0% | 9.1% | 11.6 mm | 16.1% | 1.19° | 0.00 |
 
 **Buzz** of the legs' sweep joints: the share of the frame-to-frame change's
 power above 5 Hz, and the correlation of each change with the next (−1: the
@@ -73,6 +74,7 @@ leg flips back and forth every 20 ms step):
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | 16% → 22% | 14% → 22% | 24.6 → 26.1 mm/s | 4.4 → 3.7 mm/s | 0.68 | 0.450 → 0.431 |
 | 02 | 11% → 26% | 9% → 33% | 23.3 → 27.0 mm/s | 4.4 → 3.0 mm/s | 0.54 → 0.60 | 0.450 → 0.426 |
+| 04 | 18% → 23% | 14% → 29% | 24.6 → 26.7 mm/s | 4.5 → 3.2 mm/s | 0.68 | 0.450 → 0.428 |
 | 03, seeds 1 and 2, cycles 1-22 | 0% → 1-2% | | 16-18 mm/s | 2-3 → 4-6 mm/s | | |
 
 Test 05 by quarters of its 96 cycles: arrivals 1% → 19% → 27% → 30%, no
@@ -101,3 +103,9 @@ movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
   worse as it got faster (heading error 33° → 102°): of the evaluation's 32
   episodes, 14 arrived, 14 ran out of time no closer than they started, 2
   ended closer, and 2 left the range circle.
+- The command cost alone (test 04, white noise) changed nothing in 32 cycles,
+  like the movement cost on 2026-10-08: it charged about 0.00065 per step, 70%
+  of the step cost (a mean squared command of 0.18), but the commands' size
+  barely moved (0.186 → 0.177) and neither did the spreads. While the noise
+  does the walking, a cost on it reaches the policy only through the slowly
+  learned spreads.
