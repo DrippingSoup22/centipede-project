@@ -21,7 +21,8 @@ head's speed along the ground and toward its target, and the share of steps
 with a body on the ground), and how episodes ended. All worlds start
 together, so their episodes end in waves; the endings are therefore shares of
 the episodes that ended over the last episode length of windows, in which
-every world ends at least one.
+every world ends at least one. A run with a curriculum also shows the level
+its window's new targets were drawn at.
 
 In evaluation a pass is one actor and seed: every world runs its first
 episode, which ends at the target, out of the range circle, or at the time
@@ -45,7 +46,7 @@ SETTINGS_LINE_WIDTH = 100
 ENDINGS = ("arrived", "<1/4", "<1/2", "closer", "not closer", "left circle")
 TRAINING_COLUMNS = (
     "{cycle}  {took:>6}  |  {reward:>11}  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {episodes:>8}  {endings}  |  {left:>6}"
+    "  |  {episodes:>8}  {endings}  |  {level}{left:>6}"
 )
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
@@ -272,9 +273,15 @@ class TrainingProgress(_RedrawnLine):
     """One line per window: a filling bar while it runs, then its results."""
 
     def __init__(
-        self, first_cycle: int, total_cycles: int, window_steps: int, episode_steps: int
+        self,
+        first_cycle: int,
+        total_cycles: int,
+        window_steps: int,
+        episode_steps: int,
+        curriculum: bool = False,
     ) -> None:
         super().__init__(window_steps)
+        self._curriculum = curriculum
         self._cycle = first_cycle
         self._total_cycles = total_cycles
         self._cycle_width = max(len("cycle"), 2 * len(str(total_cycles)) + 1)
@@ -296,6 +303,12 @@ class TrainingProgress(_RedrawnLine):
             ),
             flush=True,
         )
+        if self._curriculum:
+            print(
+                "level: the curriculum's target difficulty, from 0 (the targets of"
+                " [environment.target])\nto 1 (the final ranges of [curriculum]).",
+                flush=True,
+            )
         print(
             TRAINING_COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
@@ -306,6 +319,7 @@ class TrainingProgress(_RedrawnLine):
                 body_down="body down",
                 episodes="episodes",
                 endings="  ".join(ENDINGS),
+                level="level  |  " if self._curriculum else "",
                 left="left",
             ),
             flush=True,
@@ -332,6 +346,11 @@ class TrainingProgress(_RedrawnLine):
                 **_behaviour(step),
                 episodes=f"{round(sum(counts))}",
                 endings=_endings(counts),
+                level=(
+                    f"{record['curriculum']['level']:>5.3f}  |  "
+                    if self._curriculum
+                    else ""
+                ),
                 left=duration(left),
             )
         )

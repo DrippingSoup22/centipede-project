@@ -108,11 +108,20 @@ class RunFolder:
 
     # -- Checkpoints ------------------------------------------------------------------
 
-    def save_checkpoint(self, completed_cycles: int, agents_state: dict) -> Path:
-        """Save the agents after ``completed_cycles`` cycles; returns the file."""
+    def save_checkpoint(
+        self,
+        completed_cycles: int,
+        agents_state: dict,
+        curriculum_level: float | None = None,
+    ) -> Path:
+        """Save the agents after ``completed_cycles`` cycles, and the curriculum's
+        level when the run has one; returns the file."""
         self.checkpoints.mkdir(exist_ok=True)
         path = self.checkpoints / f"cycle_{completed_cycles:04d}.pt"
-        torch.save({"completed_cycles": completed_cycles, "agents": agents_state}, path)
+        checkpoint = {"completed_cycles": completed_cycles, "agents": agents_state}
+        if curriculum_level is not None:
+            checkpoint["curriculum_level"] = curriculum_level
+        torch.save(checkpoint, path)
         return path
 
     def latest_checkpoint(self) -> Path:
@@ -137,10 +146,9 @@ class RunFolder:
         PyTorch's safe loader reads only tensors and plain values.
         """
         checkpoint = torch.load(path, map_location=device, weights_only=True)
-        if not isinstance(checkpoint, dict) or set(checkpoint) != {
-            "completed_cycles",
-            "agents",
-        }:
+        if not isinstance(checkpoint, dict) or set(checkpoint) - {
+            "curriculum_level"
+        } != {"completed_cycles", "agents"}:
             raise SettingsError(f"{path} is not a checkpoint of this project")
         return checkpoint
 

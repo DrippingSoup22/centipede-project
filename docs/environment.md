@@ -18,6 +18,7 @@ in v1). Everything passed in and out is a PyTorch tensor.
 | --- | --- | --- |
 | `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
 | `step(joint_action)` | Actions `(W, N, 6)`, or `(W, N, 7)` with spine control | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
+| `set_target_ranges(distance_range_m, bearing_range_deg)` | Two `(low, high)` pairs | Nothing; new targets are drawn from these ranges from now on |
 
 The environment also reports `segment_count`, `observation_size`,
 `segment_action_sizes` (how many actions each segment takes), and
@@ -290,7 +291,11 @@ the first step.
 to its tip and direction: distance uniformly between 30 and 60 mm, about one to
 two body lengths, and direction uniformly within 30° left or right of straight
 ahead. The target is a point remembered by the environment, not an object in
-the simulation.
+the simulation. These ranges are `[environment.target]`'s; during training the
+experiment's curriculum may change them between update cycles with
+`set_target_ranges`, up to targets all around the head (see
+[configuration.md](configuration.md#the-curriculum)). Targets already placed
+stay until their episode ends.
 
 The head's **forward** direction is its body's x axis, which points from its
 centre to its tip, laid flat on the ground; **left** is 90° anticlockwise from
@@ -584,8 +589,8 @@ These are the keys of the environment sections of the configuration file (see
 | `constraints_per_world` | 512 | Reserved constraint memory, GPU only |
 | `start_heading_range_deg` | 0 | A reset turns the whole body about the vertical by a random angle within ± this many degrees; 180 allows any heading |
 | **`[environment.target]`** | | |
-| `distance_range_m` | 0.030 to 0.060 | Distance of a new target from the head's tip |
-| `bearing_range_deg` | −30 to 30 | Direction of a new target from straight ahead |
+| `distance_range_m` | 0.030 to 0.060 | Distance of a new target from the head's tip; with a curriculum, its level 0 |
+| `bearing_range_deg` | −30 to 30 | Direction of a new target from straight ahead; with a curriculum, its level 0 |
 | `arrival` | `"head"` | `"head"`: the target must lie under the head's outline; `"tip"`: the head's tip must come within `arrival_radius_m` |
 | `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip |
 | `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. With the tip, no circle unless the file sets one |

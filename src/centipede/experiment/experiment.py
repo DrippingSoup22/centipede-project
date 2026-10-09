@@ -7,7 +7,9 @@
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
   it records ``recordings`` episode lengths of windows for replay, the first,
-  the last, and the others spread evenly between, one file each.
+  the last, and the others spread evenly between, one file each. With a
+  ``[curriculum]``, after each cycle it moves the target's difficulty level
+  from the arrivals and gives the environment that level's target ranges.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -45,6 +47,7 @@ from centipede.experiment.configuration import (
     dotted_keys,
     read_configuration,
 )
+from centipede.experiment.curriculum import Curriculum
 from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
@@ -123,12 +126,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.segment_action_sizes,
     )
     completed_cycles = 0
+    saved_level = 0.0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
             checkpoint_path, configuration.agents.device
         )
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
+            saved_level = checkpoint.get("curriculum_level", 0.0)
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -137,6 +142,18 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         # it starts from, such as the spine, or wider layers: its agents are
         # then widened.
         agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
+    # The curriculum: a new run starts at level 0, a continued one at its saved
+    # level.
+    curriculum = None
+    if configuration.curriculum is not None:
+        curriculum = Curriculum(
+            configuration.curriculum,
+            configuration.environment.target,
+            loop_settings.rollout_window_steps,
+            configuration.environment.max_episode_steps,
+            saved_level,
+        )
+        environment.set_target_ranges(*curriculum.target_ranges())
     # A recording covers whole windows: the episode length, rounded up.
     recording_windows = math.ceil(
         configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
@@ -247,6 +264,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         total_cycles,
         loop_settings.rollout_window_steps,
         configuration.environment.max_episode_steps,
+        curriculum is not None,
     )
     loop.diagnostics.progress = progress
     progress.header()
@@ -267,6 +285,12 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         cycle = completed_cycles + session_cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
+        if curriculum is not None:
+            # The level this window's new targets were drawn at; the next
+            # window's follows from how its episodes ended.
+            record["curriculum"] = {"level": curriculum.level}
+            curriculum.update(record["episode_distributions"]["ending"])
+            environment.set_target_ranges(*curriculum.target_ranges())
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
@@ -304,7 +328,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             or cycle == total_cycles
             or out_of_time
         ):
-            folder.save_checkpoint(cycle, agents.state_dict())
+            folder.save_checkpoint(
+                cycle,
+                agents.state_dict(),
+                None if curriculum is None else curriculum.level,
+            )
             if run_settings.report:
                 _write_training_report(folder, configuration, categories)
         if out_of_time:

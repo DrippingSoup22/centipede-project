@@ -38,7 +38,7 @@ SAVED_CONFIGURATION_NAME = "configuration.toml"
 # sections" in docs/configuration.md.
 DEVICE_FOR_BACKEND = {"cpu": "cpu", "gpu": "cuda"}
 
-TRAINING_SECTIONS = ("run", "environment", "agents", "interaction_loop")
+TRAINING_SECTIONS = ("run", "environment", "agents", "interaction_loop", "curriculum")
 
 
 @dataclass(frozen=True)
@@ -114,6 +114,40 @@ class RunSettings:
 
 
 @dataclass(frozen=True)
+class CurriculumSettings:
+    """The [curriculum] section: targets that get harder as the agents improve.
+
+    Level 0 draws the targets from [environment.target]'s ranges, level 1 from
+    the final ranges here, and a level between from ranges in between. After
+    each update cycle the level moves by ``level_rate`` times the gap between
+    the arrival share and ``arrival_share``, within 0 and 1, so that it settles
+    where the agents arrive that often. See docs/configuration.md.
+    """
+
+    final_distance_range_m: tuple[float, float]
+    final_bearing_range_deg: tuple[float, float]
+    arrival_share: float
+    level_rate: float
+
+    @classmethod
+    def from_section(cls, values: dict) -> "CurriculumSettings":
+        """Check the section's values and fill in the defaults."""
+        section = SettingsSection(values, "curriculum")
+        settings = cls(
+            final_distance_range_m=section.number_range(
+                "final_distance_range_m", minimum=0.0
+            ),
+            final_bearing_range_deg=section.number_range("final_bearing_range_deg"),
+            arrival_share=section.number(
+                "arrival_share", default=0.5, minimum=0.0, maximum=1.0
+            ),
+            level_rate=section.positive_number("level_rate", default=0.02),
+        )
+        section.reject_unknown_keys()
+        return settings
+
+
+@dataclass(frozen=True)
 class EvaluationSettings:
     """An evaluation file's [evaluation] section and the checkpoint it names.
 
@@ -155,7 +189,8 @@ class Configuration:
 
     ``run``, ``environment``, ``agents``, and ``interaction_loop`` describe the
     training run, even in evaluation, where they are the evaluated run's (with
-    the evaluation's environment changes). ``continue_from`` is set only when
+    the evaluation's environment changes). ``curriculum`` is set when the run
+    has one; an evaluation never follows it. ``continue_from`` is set only when
     continuing a run, and ``evaluation`` only when evaluating.
     """
 
@@ -164,6 +199,7 @@ class Configuration:
     environment: EnvironmentSettings
     agents: AgentSettings
     interaction_loop: InteractionLoopSettings
+    curriculum: CurriculumSettings | None = None
     continue_from: Path | None = None
     evaluation: EvaluationSettings | None = None
 
@@ -175,6 +211,8 @@ class Configuration:
             "agents": asdict(self.agents),
             "interaction_loop": asdict(self.interaction_loop),
         }
+        if self.curriculum is not None:
+            values["curriculum"] = asdict(self.curriculum)
         return _toml_ready(values)
 
 
@@ -302,6 +340,11 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
         ),
         interaction_loop=InteractionLoopSettings.from_section(
             file_section.table("interaction_loop")
+        ),
+        curriculum=(
+            CurriculumSettings.from_section(file_section.table("curriculum"))
+            if "curriculum" in values
+            else None
         ),
         **extra,
     )

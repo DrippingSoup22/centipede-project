@@ -4,7 +4,9 @@ It keeps each world's episode state (target, step count, previous positions)
 and coordinates the observation builder, the reward function, the diagnostics,
 and the physics simulation. The interaction loop uses only ``reset`` and
 ``step``; the experiment reads ``segment_count``, ``observation_size``, and the
-action sizes to create the agents. See docs/environment.md.
+action sizes to create the agents, and its curriculum changes the target
+ranges between update cycles with ``set_target_ranges``. See
+docs/environment.md.
 """
 
 import torch
@@ -119,6 +121,23 @@ class Environment:
         # Targets have their own random sequence, separate from the starting
         # poses, so changing how targets are drawn never changes the poses.
         self.target_generator = torch.Generator(device=self.device)
+        # The ranges new targets are drawn from: [environment.target]'s, until
+        # set_target_ranges changes them.
+        self.distance_range_m = settings.target.distance_range_m
+        self.bearing_range_deg = settings.target.bearing_range_deg
+
+    def set_target_ranges(
+        self,
+        distance_range_m: tuple[float, float],
+        bearing_range_deg: tuple[float, float],
+    ) -> None:
+        """Draw every new target from these ranges from now on.
+
+        Targets already placed stay until their episode ends. The experiment's
+        curriculum calls this between update cycles.
+        """
+        self.distance_range_m = distance_range_m
+        self.bearing_range_deg = bearing_range_deg
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
@@ -222,10 +241,10 @@ class Environment:
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:
-        """Give the masked worlds a new target in front of the head's tip.
+        """Give the masked worlds a new target around the head's tip.
 
-        Distance and bearing are drawn uniformly from ``[environment.target]``;
-        a positive bearing is to the head's left. Values are drawn for every
+        Distance and bearing are drawn uniformly from the current target
+        ranges; a positive bearing is to the head's left. Values are drawn for every
         world and kept only where the mask is set, which avoids asking the GPU
         how many worlds are masked.
         """
@@ -242,8 +261,8 @@ class Environment:
             )
             return low + (high - low) * draw
 
-        distance = uniform(*target_settings.distance_range_m)
-        bearing = torch.deg2rad(uniform(*target_settings.bearing_range_deg))
+        distance = uniform(*self.distance_range_m)
+        bearing = torch.deg2rad(uniform(*self.bearing_range_deg))
         direction = (
             torch.cos(bearing)[:, None] * forward + torch.sin(bearing)[:, None] * left
         )

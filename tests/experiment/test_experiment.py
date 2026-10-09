@@ -164,6 +164,34 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
                 assert sum(counts) == 2
 
 
+def test_a_curriculum_level_is_logged_saved_and_kept_when_continuing(tmp_path):
+    # Every target lies 2 mm behind the head's tip, under the head, so every
+    # episode arrives on its first step: once an episode length of windows
+    # (two) has ended, the level rises by 0.5 x (100% - 50%) per cycle.
+    curriculum_file = TRAINING_FILE.replace(
+        "[interaction_loop]",
+        "[environment.target]\ndistance_range_m = [0.002, 0.002]\n"
+        "bearing_range_deg = [180, 180]\n\n"
+        "[curriculum]\nfinal_distance_range_m = [0.002, 0.002]\n"
+        "final_bearing_range_deg = [180, 180]\nlevel_rate = 0.5\n\n"
+        "[interaction_loop]",
+    )
+    folder = run_file(tmp_path, curriculum_file, NAME="curriculum")
+    continuing = (
+        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
+        "[interaction_loop]\nupdate_cycles = 5\n"
+    )
+    run_file(tmp_path, continuing)
+
+    # The continued session goes on at the saved level, and again waits for an
+    # episode length of windows before it moves it.
+    lines = (folder / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
+    levels = [json.loads(line)["curriculum"]["level"] for line in lines]
+    assert levels == [0.0, 0.0, 0.25, 0.5, 0.5]
+    checkpoint = torch.load(folder / "checkpoints" / "cycle_0005.pt", weights_only=True)
+    assert checkpoint["curriculum_level"] == 0.75
+
+
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
     harder_file = (

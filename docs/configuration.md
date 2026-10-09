@@ -28,12 +28,13 @@ hidden afterwards.
 | `[agents]` | Agents | Device, networks, learning rate, normalisation |
 | `[agents.ppo]` | Agents | PPO settings |
 | `[interaction_loop]` | Interaction loop | Steps per window and number of update cycles |
+| `[curriculum]` | Experiment | Targets that get harder during training: the final target ranges, and how the difficulty follows the arrivals; optional |
 | `[evaluation]` | Experiment | Seeds, episodes per seed, and optional baselines; evaluation files only |
 
 The settings in each section, with their meanings and first values, are listed
 in [environment.md](environment.md#settings), [agents.md](agents.md#settings),
-and the [architecture](architecture.md) for the interaction loop. The `[run]` and
-`[evaluation]` settings are listed below.
+and the [architecture](architecture.md) for the interaction loop. The `[run]`,
+`[curriculum]`, and `[evaluation]` settings are listed below.
 
 ## Checks across sections
 
@@ -174,7 +175,51 @@ entropy_coefficient = 0.001
 [interaction_loop]
 rollout_window_steps = 256
 update_cycles = 128
+
+# [curriculum]                        # optional: targets that get harder
+# final_distance_range_m = [0.030, 0.200]
+# final_bearing_range_deg = [-180, 180]
+# arrival_share = 0.5
+# level_rate = 0.02
 ```
+
+### The curriculum
+
+With a `[curriculum]`, the targets get harder as the agents get better. The
+experiment keeps a difficulty **level** between 0 and 1: level 0 draws the
+targets from `[environment.target]`'s ranges, level 1 from the final ranges
+below, and a level between from ranges in between, each end of each range moved
+that share of the way. A run starts at level 0. After each update cycle the
+level moves by `level_rate` times the gap between the arrival share and
+`arrival_share`: it rises while the agents arrive more often than that and
+falls while they arrive less often, so that it settles at the difficulty where
+they arrive about that often, always at the edge of what they can do. Automatic
+domain randomization (Akkaya et al., 2019, "Solving Rubik's Cube with a Robot
+Hand") widens its ranges on the same principle, and Rudin et al. (CoRL 2021)
+move each robot to harder terrain as it succeeds.
+
+The arrival share is the console's: that of the episodes that ended over the
+last episode length of windows, in which every world ends at least one. At the
+start of a session all worlds start together and only arrivals can end an
+episode before the time limit, so the level waits until a whole episode length
+of windows has ended. With the defaults the level moves at most 0.01 per cycle,
+so going from 0 to 1 takes at least 100 cycles. New targets follow the level
+from the next window; targets already placed stay until their episode ends.
+Each target's range circle follows its own start distance, so it grows with the
+targets.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `final_distance_range_m` | required | The distance range at level 1, in metres; level 0's is `[environment.target]`'s `distance_range_m` |
+| `final_bearing_range_deg` | required | The bearing range at level 1, in degrees, positive to the head's left; `[-180, 180]` places targets all around the head |
+| `arrival_share` | 0.5 | The arrival share the level holds |
+| `level_rate` | 0.02 | After each cycle the level moves by this times the gap between the arrival share and `arrival_share`, within 0 and 1 |
+
+The level of each window is written in the training log, shown in the
+console's `level` column, and saved in every checkpoint, so that a continued run
+goes on at its level. An evaluation never follows the curriculum: its targets
+are `[environment.target]`'s, which an evaluation file may change, for example
+to the final ranges.
 
 ### Starting from another run
 
@@ -317,7 +362,8 @@ holds:
   (closer), or no closer; or left the range circle. All worlds start together,
   so their episodes end in waves; the shares therefore count the episodes that
   ended over the last episode length of windows, in which every world ends at
-  least one, and the line says how many those are.
+  least one, and the line says how many those are;
+- with a curriculum, the level the window's new targets were drawn at.
 
 The last line gives the session's time and overall speed. In evaluation a pass
 is one actor and seed: the bar fills toward the time limit and jumps to full
@@ -328,7 +374,8 @@ and how they ended.
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,
 including the bin counts of the episode histograms (`episode_distributions`,
-see [diagnostics.md](diagnostics.md#episode-summary)). Each session in
+see [diagnostics.md](diagnostics.md#episode-summary)); with a curriculum, also
+`curriculum.level`, the level the window's new targets were drawn at. Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
 

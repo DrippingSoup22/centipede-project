@@ -10,6 +10,7 @@ from dataclasses import replace
 import pytest
 
 from centipede.experiment.configuration import (
+    CurriculumSettings,
     read_configuration,
     write_configuration,
 )
@@ -90,6 +91,23 @@ def test_files_that_name_a_run_start_from_its_saved_configuration(saved_run, tmp
         target=replace(trained.environment.target, distance_range_m=(0.03, 0.04)),
     )
     assert evaluating.environment == expected_environment
+
+
+def test_a_curriculum_is_read_with_its_defaults_and_saved_with_the_run(tmp_path):
+    text = (
+        TRAINING_FILE + "[curriculum]\nfinal_distance_range_m = [0.03, 0.2]\n"
+        "final_bearing_range_deg = [-180, 180]\n"
+    )
+    configuration = read_configuration(write(tmp_path, text))
+    assert configuration.curriculum == CurriculumSettings(
+        final_distance_range_m=(0.03, 0.2),
+        final_bearing_range_deg=(-180, 180),
+        arrival_share=0.5,
+        level_rate=0.02,
+    )
+    saved = tmp_path / "saved.toml"
+    write_configuration(configuration, saved)
+    assert read_configuration(saved) == configuration
 
 
 def with_run_setting(line):

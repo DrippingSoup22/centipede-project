@@ -83,7 +83,8 @@ this project; Centipede uses its package only to write the files.
 
 The experiment uses the other components only through their front files: it
 creates the environment, the agents, and the interaction loop, steps through
-`train()` one cycle at a time, and reads the diagnostics between cycles. It
+`train()` one cycle at a time, and reads the diagnostics between cycles; with a
+curriculum it then sets the environment's target ranges for the next window. It
 never looks inside them, so a new kind of run needs only a new configuration
 file, or a new function next to `train` and `evaluate`.
 
@@ -94,6 +95,7 @@ file, or a new function next to `train` and `evaluate`.
 | `experiment.py` | Front file: `run(path)` trains or evaluates as the file's mode says |
 | `configuration.py` | Reading the three kinds of file, the checks across sections, and saving the complete configuration |
 | `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, recordings, and evaluation results |
+| `curriculum.py` | The curriculum: the target's difficulty level, moved after each cycle from the arrivals, and its target ranges |
 | `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
 | `recordings.py` | Turning the recorded steps, one episode length in training, into a replay recording for the sibling MujocoReplay project |
 | `progress.py` | The terminal's view of training: one line per window, with a bar of `#` and `.` that fills as the window is collected (told each step by the loop's diagnostics), then the window's results |

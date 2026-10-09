@@ -36,7 +36,7 @@ def target_distance_and_bearing(observations) -> tuple[torch.Tensor, torch.Tenso
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_a_seed_repeats_starts_and_targets_have_their_own_sequence(backend):
+def test_a_seed_repeats_starts_and_target_ranges_change_only_the_targets(backend):
     """No physics steps, so it is quick on any GPU."""
     default_targets = environment(backend)
     other_targets = environment(
@@ -58,6 +58,15 @@ def test_a_seed_repeats_starts_and_targets_have_their_own_sequence(backend):
 
     assert torch.equal(default_targets.reset(seed=3), first)
     assert not torch.equal(default_targets.reset(seed=4)[:, 0, -2:], first[:, 0, -2:])
+
+    # Ranges set later, as the curriculum does, apply to the new targets.
+    other_targets.set_target_ranges((0.05, 0.05), (180, 180))
+    behind = other_targets.reset(seed=3)
+    assert torch.equal(behind[..., :-2], first[..., :-2])
+    distance, bearing = target_distance_and_bearing(behind)
+    assert torch.allclose(distance, torch.full_like(distance, 0.05))
+    assert torch.all(bearing.abs() > 179.9)  # straight behind the head
+    assert torch.allclose(other_targets.range_radius, torch.full_like(distance, 0.125))
 
 
 def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():
