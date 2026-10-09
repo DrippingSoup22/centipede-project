@@ -1,9 +1,7 @@
-# Full training, the long level: about 7.5 hours on the RTX 3080, projected
-# from the measured step time (plan.md, Stage 8.4): 0.82 s per step at 1,024
-# worlds, so 3.5 minutes per cycle (8.9 on a Kaggle T4). Every value not
-# written here is the default in docs/configuration.md. 1,024 worlds and
-# 256-step windows were agreed in Stage 8.2. A stopped run is continued with a
-# file such as:
+# Full training, the long level: about 7.5 hours on an RTX 3080, which takes
+# about 0.82 s per step at 1,024 worlds, so 3.5 minutes per cycle (8.9 on a
+# T4). Every value not written here is the default in docs/configuration.md.
+# A stopped run is continued with a file such as:
 #
 #   [run]
 #   mode = "train"
@@ -31,7 +29,7 @@ device = "cuda"
 [agents.ppo]
 # Eight minibatches per epoch: 1,024 worlds x 256 steps = 262,144 samples.
 # A minibatch costs about the same time whatever its size, so fewer, larger
-# ones make the update short (Stage 8.1).
+# ones make the update short.
 minibatch_size = 32768
 
 [interaction_loop]

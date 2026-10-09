@@ -1,8 +1,7 @@
-# Medium level, about 14 minutes on the RTX 3080: a short training run to see
+# Medium level, about 14 minutes on an RTX 3080: a short training run to see
 # how a choice of settings starts to behave, with a report, with the long
-# level's 256-step windows. Projected from the measured step time (plan.md,
-# Stage 8.4): 0.40 s per step at 256 worlds, so 1.7 minutes per cycle (2.9 on
-# a Kaggle T4).
+# level's 256-step windows. An RTX 3080 takes about 0.40 s per step at 256
+# worlds, so 1.7 minutes per cycle (2.9 on a T4).
 #
 #   python -m centipede configs/medium.toml
 

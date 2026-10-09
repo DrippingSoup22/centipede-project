@@ -261,7 +261,7 @@ trajectories.
 v3 is v2 with one change: the physics timestep is 0.149 ms (exactly 20 ms /
 134) instead of 0.1 ms, so one 20 ms action takes 134 physics steps instead of
 200. The agents still act every 20 ms; only the substeps inside an action
-change. It was adopted on 2026-10-07 because, after the GPU backend replays an
+change. It was adopted because, after the GPU backend replays an
 action's physics steps as a CUDA graph, the GPU's work per physics step limits
 training speed.
 
@@ -271,7 +271,7 @@ therefore keep exactly the stiffness of v2; above it they would become softer.
 0.149 ms is the longest timestep below that bound that divides 20 ms into a
 whole number of steps.
 
-**What was compared** (`benchmarks/physics_options.py`, Kaggle T4, Newton,
+**What was compared** (`benchmarks/physics_options.py`, a T4 GPU, Newton,
 1,024 worlds for speed and 64 for the checks, every option changed in memory
 only). The time of one action, replayed as a CUDA graph, against v2:
 

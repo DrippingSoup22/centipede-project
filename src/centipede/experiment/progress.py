@@ -11,8 +11,8 @@ The experiment prints a header, then hands a ``TrainingProgress`` or an
 shows a bar of ``#`` and ``.`` filling as the steps are taken. When the pass
 ends, the experiment calls ``finish``, which replaces the line with its
 results. Lines are redrawn in place with a carriage return, only when the bar
-grows, so a terminal, or the GPU desktop's launcher passing the output
-through, shows one line per pass.
+grows, so a terminal, or a log that captures the output, shows one line per
+pass.
 
 In training a pass is one window. Its results are the time it took, values of
 every step of every world, which do not depend on where each world is in its

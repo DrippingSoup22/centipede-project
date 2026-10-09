@@ -27,23 +27,16 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: complete** (all eight stages, the last closed on 2026-10-09). The
-  physics simulation runs batches of worlds on the CPU and, with MuJoCo Warp,
-  on the GPU. The environment builds on it: targets, episodes, observations,
-  rewards, and diagnostics. The agents, one independent PPO learner per
-  segment using RL_lib's batched PPO, act, store their data, learn, and save.
-  The interaction loop connects them for training and evaluation, and the
-  experiment runs everything from one configuration file and writes each run's
-  log, checkpoints, report, and recordings for replay in the sibling
-  `../MujocoReplay` viewer. Runs train on the GPU desktop, on Kaggle, or on GPUs
-  rented from Runpod, launched from the laptop. On 2026-10-01 the project was
-  restarted with a new structure; the first implementation is preserved in Git
-  history (tag `cpu-stage8`) and in the local archive.
-- **Training: in progress**, as studies in [`results/`](results/README.md).
-  The agents learn: in the best run so far (pink-noise study, test 04), the
-  policy's mean action reaches the target in 80-83% of 128 evaluation episodes
-  and turns toward it, but it moves by a buzz of the legs at the control rate,
-  not yet by a gait.
+- **Code: complete.** The physics simulation runs batches of worlds on the CPU
+  and, with MuJoCo Warp, on the GPU. The environment builds on it: targets,
+  episodes, observations, rewards, and diagnostics. The agents, one independent
+  PPO learner per segment using RL_lib's batched PPO, act, store their data,
+  learn, and save. The interaction loop connects them for training and
+  evaluation, and the experiment runs everything from one configuration file and
+  writes each run's log, checkpoints, report, and recordings for replay in the
+  sibling `../MujocoReplay` viewer. A run is described by one configuration file
+  and runs on the CPU or on an NVIDIA GPU. A first implementation, built before
+  the project was restructured, is preserved in Git history (tag `cpu-stage8`).
 
 ## Documentation
 
@@ -63,20 +56,15 @@ Centipede/
 ├─ docs/             Architecture, model, environment, and agents documents
 ├─ models/           Frozen MuJoCo XML models
 ├─ src/centipede/    Program code, one folder per component
-├─ configs/          TOML files for the smoke test, probe, training, and evaluation
-├─ results/          The report's data: small files of the runs it uses, by study
-├─ scripts/          Controlling the GPU desktop, Kaggle, and Runpod from the laptop
+├─ configs/          Example TOML files: smoke test, probe, training levels, evaluation
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
 └─ runs/             Training and evaluation results; local only
 ```
 
-`runs/`, `benchmarks/results/`, and `archive/` stay on this computer and are not
-part of the repository.
-Back up results that must survive separately. The runs the report uses are
-kept in `results/`, which is part of the repository, without their recordings
-and checkpoints; [`results/README.md`](results/README.md) explains its layout.
+`runs/` and `benchmarks/results/` are written on the computer that runs them and
+are not part of the repository.
 
 ## Setup
 
@@ -110,9 +98,9 @@ Python interpreter.
 
 PyTorch is installed first from its CUDA 12.6 build, so that tensors can live on
 the GPU; plain `pip install torch` gives a CPU-only build on Windows. This build
-still supports older GPUs such as the local MX330 (compute capability 6.1). The
+still supports older GPUs such as the MX330 (compute capability 6.1). The
 `gpu` extra adds NVIDIA Warp (its CUDA 12 build, for the same reason) and MuJoCo
-Warp. Verified on 2026-10-03 with Python 3.13.15, MuJoCo 3.12.0, MuJoCo Warp
+Warp. Verified with Python 3.13.15, MuJoCo 3.12.0, MuJoCo Warp
 3.14.0, Warp 1.17.0, PyTorch 2.14.1+cu126, and NumPy 2.5.3: MuJoCo Warp's GPU
 arrays become PyTorch GPU tensors without copying.
 
@@ -125,177 +113,22 @@ run, for example
 [`benchmarks/physics_options.py`](benchmarks/physics_options.py) compares the
 physics' speed and soundness under other solver settings and timesteps.
 
-## Training machine
+## Running
 
-Training runs on a desktop with an RTX 3080, set up as above, with this
-repository, `RL_lib`, and `MujocoReplay` side by side. It collects about 1,250
-transitions per second at 1,024 worlds, two and a half times a Kaggle T4. The
-laptop, whose MX330 cannot run the default solver, is used to write code, run
-the CPU tests, and read the results. While the desktop cannot be reached,
-training runs on Kaggle, free, or on GPUs rented from Runpod (below).
-
-The laptop controls the desktop over SSH, through
-[`scripts/gpu_desktop.py`](scripts/gpu_desktop.py), run from the repository
-root with the project's Python:
+Every run starts from one TOML configuration file, given to the program's
+entry point from the repository root:
 
 ```powershell
-python scripts/gpu_desktop.py run configs/baseline.toml
-python scripts/gpu_desktop.py queue configs/overnight
-python scripts/gpu_desktop.py watch
-python scripts/gpu_desktop.py status
+python -m centipede configs/smoke.toml
 ```
 
-`run` makes the desktop pull the pushed code (this project's, RL_lib's and
-MujocoReplay's, never while a run or queue is running), sends it the configuration file
-as it is on the laptop, starts the run there, independently of the SSH
-connection, and shows its output as it is written: one line per window, with
-a bar of `#` and `.` that fills as the window is collected. The folder's
-`launched/` holds each launch's configuration file and console output, so a
-training run and its evaluations keep theirs apart. Ctrl+C stops watching, not
-the run. `watch` follows the latest run again (or the one whose name contains
-a given text), `fetch` copies a run's folder at any time, `status` lists the
-running and recent runs with how each ended and what is being copied, `stop`
-stops the running ones, and `tests` runs the tests on the desktop. A second
-run is refused while one is running, unless `--alongside` is given, since two
-runs share the GPU.
-
-Every training that `run` or `queue` launches is copied into the laptop's
-`runs/` as soon as it ends, with its evaluation, however it was started and
-whether or not anyone is watching. A copier does it: a process of its own on
-the laptop, started with the launch, that goes on when the terminal stops
-watching or is closed, and tries again every minute while the desktop cannot
-be reached. It logs what it copied in `runs/copies/<launch>.txt`, and the
-terminal that watches shows those lines among the output. A copier stopped
-before the end, for example by restarting the laptop, is started again by the
-next command of the script.
-
-`queue` starts a whole folder of training files, which
-[`scripts/run_queue.py`](scripts/run_queue.py) runs on the desktop one after
-another, in the order of their names, for example overnight. A run that fails
-does not stop the queue. If the folder holds an `evaluation.toml`, each
-finished run is evaluated right after it, with that file's `source` replaced
-by the run's folder. Every run of the queue is a launched run of its own, so
-`status` lists it. Its copier copies each run to the laptop as soon as it and
-its evaluation are done, while the queue goes on, and at the end the queue's
-output, which ends with a table of how each run ended, to `runs/queues/`;
-`fetch queue` copies all its runs at any time. `stop` stops the queue first,
-then its running run.
-
-Setting this up once: on the desktop, install Windows' OpenSSH Server, start
-the `sshd` service automatically, make Windows PowerShell its default shell,
-and set the network profile to Private (the SSH firewall rule covers only
-private networks). On the laptop, create a key with `ssh-keygen -t ed25519`,
-add its public half to the desktop's
-`C:\ProgramData\ssh\administrators_authorized_keys` (the file Windows reads
-for administrator accounts), and name the desktop `gpu` in `~/.ssh/config`
-with its address and user. The script expects the desktop's projects in
-`~\Projects` and its environment in `~\.venvs\Centipede`; another host name
-can be given in `CENTIPEDE_GPU_HOST`.
-
-### Training on Kaggle
-
-[`scripts/kaggle_gpu.py`](scripts/kaggle_gpu.py) trains a run and its
-evaluation on each of a Kaggle machine's two T4s, in one session of the private notebook
-`centipede-training`, launched and followed from the laptop. It uses Kaggle's
-command-line tool, installed in the project's environment and signed in once
-(the sign-in opens the browser):
-
-```powershell
-& "$HOME\.venvs\Centipede\Scripts\python.exe" -m pip install kaggle==2.2.4
-& "$HOME\.venvs\Centipede\Scripts\kaggle.exe" auth login
-```
-
-Then, from the repository root with the project's Python:
-
-```powershell
-python scripts/kaggle_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
-python scripts/kaggle_gpu.py run configs/pink_study/01_gae_lambda09.toml configs/pink_study/04_hidden256.toml
-python scripts/kaggle_gpu.py watch
-python scripts/kaggle_gpu.py status
-python scripts/kaggle_gpu.py fetch
-```
-
-`run` checks that the code is pushed, since the session clones it at the
-laptop's commit, uploads the run that the file starts from as a private
-dataset the first time, and sends the configuration file as it is on the
-laptop, with the `evaluation.toml` beside it. With `--seeds`, the session
-trains the file once per seed at the same time, one run on each of the
-machine's two T4s, named with `_seed<N>`; given two files from one folder, it
-trains both at the same time, one on each T4, each evaluated with that
-folder's `evaluation.toml`. The session,
-[`scripts/cloud_session.py`](scripts/cloud_session.py), runs the tests
-(`--skip-tests` leaves them out), trains, and evaluates each new run. `run`
-shows its output as Kaggle streams it, one line per window, marked with its
-seed or its file's name, and when it ends copies the run folders into `runs/` and the console
-output of every step into
-`runs/kaggle/<launch>/`, so Kaggle's web page is not needed. Ctrl+C stops
-watching, not the session; `watch` follows it again, `status` tells whether it
-is queued, running, or ended, and `fetch` copies its results at any time,
-waiting while it runs. Only the latest session is followed or fetched, so a
-new one is refused until it has ended. Run folders made on Kaggle are named
-by its clock, in UTC.
-
-### Training on Runpod
-
-[`scripts/runpod_gpu.py`](scripts/runpod_gpu.py) trains up to four runs at
-the same time on GPUs rented from [Runpod](https://www.runpod.io), each run
-on a pod of its own with one GPU: by default an RTX 5090 in the community
-cloud, $0.69 an hour on 2026-10-09, which trained 1.7 times as fast as the
-RTX 3080 at 256 worlds and 2.4 times at 1,024. It needs, once:
-
-- a Runpod account with credit, and an API key made in the Runpod console
-  (Settings, API Keys), stored in the user environment variable
-  `RUNPOD_API_KEY` or in `~/.runpod/config.toml` as `apikey = "..."`;
-- the laptop's SSH public key (`~/.ssh/id_ed25519.pub`) registered in the
-  account (Settings, SSH Public Keys), with which the laptop reaches the pods.
-
-Then, from the repository root with the project's Python:
-
-```powershell
-python scripts/runpod_gpu.py run configs/pink_study/03_worlds1024.toml
-python scripts/runpod_gpu.py run configs/pink_study/02_progress_ratio2.toml configs/pink_study/03_worlds1024.toml
-python scripts/runpod_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
-python scripts/runpod_gpu.py watch
-python scripts/runpod_gpu.py status
-python scripts/runpod_gpu.py fetch
-python scripts/runpod_gpu.py stop
-```
-
-`run` checks that the code is pushed, and refuses a launch that would make
-more than four pods rented at once. It rents a pod per run (`--gpu` and
-`--cloud` choose another GPU), waits until each answers over SSH, replaces a
-pod whose GPU is already busy before any work (a shared or faulty host),
-copies to it the run that the file starts from, and starts there the same session as on
-Kaggle, with the configuration file as it is on the laptop and the
-`evaluation.toml` beside it. On the pod,
-[`scripts/runpod_pod.sh`](scripts/runpod_pod.sh) runs the session in the
-background in a Python environment that keeps the image's PyTorch: the tests
-(`--skip-tests` leaves them out), the training, and the evaluation. If
-anything fails before every session has started, the launch's pods are
-deleted, so a failed launch costs nothing more.
-
-Each pod has a copier, a process of its own on the laptop like the desktop's,
-which checks the pod every minute and, when its session ends, copies the run
-folder into `runs/` and the console output of every step into
-`runs/runpod/<launch>/`, then deletes the pod. Its log is
-`runs/runpod/<launch>/copier.txt`; a copier stopped before the end is started
-again by the next command. So that a forgotten pod does not go on costing
-money, each pod also deletes itself three hours after its session ends, and in
-any case after `--max-hours` (12 by default) from its start: output not
-copied by then is lost.
-
-`run` shows the sessions' output, one line per window, each marked with its
-file or seed when there are several, then waits for the copies. Ctrl+C stops
-watching, not the runs or their copies. `watch` follows the latest launch
-again, `fetch` waits until its runs are copied and tries a failed copy again,
-`stop` copies what its pods hold so far and deletes them, and `status` lists
-the recent launches with how their copies ended, and the pods rented now with
-their cost so far. `watch`, `fetch`, and `stop` take part of a launch's name
-to choose another. Run folders made on a pod are named by its clock, in UTC.
-
-## Archive
-
-Material that is no longer active is moved to the local `archive/` folder rather
-than deleted, when it records a decision, a comparison, or a result. Archived
-files are never imported or used by active code. An archived idea that is revived
-is rebuilt as a new version and checked against the current baseline.
+The file chooses everything about the run, including where it runs: the
+physics simulation on the CPU or on an NVIDIA GPU (`backend` in
+`[environment.simulation]`) and the learning on the CPU or on the GPU
+(`device` in `[agents]`). The files in `configs/` are examples to copy and
+change: a smoke test that finishes in seconds on the CPU, a light probe on the
+CPU, training runs of increasing length on the GPU, and an evaluation of a
+trained run. [`docs/configuration.md`](docs/configuration.md) lists every
+setting, and what a run writes into its folder under `runs/`. A GPU older than
+Volta (compute capability 7.0) cannot compile MuJoCo Warp's default solver;
+the conjugate-gradient solver (`gpu_solver = "cg"`) runs on it, slowly.

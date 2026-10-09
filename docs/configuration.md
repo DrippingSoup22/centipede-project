@@ -48,9 +48,8 @@ defaults that need two sections at once:
 
 - The physics and the agents run on the same kind of device: `backend = "cpu"`
   requires `[agents] device = "cpu"`, and `backend = "gpu"` requires
-  `device = "cuda"`. The other two combinations are rejected for now. They may
-  be allowed later, for example a single world on the CPU with large networks
-  on the GPU; the interaction loop would then move tensors between devices.
+  `device = "cuda"`. The other two combinations are rejected, so the
+  interaction loop never has to move tensors between devices.
 
 ## Kinds of file
 
@@ -77,15 +76,15 @@ the number of worlds, episode length, and number of update cycles.
 | --- | --- | --- | --- |
 | `configs/smoke.toml` | Check that everything runs from start to finish | Tiny, seconds on the CPU | No |
 | `configs/probe.toml` | See how a choice of settings behaves on the CPU | Light, about half an hour on the CPU | Yes |
-| `configs/baseline.toml` | The first, smallest training run, against which later changes are compared | About 11 minutes on the RTX 3080 (64 worlds, 32 cycles of 64 steps, 1,024-step episodes) | Yes |
-| `configs/quick.toml` | Check that a GPU run works and measure its speed | Quick, about 3 minutes on the RTX 3080 (1,024 worlds, 3 cycles of 64 steps) | Yes |
-| `configs/medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 14 minutes on the RTX 3080 (256 worlds, 8 cycles of 256 steps) | Yes |
-| `configs/training.toml` | The actual experiment | Long, about 7.5 hours on the RTX 3080 (1,024 worlds, 128 cycles of 256 steps) | Yes |
+| `configs/baseline.toml` | A small training run on the GPU, against which other settings can be compared one at a time | About 11 minutes on an RTX 3080 (64 worlds, 32 cycles of 64 steps, 1,024-step episodes) | Yes |
+| `configs/quick.toml` | Check that a GPU run works and measure its speed | Quick, about 3 minutes on an RTX 3080 (1,024 worlds, 3 cycles of 64 steps) | Yes |
+| `configs/medium.toml` | See how a choice of settings starts to behave on the GPU | Medium, about 14 minutes on an RTX 3080 (256 worlds, 8 cycles of 256 steps) | Yes |
+| `configs/training.toml` | Full training | Long, about 7.5 hours on an RTX 3080 (1,024 worlds, 128 cycles of 256 steps) | Yes |
 
-The times are projected from the step times the training profile measured on
-the RTX 3080 desktop, the training machine (Stage 8.4 in `plan.md`): 0.29 s
-per step at 64 worlds, 0.40 s at 256, and 0.82 s at 1,024. The first run on a
-machine adds about half a minute compiling the kernels.
+The times are projected from the step times the training profile
+(`benchmarks/training_profile.py`) measured on an RTX 3080: 0.29 s per step at
+64 worlds, 0.40 s at 256, and 0.82 s at 1,024. The first run on a machine adds
+about half a minute compiling the kernels.
 
 The `[run]` settings of a training file:
 
@@ -146,7 +145,8 @@ leg_contact_cost_parts = 1
 # cost_budget_parts = 6               # default: the costs' parts together
 head_progress_ratio = 1               # a halving = one episode of step cost
 follower_progress_share = 1           # every follower receives the head's progress
-# command_cost_ratio = 4              # off by default: Ant's control cost, in step costs
+# movement_cost_parts = 0             # optional costs, off by default
+# command_cost_ratio = 0
 
 [agents]
 device = "cpu"                        # "cpu" or "cuda", matching the backend
@@ -255,8 +255,9 @@ replace the run's: `backend = "cpu"` evaluates a run trained on a GPU on the
 CPU, and the agents' device follows the backend; farther targets test how far
 the learned walking carries. Every changed value is listed in the results. The
 number of worlds cannot be changed this way, since `episodes_per_seed` sets it.
-CPU and GPU physics drift apart quickly (Stage 2 of the plan measured this), so
-results from the two backends are not identical.
+CPU and GPU physics drift apart quickly (see
+[environment.md](environment.md#backends)), so results from the two backends
+are not identical.
 
 Each world counts only its first episode; worlds that finish early start new
 episodes, which are not counted. An evaluation lasts up to `max_episode_steps`
@@ -429,7 +430,7 @@ Charts over training run along the world steps collected, so that runs with
 different numbers of worlds can be compared; hovering shows the cycle too.
 Dotted vertical lines mark where a later session resumed the run. The first
 window of each session also holds its start-up, such as compiling the GPU
-kernels (about 50 s on a fresh Kaggle machine), so it is drawn apart and left
+kernels (about 50 s when they are not yet cached), so it is drawn apart and left
 out of the speed's median.
 
 Every point of an episode value is a mean over the episodes that ended in that

@@ -1,7 +1,7 @@
 """Validation of model v3 against v2.
 
 v3 is v2 with a 0.149 ms timestep (134 physics steps per 20 ms action instead
-of 200), chosen in Stage 8.2 because it makes the physics about 1.3 times
+of 200), chosen because it makes the physics about 1.3 times
 faster while the contacts, which respond in 0.3 ms, keep their stiffness.
 """
 

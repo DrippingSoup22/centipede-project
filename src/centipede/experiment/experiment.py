@@ -354,7 +354,7 @@ def _check_agents_can_start_from(
     saved_layers = tuple(saved["hidden_layers"])
     if len(saved_layers) != len(settings.hidden_layers) or any(
         size < saved_size
-        for saved_size, size in zip(saved_layers, settings.hidden_layers)
+        for saved_size, size in zip(saved_layers, settings.hidden_layers, strict=True)
     ):
         raise SettingsError(
             f"[agents] hidden_layers must have as many layers as the checkpoint "

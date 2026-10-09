@@ -123,9 +123,8 @@ segment behind it. The rear has no joint behind it and keeps six actions; the
 joint action is seven wide, and the rear's seventh column is padding that goes
 to no motor. The model stores each spine motor with the unit it sits in, the
 one behind the joint ([model.md](model.md#motors)); which agent commands it is
-the environment's choice. Without spine control, as in every run saved before
-it existed, the spine motors always receive zero and the spine bends passively
-against its springs.
+the environment's choice. Without spine control, the spine motors always
+receive zero and the spine bends passively against its springs.
 
 **Why the joint behind.** Only the head sees the target, so it is the head
 that should be able to turn the front of the body: commanding its neck, it can
@@ -177,11 +176,11 @@ Known differences of the GPU backend:
 - Memory for contacts and constraints is reserved in advance. MuJoCo Warp's
   defaults (48 contacts, 64 constraint rows per world) are too small: the model
   at rest already reaches 40 contacts and 256 constraint rows.
-- Its default Newton solver needs a GPU of the Volta generation or newer, such
-  as Kaggle's T4; the local MX330 and Kaggle's P100 cannot compile it. With
-  models v2 and v3, the MX330 can run the GPU backend using the conjugate-gradient
-  solver, slowly and less converged, which is enough for local functional
-  tests.
+- Its default Newton solver needs a GPU of the Volta generation (compute
+  capability 7.0) or newer, such as a T4; older GPUs such as the MX330 or the
+  P100 cannot compile it. With models v2 and v3, the MX330 can run the GPU
+  backend using the conjugate-gradient solver (`gpu_solver = "cg"`), slowly and
+  less converged, which is enough for functional tests.
 
 ## Physical state and observations
 
@@ -315,17 +314,18 @@ If arrival and a cut happen on the same step, arrival wins. Nothing else ends
 an episode: the centipede may fall or touch the ground with its body and
 recover.
 
-**Why the head, and why so permissive.** Until 2026-10-08 the head's tip had to
-come within 1 mm of targets 10 to 20 mm away: an aim within an eighth of the
-head's own width, on top of learning to walk. The user wants a centipede that
-walks far to reach its target, however it gets there, so the target now only
-has to come under the head. Only the head sees the target and its distance
+**Why the head, and why so permissive.** The task is to walk to the target,
+however the body gets there, not to aim the head's tip precisely, so the target
+only has to come under the head. Only the head sees the target and its distance
 makes the progress, so the head, not any segment, decides arrival: counting the
 whole body would also count the body sweeping or swinging over targets the
-head missed, and with targets in front the head gets there first anyway. The
-head is eight times wider than the old 2 mm circle, so the targets moved
-farther: a straight walk, without steering, now reaches 18% of them (it reached
-26.6% before), and an approach is worth 3.5 halvings, about the old 3.9:
+head missed, and with targets in front the head gets there first anyway.
+
+The head is 8 mm wide, so a near target is reached by walking straight ahead,
+without steering. The targets are placed far enough that this luck reaches few
+of them: at 30 to 60 mm and within 30° of straight ahead, a straight walk
+reaches 18%, and an approach is worth 3.5 halvings of the distance (see
+[Rewards](#rewards)):
 
 | Targets, with arrival under the head | Straight-walk luck at ±15° | ±30° | ±45° | Halvings per approach |
 | --- | ---: | ---: | ---: | ---: |
@@ -333,45 +333,43 @@ farther: a straight walk, without steering, now reaches 18% of them (it reached
 | 30–60 mm | 35% | 18% | 12% | 3.5 |
 | 40–80 mm | 26.5% | | 8.8% | 3.9 |
 
-**Why the range circle.** In the first runs of the rules, every episode that ran
-out of time ended more than 50 mm from its target, and up to half of them more
-than 100 mm: about half of each episode was spent far beyond the target, where
-a step changes the halvings very little and the target's position lies far
-outside what the networks usually see. Leaving the circle restarts the world
-with a new target, so those steps become new approaches. It ends the episode
-like the time limit, not as a failure: the agents' critic values the state the
-episode was cut in, as at the time limit, so the reward and what is best stay
-unchanged, and walking away can never become a way to stop paying the costs. At
-2.5 times the start distance, a centipede that overshoots can still walk one and
-a half times its first distance past the target and turn back before it is cut.
-The circle grows with the targets' distance, so it needs no change when they
-move farther.
+**Why the range circle.** Without it, a centipede that walks past its target or
+away from it spends the rest of the episode far beyond it, where a step changes
+the halvings very little and the target's position lies far outside what the
+networks usually see. Leaving the circle restarts the world with a new target,
+so those steps become new approaches. It ends the episode like the time limit,
+not as a failure: the agents' critic values the state the episode was cut in,
+as at the time limit, so the reward and what is best stay unchanged, and
+walking away can never become a way to stop paying the costs. At 2.5 times the
+start distance, a centipede that overshoots can still walk one and a half times
+its first distance past the target and turn back before it is cut. The circle
+grows with the target's distance, so it suits any range of targets.
 
 ## Rewards
 
-The reward was rebuilt on 2026-10-08 from a small set of rules, agreed with
-the user, so that every weight follows from them instead of being tuned by
-hand; the same day, after its first runs, the followers' progress was replaced
-by a share of the head's. This section gives the terms, the rules, what they
-produce, and the rewards used before, which earlier runs keep.
+The reward follows from a small set of rules, so that every weight is derived
+from them instead of being tuned by hand. This section gives the terms, the
+rules, and the weights they produce, then two optional costs, off by default,
+and the earlier forms of the reward that the program still computes.
 
 ### The terms
 
 Every segment `i` receives, on every step:
 
 ```text
-r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i − w_move × M_i − w_command × C_i
+r_i = A × arrived + w_progress × P − w_step − w_body × B_i − w_leg × L_i
 ```
 
 | Term | Its value on a step | Who receives it |
 | --- | --- | --- |
-| **Arrival** | 1 on the step the head comes within the arrival radius of the target, otherwise 0 | Every segment, the same |
+| **Arrival** | 1 on the step the head arrives at the target, otherwise 0 | Every segment, the same |
 | **Progress** `P` | `log2(distance before ÷ distance after)` of the head's tip and the target: how many times the head halved its distance; negative when it moved away, 0 when it did not move | Every segment, the same (`follower_progress_share` = 1) |
 | **Step cost** | 1 on every step | Every segment |
 | **Body contact** `B_i` | 1 when the segment's body touches the ground | That segment |
 | **Leg contact** `L_i` | 1 when one of its legs touches another leg; both segments involved pay | That segment |
-| **Movement** `M_i` | How far the joints the segment commands moved on the step, squared and averaged over them, in units of how far random commands move a joint (25° for v3, squared); at most 1. Only when `movement_cost_parts` is set | That segment |
-| **Command** `C_i` | The segment's commands for the step, squared and averaged over the joints it commands: 0 for none, 1 for full commands. Only when `command_cost_ratio` is set | That segment |
+
+In the code, the reward function is a sum of named terms, each multiplied by
+the weight that `RewardSettings.weights` works out from the settings.
 
 Feet on the ground cost nothing, and nothing rewards a particular gait. The
 design is a **team led by the head**: only the head sees the target, but every
@@ -382,57 +380,19 @@ others push, and when they stop, has to come from training. Posture stays each
 segment's own: the contact costs, paid by the segment that touches, are the
 only terms that differ between segments.
 
-**Why the followers share the head's progress.** The first runs of the rules
-paid each follower for halving its own distance to the spot where the segment
-ahead had been. The segments are joined by hinges at a fixed distance
-([model.md](model.md), Spine), so a follower cannot lag behind its leader or
-catch up with it: its distance to that spot shrank by exactly how far the body
-moved forward on the step. The term rewarded every follower for the body's
-speed, wherever it went, and since the spot moved on with every step, nothing
-was ever given back: about 40 halvings per episode, worth about 0.9 `A` to each
-follower. Seven segments paid to push outweighed the one trying to steer; the
-results are under [The first runs of the rules](#the-first-runs-of-the-rules).
-Matching the leader's velocity instead was considered and rejected for the same
-reason: with the distance fixed, two neighbours' velocities differ only when
-the body turns, so it would be blind to speed and would penalise the turns the
-head needs. Sharing the head's progress is a shared reward copied to each
-agent, which keeps every agent's networks, data, and learning separate.
-
-**Why a movement cost.** The far-target runs of 2026-10-08 showed that the
-centipede had no gait: it crawled by jittering its legs with the exploration
-noise, which PPO draws afresh for every 20 ms step. In the recordings each
-leg's angle lost its correlation within 0.1 s and never regained it, left and
-right legs were unrelated, and with the policy's mean action, without noise,
-the head moved 8 mm in 5 s. Nothing made the jitter cost anything, and since it
-moved the body, the noise hardly shrank. The movement cost, chosen with the
-user, charges each segment for how far the joints it commands move in each
-step, squared. The square makes a sudden movement expensive and a calm one
-cheap: ten steps of 1° cost a tenth of one step of 10°, so the same distance
-spread over more steps costs less, and holding still costs nothing. It is
-close to the energy the joints' own friction burns. It is measured on the
-joints the agent observes, so an agent can tell from its own observation what
-a choice will cost; a cost on how much the commands change was considered and
-set aside, because no agent sees its previous command. The unit is how far
-random commands move a joint in one step, 25° for model v3 (the root of the
-mean square over every leg joint, 8 worlds for 3.6 s on the CPU): 1 is as
-erratic as random commands, and anything more counts as 1. Measured on the last
-far-target policy, random commands give 1.00, its training walk 0.64, and its
-mean action 0.003; a calm stroke over half the sweep range, twice a second,
-gives about 0.02. The noise itself pays the cost, so PPO is pushed to shrink it
-as far as that pays: the cost does not say how to walk, it only stops jitter
-being free.
-
-**Why a command cost.** In the runs of 2026-10-08 the movement cost, at one and
-two parts of the budget, left the jitter as it was (joint movement 0.68 → 0.67
-of random commands). The command cost is the control cost of Gymnasium's Ant
-(Towers et al., 2024): it charges what each segment commands, squared, rather
-than what its joints do, so a large command costs the same whether or not the
-body follows it. Ant pays 1 per healthy step and charges 0.5 times the sum of
-its 8 squared commands, so a mean squared command of 1 costs 4 healthy steps;
-`command_cost_ratio` = 4 copies that ratio against the step cost. Like the
-noise it charges, it lies outside the cost budget: with it, the worst episode
-no longer balances to zero (rule R1). Added for the night tests of 2026-10-09
-([results/night_2026-10-09](../results/night_2026-10-09/README.md)).
+**Why the followers share the head's progress.** A follower could instead be
+paid for its own progress: for halving its distance to the spot where the
+segment ahead had been. But the segments are joined by hinges at a fixed
+distance ([model.md](model.md), Spine), so a follower cannot lag behind its
+leader or catch up with it: its distance to that spot shrinks by exactly how
+far the body moved forward on the step. Such a term pays every follower for the
+body's speed, wherever it goes, and since the spot moves on with every step,
+nothing is ever given back: seven segments paid to push would outweigh the one
+trying to steer. Matching the leader's velocity fails for the same reason: with
+the distance fixed, two neighbours' velocities differ only when the body turns,
+so it would be blind to speed and would penalise the turns the head needs.
+Sharing the head's progress is a shared reward copied to each agent, which
+keeps every agent's networks, data, and learning separate.
 
 **Why progress counts halvings.** A halving has no unit, so the same rules hold
 for any target distance, and it is worth the same at 16 mm as at 2 mm. Over an
@@ -441,8 +401,9 @@ whatever path it took: wiggling back and forth earns nothing, and walking past
 the target gives back what was earned on the way. Distances closer than half
 the head's width (4 mm) count as 4 mm: within the head's reach nothing pays
 more, so there is nothing to gain from aiming the tip exactly, and an approach
-from 45 mm is worth `log2(45 ÷ 4)` = 3.5 halvings. Moving away is penalised only by the logarithm of how far
-the head goes: ending twice as far as it started costs one halving.
+from 45 mm is worth `log2(45 ÷ 4)` = 3.5 halvings. Moving away is penalised
+only by the logarithm of how far the head goes: ending twice as far as it
+started costs one halving.
 
 Progress is part of the goal, not only a guide to it: it says that ending closer
 is better than not trying (rule R2 below). Pure "potential-based shaping" (Ng,
@@ -467,7 +428,7 @@ for leg contact.
   adds up to zero, seen from its start with that discount:
   `γ^(T−1) = (σ + β + λ) / T × (1 − γ^T) / (1 − γ)`. This gives the **cost
   budget** `σ + β + λ = T × (2^(1/T) − 1)`, about ln 2 = 0.69 for any long
-  episode; with the movement cost, its share μ is part of the same budget. R1 counts only the costs: every arrival also earns the progress of
+  episode. R1 counts only the costs: every arrival also earns the progress of
   its approach, which depends only on where it started, and asking the costs to
   cancel that too would make them larger than the arrival itself.
 - **R2. Standing still is a little worse than trying badly.** A centipede that
@@ -481,28 +442,20 @@ for leg contact.
 - **R4. Every segment shares the head's progress.** Each follower receives the
   head's progress at `follower_progress_share` = 1. The share must make helping
   the head worth more than a follower's own posture over an episode, or it
-  would rather keep still: a full approach from 15 mm is worth about 0.9 `A`,
-  more than a whole episode of leg contact (λ = 0.116) above a share of 0.13,
-  and of body contact (β = 0.347) above 0.39. Nothing limits it from above:
-  a follower gains only when the head comes closer and loses when it moves
-  away, so its interest and the head's never diverge, and with a share of 1
-  every segment values the approach equally.
+  would rather keep still: a full approach from 45 mm, the middle of the
+  targets' range, is worth about 0.8 `A`, more than a whole episode of leg
+  contact (λ = 0.116) above a share of 0.14, and of body contact (β = 0.347)
+  above 0.43. Nothing limits it from above: a follower gains only when the head
+  comes closer and loses when it moves away, so its interest and the head's
+  never diverge, and with a share of 1 every segment values the approach
+  equally.
 
-- **R5. Moving costs, but trying still pays.** With the movement cost, R2 must
-  hold even for an attempt that moves as erratically as training's walk did
-  when the cost was introduced, 0.64 of random commands: a whole episode of
-  that, with the legs touching and one halving, must still end above standing
-  still, `λ + 0.64 μ < σ`. With the order of R3 that allows at most 1.56 parts;
-  the largest whole number, 1 part like leg contact, splits the budget
-  **3 : 2 : 1 : 1** (β : σ : λ : μ). Over an episode a calm attempt (about
-  0.02) then ends at −0.10, the same attempt by jittering at −0.16, and
-  standing still at −0.20: jitter no longer pays, and nothing pushes the
-  centipede to freeze before it finds a calmer walk.
-
-Two earlier candidates turned out to be consequences rather than rules. A full
-approach from 20 mm earns `log2(20) × σ ≈ 1.0 A`, about the arrival; every
-arrival still sits a whole `A` above a near miss, and progress cannot be farmed.
-Wandering away is penalised only gently, by the logarithm.
+Two more properties follow from these rules and need no rule of their own.
+Progress cannot be farmed, since it depends only on where the head starts and
+ends, so an arrival always sits a whole `A` above a near miss; a full approach
+from the farthest targets, 60 mm, earns `log2(60 ÷ 4) × σ ≈ 0.9 A`, about as
+much as the arrival itself. And wandering away is penalised only gently, by
+the logarithm.
 
 ### What the rules give
 
@@ -516,10 +469,6 @@ With `A = 1` and 256-step episodes:
 | Leg contact | 0.00045 per step | λ = 1/6 of the budget (0.116) |
 | Progress | 0.231 per halving of the head's distance, to every segment | σ × `head_progress_ratio`, shared at `follower_progress_share` |
 | Discount | 0.9973 | 2^(−1/256) |
-
-With the movement cost at 1 part the budget has seven parts: σ = 0.198,
-β = 0.298, λ = 0.099, and μ = 0.099 (0.00039 per step at the level of random
-commands), and progress is worth 0.198 per halving.
 
 Doubling the episode length halves the per-step costs and sets the discount to
 0.9987; nothing else changes. Every training run prints these weights under its
@@ -542,10 +491,9 @@ The two cut episodes stop at the circle: what would have followed is left to
 the critic's estimate, as at the time limit.
 
 Seen from the start through the discount, the worst arrival comes to about +0.5
-(zero for its costs, plus its progress) and standing still to −0.17. Per step at
-walking speed, the progress is about three times the body cost at 15 mm and
-grows near the target, so a much faster crawl could outweigh an upright walk;
-the reports' body values show whether it does.
+(zero for its costs, plus its progress) and standing still to −0.17. Per step,
+the progress grows as the head nears the target, so near it a much faster
+crawl, with the body on the ground, could earn more than an upright walk.
 
 **Switching a cost off.** A cost of 0 parts is off. The budget is split into
 `cost_budget_parts` equal parts, by default the costs' parts together; setting
@@ -555,49 +503,58 @@ keeps the step cost and progress of the full reward with
 `body_contact_cost_parts = 0`, `leg_contact_cost_parts = 0`, and
 `cost_budget_parts = 6`.
 
-### The reward used before 2026-10-08
+### Optional costs
 
-Earlier runs used per-step weights and one **efficiency** term in place of the
-step cost and progress:
+Two more costs can be added to the reward, each charged to every segment for
+its own joints. Both are off unless a configuration sets them:
+
+```text
+r_i = … − w_move × M_i − w_command × C_i
+```
+
+- **Movement** `M_i` (`movement_cost_parts`): how far the joints the segment
+  commands moved on the step, squared and averaged over them, in units of how
+  far random commands move a joint in one step (`random_command_movement_deg`,
+  25° for model v3); at most 1. It takes its parts of the cost budget like the
+  other costs, so rule R1 still holds. The square makes a sudden movement
+  expensive and a calm one cheap: ten steps of 1° cost a tenth of one step of
+  10°, and holding still costs nothing. It is measured on the joints the agent
+  observes, so an agent can tell from its own observation what a choice will
+  cost.
+- **Command** `C_i` (`command_cost_ratio`): the segment's commands for the
+  step, squared and averaged over the joints it commands: 0 for none, 1 for
+  full commands. It charges what the segment asks for, exploration noise
+  included, whether or not the body follows. It is the control cost of
+  Gymnasium's Ant (Towers et al., 2024), with a weight that is a multiple of
+  the step cost's, `w_command = command_cost_ratio × w_step`. It lies outside
+  the cost budget, so with it the worst arrival no longer balances to zero
+  (rule R1).
+
+### Earlier forms of the reward
+
+The program also computes two earlier forms of the reward, so that runs
+configured with them can still be continued and evaluated.
+
+**The efficiency reward.** A file that sets any of `efficiency_cost`,
+`body_contact_cost`, or `leg_contact_cost` uses per-step weights and one
+efficiency term in place of the step cost and progress:
 
 ```text
 r_i = A × arrived + E_i − c_body × B_i − c_leg × L_i
 E_i = −c_efficiency × (ε + distance after) / (ε + distance before)
 ```
 
-The efficiency term held the step cost (`−c_efficiency` when standing still)
-and the progress (`c_efficiency × gain ÷ distance`) under one weight. Its
-progress part was about 1% of it at the targets' distance, and about a
-thousandth of the arrival over a whole approach: in the runs of 2026-10-08 the
-head's progress part averaged zero, and no run learned to steer. A
-configuration that sets any of `efficiency_cost`, `body_contact_cost`, or
-`leg_contact_cost` uses this reward, so runs saved before keep it when they are
-continued or evaluated; a file that also sets the proportions is refused.
+The efficiency term holds the step cost (`−c_efficiency` when standing still)
+and the progress (`c_efficiency × gain ÷ distance`) under one weight, so the
+progress is only a small part of it; the rules give progress a weight of its
+own instead. A file that also sets the rules' proportions is refused.
 
-### The first runs of the rules
-
-The first two runs of the rules (2026-10-08, `configs/reward_rules/`, from the
-standing prototype, two seeds) paid each follower for halving its own distance
-to the spot where the segment ahead had been, at `follower_progress_ratio` =
-1/10 of the head's weight. As explained above, that paid for speed. Over the
-64 update cycles, each follower's progress rose from +0.0021 to +0.0045 per
-step, five times the step cost, while the head's fell from −0.0004 to −0.0016:
-the centipedes walked faster (head path 123 → 167 mm per episode) and past
-their targets, ending 81 and 70 mm away instead of 34 mm, with the heading
-error rising from 119° to 145°. Arrivals stayed at 21–23%, the luck of walking
-straight. A file that sets `follower_progress_ratio` keeps that term, with
-`follower_progress_share` 0 unless it sets that too, so those runs read back
-with their reward.
-
-### Changing the reward
-
-The reward function is a sum of named **terms**, each multiplied by the weight
-`RewardSettings.weights` works out. A new term is placed in the rules before it
-is added: a cost takes its parts of the budget, so that the worst arrival still
-balances to zero, and anything positive is weighed against the arrival and the
-costs as progress was. A changed formula is added as a new term rather than by
-editing an existing one, so that earlier runs' settings keep meaning the same
-reward.
+**The followers' own progress.** A file that sets `follower_progress_ratio`
+pays each follower, at that share of the head's weight, for halving its own
+distance to the spot where the segment ahead had been, and gives it no share
+of the head's progress unless it also sets `follower_progress_share`. As
+explained under [The terms](#the-terms), this pays for the body's speed rather
+than for approaching the target.
 
 ## Diagnostics
 
@@ -617,7 +574,7 @@ These are the keys of the environment sections of the configuration file (see
 | **`[environment]`** | | |
 | `max_episode_steps` | 8,192 | Time limit, in 20 ms steps (about 164 s) |
 | `observation_radius` | 1 | Neighbours seen on each side; 0 means only itself; must be less than `N` |
-| `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; false, as in every run saved before it existed: the spine motors receive zero |
+| `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; when false, the spine motors receive zero |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
@@ -630,39 +587,24 @@ These are the keys of the environment sections of the configuration file (see
 | `distance_range_m` | 0.030 to 0.060 | Distance of a new target from the head's tip |
 | `bearing_range_deg` | −30 to 30 | Direction of a new target from straight ahead |
 | `arrival` | `"head"` | `"head"`: the target must lie under the head's outline; `"tip"`: the head's tip must come within `arrival_radius_m` |
-| `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip, as every run saved before 2026-10-08's head arrival does |
-| `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. Not set in the tip's files: no circle |
+| `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip |
+| `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. With the tip, no circle unless the file sets one |
 | **`[environment.rewards]`** | | |
 | `arrival_reward` (`A`) | 1.0 | Shared reward for reaching the target: the unit of every other weight |
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |
 | `body_contact_cost_parts` | 3 | Body contact's parts of the cost budget |
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
-| `movement_cost_parts` | 0 | The movement cost's parts of the cost budget; 0 (off) unless a file sets it, so that runs saved before it existed keep their reward |
+| `movement_cost_parts` | 0 | The [movement cost](#optional-costs)'s parts of the cost budget; 0 is off |
 | `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
-| `command_cost_ratio` | 0 | The command cost's weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`. Outside the cost budget, so it breaks rule R1 when set; 0 (off) unless a file sets it. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
+| `command_cost_ratio` | 0 | The [command cost](#optional-costs)'s weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`; 0 is off. Outside the cost budget, so rule R1 no longer holds when it is set. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
 | `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
 | `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole episodes of step cost |
 | `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
-| `follower_progress_ratio` | Not set | The first runs' followers' own progress toward the spot where the segment ahead had been, as a share of the head's weight; kept for those runs |
-| `distance_ratio_epsilon_m` (`ε`) | 0.000001 | Keeps the efficiency ratio of the earlier reward defined |
-| `efficiency_cost`, `body_contact_cost`, `leg_contact_cost` | Not set | Per-step weights of the reward used before 2026-10-08 (0.003, 0.010, and 0.005 when any is set); setting one selects that reward |
+| `follower_progress_ratio` | Not set | Each follower's [own progress](#earlier-forms-of-the-reward) toward the spot where the segment ahead had been, as a share of the head's weight |
+| `distance_ratio_epsilon_m` (`ε`) | 0.000001 | Keeps the efficiency reward's ratio defined |
+| `efficiency_cost`, `body_contact_cost`, `leg_contact_cost` | Not set | Per-step weights of the [efficiency reward](#earlier-forms-of-the-reward) (0.003, 0.010, and 0.005 when any is set); setting one selects that reward |
 
-The episode length is a hyperparameter like the others: 8,192 steps is the
-default, and 4,096 is the main alternative considered. The GPU memory values
-leave headroom over the 40 contacts and 256 constraint rows measured at rest;
-they are confirmed in motion on the GPU. The reward's proportions come from
-the rules in [Rewards](#rewards), not from measured biology. Reward experiments
-change these proportions or the reward function, and nothing else.
-
-## Later experiments
-
-Left for after the first version works, one change at a time:
-
-- Targets farther away, at wider angles, or behind the head.
-- A new target after arrival, without a reset.
-- More variation in the starting pose than the heading.
-- Agents controlling and observing the spine.
-- A larger observation radius, which is only a configuration change.
-- A body with more segments: a new model version. The code adapts, but trained
-  agents do not carry over, because each segment has its own network.
-- A reward term for a wave-like gait, only if one does not emerge on its own.
+The episode length is a hyperparameter like the others. The GPU memory values
+leave headroom over the 40 contacts and 256 constraint rows measured at rest,
+and hold in motion. The reward's proportions come from the rules in
+[Rewards](#rewards), not from measured biology.

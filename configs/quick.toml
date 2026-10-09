@@ -1,8 +1,8 @@
-# Quick level, about 3 minutes on the RTX 3080: checks that a GPU run works
+# Quick level, about 3 minutes on an RTX 3080: checks that a GPU run works
 # from start to finish and measures its speed, with a report. Three short
-# windows give three updates; nothing is expected to be learned. Projected
-# from the measured step time (plan.md, Stage 8.4): 0.82 s per step at 1,024
-# worlds, so 53 s per cycle (2.2 minutes on a Kaggle T4).
+# windows give three updates; nothing is expected to be learned. An RTX 3080
+# takes about 0.82 s per step at 1,024 worlds, so 53 s per cycle (2.2
+# minutes on a T4).
 #
 #   python -m centipede configs/quick.toml
 

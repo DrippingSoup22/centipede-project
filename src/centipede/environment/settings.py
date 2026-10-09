@@ -17,9 +17,8 @@ class TargetSettings:
     the target, with ``range_circle_ratio`` times the distance at the start as
     its radius; 0 means no circle.
 
-    The tip and no circle are the task of the runs before 2026-10-08's head
-    arrival: a file that sets ``arrival_radius_m``, as their saved files do,
-    uses the tip, and has no circle unless it sets one.
+    A file that sets ``arrival_radius_m`` uses the tip, and has no circle
+    unless it sets one, as the earlier task did.
     """
 
     distance_range_m: tuple[float, float]
@@ -69,9 +68,9 @@ class TargetSettings:
         return settings
 
 
-# The settings of the reward used before 2026-10-08: per-step weights, with
-# efficiency as one term. A file that sets any of them uses that reward, so the
-# runs saved before then keep their reward when continued or evaluated.
+# The settings of the earlier efficiency reward: per-step weights, with
+# efficiency as one term. A file that sets any of them uses that reward, so
+# runs configured with it keep their reward when continued or evaluated.
 PER_STEP_WEIGHT_KEYS = ("efficiency_cost", "body_contact_cost", "leg_contact_cost")
 PROPORTION_KEYS = (
     "step_cost_parts",
@@ -111,25 +110,25 @@ class RewardSettings:
     parts. The movement cost charges each segment for how far the joints it
     commands move in a step, squared, in units of
     ``random_command_movement_deg``: how far a joint moves in a step under
-    random commands. It is off (0 parts) unless a file sets it, so runs saved
-    before it existed keep their reward. The command cost, also off unless set,
-    lies outside the budget: each step it charges ``command_cost_ratio`` times
-    the step cost's weight, times the segment's mean squared command (from 0
-    to 1). Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands
-    against a reward of 1 for every step it stays healthy: a ratio of 4. Being
-    outside the budget, it breaks rule R1 when set. ``head_progress_ratio`` is
-    what one halving of the head's distance to its target is worth, in whole
-    episodes of step cost, and ``follower_progress_share`` the share of the
-    head's progress that every follower receives as well (1: the same). A cost
-    of zero parts is switched off.
+    random commands. It is off (0 parts) unless a file sets it. The command
+    cost, also off unless set, lies outside the budget: each step it charges
+    ``command_cost_ratio`` times the step cost's weight, times the segment's
+    mean squared command (from 0 to 1). Gymnasium's Ant charges 0.5 times the
+    sum of its 8 squared commands against a reward of 1 for every step it stays
+    healthy: a ratio of 4. Being outside the budget, it breaks rule R1 when set.
+    ``head_progress_ratio`` is what one halving of the head's distance to its
+    target is worth, in whole episodes of step cost, and
+    ``follower_progress_share`` the share of the head's progress that every
+    follower receives as well (1: the same). A cost of zero parts is switched
+    off.
 
-    ``follower_progress_ratio`` belongs to the first runs of the rules, on
-    2026-10-08, whose followers were paid for halving their distance to the spot
-    where the segment ahead had been; it is None unless a file sets it, and in
-    such a file ``follower_progress_share`` defaults to 0, so those runs read
+    ``follower_progress_ratio`` pays each follower, as an earlier form of the
+    reward did, for halving its own distance to the spot where the segment
+    ahead had been; it is None unless a file sets it, and in such a file
+    ``follower_progress_share`` defaults to 0, so runs configured with it read
     back with their reward.
 
-    A file that sets the per-step weights of the reward used before 2026-10-08
+    A file that sets the per-step weights of the earlier efficiency reward
     (``efficiency_cost``, ``body_contact_cost``, ``leg_contact_cost``) uses that
     reward instead; then the proportions are None, and otherwise those weights
     are. Unset values are left out of a run's saved configuration, so a saved
@@ -247,7 +246,7 @@ class RewardSettings:
 
     @property
     def uses_per_step_weights(self) -> bool:
-        """Whether this is the reward used before 2026-10-08."""
+        """Whether this is the earlier efficiency reward."""
         return self.efficiency_cost is not None
 
     def weights(self, max_episode_steps: int) -> RewardWeights:

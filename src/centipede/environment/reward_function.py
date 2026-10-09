@@ -125,11 +125,12 @@ def progress(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     ÷ arrival radius) for an episode that arrives, and walking past the target
     gives back what was earned.
 
-    The first runs of the rules, on 2026-10-08, paid each follower instead for
-    halving its own distance to the spot where the segment ahead had been, at
+    An earlier form of the reward paid each follower instead for halving its
+    own distance to the spot where the segment ahead had been, at
     ``follower_progress_ratio``. Those spots move on every step, so the
-    followers' values never added up to anything bounded: they paid for speed.
-    The term is kept so that those runs read back with their reward.
+    followers' values never add up to anything bounded: they pay for speed.
+    The term is kept so that runs configured with it read back with their
+    reward.
     """
     radius = context.arrival_radius_m
     halvings = torch.log2(
@@ -152,8 +153,8 @@ def step_cost(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
 def efficiency(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−(ε + distance after) / (ε + distance before): −1 when not moving.
 
-    The reward used before 2026-10-08 held the step cost and the progress in
-    this one term, under one weight; it is kept for the runs saved then.
+    The earlier efficiency reward held the step cost and the progress in this
+    one term, under one weight; it is kept for the runs configured with it.
     """
     epsilon = settings.distance_ratio_epsilon_m
     return -(epsilon + context.distance_after) / (epsilon + context.distance_before)
@@ -211,7 +212,7 @@ class StepRewards:
 
 
 # The terms of each reward, in order: the current one, built from its rules,
-# and the one used before 2026-10-08, for the runs saved then.
+# and the earlier efficiency reward, for the runs configured with it.
 TERMS = {
     "arrival": arrival,
     "progress": progress,

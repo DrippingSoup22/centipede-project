@@ -205,7 +205,7 @@ const METRICS = {
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
-    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs (step cost, body contact, leg contact, and progress while it moves away) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. Runs from before 8 October 2026 had one efficiency term in place of progress and the step cost." },
+    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs (step cost, body contact, leg contact, and progress while it moves away) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
 
   // -- How the episodes spread -------------------------------------------------
   "episode_distributions.distance_closed": { label: "Distance closed, every episode", source: "episodes.distance_closed", better: "higher",
@@ -215,7 +215,7 @@ const METRICS = {
   "episode_distributions.final_distance": { label: "Distance at the end, every episode", source: "episodes.final_distance", better: "lower",
     about: "How far from its target each episode's head ended. Arrivals end within the arrival radius; the episodes that ran out of time end wherever the head was. Counting episodes in bins shows what most centipedes did, which a mean distance hides: a few that wander far away pull a mean up however well the others did." },
   "episode_distributions.ending": { label: "How episodes ended, every episode", source: "episodes.ending",
-    about: "How each episode ended, measured against its own start distance so that the classes hold for any target distance: arrived; ran out of time within a quarter of the start distance, within half, closer than at the start, or not closer; or left the range circle, which cut it. Runs from 8 October 2026's arrival under the head on log it." },
+    about: "How each episode ended, measured against its own start distance so that the classes hold for any target distance: arrived; ran out of time within a quarter of the start distance, within half, closer than at the start, or not closer; or left the range circle, which cut it." },
   "episodes.left_range": { label: "Left the circle", unit: "%", scale: 100, better: "lower",
     about: "The share of episodes cut because the head's tip left the range circle around the target, whose radius is a multiple of the distance at the start. Such an episode ends like a time limit: the world starts again with a new target." },
   "episode_distributions.upside_down_share": { label: "Head upside down, every episode", source: "episodes.upside_down_share", better: "lower",
@@ -303,7 +303,7 @@ const SETTING_CHIPS = [
   { keys: ["environment.target"],
     text: ({ environment: { target: t } }) => `targets ${number(t.distance_range_m[0] * 1000)}–${number(t.distance_range_m[1] * 1000)} mm, ` +
       `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, ` +
-      // Runs before 8 October 2026's arrival under the head set the tip's radius.
+      // A file that sets the tip's radius uses arrival at the tip.
       (t.arrival_radius_m !== undefined && t.arrival !== "head" ? `arrival within ${number(t.arrival_radius_m * 1000)} mm` : "arrival under the head") +
       (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` : "") },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
@@ -311,7 +311,7 @@ const SETTING_CHIPS = [
   { keys: ["environment.spine_control"], text: (s) => s.environment.spine_control ? "each segment bends the spine joint behind it" : "passive spine" },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
-      // Runs from before 8 October 2026 set per-step weights instead of proportions.
+      // The earlier efficiency reward sets per-step weights instead of proportions.
       if (r.step_cost_parts === undefined) return `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}`;
       const movement = r.movement_cost_parts || 0;
       const used = r.body_contact_cost_parts + r.step_cost_parts + r.leg_contact_cost_parts + movement;
@@ -767,8 +767,8 @@ const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
 // Reward terms by name: arrival green, progress blue, the step cost grey, and
 // the posture costs warm, the movement cost its own; efficiency is the term
-// of the reward used before 8 October 2026, which held the step cost and
-// progress together.
+// of the earlier efficiency reward, which held the step cost and progress
+// together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)" };
@@ -1365,9 +1365,9 @@ function endingClasses(settings, edges) {
   return classes.filter((c) => c.bins.length);
 }
 
-// How episodes ended in runs that log the "ending" histogram (from 8 October
-// 2026's arrival under the head on): one bin per class, against each episode's
-// start distance.
+// How episodes ended in runs that log the "ending" histogram (runs from before
+// it existed have none): one bin per class, against each episode's start
+// distance.
 const RELATIVE_ENDING_CLASSES = [
   { name: "arrived", quality: 1 },
   { name: "within a quarter of the start distance", quality: 0.8 },

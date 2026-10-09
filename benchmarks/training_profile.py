@@ -29,8 +29,7 @@ short windows of real training at one or more world counts:
 
 The pipeline's methods are wrapped with timers at run time; no pipeline code
 changes. Some private methods are reached on purpose: this is a diagnostic,
-not pipeline code. Run from the repository root, for example on the GPU
-desktop:
+not pipeline code. Run from the repository root, for example on a GPU:
 
     python benchmarks/training_profile.py configs/baseline.toml \\
         --worlds 64 256 1024 --output benchmarks/results/<date>_<machine>

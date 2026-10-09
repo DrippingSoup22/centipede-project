@@ -23,7 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # The GPU backend. Warp comes from NVIDIA's CUDA 12 wheels: the default CUDA 13
-# build no longer supports Pascal GPUs such as the local MX330, and CUDA 12 needs
+# build no longer supports Pascal GPUs such as the MX330, and CUDA 12 needs
 # an older minimum driver on cloud machines.
 gpu = [
     "warp-lang @ https://github.com/NVIDIA/warp/releases/download/v1.17.0/warp_lang-1.17.0%2Bcu12-py3-none-win_amd64.whl ; sys_platform == 'win32' and platform_machine == 'AMD64'",

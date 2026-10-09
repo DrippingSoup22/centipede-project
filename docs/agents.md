@@ -13,7 +13,7 @@ own.
 
 RL_lib's PPO originally handled one observation at a time through NumPy. For
 this project it is extended with a batched, tensor-based form that works on any
-device, as agreed in `../RL_lib/docs/batched-ppo.md`. A second round there gave
+device, as described in `../RL_lib/docs/batched-ppo.md`. A second round there gave
 each PPO its own random generator and checkpoint methods, reports how well the
 critic predicted the returns, and removed every point where acting or learning
 made the CPU wait for the GPU. An external library
@@ -221,13 +221,10 @@ The experiment sets the learning rate before every update with the agents'
 The number of steps collected before each update, `rollout_window_steps` (first
 value 256 per world), belongs to the interaction loop.
 
-## Open questions
-
-- **Minibatch size at scale.** An update minibatch costs about 3 ms on the CPU
-  and 8 ms on the local GPU, almost independently of its size up to 4,096
-  samples, so an update's time depends mostly on how many minibatches it takes.
-  With 1,024 worlds and 256 steps per window, a `minibatch_size` of 64 means
-  about 131,000 minibatches per update for the eight agents, roughly as long as
-  collecting the window; 4,096 means about 2,000. The value, or a number of
-  minibatches per epoch instead, is chosen with the first learning
-  experiments.
+**Minibatch size and speed.** A minibatch takes a few milliseconds almost
+independently of its size up to 4,096 samples, so an update's time depends
+mostly on how many minibatches it takes. With 1,024 worlds and 256 steps per
+window, a `minibatch_size` of 64 means about 131,000 minibatches per update for
+the eight agents, roughly as long as collecting the window; 4,096 means about
+2,000. Runs with many worlds therefore use large minibatches, as the GPU
+examples in `configs/` do.
