@@ -39,6 +39,7 @@ seed only when it looks promising.
 | 07 | 05 + command cost, ratio 4 | 1 | 3080 | Done |
 | 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Done |
 | 05 seed 2 | 05 with seed 2 | 2 | 3080 | Running |
+| 09 | 05 + CAPS temporal smoothness (0.1), 64 cycles | 1 | 3080 | Planned |
 
 ## Results
 
