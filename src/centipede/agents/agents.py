@@ -100,6 +100,11 @@ class Agents:
             agent.set_learning_rate(learning_rate)
         self.diagnostics.learning.learning_rate.fill_(learning_rate)
 
+    def set_action_std(self, action_std: float) -> None:
+        """Every agent's actions get the spread ``action_std`` (a schedule's)."""
+        for agent in self.segment_agents:
+            agent.set_action_std(action_std)
+
     def update(self) -> None:
         """Let each agent learn from its own window, then fill the diagnostics."""
         summaries: list[PPOUpdateSummary] = []

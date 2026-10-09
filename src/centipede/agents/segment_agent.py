@@ -5,6 +5,7 @@ segment and gives each its own slice of every tensor it passes on, with the
 worlds as the first dimension. See docs/agents.md.
 """
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -78,6 +79,9 @@ class SegmentAgent:
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
         )
+        # Scheduled spreads are set by the experiment, never learned.
+        if settings.action_std_schedule != "learned":
+            actor_network.log_std.requires_grad_(False)
         self.observation_normaliser = ObservationNormalizer(
             observation_size,
             "running",
@@ -134,6 +138,11 @@ class SegmentAgent:
         for optimizer in self._optimizers():
             for group in optimizer.param_groups:
                 group["lr"] = learning_rate
+
+    def set_action_std(self, action_std: float) -> None:
+        """Give every action the spread ``action_std`` from the next step on."""
+        with torch.no_grad():
+            self.ppo.actor_network.log_std.fill_(math.log(action_std))
 
     def update(self) -> PPOUpdateSummary:
         """Learn from this agent's full window, then start a new one."""

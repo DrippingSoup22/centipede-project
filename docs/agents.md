@@ -175,6 +175,8 @@ These are the keys of the agents sections of the configuration file (see
 | `device` | `cpu` | Where networks and stored data live: `cpu` or `cuda` |
 | `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU) |
 | `initial_action_std` | 0.5 | Starting value of every learned action spread, including an action a widened agent gains |
+| `action_std_schedule` | `learned` | `learned`: each action's spread is a learned value; `log_linear`: the spreads are not learned, and every cycle sets them all, from `initial_action_std` in the first cycle to `final_action_std` in the last, in a straight line of their logarithms (overriding a saved run's spreads), as the PPO paper annealed its humanoid tasks' log spread (Schulman et al., 2017) |
+| `final_action_std` | initial_action_std | The spread of the last cycle, with a `log_linear` schedule |
 | `exploration_noise_beta` | 0 | Colors the exploration noise over time, `1/f^β`: 0 is white noise, drawn afresh at every step; 0.5 the PPO default of Hollenstein et al. (AAAI 2024), 1 pink noise (Eberhard et al., ICLR 2023). Each step's noise stays standard normal, so the policy's probabilities are unchanged ([RL_lib's colored-noise.md](../../RL_lib/docs/colored-noise.md)) |
 | `optimizer` | `adam` | Each network's optimizer: `adam`, `adamw` (Adam with decoupled weight decay), or `sgd` |
 | `learning_rate` | 3e-4 | Learning rate of the first update |

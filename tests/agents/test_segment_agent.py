@@ -18,9 +18,9 @@ DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 WORLDS, OBSERVATION_SIZE, WINDOW_STEPS = 4, 5, 3
 
 
-def make_agent(device="cpu", seed=0) -> SegmentAgent:
+def make_agent(device="cpu", seed=0, **values) -> SegmentAgent:
     settings = AgentSettings.from_section(
-        {"device": device, "hidden_layers": [8], "ppo": {"minibatch_size": 4}}
+        {"device": device, "hidden_layers": [8], "ppo": {"minibatch_size": 4}, **values}
     )
     return SegmentAgent(0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, seed)
 
@@ -95,6 +95,18 @@ def test_update_learns_from_the_window_then_starts_a_new_one(device):
             agent.ppo.actor_network.state_dict().values(),
             strict=True,
         )
+    )
+
+
+def test_a_scheduled_spread_is_set_and_never_learned():
+    agent = make_agent(action_std_schedule="log_linear", final_action_std=0.1)
+
+    agent.set_action_std(0.2)
+    collect_window(agent)
+    agent.update()
+
+    torch.testing.assert_close(
+        agent.ppo.actor_network.log_std.exp(), torch.full((6,), 0.2)
     )
 
 

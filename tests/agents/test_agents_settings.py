@@ -17,6 +17,8 @@ def test_an_empty_section_gives_the_agreed_first_values():
         device="cpu",
         hidden_layers=(64, 64),
         initial_action_std=0.5,
+        action_std_schedule="learned",
+        final_action_std=0.5,
         exploration_noise_beta=0.0,
         optimizer="adam",
         learning_rate=3e-4,
@@ -69,6 +71,21 @@ def test_the_learning_rate_moves_from_the_first_to_the_last_update(schedule, rat
     assert [settings.learning_rate_at(cycle, 5) for cycle in range(1, 6)] == (
         pytest.approx(rates, rel=1e-3)
     )
+
+
+def test_a_scheduled_action_spread_moves_by_equal_ratios_and_a_learned_has_none():
+    settings = AgentSettings.from_section(
+        {
+            "initial_action_std": 0.4,
+            "action_std_schedule": "log_linear",
+            "final_action_std": 0.1,
+        }
+    )
+
+    assert [settings.action_std_at(cycle, 3) for cycle in range(1, 4)] == (
+        pytest.approx([0.4, 0.2, 0.1])
+    )
+    assert AgentSettings.from_section({}).action_std_at(1, 3) is None
 
 
 @pytest.mark.parametrize(
