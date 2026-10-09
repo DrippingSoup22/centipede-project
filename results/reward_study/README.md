@@ -40,7 +40,7 @@ neighbouring segments, left–right correlation) are to be written.
 
 | # | Condition | Change from the baseline | Status |
 | --- | --- | --- | --- |
-| 01 | [Baseline](01_baseline/README.md) | – | To run |
+| 01 | [Baseline](01_baseline/README.md) | – | Done |
 | 02 | Command cost | A cost on the size of each command, `‖a‖²`, as in Gymnasium's Ant | Planned |
 | 03 | Colored exploration noise | Exploration noise correlated over time, `1/f^β` with β = 0.5 (the PPO default of Hollenstein et al., AAAI 2024), in RL_lib | Planned |
 | – | gSDE | State-dependent exploration noise (Raffin et al., CoRL 2021), only if colored noise is not enough | Fallback |

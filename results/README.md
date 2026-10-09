@@ -41,5 +41,6 @@ the evaluations' `.npz` files) and the checkpoints.
 
 | Study | What it asks | Status |
 | --- | --- | --- |
-| [`reward_study/`](reward_study/README.md) | Which reward components make the independent segments walk and steer, and whether a gait emerges | Baseline next |
+| [`reward_study/`](reward_study/README.md) | Which reward components make the independent segments walk and steer, and whether a gait emerges | Baseline done |
+| [`night_2026-10-09/`](night_2026-10-09/README.md) | Screening tests of smooth exploration and smoothness costs, run by the assistant overnight: what makes the policy's mean action reach the target | Done; open questions listed |
 | [`earlier/`](earlier/README.md) | Far targets and the movement cost; the follower's share of the progress, on the older task | Complete |

@@ -39,7 +39,7 @@ seed only when it looks promising.
 | 07 | 05 + command cost, ratio 4 | 1 | 3080 | Done |
 | 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Done |
 | 05 seed 2 | 05 with seed 2 | 2 | 3080 | Done |
-| 09 | 05 + CAPS temporal smoothness (0.1), 64 cycles | 1 | 3080 | Running |
+| 09 | 05 + CAPS temporal smoothness (0.1), 64 cycles | 1 | 3080 | Done |
 
 ## Results
 
@@ -57,6 +57,7 @@ while the training arrivals ended at 19-20%.
 | 02 (beta 0.5) | 0% | **24.6%** | 20.7 mm | 6.1% | 2.26° | 0.03 |
 | 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
 | 05 seed 2 | **28%** | −73.2% | 170.0 mm (184 steps) | 0.4% | 8.96° | 0.14 |
+| 09 (beta 1 + CAPS 0.1, 64 cycles) | 0% | 13.7% | 13.0 mm | 0% | 1.18° | 0.00 |
 | 04 (command cost 4) | 0% | 9.1% | 11.6 mm | 16.1% | 1.19° | 0.00 |
 | 07 (beta 1 + command cost 4, 96 cycles) | **41%** | −24.3% | 155.3 mm (168 steps) | 7.5% | 10.73° | 0.16 |
 | 08 (beta 1 + movement cost 10°, 96 cycles) | **34%** | −54.2% | 166.9 mm (174 steps) | 4.8% | 11.04° | 0.15 |
@@ -75,6 +76,9 @@ leg flips back and forth every 20 ms step):
 | 07, mean action | **95%** | **−0.39** |
 | 08, mean action | **94%** | **−0.38** |
 | 05 seed 2, mean action | **92%** | **−0.31** |
+| 05, training cycles 61-64 | 87% | −0.15 |
+| 09, training cycles 61-64 | 78% | +0.11 |
+| 09, mean action | 67% | +0.32 |
 | Random commands | 88% | −0.11 |
 
 By joint kind, test 05's mean action changes its legs' lift and knee joints by
@@ -150,3 +154,30 @@ movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
   0.0013-0.0018 per step by the end of these runs, and a cost inside the
   budget can take at most ln 2 of an episode. Once the mean action has found
   the buzz, the costs tried here do not move it off.
+- CAPS's temporal term on the policy itself (test 09, 0.1, 64 cycles) kept
+  the buzz from forming and kept the aim. By quarters of its 64 cycles,
+  against test 05 over the same cycles: arrivals 0% → 1% → 7% → 21% (05: 0% →
+  6% → 23% → 28%), no closer 10% → 3% → 1% → 4% (05: 10% → 4% → 24% → 38%),
+  speed toward the target 2.4 → 3.8 → 5.1 → 5.9 mm/s, the best of the night
+  (05: 2.5 → 4.4 → 3.9 → 2.1), heading error 32° → 53° (05: 32° → 88°), speed
+  16 → 19 mm/s (05: 17 → 29), joint movement 0.30 → 0.37 (05: 0.31 → 0.63).
+  In training the changes no longer flip from step to step. But the mean
+  action did not walk yet: all 32 evaluation episodes ran out of time closer
+  than they started (13.7% of the distance closed, a 13 mm path), with no
+  rhythm. In training, the body moved with the slow drift of the pink noise,
+  well aimed. Whether the mean action learns a calm walk given more cycles is
+  the open question for the next run.
+
+## Open questions
+
+- Does the mean action learn a calm walk with CAPS given more cycles (test
+  09 for 96 or 128), and which weight works best?
+- The aim gets worse as the buzzing walk gets faster in every pink-noise run
+  without CAPS: does the reward need a term for steering?
+- Test 03's results (Kaggle, two seeds, 32 cycles) are still in the
+  notebook's output, to fetch after signing in to Kaggle again.
+- Larger evaluations (seeds 102 and 103, 64 worlds each) of tests 05, 07 and
+  08 are ready in `configs/night/evaluations/`: the arrival rates above
+  rest on 32 episodes each.
+- Not tested: the action-spread schedule (`action_std_schedule`), built for
+  the night.
