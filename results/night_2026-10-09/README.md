@@ -37,7 +37,8 @@ seed only when it looks promising.
 | 05 | 03 for 96 cycles | 1 | 3080 | Done |
 | 04 | 01 + command cost, ratio 4 | 1 | 3080 | Done |
 | 07 | 05 + command cost, ratio 4 | 1 | 3080 | Done |
-| 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Running |
+| 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Done |
+| 05 seed 2 | 05 with seed 2 | 2 | 3080 | Running |
 
 ## Results
 
@@ -56,6 +57,7 @@ while the training arrivals ended at 19-20%.
 | 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
 | 04 (command cost 4) | 0% | 9.1% | 11.6 mm | 16.1% | 1.19° | 0.00 |
 | 07 (beta 1 + command cost 4, 96 cycles) | **41%** | −24.3% | 155.3 mm (168 steps) | 7.5% | 10.73° | 0.16 |
+| 08 (beta 1 + movement cost 10°, 96 cycles) | **34%** | −54.2% | 166.9 mm (174 steps) | 4.8% | 11.04° | 0.15 |
 
 **Buzz** of the legs' sweep joints: the share of the frame-to-frame change's
 power above 5 Hz, and the correlation of each change with the next (−1: the
@@ -69,6 +71,7 @@ leg flips back and forth every 20 ms step):
 | 05, training cycles 1-4 / 45-48 / 93-96 | 70% / 83% / 92% | +0.23 / −0.06 / −0.28 |
 | 05, mean action | **93%** | **−0.32** |
 | 07, mean action | **95%** | **−0.39** |
+| 08, mean action | **94%** | **−0.38** |
 | Random commands | 88% | −0.11 |
 
 By joint kind, test 05's mean action changes its legs' lift and knee joints by
@@ -127,3 +130,15 @@ movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
   Its training followed test 05's almost exactly (arrivals 1% → 19% → 26% →
   30%, speed 16.5 → 36.2 mm/s, heading error 33° → 99°, joint movement 0.32 →
   0.84).
+- The movement cost aimed at the buzz (test 08: 2 parts of the budget, a 10°
+  unit) did not stop it either: 34% arrivals (11 of 32; 12 no closer, 9 left
+  the circle), the same buzz (94% above 5 Hz; lift 30° and knee 36° per
+  frame). The cost charges at most 1 per step, and a buzz of 15° per frame or
+  more already reaches that most with a 10° unit: from about cycle 40 on it
+  was charging its maximum, 0.00064 of 0.00068 per step, so it no longer told
+  a calmer buzz from a stronger one. Its training: arrivals 0% → 14% → 29% →
+  27%, heading error 33° → 106°, joint movement 0.31 → 0.81.
+- Both costs stay small next to what buzzing earns: the arrivals pay about
+  0.0013-0.0018 per step by the end of these runs, and a cost inside the
+  budget can take at most ln 2 of an episode. Once the mean action has found
+  the buzz, the costs tried here do not move it off.
