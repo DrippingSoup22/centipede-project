@@ -104,6 +104,7 @@ The `[run]` settings of a training file:
 | `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
 | `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress, averaged over the last three episode lengths, has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
 | `plateau_progress` | 0.02 | The rise of the progress that counts as improving |
+| `plateau_minimum_cycles` | 128 with clocks, else 0 | The plateau stop never ends a run before this many cycles: with `[environment] clocks`, the segments first need time to find a common tempo and their offsets |
 
 A complete training file, with every section written out:
 
@@ -238,6 +239,16 @@ level when there is one. Progress rises while the arrivals rise toward the
 share the curriculum holds, then while the level rises, and at the top level
 while the arrivals rise again; without a curriculum it is the arrival share
 alone, which stops a run once it has solved its task.
+
+In a run whose segments have clocks (`[environment] clocks`), the stop also
+watches a second signal, the **wave**: how alike the phase offsets between
+neighbours are across every world and step of a window (their consistency, in
+[diagnostics.md](diagnostics.md#rhythm)), averaged over the pairs. Every clock
+starts at the same tempo, so within each world the offsets hold from the
+first step; across the worlds, which start from random phases, they grow
+alike only as the segments steer them toward the same wave. Each signal keeps
+its own best, and the run stops only when neither has risen for
+`plateau_cycles` cycles, never before `plateau_minimum_cycles`.
 
 The arrival share swings with the rhythm of the episode length. All worlds
 start together, so those that run out of time end together and restart
@@ -426,13 +437,23 @@ holds:
   level;
 - with a curriculum, the level the window's new targets were drawn at.
 
+In a run whose segments have clocks, a second line under each window shows its
+rhythm ([diagnostics.md](diagnostics.md#rhythm)): the clocks' mean tempo, with
+the lowest and highest segment's; the mean phase offset between neighbours,
+positive when the rear lags as in a wave from head to tail, in degrees and as
+a delay in steps; the lock and the consistency of the offsets, from 0 to 1;
+the legs on tempo, 1 minus the legs-off-tempo cost; the foot slip, the cost
+from 0 to 1; and the reward per step of the head and of the mean follower,
+which in such a run earn in different ways.
+
 The last line gives the session's time and overall speed, or, for a run that
 stops at a plateau, the cycle of its last rise. In evaluation a pass
 is one actor and seed: the bar fills toward the time limit and jumps to full
 when every world's first episode has ended; the line then holds the time it
 took, the same speeds and shares over the steps of those first episodes, and
 how they ended. A walk's line holds the same values over every step and
-episode of the walk, and its targets per minute.
+episode of the walk, and its targets per minute. With clocks, the rhythm line
+follows each pass too.
 
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,
@@ -441,7 +462,10 @@ see [diagnostics.md](diagnostics.md#episode-summary)); `arrivals`, the
 arrival share (`arrivals.share`) and the targets reached per world and minute
 (`arrivals.targets_per_minute`) over the last episode length of windows, both
 `null` until that span is full; with a curriculum, also
-`curriculum.level`, the level the window's new targets were drawn at. Each session in
+`curriculum.level`, the level the window's new targets were drawn at; with
+clocks, also `clock_snapshot`, the clocks of the first four worlds as the
+window left them, each segment's `phase` (rad) and `tempo_hz`, for a live view
+of the rhythm. Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
 

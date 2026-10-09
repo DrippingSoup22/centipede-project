@@ -29,6 +29,7 @@ no policy observes them and no reward depends on them.
 | Category | Measured by | Contents |
 | --- | --- | --- |
 | Step facts | Environment | What happened in the last 20 ms step |
+| Rhythm | Environment | The segments' clocks, and how the legs keep time with them; only in a run with clocks |
 | Episode summary | Environment | How each finished episode went |
 | Simulation facts | Physics simulation | Every world's positions, and how close the physics came to its limits |
 | Learning | Agents | How each segment agent's last update went |
@@ -55,11 +56,41 @@ Refreshed on every step, for every world.
 | `heading_error` | `(W,)` | Angle between the head's forward direction and the target, rad, from 0 to π | Mean |
 | `target_position` | `(W, 2)` | Each world's target, world x and y, m; refreshed again for the worlds whose episode a step ended, so it always matches the pose | Recorded |
 | `range_radius` | `(W,)` | Radius of each world's range circle around its target, m (infinite without one); refreshed like the target | Recorded |
+| `support` | `(W,)` | At least one left foot and one right foot on the ground, anywhere along the body | Share of steps |
+| `left_right_similarity` | `(W, N)` | How alike the segment's two legs moved on the step: the cosine between the movements of the left leg's three joints and the right leg's, which mirror each other, so that 1 is together, −1 alternating, and 0 in between | Mean |
+| `neighbour_leg_similarity` | `(W, N − 1)` | How alike the segment's legs moved on the step to the next segment's: the cosine between their six joints' movements; 1 the same, −1 opposite, 0 unrelated | Mean |
 
 Comparing `segment_progress` with `segment_moved` shows how much of a segment's
-movement brings it closer to its goal. Gait measures, such as how long each foot
-stays on the ground and how a step travels from segment to segment, are worked
+movement brings it closer to its goal. The two similarities compare the
+directions of joint movements over the step, so they describe the gait whatever
+its speed; legs that barely move (below 1 mrad a step) count as 0, in between.
+Other gait measures, such as how long each foot stays on the ground, are worked
 out later from `contact_flags` over time.
+
+### Rhythm
+
+Refreshed on every step, for every world, in a run whose segments have
+[clocks](environment.md#clocks), from the clocks as the step left them and the
+two walking costs before their weights. Each segment's phase φ is its clock's
+hand.
+
+| Value | Shape | Meaning | Summary |
+| --- | --- | --- | --- |
+| `tempo` | `(W, N)` | Each segment's clock tempo, Hz | Mean |
+| `neighbour_offset` | `(W, N − 1)` | Phase offset between neighbours, φ of the segment minus φ of the next one, rad: positive, up to half a turn, when the rear one lags, as in a wave from head to tail | Angle |
+| `head_offset` | `(W, N)` | How far each segment's clock lags behind the head's, φ of the head minus φ of the segment, rad: the wave along the body; 0 for the head | Angle |
+| `legs_on_tempo` | `(W, N)` | 1 minus the legs-off-tempo cost: how closely the segment's leg joints came back to their angles at the same point of the clock's last turn | Mean |
+| `foot_slip` | `(W, N)` | The foot-slip cost before its weight, from 0 to 1: how fast the segment's feet that stayed on the ground slid | Mean |
+
+An offset in steps is its share of a turn times the steps of a turn: 36° at
+2 Hz, whose turn takes 25 steps of 20 ms, is a delay of 2.5 steps. The two
+steadiness values of each offset (see [Window summaries](#window-summaries))
+tell a wave apart from mere agreement: every clock starts at the same tempo,
+so within each world the offsets stay where the random start put them, and
+the **lock** is high from the first window; the **consistency**, across the
+worlds, rises only once the segments steer their offsets toward the same wave.
+The [plateau stop](configuration.md#the-plateau-stop) watches the
+consistency of the neighbours' offsets, averaged over the pairs.
 
 ### Episode summary
 
@@ -155,10 +186,10 @@ times include the GPU's work.
 
 ## Window summaries
 
-The log has one line per window, so the environment's step facts and episode
-summaries are summarised over each window as they are refreshed. The interaction
-loop adds every step to two window summaries, one per category, and each
-starts empty when a window starts. A summary keeps running totals on the
+The log has one line per window, so the environment's step facts, episode
+summaries, and rhythm are summarised over each window as they are refreshed.
+The interaction loop adds every step to one window summary per category, and
+each starts empty when a window starts. A summary keeps running totals on the
 category's device, so it never waits for the GPU, and removes the worlds:
 a `(W, N)` value becomes `(N,)`.
 
@@ -166,7 +197,17 @@ Each value follows its own summary: a **mean** or a **share** averages over
 the counted rows, a **count** adds up true flags, and a **maximum** keeps the
 largest value. A **recorded** value is never summarised: it is kept as it is
 for the recorder and left out of the window summary, the log, and the
-report. A value declared with histogram edges is also counted bin by
+report. An **angle**, in rad, cannot be averaged as a number (359° and 1°
+would give 180°), so it is summarised through its unit vectors (cos, sin), as
+circular statistics do: by the direction of their mean, from −π to π, and by
+two lengths of such means, from 0 to 1, logged after it under its name with
+`_consistency` and `_lock`. The **consistency** is the length of the mean over
+every counted world and step: 1 when the angle is the same everywhere, near 0
+when it points every way. The **lock** is the length of the mean over each
+world's counted steps, averaged over the worlds: 1 when the angle holds steady
+within each world, whatever it is in the others. This lock is the phase-locking
+value of Lachaux et al. (Human Brain Mapping, 1999), taken over a window's
+steps instead of trials. A value declared with histogram edges is also counted bin by
 bin: each counted row adds one to the bin its value falls in, a bin including
 its lower edge. The counts are kept on the device like the totals, so they too
 never wait for the GPU. The episode summary counts only the worlds whose episode ended.

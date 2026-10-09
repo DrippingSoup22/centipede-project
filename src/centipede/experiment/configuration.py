@@ -39,6 +39,9 @@ SAVED_CONFIGURATION_NAME = "configuration.toml"
 DEVICE_FOR_BACKEND = {"cpu": "cpu", "gpu": "cuda"}
 
 TRAINING_SECTIONS = ("run", "environment", "agents", "interaction_loop", "curriculum")
+# The cycles a run whose segments have clocks trains, by default, before its
+# plateau stop may end it.
+CLOCK_PLATEAU_MINIMUM_CYCLES = 128
 
 
 @dataclass(frozen=True)
@@ -54,8 +57,8 @@ class RunSettings:
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
     with a checkpoint, before a cycle that would end after it. With
     ``plateau_cycles`` the run also stops cleanly once its progress has not
-    risen by ``plateau_progress`` for that many cycles (plateau.py). See
-    docs/configuration.md.
+    risen by ``plateau_progress`` for that many cycles, never before
+    ``plateau_minimum_cycles`` (plateau.py). See docs/configuration.md.
     """
 
     name: str
@@ -71,6 +74,7 @@ class RunSettings:
     time_limit_hours: float | None
     plateau_cycles: int
     plateau_progress: float
+    plateau_minimum_cycles: int
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
@@ -108,6 +112,9 @@ class RunSettings:
             time_limit_hours=section.positive_number("time_limit_hours", default=None),
             plateau_cycles=section.integer("plateau_cycles", default=0, minimum=0),
             plateau_progress=section.positive_number("plateau_progress", default=0.02),
+            plateau_minimum_cycles=section.integer(
+                "plateau_minimum_cycles", default=0, minimum=0
+            ),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.
@@ -342,7 +349,9 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
     environment = EnvironmentSettings.from_section(file_section.table("environment"))
     configuration = Configuration(
         mode=mode,
-        run=RunSettings.from_section(file_section.table("run")),
+        run=RunSettings.from_section(
+            _with_plateau_minimum(file_section.table("run"), environment.clocks)
+        ),
         environment=environment,
         agents=AgentSettings.from_section(
             _with_episode_discount(
@@ -383,6 +392,20 @@ def _with_episode_discount(agents_values: dict, max_episode_steps: int) -> dict:
     if not isinstance(ppo, dict) or "discount" in ppo:
         return agents_values
     return _merged(agents_values, {"ppo": {"discount": 2 ** (-1 / max_episode_steps)}})
+
+
+def _with_plateau_minimum(run_values: dict, clocks: bool) -> dict:
+    """The [run] values, with ``plateau_minimum_cycles`` when they set none.
+
+    A run whose segments have clocks trains CLOCK_PLATEAU_MINIMUM_CYCLES
+    before its plateau stop may end it, since its segments first need to find
+    a common tempo and their offsets; any other run, none. The value is then
+    saved with the run like any other.
+    """
+    if "plateau_minimum_cycles" in run_values:
+        return run_values
+    minimum = CLOCK_PLATEAU_MINIMUM_CYCLES if clocks else 0
+    return {**run_values, "plateau_minimum_cycles": minimum}
 
 
 # Settings that older runs saved and the current code no longer has, by

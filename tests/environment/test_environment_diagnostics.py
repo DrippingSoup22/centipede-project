@@ -5,6 +5,8 @@ these tests cover only what the diagnostics add.
 """
 
 import math
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -91,6 +93,65 @@ def test_step_facts_describe_the_last_step():
         [0.0, math.atan2(0.010, -0.005)]
     )
     assert set(descriptions(facts)) == set(vars(facts))
+
+
+def test_step_facts_compare_the_legs_movements_and_see_the_support():
+    diagnostics = make_diagnostics()
+    before = upright_state()
+    diagnostics.start_episodes(torch.tensor([True, True]), before, TARGET, RANGE)
+    after = upright_state()
+    # World 0: the head's legs swing forward together, the next segment's
+    # alternate. World 1: both segments lift their legs, by different amounts.
+    after.leg_joint_position[0] = torch.tensor(
+        [[0.1, 0.0, 0.0, 0.1, 0.0, 0.0], [0.1, 0.0, 0.0, -0.1, 0.0, 0.0]]
+    )
+    after.leg_joint_position[1] = torch.tensor(
+        [[0.0, 0.2, 0.0, 0.0, 0.2, 0.0], [0.0, 0.1, 0.0, 0.0, 0.1, 0.0]]
+    )
+    # World 0 stands on a left and a right foot, world 1 on left feet only.
+    after.left_foot_ground_contact[:, 0] = True
+    after.right_foot_ground_contact[0, 1] = True
+
+    record(diagnostics, after, before, step_rewards(0.0))
+    facts = diagnostics.step
+
+    assert facts.support.tolist() == [True, False]
+    assert torch.allclose(
+        facts.left_right_similarity, torch.tensor([[1.0, -1.0], [1.0, 1.0]])
+    )
+    assert torch.allclose(facts.neighbour_leg_similarity, torch.tensor([[0.0], [1.0]]))
+
+    record(diagnostics, after, after, step_rewards(0.0))  # nothing moves
+    assert facts.left_right_similarity.abs().max() < 1e-6  # still: 0, not NaN
+
+
+def test_the_rhythm_follows_the_clocks_and_the_legs_costs():
+    clocks = SimpleNamespace(
+        phase=torch.tensor([[0.5, 0.2], [0.1, 2 * math.pi - 0.1]]),
+        tempo_hz=torch.tensor([[2.0, 2.5], [1.0, 4.0]]),
+    )
+    simulation = SimulationDiagnostics.allocate(2, 4, "cpu")
+    diagnostics = EnvironmentDiagnostics(
+        2, 2, ["first", "second"], "cpu", simulation.facts, clocks=clocks
+    )
+    state = upright_state()
+    rewards = replace(
+        step_rewards(0.0),
+        legs_off_tempo=torch.tensor([[0.25, 0.0], [1.0, 0.5]]),
+        foot_slip=torch.full((2, 2), 0.1),
+    )
+
+    record(diagnostics, state, state, rewards)
+    rhythm = diagnostics.rhythm
+
+    assert torch.equal(rhythm.tempo, clocks.tempo_hz)
+    # Positive when the rear lags, within half a turn either way.
+    lags = torch.tensor([[0.0, 0.3], [0.0, 0.2]])
+    assert torch.allclose(rhythm.neighbour_offset, lags[:, 1:], atol=1e-6)
+    assert torch.allclose(rhythm.head_offset, lags, atol=1e-6)
+    assert rhythm.legs_on_tempo.tolist() == [[0.75, 1.0], [0.0, 0.5]]
+    assert torch.equal(rhythm.foot_slip, rewards.foot_slip)
+    assert make_diagnostics().rhythm is None  # without clocks
 
 
 def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():

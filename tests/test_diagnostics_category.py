@@ -1,5 +1,6 @@
 """Tests for describing the values of a diagnostics category."""
 
+import math
 from dataclasses import dataclass
 
 import pytest
@@ -127,3 +128,29 @@ def test_a_window_summary_counts_the_masked_rows_in_each_bin():
 
     window.clear()
     assert window.histograms()["length"].tolist() == [0.0, 0.0]
+
+
+@dataclass(frozen=True)
+class ExampleClocks:
+    offset: torch.Tensor = measure("Offset between clocks", "rad", summary="angle")
+
+
+def test_an_angle_is_summarised_by_its_direction_and_how_steady_it_is():
+    clocks = ExampleClocks(offset=torch.zeros(3, 2))
+    window = WindowSummary(clocks)
+
+    # Entry 0: each counted world keeps its angle, but the two are opposite.
+    # Entry 1: 30 degrees everywhere. World 2 is not counted.
+    for degrees in ([[90, 30], [-90, 30], [0, 0]], [[90, 30], [-90, 30], [180, 180]]):
+        clocks.offset.copy_(torch.deg2rad(torch.tensor(degrees, dtype=torch.float32)))
+        window.add(torch.tensor([True, True, False]))
+
+    summary = window.result()
+    assert list(summary) == ["offset", "offset_consistency", "offset_lock"]
+    assert list(window.descriptions) == list(summary)
+    assert summary["offset"][1].item() == pytest.approx(math.radians(30))
+    assert summary["offset_consistency"].tolist() == pytest.approx([0.0, 1.0], abs=1e-6)
+    assert summary["offset_lock"].tolist() == pytest.approx([1.0, 1.0])
+
+    window.clear()
+    assert window.result()["offset_lock"].isnan().all()

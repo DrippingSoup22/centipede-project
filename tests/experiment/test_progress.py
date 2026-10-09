@@ -1,5 +1,7 @@
 """Tests for the terminal's view of a training run: one line per window."""
 
+import math
+
 from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
@@ -91,6 +93,39 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
     ]
     assert "[#...................]  1/20 steps" in drawings[-2]
     assert rows[1][-7:-6] == ["12.5"]
+
+
+def test_a_run_with_clocks_shows_its_rhythm_under_each_window(capsys):
+    progress = TrainingProgress(
+        first_cycle=1,
+        total_cycles=2,
+        window_steps=4,
+        episode_steps=8,
+        world_count=2,
+        clocks=True,
+    )
+    progress.header()
+    rhythm = {
+        "tempo": [2.0, 3.0],
+        "neighbour_offset": [math.pi / 4],
+        "neighbour_offset_consistency": [0.5],
+        "neighbour_offset_lock": [0.9],
+        "legs_on_tempo": [0.8, 0.6],
+        "foot_slip": [0.1, 0.3],
+    }
+    progress.finish(window([1, 0, 0, 0, 0, 0]) | {"rhythm": rhythm})
+
+    lines = capsys.readouterr().out.splitlines()
+    assert any(line.startswith("clocks: the segments' mean tempo") for line in lines)
+    # Under the cycle's label. A 45 degree lag at 2.5 Hz is an eighth of a
+    # 20-step turn: 2.5 steps. The head pays 0.004 a step, the follower 0.002.
+    assert lines[-1].startswith(" " * 7 + "clocks")
+    assert lines[-1].split() == [
+        *("clocks", "2.50", "Hz", "(2.00-3.00)", "offset", "+45", "deg", "="),
+        *("+2.5", "steps", "lock", "0.90", "consistency", "0.50", "legs", "on"),
+        *("tempo", "70%", "slip", "0.20", "|", "head", "-0.00400", "followers"),
+        "-0.00200",
+    ]
 
 
 def test_the_settings_header_names_the_six_training_settings_and_what_they_make():

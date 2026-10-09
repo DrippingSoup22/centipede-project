@@ -3,11 +3,12 @@
 The front file uses three things. ``with collecting():`` around a window's
 steps, both in training and in evaluation, and ``with learning():`` around the
 update, time those parts; ``step_taken`` after every step adds the
-environment's step facts, episode summaries, and the simulation's facts to the
-window's summaries, and feeds the recorder. Each window starts empty. The
-clock waits for the GPU only when a timed part starts and ends, once per
-window, so the times include the GPU's work. The values are listed in
-docs/diagnostics.md; the recorder is described in ``recording.py``. A caller
+environment's step facts, episode summaries, rhythm (with clocks), and the
+simulation's facts to the window's summaries, and feeds the recorder. Each
+window starts empty. The clock waits for the GPU only when a timed part
+starts and ends, once per window, so the times include the GPU's work. The
+values are listed in docs/diagnostics.md; the recorder is described in
+``recording.py``. A caller
 may also give ``progress``, told of every step and of each update's start,
 for example to draw the window's progress in the terminal.
 """
@@ -50,20 +51,23 @@ class WindowProgress(Protocol):
 class LoopDiagnostics:
     """Times each window and summarises the environment's categories over it.
 
-    ``timing``, ``step_window``, ``episode_window``, and ``simulation_window``
-    are what the experiment reads; each window summary offers its category's
+    ``timing``, ``step_window``, ``episode_window``, ``simulation_window``, and
+    in a run with clocks ``rhythm_window`` (None without) are what the
+    experiment reads; each window summary offers its category's
     ``descriptions`` and its ``result()``. Episode summaries count only the
     worlds whose episode ended; the simulation's maxima always count every
     world. ``recorder`` records the poses of the windows the experiment arms.
     """
 
     def __init__(self, environment) -> None:
-        """Prepare the summaries of the three categories and the recorder."""
+        """Prepare the summaries of the categories and the recorder."""
         self.step_window = WindowSummary(environment.diagnostics.step)
         self.episode_window = WindowSummary(
             environment.diagnostics.episode, mask_field="episode_ended"
         )
         self.simulation_window = WindowSummary(environment.diagnostics.simulation)
+        rhythm = environment.diagnostics.rhythm
+        self.rhythm_window = None if rhythm is None else WindowSummary(rhythm)
         self.recorder = WindowRecorder(environment.diagnostics, environment.world_count)
         self.timing = Timing(
             collecting_seconds=torch.zeros(()),
@@ -80,6 +84,8 @@ class LoopDiagnostics:
         self.step_window.clear()
         self.episode_window.clear()
         self.simulation_window.clear()
+        if self.rhythm_window is not None:
+            self.rhythm_window.clear()
         self.recorder.start_window()
         self._window_steps = 0
         self.timing.learning_seconds.zero_()
@@ -109,6 +115,8 @@ class LoopDiagnostics:
         self.step_window.add(counted_worlds)
         self.episode_window.add(counted_worlds)
         self.simulation_window.add()
+        if self.rhythm_window is not None:
+            self.rhythm_window.add(counted_worlds)
         self.recorder.step_taken(counted_worlds)
         self._window_steps += 1
         if self.progress is not None:

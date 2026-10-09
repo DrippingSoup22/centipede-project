@@ -32,6 +32,11 @@ world has finished sooner. Its results are the same values over the steps of
 those first episodes, and how they ended. A walk pass instead runs every world
 for a fixed number of steps and counts every episode, with the targets reached
 per world and minute.
+
+In a run whose segments have clocks, a second line under each pass shows its
+rhythm: the clocks' tempo, the phase offset between neighbours with how steady
+it is, how well the legs keep time, how much the feet slip, and the reward per
+step of the head and of the followers, whose rewards differ in kind.
 """
 
 import math
@@ -60,6 +65,14 @@ EVALUATION_COLUMNS = (
 # contact flags.
 BODY_ON_GROUND = 2
 LEGS_TOUCHING = 3
+CLOCK_LEGEND = (
+    "clocks: the segments' mean tempo (lowest-highest segment); offset: the mean"
+    " phase offset\nbetween neighbours, positive when the rear lags (a wave from"
+    " head to tail), in degrees and\nin steps; lock: how steady each pair's offset"
+    " stays within a world; consistency: how alike\nthe offsets are across every"
+    " world and step, both 0 to 1; legs on tempo: 1 - the legs-off-tempo\ncost;"
+    " slip: the foot-slip cost, 0 to 1; head, followers: the reward per step."
+)
 
 
 def duration(seconds: float) -> str:
@@ -243,6 +256,42 @@ def _endings(counts: list[float]) -> str:
     )
 
 
+def _clock_line(record: dict[str, Any], indent: int) -> str:
+    """A pass's rhythm, from its log record, printed under its row."""
+    rhythm = record["rhythm"]
+    tempo = rhythm["tempo"]
+    mean_tempo = sum(tempo) / len(tempo)
+    # The mean offset of all pairs: the direction of the mean of the pairs'
+    # mean unit vectors, whose lengths are their consistencies.
+    pairs = list(
+        zip(
+            rhythm["neighbour_offset"],
+            rhythm["neighbour_offset_consistency"],
+            strict=True,
+        )
+    )
+    offset = math.degrees(
+        math.atan2(
+            sum(length * math.sin(angle) for angle, length in pairs),
+            sum(length * math.cos(angle) for angle, length in pairs),
+        )
+    )
+    # The offset as a delay: its share of a turn, times the steps of a turn.
+    delay_steps = offset / 360 / (mean_tempo * STEP_SECONDS)
+    consistency = sum(length for _, length in pairs) / len(pairs)
+    lock = sum(rhythm["neighbour_offset_lock"]) / len(pairs)
+    on_tempo = sum(rhythm["legs_on_tempo"]) / len(tempo)
+    slip = sum(rhythm["foot_slip"]) / len(tempo)
+    rewards = [sum(parts) for parts in record["step_facts"]["reward_parts"]]
+    followers = sum(rewards[1:]) / len(rewards[1:])
+    return (
+        f"{' ' * indent}clocks {mean_tempo:.2f} Hz ({min(tempo):.2f}-{max(tempo):.2f})"
+        f"  offset {offset:+.0f} deg = {delay_steps:+.1f} steps  lock {lock:.2f}"
+        f"  consistency {consistency:.2f}  legs on tempo {on_tempo:.0%}"
+        f"  slip {slip:.2f}  |  head {rewards[0]:+.5f}  followers {followers:+.5f}"
+    )
+
+
 class _RedrawnLine:
     """A terminal line drawn again in place, as a pass's bar grows."""
 
@@ -268,9 +317,12 @@ class _RedrawnLine:
     def _label(self) -> str:
         raise NotImplementedError
 
-    def _end_pass(self, row: str) -> None:
-        """Replace the line with the pass's results and start a new one."""
+    def _end_pass(self, row: str, line_under: str | None = None) -> None:
+        """Replace the line with the pass's results, and any line to print
+        under them, and start a new one."""
         self._write(row, end="\n")
+        if line_under is not None:
+            print(line_under, flush=True)
         self._filled = -1
         self._drawn_length = 0
 
@@ -291,10 +343,12 @@ class TrainingProgress(_RedrawnLine):
         episode_steps: int,
         world_count: int,
         curriculum: bool = False,
+        clocks: bool = False,
     ) -> None:
         super().__init__(window_steps)
         self._world_count = world_count
         self._curriculum = curriculum
+        self._clocks = clocks
         self._cycle = first_cycle
         self._total_cycles = total_cycles
         self._cycle_width = max(len("cycle"), 2 * len(str(total_cycles)) + 1)
@@ -322,6 +376,8 @@ class TrainingProgress(_RedrawnLine):
                 " [environment.target])\nto 1 (the final ranges of [curriculum]).",
                 flush=True,
             )
+        if self._clocks:
+            print(CLOCK_LEGEND, flush=True)
         print(
             TRAINING_COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
@@ -368,7 +424,8 @@ class TrainingProgress(_RedrawnLine):
                     else ""
                 ),
                 left=duration(left),
-            )
+            ),
+            _clock_line(record, self._cycle_width + 2) if self._clocks else None,
         )
         self._cycle += 1
 
@@ -384,9 +441,12 @@ class TrainingProgress(_RedrawnLine):
 class EvaluationProgress(_RedrawnLine):
     """One line per actor and seed: a bar toward the time limit, then results."""
 
-    def __init__(self, total_passes: int, max_episode_steps: int) -> None:
+    def __init__(
+        self, total_passes: int, max_episode_steps: int, clocks: bool = False
+    ) -> None:
         super().__init__(max_episode_steps)
         self._max_episode_steps = max_episode_steps
+        self._clocks = clocks
         self._total_passes = total_passes
         self._number_width = max(len("pass"), 2 * len(str(total_passes)) + 1)
         self._done = 0
@@ -399,6 +459,8 @@ class EvaluationProgress(_RedrawnLine):
             _legend("every world's first episode, or of every episode of a walk"),
             flush=True,
         )
+        if self._clocks:
+            print(CLOCK_LEGEND, flush=True)
         print(
             EVALUATION_COLUMNS.format(
                 number="pass".rjust(self._number_width),
@@ -435,7 +497,8 @@ class EvaluationProgress(_RedrawnLine):
                 **_behaviour(record["step_facts"]),
                 per_minute="-" if per_minute is None else f"{per_minute:.1f}",
                 endings=_endings(record["episode_distributions"]["ending"]),
-            )
+            ),
+            _clock_line(record, self._number_width + 2) if self._clocks else None,
         )
 
     def _number(self) -> str:

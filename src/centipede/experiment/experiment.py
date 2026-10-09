@@ -78,6 +78,14 @@ from centipede.settings_section import SettingsError
 Actor = Agents | ZeroActionBaseline | RandomActionBaseline
 # The evaluation's name for the agents' walk of a fixed number of steps.
 WALK = "agents walking"
+# How the rhythm category is summarised, after where it is counted.
+RHYTHM_NOTE = (
+    "means, and for each phase offset its circular mean, with how alike it is "
+    "across the worlds (consistency) and how steady within each world (lock)."
+)
+# How many worlds' clocks each training log line keeps, as they were after its
+# window, for a live view.
+SNAPSHOT_WORLDS = 4
 
 # The most device memory a training recording may hold while it runs: the
 # poses of every world for one episode length.
@@ -130,6 +138,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         configuration.agents,
         run_settings.seed,
         environment.segment_action_sizes,
+        tempo_actions=environment.clocks is not None,
     )
     completed_cycles = 0
     saved_level = 0.0
@@ -268,6 +277,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         configuration.environment.max_episode_steps,
         environment.world_count,
         curriculum is not None,
+        clocks=environment.clocks is not None,
     )
     loop.diagnostics.progress = progress
     progress.header()
@@ -296,6 +306,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             run_settings.plateau_cycles,
             run_settings.plateau_progress,
             episode_windows=recording_windows,
+            minimum_cycles=run_settings.plateau_minimum_cycles,
         )
         if run_settings.plateau_cycles
         else None
@@ -318,6 +329,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             if arrival_share.value is not None:
                 curriculum.update(arrival_share.value)
             environment.set_target_ranges(*curriculum.target_ranges())
+        if environment.clocks is not None:
+            record["clock_snapshot"] = _clock_snapshot(environment)
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
@@ -328,10 +341,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             and cycle < total_cycles
             and time.monotonic() - session_start + seconds_per_cycle > time_limit_s
         )
-        measured = arrival_share.value is not None
-        if plateau is not None and stop_cycle is None and measured:
-            level = 0.0 if curriculum is None else curriculum.level
-            plateau.update(cycle, arrival_share.value + level)
+        if plateau is not None and stop_cycle is None:
+            plateau.update(cycle, _plateau_readings(record, arrival_share, curriculum))
             if plateau.reached(cycle):
                 if recorder.recording:  # its end shows the final behaviour
                     stop_cycle = recording_first_cycle + recording_windows - 1
@@ -388,11 +399,20 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             return folder.path
         if stopping and cycle < total_cycles:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
+            task = plateau.signals["task"]
+            wave = plateau.signals.get("wave")
             print(
                 f"Stopped after cycle {cycle} of {total_cycles}: a plateau. The"
                 f" progress ({measure}, averaged over {plateau.average_cycles}"
                 f" cycles) last rose by {plateau.min_progress:g} at cycle"
-                f" {plateau.best_cycle}, to {plateau.best:.3f}."
+                f" {task.best_cycle}, to {task.best:.3f}"
+                + (
+                    ""
+                    if wave is None
+                    else f"; the wave consistency, averaged alike, at cycle"
+                    f" {wave.best_cycle}, to {wave.best:.3f}"
+                )
+                + "."
             )
             return folder.path
     session_cycles = total_cycles - completed_cycles
@@ -403,6 +423,23 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         f" overall: {folder.path}"
     )
     return folder.path
+
+
+def _plateau_readings(
+    record: dict[str, Any], arrival_share: ArrivalShare, curriculum: Curriculum | None
+) -> dict[str, float]:
+    """The signals the plateau stop watches, once measured: the task (the
+    arrival share, plus the curriculum's level), and in a run with clocks the
+    wave (how alike the neighbours' offsets are across every world and step,
+    averaged over the pairs)."""
+    readings = {}
+    if arrival_share.value is not None:
+        level = 0.0 if curriculum is None else curriculum.level
+        readings["task"] = arrival_share.value + level
+    if "rhythm" in record:
+        consistency = record["rhythm"]["neighbour_offset_consistency"]
+        readings["wave"] = sum(consistency) / len(consistency)
+    return readings
 
 
 def recorded_blocks(block_count: int, recordings: int | str) -> set[int]:
@@ -496,6 +533,9 @@ def _training_categories(
             "Means over every world and step of each window; shares are the "
             "fraction of those steps.",
         ),
+        *_rhythm_categories(
+            loop, "Over every world and step of each window; " + RHYTHM_NOTE
+        ),
         LoggedCategory(
             "learning",
             "Learning",
@@ -538,6 +578,33 @@ def _step_category(
     return LoggedCategory(
         "step_facts", "Body, step by step", note, descriptions, step_window.result
     )
+
+
+def _rhythm_categories(loop: InteractionLoop, note: str) -> list[LoggedCategory]:
+    """The rhythm over a window, in a run whose segments have clocks; none
+    without."""
+    rhythm_window = loop.diagnostics.rhythm_window
+    if rhythm_window is None:
+        return []
+    return [
+        LoggedCategory(
+            "rhythm", "Rhythm", note, rhythm_window.descriptions, rhythm_window.result
+        )
+    ]
+
+
+def _clock_snapshot(environment: Environment) -> dict[str, list[list[float]]]:
+    """The first SNAPSHOT_WORLDS worlds' clocks after a window, for a live view:
+    each segment's phase, in rad, and tempo."""
+
+    def rounded(values: torch.Tensor) -> list[list[float]]:
+        return [[round(value, 3) for value in row] for row in values.tolist()]
+
+    clocks = environment.clocks
+    return {
+        "phase": rounded(clocks.phase[:SNAPSHOT_WORLDS]),
+        "tempo_hz": rounded(clocks.tempo_hz[:SNAPSHOT_WORLDS]),
+    }
 
 
 def _timing_category(loop: InteractionLoop) -> LoggedCategory:
@@ -670,6 +737,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         configuration.agents,
         configuration.run.seed,
         environment.segment_action_sizes,
+        tempo_actions=environment.clocks is not None,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])

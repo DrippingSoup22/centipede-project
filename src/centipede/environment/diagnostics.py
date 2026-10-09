@@ -1,16 +1,19 @@
-"""The environment's diagnostics: step facts and episode summaries.
+"""The environment's diagnostics: step facts, episode summaries, and rhythm.
 
-Both categories are allocated once and refreshed in place. The front file fills
+The categories are allocated once and refreshed in place. The front file fills
 them with two calls: ``record_step`` after each step's rewards and episode ends
-are known, and ``start_episodes`` whenever worlds start a new episode. Nothing
-here waits for the GPU. The values are listed in docs/diagnostics.md.
+are known, and ``start_episodes`` whenever worlds start a new episode. The
+rhythm category exists only in a run whose segments have clocks. Nothing here
+waits for the GPU. The values are listed in docs/diagnostics.md.
 """
 
+import math
 from dataclasses import dataclass
 
 import torch
 
 from centipede.diagnostics_category import measure
+from centipede.environment.clocks import Clocks
 from centipede.environment.observation_builder import head_forward_direction
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
@@ -49,6 +52,9 @@ ENDINGS = (
     "left the circle",
 )
 ENDING_EDGES = tuple(range(len(ENDINGS) + 1))
+# Joint movements below this, in rad per step, barely count when comparing the
+# directions of two legs' movements: their cosine stays near 0.
+STILL_MOVEMENT_RAD = 1e-3
 
 
 @dataclass(frozen=True)
@@ -100,6 +106,51 @@ class StepFacts:
         " one, (W,); kept for recordings",
         "m",
         summary="recorded",
+    )
+    support: torch.Tensor = measure(
+        "At least one left foot and one right foot on the ground, anywhere along"
+        " the body, (W,)",
+        summary="share",
+    )
+    left_right_similarity: torch.Tensor = measure(
+        "How alike the segment's left and right legs moved on the step: the"
+        " cosine between their three joints' movements, which mirror each other;"
+        " 1 together, -1 alternating, 0 in between or still, (W, N)"
+    )
+    neighbour_leg_similarity: torch.Tensor = measure(
+        "How alike the segment's legs moved on the step to the next segment's:"
+        " the cosine between their six joints' movements; 1 the same, -1"
+        " opposite, 0 unrelated or still, (W, N - 1)"
+    )
+
+
+@dataclass(frozen=True)
+class RhythmFacts:
+    """The segments' clocks in the last step, and how the legs keep time with
+    them, in every world; only in a run with clocks."""
+
+    tempo: torch.Tensor = measure("Each segment's clock tempo, (W, N)", "Hz")
+    neighbour_offset: torch.Tensor = measure(
+        "Phase offset between neighbours: the segment's clock phase minus the"
+        " next one's, positive when the rear one lags, as in a wave from head to"
+        " tail, (W, N - 1)",
+        "rad",
+        summary="angle",
+    )
+    head_offset: torch.Tensor = measure(
+        "How far each segment's clock lags behind the head's: the head's phase"
+        " minus the segment's; 0 for the head, (W, N)",
+        "rad",
+        summary="angle",
+    )
+    legs_on_tempo: torch.Tensor = measure(
+        "1 minus the legs-off-tempo cost: how closely the segment's leg joints"
+        " came back to their angles at the same point of the clock's last turn,"
+        " (W, N)"
+    )
+    foot_slip: torch.Tensor = measure(
+        "The foot-slip cost before its weight: how fast the segment's feet that"
+        " stayed on the ground slid, from 0 to 1, (W, N)"
     )
 
 
@@ -168,12 +219,14 @@ class EpisodeSummary:
 
 
 class EnvironmentDiagnostics:
-    """Fills the environment's two categories, and keeps per-episode totals.
+    """Fills the environment's categories, and keeps per-episode totals.
 
-    ``step`` and ``episode`` are the categories the experiment reads, and
+    ``step``, ``episode``, and in a run with clocks ``rhythm`` are the
+    categories the experiment reads (``rhythm`` is None without clocks), and
     ``simulation`` is the physics simulation's, offered here because only the
-    environment can see the simulation. ``reward_part_names`` labels the last
-    dimension of ``reward_parts``.
+    environment can see the simulation; so are the environment's ``clocks``,
+    for recordings and the log's snapshots. ``reward_part_names`` labels the
+    last dimension of ``reward_parts``.
     """
 
     def __init__(
@@ -183,10 +236,12 @@ class EnvironmentDiagnostics:
         reward_part_names: list[str],
         device: torch.device | str,
         simulation_facts: SimulationFacts,
+        clocks: Clocks | None = None,
     ) -> None:
-        """Allocate both categories and the running totals, all zero."""
+        """Allocate the categories and the running totals, all zero."""
         self.reward_part_names = list(reward_part_names)
         self.simulation = simulation_facts
+        self.clocks = clocks
 
         def zeros(*trailing_shape: int, dtype=torch.float32) -> torch.Tensor:
             return torch.zeros(
@@ -206,6 +261,20 @@ class EnvironmentDiagnostics:
             heading_error=zeros(),
             target_position=zeros(2),
             range_radius=zeros(),
+            support=zeros(dtype=torch.bool),
+            left_right_similarity=zeros(segment_count),
+            neighbour_leg_similarity=zeros(segment_count - 1),
+        )
+        self.rhythm = (
+            None
+            if clocks is None
+            else RhythmFacts(
+                tempo=zeros(segment_count),
+                neighbour_offset=zeros(segment_count - 1),
+                head_offset=zeros(segment_count),
+                legs_on_tempo=zeros(segment_count),
+                foot_slip=zeros(segment_count),
+            )
         )
         self.episode = EpisodeSummary(
             episode_ended=zeros(dtype=torch.bool),
@@ -234,6 +303,8 @@ class EnvironmentDiagnostics:
         )  # left foot, right foot, body, legs
         self._upside_down_steps = zeros()
         self._start_distance = zeros()
+        # The leg angles after the last step, or a new episode's first.
+        self._previous_leg_angles = zeros(segment_count, 6)
         # Remaining shares of the start distance that separate the endings
         # "within a quarter", "within half", "closer", and "not closer".
         self._remaining_edges = torch.tensor([0.25, 0.5, 1.0], device=device)
@@ -259,6 +330,13 @@ class EnvironmentDiagnostics:
             self._upside_down_steps,
         ):
             total.masked_fill_(_per_world(world_mask, total), 0.0)
+        self._previous_leg_angles.copy_(
+            torch.where(
+                world_mask[:, None, None],
+                physical_state.leg_joint_position,
+                self._previous_leg_angles,
+            )
+        )
         start = _head_distance(physical_state, target_position)
         self._start_distance.copy_(torch.where(world_mask, start, self._start_distance))
         # The new targets of the reset worlds, so that after a step every
@@ -326,6 +404,18 @@ class EnvironmentDiagnostics:
                 (forward * to_target).sum(dim=-1),
             ).abs()
         )
+        step.support.copy_(
+            physical_state.left_foot_ground_contact.any(dim=1)
+            & physical_state.right_foot_ground_contact.any(dim=1)
+        )
+        # The legs' joint movements over the step, left leg then right leg.
+        leg_angles = physical_state.leg_joint_position
+        movement = leg_angles - self._previous_leg_angles
+        self._previous_leg_angles.copy_(leg_angles)
+        step.left_right_similarity.copy_(_cosine(movement[..., :3], movement[..., 3:]))
+        step.neighbour_leg_similarity.copy_(_cosine(movement[:, :-1], movement[:, 1:]))
+        if self.rhythm is not None:
+            self._record_rhythm(step_rewards)
 
         self._steps += 1
         self._segment_return += step_rewards.rewards
@@ -369,6 +459,28 @@ class EnvironmentDiagnostics:
             (episode.upside_down_share, self._upside_down_steps / self._steps),
         ):
             summary.copy_(torch.where(_per_world(ended, summary), value, summary))
+
+    def _record_rhythm(self, step_rewards: StepRewards) -> None:
+        """Refresh the rhythm from the clocks, which the step has advanced."""
+        rhythm = self.rhythm
+        phase = self.clocks.phase
+        rhythm.tempo.copy_(self.clocks.tempo_hz)
+        rhythm.neighbour_offset.copy_(_wrapped(phase[:, :-1] - phase[:, 1:]))
+        rhythm.head_offset.copy_(_wrapped(phase[:, :1] - phase))
+        rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
+        rhythm.foot_slip.copy_(step_rewards.foot_slip)
+
+
+def _wrapped(angle: torch.Tensor) -> torch.Tensor:
+    """An angle in rad brought into [-pi, pi)."""
+    return torch.remainder(angle + math.pi, 2 * math.pi) - math.pi
+
+
+def _cosine(first: torch.Tensor, second: torch.Tensor) -> torch.Tensor:
+    """The cosine between two joint movements, over their last dimension; near
+    0 when either barely moves."""
+    lengths = first.norm(dim=-1) * second.norm(dim=-1)
+    return (first * second).sum(dim=-1) / lengths.clamp(min=STILL_MOVEMENT_RAD**2)
 
 
 def _per_world(world_mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
