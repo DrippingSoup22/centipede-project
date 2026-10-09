@@ -1,0 +1,11 @@
+Evaluating runs\2026-10-09_0126_night_01_worlds256\checkpoints\cycle_0032.pt
+32 worlds, 1 seeds, agents; each world's first episode, up to 256 steps
+
+speed: the head's, along the ground; toward: how fast it closes on its target.
+Endings: shares of every world's first episode. Those out of time are split by how much of
+the start distance was left: <1/4, <1/2, closer (less than all of it), or not closer.
+pass  actor and seed                took  |      speed     toward  body down  |  arrived  <1/4  <1/2  closer  not closer  left circle
+ 1/1  agents, seed 101            [....................]  1/256 steps 1/1  agents, seed 101            [#...................]  13/256 steps 1/1  agents, seed 101            [##..................]  26/256 steps 1/1  agents, seed 101            [###.................]  39/256 steps 1/1  agents, seed 101            [####................]  52/256 steps 1/1  agents, seed 101            [#####...............]  64/256 steps 1/1  agents, seed 101            [######..............]  77/256 steps 1/1  agents, seed 101            [#######.............]  90/256 steps 1/1  agents, seed 101            [########............]  103/256 steps 1/1  agents, seed 101            [#########...........]  116/256 steps 1/1  agents, seed 101            [##########..........]  128/256 steps 1/1  agents, seed 101            [###########.........]  141/256 steps 1/1  agents, seed 101            [############........]  154/256 steps 1/1  agents, seed 101            [#############.......]  167/256 steps 1/1  agents, seed 101            [##############......]  180/256 steps 1/1  agents, seed 101            [###############.....]  192/256 steps 1/1  agents, seed 101            [################....]  205/256 steps 1/1  agents, seed 101            [#################...]  218/256 steps 1/1  agents, seed 101            [##################..]  231/256 steps 1/1  agents, seed 101            [###################.]  244/256 steps 1/1  agents, seed 101            [####################]  256/256 steps 1/1  agents, seed 101             1m10s  |   2.4 mm/s   0.7 mm/s         6%  |       0%    0%    0%    100%          0%           0%
+
+Results: runs\2026-10-09_0126_night_01_worlds256\evaluations\2026-10-09_014313_cycle_0032.html
+run ended with exit code 0

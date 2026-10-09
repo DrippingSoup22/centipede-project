@@ -1,0 +1,50 @@
+# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
+# short tests one at a time on the 3080 while the user sleeps, each on the
+# reward-study baseline (configs/reward_study/01_baseline.toml) with one
+# change, judged by the evaluation with the policy's mean action.
+#
+# Test 01: 256 worlds instead of 64, minibatch 2048 instead of 512, so each
+# cycle still makes 32 gradient steps per agent, each on four times more data.
+# Question: does four times more data per cycle cost much time on the 3080,
+# and does it change what the agents learn in 32 cycles?
+
+[run]
+mode = "train"
+name = "night_01_worlds256"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+
+[agents.ppo]
+minibatch_size = 2048
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 32
