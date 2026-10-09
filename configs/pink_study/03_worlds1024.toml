@@ -1,0 +1,57 @@
+# Pink-noise study, 2026-10-09 (results/pink_study/): night test 05 with one
+# change per file; see 01_gae_lambda09.toml for the protocol.
+#
+# Test 03: 1,024 worlds instead of 256, and minibatch 8,192 instead of 2,048,
+# so that every update still makes 8 gradient steps per epoch (32 over its 4
+# epochs), each from four times as many samples. The followers' critics
+# predict little of the return (see test 01), which makes their advantages
+# noisy; averaging more samples in every gradient step is the direct remedy,
+# the route massively parallel locomotion training takes (Rudin et al., CoRL
+# 2021: 4,096 robots at once). On the 3080 a step takes 0.82 s at 1,024
+# worlds against 0.40 s at 256: four times the samples for twice the time,
+# about 1 hour 40 minutes for the 96 cycles. The recordings keep 256 worlds,
+# spread over the ranks, so that they stay the size of test 05's. Question:
+# does the mean action learn more from the same number of updates?
+
+[run]
+mode = "train"
+name = "pink_03_worlds1024"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+record_worlds = 256
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 1024
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+exploration_noise_beta = 1.0
+
+[agents.ppo]
+minibatch_size = 8192
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 96
