@@ -41,7 +41,11 @@ def test_a_seed_repeats_starts_and_target_ranges_change_only_the_targets(backend
     default_targets = environment(backend)
     other_targets = environment(
         backend,
-        target={"distance_range_m": [0.01, 0.02], "bearing_range_deg": [20, 30]},
+        target={
+            "distance_range_m": [0.01, 0.02],
+            "bearing_range_deg": [20, 30],
+            "range_circle_margin_m": 0.035,
+        },
     )
 
     first = default_targets.reset(seed=3)
@@ -66,7 +70,9 @@ def test_a_seed_repeats_starts_and_target_ranges_change_only_the_targets(backend
     distance, bearing = target_distance_and_bearing(behind)
     assert torch.allclose(distance, torch.full_like(distance, 0.05))
     assert torch.all(bearing.abs() > 179.9)  # straight behind the head
-    assert torch.allclose(other_targets.range_radius, torch.full_like(distance, 0.125))
+    # The range circle: 2.5 x the start distance, plus room to turn.
+    radius = torch.full_like(distance, 2.5 * 0.05 + 0.035)
+    assert torch.allclose(other_targets.range_radius, radius)
 
 
 def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():

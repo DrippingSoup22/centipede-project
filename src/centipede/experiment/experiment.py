@@ -10,6 +10,8 @@
   the last, and the others spread evenly between, one file each. With a
   ``[curriculum]``, after each cycle it moves the target's difficulty level
   from the arrivals and gives the environment that level's target ranges.
+  With ``plateau_cycles`` it stops cleanly, after recording one more episode
+  length and saving a checkpoint, once the run has stopped improving.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -41,6 +43,7 @@ from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBase
 from centipede.agents.settings import AgentSettings
 from centipede.diagnostics_category import descriptions, values
 from centipede.environment.environment import Environment
+from centipede.experiment.arrivals import ArrivalShare
 from centipede.experiment.configuration import (
     Configuration,
     EvaluationSettings,
@@ -48,6 +51,7 @@ from centipede.experiment.configuration import (
     read_configuration,
 )
 from centipede.experiment.curriculum import Curriculum
+from centipede.experiment.plateau import Plateau
 from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
@@ -147,11 +151,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     curriculum = None
     if configuration.curriculum is not None:
         curriculum = Curriculum(
-            configuration.curriculum,
-            configuration.environment.target,
-            loop_settings.rollout_window_steps,
-            configuration.environment.max_episode_steps,
-            saved_level,
+            configuration.curriculum, configuration.environment.target, saved_level
         )
         environment.set_target_ranges(*curriculum.target_ranges())
     # A recording covers whole windows: the episode length, rounded up.
@@ -280,16 +280,34 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             agents.set_action_std(action_std)
 
     follow_schedules(completed_cycles + 1)
+    # The arrival share moves the curriculum and measures the progress the
+    # plateau stop watches. At a plateau the run records one more episode
+    # length, to show its final behaviour, and stops after stop_cycle.
+    arrival_share = ArrivalShare(
+        loop_settings.rollout_window_steps, configuration.environment.max_episode_steps
+    )
+    plateau = (
+        Plateau(
+            run_settings.plateau_cycles,
+            run_settings.plateau_progress,
+            completed_cycles + 1,
+        )
+        if run_settings.plateau_cycles
+        else None
+    )
+    stop_cycle = None
     cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
+        arrival_share.add(record["episode_distributions"]["ending"])
         if curriculum is not None:
             # The level this window's new targets were drawn at; the next
-            # window's follows from how its episodes ended.
+            # window's follows from the arrival share.
             record["curriculum"] = {"level": curriculum.level}
-            curriculum.update(record["episode_distributions"]["ending"])
+            if arrival_share.value is not None:
+                curriculum.update(arrival_share.value)
             environment.set_target_ranges(*curriculum.target_ranges())
         folder.append_log(record)
         if cycle < total_cycles:
@@ -301,8 +319,23 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             and cycle < total_cycles
             and time.monotonic() - session_start + seconds_per_cycle > time_limit_s
         )
+        measured = arrival_share.value is not None
+        if plateau is not None and stop_cycle is None and measured:
+            level = 0.0 if curriculum is None else curriculum.level
+            plateau.update(cycle, arrival_share.value + level)
+            if plateau.reached(cycle):
+                if recorder.recording:  # its end shows the final behaviour
+                    stop_cycle = recording_first_cycle + recording_windows - 1
+                elif run_settings.recordings:
+                    recorder.arm(recording_frames)
+                    recording_first_cycle = cycle + 1
+                    stop_cycle = cycle + recording_windows
+                else:
+                    stop_cycle = cycle
+                stop_cycle = min(stop_cycle, total_cycles)
+        stopping = out_of_time or cycle == stop_cycle
         if recorder.recording and (
-            recorder.complete or cycle == total_cycles or out_of_time
+            recorder.complete or cycle == total_cycles or stopping
         ):
             window = recorder.take(
                 run_settings.record_levels,
@@ -320,13 +353,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                     folder,
                 ),
             )
-        if cycle < total_cycles and cycle + 1 in recording_starts:
+        next_recording = cycle < total_cycles and cycle + 1 in recording_starts
+        if next_recording and stop_cycle is None:
             recorder.arm(recording_frames)
             recording_first_cycle = cycle + 1
         if (
             cycle % run_settings.checkpoint_every_cycles == 0
             or cycle == total_cycles
-            or out_of_time
+            or stopping
         ):
             folder.save_checkpoint(
                 cycle,
@@ -341,6 +375,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 f" (about {duration(seconds_per_cycle)}) would pass the time"
                 f" limit of {run_settings.time_limit_hours:g} h. Continue it with"
                 f' continue_from = "{folder.path.as_posix()}".'
+            )
+            return folder.path
+        if stopping and cycle < total_cycles:
+            measure = "arrival share" + (" + level" if curriculum is not None else "")
+            print(
+                f"Stopped after cycle {cycle} of {total_cycles}: a plateau. The"
+                f" progress ({measure}) last rose by {plateau.min_progress:g} at"
+                f" cycle {plateau.best_cycle}, to {plateau.best:.3f}."
             )
             return folder.path
     session_cycles = total_cycles - completed_cycles

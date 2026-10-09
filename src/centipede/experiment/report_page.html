@@ -305,7 +305,8 @@ const SETTING_CHIPS = [
       `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, ` +
       // A file that sets the tip's radius uses arrival at the tip.
       (t.arrival_radius_m !== undefined && t.arrival !== "head" ? `arrival within ${number(t.arrival_radius_m * 1000)} mm` : "arrival under the head") +
-      (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` : "") },
+      (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` +
+        (t.range_circle_margin_m ? ` + ${number(t.range_circle_margin_m * 1000)} mm` : "") : "") },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   // Runs before the spine could be commanded have no such setting.
   { keys: ["environment.spine_control"], text: (s) => s.environment.spine_control ? "each segment bends the spine joint behind it" : "passive spine" },

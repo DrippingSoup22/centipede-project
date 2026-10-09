@@ -1,47 +1,50 @@
-"""Tests for the curriculum: how its level follows the arrivals, and its ranges.
+"""Tests for the curriculum and the arrival share it follows.
 
-How the experiment applies it during a run is tested with the experiment.
+How the experiment applies them during a run is tested with the experiment.
 """
 
 import pytest
 
 from centipede.environment.settings import TargetSettings
+from centipede.experiment.arrivals import ArrivalShare
 from centipede.experiment.configuration import CurriculumSettings
 from centipede.experiment.curriculum import Curriculum
 
-# Episode endings, in the environment's order: arrived, within a quarter,
-# within half, closer, not closer, left the circle.
-ALL_ARRIVED = [4, 0, 0, 0, 0, 0]
-THREE_OF_FOUR_ARRIVED = [3, 0, 0, 0, 1, 0]
-NONE_ARRIVED = [0, 0, 0, 0, 4, 0]
-
 
 def make_curriculum() -> Curriculum:
-    """From the default targets (30-60 mm, ±30°) to 30-200 mm all around,
-    with two windows per episode length."""
+    """From the default targets (30-60 mm, ±30°) to 30-200 mm all around."""
     settings = CurriculumSettings.from_section(
         {"final_distance_range_m": [0.03, 0.2], "final_bearing_range_deg": [-180, 180]}
     )
-    target = TargetSettings.from_section({})
-    return Curriculum(settings, target, window_steps=4, episode_steps=8, level=0.0)
+    return Curriculum(settings, TargetSettings.from_section({}), level=0.0)
 
 
-def test_the_level_follows_the_arrival_share_of_the_last_episode_length():
+def test_the_arrival_share_waits_for_a_whole_episode_length_of_windows():
+    share = ArrivalShare(window_steps=4, episode_steps=8)  # two windows
+    # Endings, in the environment's order: arrived, within a quarter, within
+    # half, closer, not closer, left the circle.
+    share.add([4, 0, 0, 0, 0, 0])
+    assert share.value is None
+    share.add([3, 0, 0, 0, 1, 0])
+    assert share.value == 7 / 8
+    share.add([0, 0, 0, 0, 4, 0])  # the first window has left the span
+    assert share.value == 3 / 8
+
+
+def test_the_level_follows_the_arrival_share_within_0_and_1():
     curriculum = make_curriculum()
-    curriculum.update(ALL_ARRIVED)  # one window is not yet an episode length
-    assert curriculum.level == 0.0
-    curriculum.update(THREE_OF_FOUR_ARRIVED)  # 7 arrivals of 8 over both windows
-    assert curriculum.level == pytest.approx(0.02 * (7 / 8 - 0.5))
+    curriculum.update(0.75)
+    assert curriculum.level == pytest.approx(0.02 * 0.25)
 
     for _ in range(200):
-        curriculum.update(ALL_ARRIVED)
+        curriculum.update(1.0)
     assert curriculum.level == 1.0
     distance, bearing = curriculum.target_ranges()
     assert distance == pytest.approx((0.03, 0.2))
     assert bearing == pytest.approx((-180, 180))
 
     for _ in range(200):
-        curriculum.update(NONE_ARRIVED)
+        curriculum.update(0.0)
     assert curriculum.level == 0.0
     assert curriculum.target_ranges() == ((0.03, 0.06), (-30, 30))
 

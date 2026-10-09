@@ -34,6 +34,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         arrival="head",
         arrival_radius_m=None,
         range_circle_ratio=2.5,
+        range_circle_margin_m=0.0,
     )
     # A file with the tip's radius, as every run saved before the head arrival,
     # keeps the tip, with no range circle.

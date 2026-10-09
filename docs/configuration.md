@@ -102,6 +102,8 @@ The `[run]` settings of a training file:
 | `record_selection` | `"ranked"` | Which worlds a number keeps: `"ranked"` splits the worlds by the rank of their summed reward into as many bands as it keeps, from the best to the worst, and keeps the best world of each, the rule MujocoReplay's viewer uses; `"first"` keeps the first worlds, so that consecutive recordings show the same worlds |
 | `record_levels` | 4 | The recorded worlds' ranks are sorted into this many levels, which the viewer shows (for example "level 2 of 4") |
 | `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
+| `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
+| `plateau_progress` | 0.02 | The rise of the progress that counts as improving |
 
 A complete training file, with every section written out:
 
@@ -118,6 +120,7 @@ report = true
 # record_worlds = 64                 # or "all"
 # record_selection = "ranked"
 # record_levels = 4
+# plateau_cycles = 48                # stop after 48 cycles without progress
 
 [environment]
 max_episode_steps = 8192
@@ -137,6 +140,7 @@ distance_range_m = [0.030, 0.060]
 bearing_range_deg = [-30, 30]
 arrival = "head"                      # the target must come under the head
 range_circle_ratio = 2.5              # cut, like the time limit, beyond 2.5 x the start distance
+range_circle_margin_m = 0.0           # ... plus this, room to turn
 
 [environment.rewards]                 # proportions; see docs/environment.md
 arrival_reward = 1.0                  # the unit of every other weight
@@ -206,7 +210,8 @@ of windows has ended. With the defaults the level moves at most 0.01 per cycle,
 so going from 0 to 1 takes at least 100 cycles. New targets follow the level
 from the next window; targets already placed stay until their episode ends.
 Each target's range circle follows its own start distance, so it grows with the
-targets.
+targets; `range_circle_margin_m` adds room to turn, which near targets beside
+or behind the head need.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -220,6 +225,29 @@ console's `level` column, and saved in every checkpoint, so that a continued run
 goes on at its level. An evaluation never follows the curriculum: its targets
 are `[environment.target]`'s, which an evaluation file may change, for example
 to the final ranges.
+
+### The plateau stop
+
+A run with `plateau_cycles` stops by itself once it no longer improves, so
+that no money is spent on cycles that teach nothing, whether the agents have
+learned all they can or their learning has failed. Its **progress** is the
+arrival share, measured as the curriculum measures it, plus the curriculum's
+level when there is one. Progress rises while the arrivals rise toward the
+share the curriculum holds, then while the level rises, and at the top level
+while the arrivals rise again; without a curriculum it is the arrival share
+alone, which stops a run once it has solved its task. A rise counts only if it
+beats the best so far by `plateau_progress`, so the noise of the share does not
+keep a run going.
+
+When `plateau_cycles` cycles pass without a rise, the run records one more
+episode length, unless one is being recorded, so that its last recording shows
+its final behaviour; then it saves a checkpoint and its report, prints the
+cycle of its last rise, and ends normally, so an evaluation that follows it
+still runs. The rule was checked on the first runs of the story: with 48
+cycles and 0.02 it would have stopped two runs about 60 cycles after they had
+solved their task, and none that was still going to learn; with 32 cycles it
+would have stopped a slow learner during a stall of about 30 cycles, before it
+reached 95% of arrivals.
 
 ### Starting from another run
 
@@ -365,7 +393,8 @@ holds:
   least one, and the line says how many those are;
 - with a curriculum, the level the window's new targets were drawn at.
 
-The last line gives the session's time and overall speed. In evaluation a pass
+The last line gives the session's time and overall speed, or, for a run that
+stops at a plateau, the cycle of its last rise. In evaluation a pass
 is one actor and seed: the bar fills toward the time limit and jumps to full
 when every world's first episode has ended; the line then holds the time it
 took, the same speeds and body share over the steps of those first episodes,

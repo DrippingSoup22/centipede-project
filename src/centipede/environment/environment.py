@@ -271,13 +271,11 @@ class Environment:
             torch.where(world_mask[:, None], new_target, self.target_position)
         )
         if target_settings.range_circle_ratio:
-            self.range_radius.copy_(
-                torch.where(
-                    world_mask,
-                    target_settings.range_circle_ratio * distance,
-                    self.range_radius,
-                )
+            radius = (
+                target_settings.range_circle_ratio * distance
+                + target_settings.range_circle_margin_m
             )
+            self.range_radius.copy_(torch.where(world_mask, radius, self.range_radius))
 
     def _target_under_head(self) -> torch.Tensor:
         """Worlds whose target lies under the head's outline, seen from above.

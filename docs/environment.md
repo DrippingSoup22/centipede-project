@@ -313,7 +313,13 @@ together:
   extra penalty.
 - **Leaving the range circle** (truncated, like the time limit): the head's tip
   is farther from the target than 2.5 times its distance at the start
-  (`range_circle_ratio`), 75 to 150 mm for these targets.
+  (`range_circle_ratio`), plus an optional margin (`range_circle_margin_m`),
+  75 to 150 mm for these targets without one. Every episode starts from the
+  starting pose with a new target, so the head always starts inside its
+  circle, 1.5 times the target's distance (plus the margin) from its edge.
+  The margin gives room to turn: a near target beside or behind the head
+  needs a turn that may first take the head away from it, by roughly a body
+  length (an estimate, not a measurement).
 
 If arrival and a cut happen on the same step, arrival wins. Nothing else ends
 an episode: the centipede may fall or touch the ground with its body and
@@ -594,6 +600,7 @@ These are the keys of the environment sections of the configuration file (see
 | `arrival` | `"head"` | `"head"`: the target must lie under the head's outline; `"tip"`: the head's tip must come within `arrival_radius_m` |
 | `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip |
 | `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. With the tip, no circle unless the file sets one |
+| `range_circle_margin_m` | 0 | Added to the range circle's radius: room to turn, whatever the target's distance |
 | **`[environment.rewards]`** | | |
 | `arrival_reward` (`A`) | 1.0 | Shared reward for reaching the target: the unit of every other weight |
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |

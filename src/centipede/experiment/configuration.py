@@ -52,7 +52,9 @@ class RunSettings:
     settings say how many worlds each keeps (a number, or ``"all"``), which
     ones when not all, and how many levels their ranks are sorted into.
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
-    with a checkpoint, before a cycle that would end after it. See
+    with a checkpoint, before a cycle that would end after it. With
+    ``plateau_cycles`` the run also stops cleanly once its progress has not
+    risen by ``plateau_progress`` for that many cycles (plateau.py). See
     docs/configuration.md.
     """
 
@@ -67,6 +69,8 @@ class RunSettings:
     record_worlds: int | str
     record_selection: str
     time_limit_hours: float | None
+    plateau_cycles: int
+    plateau_progress: float
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
@@ -102,6 +106,8 @@ class RunSettings:
                 "record_selection", ("ranked", "first"), default="ranked"
             ),
             time_limit_hours=section.positive_number("time_limit_hours", default=None),
+            plateau_cycles=section.integer("plateau_cycles", default=0, minimum=0),
+            plateau_progress=section.positive_number("plateau_progress", default=0.02),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.

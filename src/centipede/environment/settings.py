@@ -14,8 +14,9 @@ class TargetSettings:
     must lie under the head's outline, or ``"tip"`` when the head's tip must come
     within ``arrival_radius_m`` (None for ``"head"``). An episode is also cut,
     like a time limit, when the head's tip leaves the range circle: centred on
-    the target, with ``range_circle_ratio`` times the distance at the start as
-    its radius; 0 means no circle.
+    the target, with ``range_circle_ratio`` times the distance at the start,
+    plus ``range_circle_margin_m``, as its radius; 0 means no circle. The
+    margin is room to turn, which a near target behind the head needs.
 
     A file that sets ``arrival_radius_m`` uses the tip, and has no circle
     unless it sets one, as the earlier task did.
@@ -26,6 +27,7 @@ class TargetSettings:
     arrival: str
     arrival_radius_m: float | None
     range_circle_ratio: float | None
+    range_circle_margin_m: float
 
     @classmethod
     def from_section(cls, values: dict) -> "TargetSettings":
@@ -63,6 +65,9 @@ class TargetSettings:
                 else None
             ),
             range_circle_ratio=range_circle_ratio,
+            range_circle_margin_m=section.number(
+                "range_circle_margin_m", default=0.0, minimum=0.0
+            ),
         )
         section.reject_unknown_keys()
         return settings

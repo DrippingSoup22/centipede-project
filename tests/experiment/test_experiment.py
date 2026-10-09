@@ -192,6 +192,23 @@ def test_a_curriculum_level_is_logged_saved_and_kept_when_continuing(tmp_path):
     assert checkpoint["curriculum_level"] == 0.75
 
 
+def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
+    # Three steps never reach a target 30 mm away: the arrival share stays 0,
+    # first measured at cycle 2 (an episode length is two windows), so cycle 4
+    # is a plateau of two cycles. Cycles 5 and 6 are then recorded, the run's
+    # first recording being cycles 1 and 2.
+    plateau_file = TRAINING_FILE.replace(
+        'runs_folder = "RUNS"',
+        'runs_folder = "RUNS"\nrecordings = 1\nplateau_cycles = 2',
+    ).replace("update_cycles = 3", "update_cycles = 10")
+    folder = run_file(tmp_path, plateau_file, NAME="plateau")
+
+    assert logged_cycles(folder) == [1, 2, 3, 4, 5, 6]
+    assert (folder / "checkpoints" / "cycle_0006.pt").exists()
+    recordings = sorted(path.name for path in (folder / "recordings").iterdir())
+    assert recordings == ["cycles_0001-0002.npz", "cycles_0005-0006.npz"]
+
+
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
     harder_file = (
