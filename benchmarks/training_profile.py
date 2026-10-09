@@ -822,7 +822,7 @@ def between_cycles(
 
         start = time.perf_counter()
         window = loop.diagnostics.recorder.take(
-            run.record_levels, run.record_per_level, run.record_selection
+            run.record_levels, run.record_worlds, run.record_selection
         )
         scene = RecordingScene.from_run(run_configuration, environment)
         folder.write_recording(
@@ -1007,15 +1007,23 @@ def project(result: dict[str, Any], configuration: Configuration, out: Output) -
     collect = result["collect_seconds_per_step"] * window_steps
     between = result["between_cycles_seconds"]
     checkpoints = math.ceil(cycles / run.checkpoint_every_cycles)
+    # As the experiment records: one episode length of windows per file, every
+    # record_every_episodes episode lengths.
+    recording_windows = math.ceil(
+        configuration.environment.max_episode_steps / window_steps
+    )
+    recording_steps = recording_windows * window_steps
     recordings = (
-        math.ceil(cycles / run.record_every_cycles) if run.record_every_cycles else 0
+        math.ceil(cycles / (recording_windows * run.record_every_episodes))
+        if run.record_every_episodes
+        else 0
     )
     startup = sum(result["startup_seconds"].values())
     total = (
         startup
         + cycles * (collect + update + between.get("log line", 0.0))
         + checkpoints * (between.get("checkpoint", 0.0) + between.get("report", 0.0))
-        + recordings * between.get("recording", 0.0) * window_steps / measured_window
+        + recordings * between.get("recording", 0.0) * recording_steps / measured_window
     )
     transitions = world_count * window_steps * cycles
     projection = {
