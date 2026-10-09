@@ -38,8 +38,8 @@ seed only when it looks promising.
 | 04 | 01 + command cost, ratio 4 | 1 | 3080 | Done |
 | 07 | 05 + command cost, ratio 4 | 1 | 3080 | Done |
 | 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Done |
-| 05 seed 2 | 05 with seed 2 | 2 | 3080 | Running |
-| 09 | 05 + CAPS temporal smoothness (0.1), 64 cycles | 1 | 3080 | Planned |
+| 05 seed 2 | 05 with seed 2 | 2 | 3080 | Done |
+| 09 | 05 + CAPS temporal smoothness (0.1), 64 cycles | 1 | 3080 | Running |
 
 ## Results
 
@@ -56,6 +56,7 @@ while the training arrivals ended at 19-20%.
 | 01 (256 worlds) | 0% | 8.4% | 22.9 mm | 22.5% | 1.25° | 0.01 |
 | 02 (beta 0.5) | 0% | **24.6%** | 20.7 mm | 6.1% | 2.26° | 0.03 |
 | 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
+| 05 seed 2 | **28%** | −73.2% | 170.0 mm (184 steps) | 0.4% | 8.96° | 0.14 |
 | 04 (command cost 4) | 0% | 9.1% | 11.6 mm | 16.1% | 1.19° | 0.00 |
 | 07 (beta 1 + command cost 4, 96 cycles) | **41%** | −24.3% | 155.3 mm (168 steps) | 7.5% | 10.73° | 0.16 |
 | 08 (beta 1 + movement cost 10°, 96 cycles) | **34%** | −54.2% | 166.9 mm (174 steps) | 4.8% | 11.04° | 0.15 |
@@ -73,6 +74,7 @@ leg flips back and forth every 20 ms step):
 | 05, mean action | **93%** | **−0.32** |
 | 07, mean action | **95%** | **−0.39** |
 | 08, mean action | **94%** | **−0.38** |
+| 05 seed 2, mean action | **92%** | **−0.31** |
 | Random commands | 88% | −0.11 |
 
 By joint kind, test 05's mean action changes its legs' lift and knee joints by
@@ -115,7 +117,12 @@ movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
   buzz, the policy learned to buzz with its mean action. Its aim also got
   worse as it got faster (heading error 33° → 102°): of the evaluation's 32
   episodes, 14 arrived, 14 ran out of time no closer than they started, 2
-  ended closer, and 2 left the range circle.
+  ended closer, and 2 left the range circle. Its second seed repeated it: the
+  training followed almost the same curve (arrivals 1% → 18% → 26% → 27%,
+  speed 16.7 → 34.1 mm/s, heading error 32° → 105°, joint movement 0.31 →
+  0.80), and the mean action arrived in 28% of the episodes (9 of 32; 10 no
+  closer, 13 left the circle) with the same buzz (lift 33° and knee 36° per
+  frame). Over the two seeds, 36% arrivals (23 of 64 episodes).
 - The command cost alone (test 04, white noise) changed nothing in 32 cycles,
   like the movement cost on 2026-10-08: it charged about 0.00065 per step, 70%
   of the step cost (a mean squared command of 0.18), but the commands' size
