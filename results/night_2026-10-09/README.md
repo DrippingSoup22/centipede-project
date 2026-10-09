@@ -71,6 +71,12 @@ leg flips back and forth every 20 ms step):
 | 07, mean action | **95%** | **−0.39** |
 | Random commands | 88% | −0.11 |
 
+By joint kind, test 05's mean action changes its legs' lift and knee joints by
+29° and 32° per frame (99% of it above 5 Hz), as much as random commands do
+(24° and 32°), and the sweep joints by 11° (random: 17°); the baseline's mean
+action, by 1.7°, 2.1° and 1°. The legs tap up and down at the control rate,
+like a vibrating brush.
+
 **Training**, first → last quarter of 32 cycles:
 
 | Test | Arrivals | No closer | Speed | Toward | Joint movement | Legs' spread |
