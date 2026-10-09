@@ -17,6 +17,9 @@ class TargetSettings:
     the target, with ``range_circle_ratio`` times the distance at the start,
     plus ``range_circle_margin_m``, as its radius; 0 means no circle. The
     margin is room to turn, which a near target behind the head needs.
+    ``after_arrival`` is ``"restart"`` when an arrival restarts the world like
+    any other end, or ``"new_target"`` when the body walks on from where it
+    arrived, toward a new target; the other ends always restart the world.
 
     A file that sets ``arrival_radius_m`` uses the tip, and has no circle
     unless it sets one, as the earlier task did.
@@ -28,6 +31,7 @@ class TargetSettings:
     arrival_radius_m: float | None
     range_circle_ratio: float | None
     range_circle_margin_m: float
+    after_arrival: str
 
     @classmethod
     def from_section(cls, values: dict) -> "TargetSettings":
@@ -67,6 +71,9 @@ class TargetSettings:
             range_circle_ratio=range_circle_ratio,
             range_circle_margin_m=section.number(
                 "range_circle_margin_m", default=0.0, minimum=0.0
+            ),
+            after_arrival=section.choice(
+                "after_arrival", ("restart", "new_target"), default="restart"
             ),
         )
         section.reject_unknown_keys()

@@ -24,8 +24,9 @@ The environment also reports `segment_count`, `observation_size`,
 `segment_action_sizes` (how many actions each segment takes), and
 `action_size` (the joint action's width), which the experiment uses to create
 the agents. When an episode ends in a world, `step`
-resets that world by itself: the observations it returns are already the new
-episode's, and the final observations hold, for that world, the observation the
+starts the next one by itself, resetting the world or, after an arrival, perhaps
+only giving it a new target (see [Episodes](#episodes)): the observations it
+returns are already the new episode's, and the final observations hold, for that world, the observation the
 episode ended with. A seed given to `reset` makes the starting poses and targets
 repeatable.
 
@@ -63,8 +64,9 @@ other parts in order:
    needs the result of step 3.
 5. The observation builder builds the next observations, and the diagnostics
    are updated.
-6. Worlds whose episodes ended are reset, get a new target, and get fresh
-   observations; their final observations are returned as well.
+6. Worlds whose episodes ended get a new target and fresh observations, and
+   are reset unless they walk on after an arrival; their final observations
+   are returned as well.
 
 ## Physics simulation
 
@@ -314,8 +316,8 @@ together:
 - **Leaving the range circle** (truncated, like the time limit): the head's tip
   is farther from the target than 2.5 times its distance at the start
   (`range_circle_ratio`), plus an optional margin (`range_circle_margin_m`),
-  75 to 150 mm for these targets without one. Every episode starts from the
-  starting pose with a new target, so the head always starts inside its
+  75 to 150 mm for these targets without one. Every episode starts with a
+  new target placed from the head, so the head always starts inside its
   circle, 1.5 times the target's distance (plus the margin) from its edge.
   The margin gives room to turn: a near target beside or behind the head
   needs a turn that may first take the head away from it, by roughly a body
@@ -324,6 +326,23 @@ together:
 If arrival and a cut happen on the same step, arrival wins. Nothing else ends
 an episode: the centipede may fall or touch the ground with its body and
 recover.
+
+**After an arrival.** With `after_arrival = "restart"`, every end restarts the
+world from the starting pose. With `"new_target"`, an arrival only gives the
+head a new target, placed from where the head is and drawn from the current
+ranges, and the body walks on from the pose and speed it arrived with; the time
+limit and leaving the range circle still restart the world. Either way the
+arrival ends the episode, so its returns and the arrival share are counted as
+before, and the step count starts again for the new target. Walking on gives
+the agents starts in motion and in every posture a walk passes through, which
+restarts never give: from a standing start, each episode first practises
+starting to walk, and a centipede that must turn toward a new target never has
+to turn while walking. There is no limit to how many targets a body may reach
+in a row. The arrival still ends the episode for learning: each agent learns
+to reach every target as fast as it can, not to arrive in a state that suits
+the next target, which is drawn at random. Since the starting position is not
+varied and no segment observes its position on the floor, a body far from
+where it started faces the same task.
 
 **Why the head, and why so permissive.** The task is to walk to the target,
 however the body gets there, not to aim the head's tip precisely, so the target
@@ -601,6 +620,7 @@ These are the keys of the environment sections of the configuration file (see
 | `arrival_radius_m` | Not set | With `arrival = "tip"` (0.001 when unset): the distance that counts as arrival, and the closest distance progress counts. A file that sets it uses the tip |
 | `range_circle_ratio` | 2.5 | The range circle's radius around the target, as a multiple of the head's distance at the start; leaving it ends the episode like the time limit. 0: no circle. With the tip, no circle unless the file sets one |
 | `range_circle_margin_m` | 0 | Added to the range circle's radius: room to turn, whatever the target's distance |
+| `after_arrival` | `"restart"` | `"restart"`: an arrival restarts the world, like every other end; `"new_target"`: the body walks on from where it arrived, toward a new target ([Episodes](#episodes)) |
 | **`[environment.rewards]`** | | |
 | `arrival_reward` (`A`) | 1.0 | Shared reward for reaching the target: the unit of every other weight |
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |

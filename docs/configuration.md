@@ -141,6 +141,7 @@ bearing_range_deg = [-30, 30]
 arrival = "head"                      # the target must come under the head
 range_circle_ratio = 2.5              # cut, like the time limit, beyond 2.5 x the start distance
 range_circle_margin_m = 0.0           # ... plus this, room to turn
+after_arrival = "restart"             # "new_target": the body walks on to a new target
 
 [environment.rewards]                 # proportions; see docs/environment.md
 arrival_reward = 1.0                  # the unit of every other weight

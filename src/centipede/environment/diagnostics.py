@@ -247,8 +247,8 @@ class EnvironmentDiagnostics:
     ) -> None:
         """Clear the totals of the masked worlds and note their start distance.
 
-        Called after those worlds were reset and given new targets, with every
-        world's range circle radius.
+        Called after those worlds were given new targets, and reset unless
+        they walk on after an arrival, with every world's range circle radius.
         """
         for total in (
             self._steps,

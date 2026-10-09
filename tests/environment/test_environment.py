@@ -122,6 +122,29 @@ def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():
     assert not terminated.item() and not truncated.item()
 
 
+def test_after_an_arrival_the_body_can_walk_on_toward_a_new_target():
+    """With after_arrival = "new_target", world 0 arrives and keeps its body;
+    world 1 runs out of time and still restarts."""
+    env = environment(
+        world_count=2, max_episode_steps=2, target={"after_arrival": "new_target"}
+    )
+    env.reset(seed=1)
+    zero_action = torch.zeros(2, env.segment_count, 6)
+    env.step(zero_action)
+    state = env.simulation.physical_state
+    head_centre, head_tip = state.body_planar_position[0, 0], state.head_tip_position
+    env.target_position[0] = head_centre - 0.2 * (head_tip[0, :2] - head_centre)
+
+    observations, _, terminated, truncated, final = env.step(zero_action)
+
+    assert terminated.tolist() == [True, False] and truncated.tolist() == [False, True]
+    assert env.episode_steps.tolist() == [0, 0]
+    # World 0 sees the same body, with a new target; world 1 a new body.
+    assert torch.equal(observations[0, :, :-2], final[0, :, :-2])
+    assert target_distance_and_bearing(observations)[0][0] >= 0.030
+    assert not torch.equal(observations[1, :, :-2], final[1, :, :-2])
+
+
 def test_progress_is_measured_from_the_positions_before_the_step():
     """The physical state is overwritten by the step, so the front must have
     copied the earlier positions; otherwise every movement would measure zero."""

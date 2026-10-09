@@ -26,7 +26,8 @@ class Environment:
     """Batches of centipede worlds, each with a target for the head.
 
     Every tensor passed in or out has the worlds as its first dimension. When an
-    episode ends in a world, ``step`` resets that world by itself.
+    episode ends in a world, ``step`` starts the next one by itself: it resets
+    the world, or after an arrival may only give it a new target.
 
     ``segment_action_sizes`` lists how many actions each segment takes: six for
     its legs, and with spine control a seventh, the spine joint behind it, for
@@ -165,8 +166,9 @@ class Environment:
 
         Returns the observations, the rewards ``(W, N)``, terminated and
         truncated ``(W,)``, and the final observations. Worlds whose episode
-        ended are already reset: their observations start the new episode, and
-        their final observations are the ones the old episode ended with.
+        ended have already started a new one: their observations start the new
+        episode, and their final observations are the ones the old episode
+        ended with.
         """
         state = self.simulation.physical_state
 
@@ -219,12 +221,17 @@ class Environment:
             left_range,
         )
 
-        # 6. Reset the worlds whose episode ended. ``build`` returns a new
+        # 6. Start a new episode in the worlds whose episode ended: restart
+        # them, except, with after_arrival = "new_target", those that arrived,
+        # whose body walks on toward a new target. ``build`` returns a new
         # tensor, so the final observations keep the values from before.
         ended = terminated | truncated
         final_observations = observations
         if ended.any():
-            self.simulation.reset(ended)
+            if self.settings.target.after_arrival == "new_target":
+                self.simulation.reset(truncated)
+            else:
+                self.simulation.reset(ended)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
             self.diagnostics.start_episodes(

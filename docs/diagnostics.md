@@ -53,7 +53,7 @@ Refreshed on every step, for every world.
 | `uprightness` | `(W, N)` | How upright the segment is: 1 upright, 0 on its side, −1 upside down | Mean |
 | `head_distance` | `(W,)` | Flat distance from the head's tip to the target, m | Mean |
 | `heading_error` | `(W,)` | Angle between the head's forward direction and the target, rad, from 0 to π | Mean |
-| `target_position` | `(W, 2)` | Each world's target, world x and y, m; refreshed again for the worlds a step resets, so it always matches the pose | Recorded |
+| `target_position` | `(W, 2)` | Each world's target, world x and y, m; refreshed again for the worlds whose episode a step ended, so it always matches the pose | Recorded |
 | `range_radius` | `(W,)` | Radius of each world's range circle around its target, m (infinite without one); refreshed like the target | Recorded |
 
 Comparing `segment_progress` with `segment_moved` shows how much of a segment's
