@@ -149,6 +149,7 @@ step_cost_parts = 2                   # the cost budget is split 3 : 2 : 1
 body_contact_cost_parts = 3
 leg_contact_cost_parts = 1
 # cost_budget_parts = 6               # default: the costs' parts together
+# cost_horizon_steps = 256            # default: the episode; the rules' span
 head_progress_ratio = 1               # a halving = one episode of step cost
 follower_progress_share = 1           # every follower receives the head's progress
 # movement_cost_parts = 0             # optional costs, off by default

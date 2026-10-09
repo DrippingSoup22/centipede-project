@@ -54,6 +54,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         random_command_movement_deg=25.0,
         command_cost_ratio=0.0,
         cost_budget_parts=6.0,
+        cost_horizon_steps=None,
         head_progress_ratio=1.0,
         follower_progress_share=1.0,
         follower_progress_ratio=None,

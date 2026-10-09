@@ -444,31 +444,36 @@ it could not make an attempt better than standing still.
 
 Every weight is a proportion of the arrival reward `A` (1 by default; learning
 only sees proportions, since each update rescales its advantages). A cost is
-given by its **share** of a whole episode of `T` steps (`max_episode_steps`): a
-cost with share `s` costs `s × A / T` on each step, so the rules hold for any
-episode length. The shares are σ for the step cost, β for body contact, and λ
-for leg contact.
+given by its **share** of the **cost horizon**, a span of `H` steps: the whole
+episode, `T` steps (`max_episode_steps`), unless `cost_horizon_steps` sets a
+shorter one (see "Why a cost horizon" below). A cost with share `s` costs
+`s × A / H` on each step, so the rules hold for any episode length.
+The shares are σ for the step cost, β for body contact, and λ for leg contact.
 
 - **R0. The discount fits the episode length.** The agents' discount is
   `γ = 2^(−1/T)`, so an arrival on an episode's last step is worth half of `A`
   seen from its first step. The configuration sets it when a file sets no
   `discount` (0.9973 for 256-step episodes).
-- **R1. The worst arrival balances to zero.** An episode that pays every cost on
-  every step (body on the ground, legs touching) and arrives on its last step
-  adds up to zero, seen from its start with that discount:
-  `γ^(T−1) = (σ + β + λ) / T × (1 − γ^T) / (1 − γ)`. This gives the **cost
-  budget** `σ + β + λ = T × (2^(1/T) − 1)`, about ln 2 = 0.69 for any long
-  episode. R1 counts only the costs: every arrival also earns the progress of
-  its approach, which depends only on where it started, and asking the costs to
-  cancel that too would make them larger than the arrival itself.
+- **R1. The worst arrival balances to zero.** An approach of `H` steps that
+  pays every cost on every step (body on the ground, legs touching) and
+  arrives on its last step adds up to zero, seen from its start with that
+  discount: `γ^(H−1) = (σ + β + λ) / H × (1 − γ^H) / (1 − γ)`. With the whole
+  episode as the horizon, this gives the **cost budget**
+  `σ + β + λ = T × (2^(1/T) − 1)`, about ln 2 = 0.69 for any long episode; over
+  a shorter horizon the discount weighs less, and the budget is a little
+  larger (0.84 for 256 steps of a 512-step episode). R1 counts only the
+  costs: every arrival also earns the progress of its approach, which
+  depends only on where it started, and asking the costs to cancel that too
+  would make them larger than the arrival itself.
 - **R2. Standing still is a little worse than trying badly.** A centipede that
-  halves its distance with its legs touching all episode must end better than
-  one that stands still, upright: one halving must be worth more than λ. A
-  halving is worth one whole episode of step cost (`head_progress_ratio = 1`,
-  the progress weight per halving equal to σ × A), so the attempt ends at −λ and
-  standing still at −σ = −2λ: worse by the mildest cost.
+  halves its distance over the horizon with its legs touching all along must
+  end better than one that stands still, upright: one halving must be worth
+  more than λ. A halving is worth one whole horizon of step cost
+  (`head_progress_ratio = 1`, the progress weight per halving equal to σ × A),
+  so the attempt ends at −λ and standing still at −σ = −2λ: worse by the
+  mildest cost.
 - **R3. The order of the costs.** Body contact weighs most, then the step cost,
-  then leg contact: the budget is split **3 : 2 : 1** (β : σ : λ).
+  then leg contact: by default the budget is split **3 : 2 : 1** (β : σ : λ).
 - **R4. Every segment shares the head's progress.** Each follower receives the
   head's progress at `follower_progress_share` = 1. The share must make helping
   the head worth more than a follower's own posture over an episode, or it
@@ -479,6 +484,22 @@ for leg contact.
   comes closer and loses when it moves away, so its interest and the head's
   never diverge, and with a share of 1 every segment values the approach
   equally.
+
+**Why a cost horizon.** The time limit is a safety net, long enough for the
+slowest approach still worth finishing, while most arrivals take a fraction
+of it. Measured at the time limit, R1 ties every cost to it: doubling the
+episode length halves every cost per step, though nothing about posture
+changed, and a typical arrival then pays only a small part of the budget.
+With `cost_horizon_steps`, the rules are measured over a typical approach
+instead, and the time limit only sets the discount (R0) and cuts episodes. An
+arrival later than the horizon that paid every cost all along may then add up
+to less than zero, as intended: a slow, untidy arrival should not pay. This is
+safe because nothing but an arrival ends an episode early: at the time limit
+and at the range circle the agents' critic values what would have followed,
+so a negative return can never become a reason to stop. R2 likewise holds
+over the horizon: over an episode longer than it, a centipede that touches
+its legs throughout must halve its distance more than once to beat standing
+still.
 
 Two more properties follow from these rules and need no rule of their own.
 Progress cannot be farmed, since it depends only on where the head starts and
@@ -501,8 +522,13 @@ With `A = 1` and 256-step episodes:
 | Discount | 0.9973 | 2^(−1/256) |
 
 Doubling the episode length halves the per-step costs and sets the discount to
-0.9987; nothing else changes. Every training run prints these weights under its
-settings. Totals per segment over one episode of 256 steps, without discount,
+0.9987; nothing else changes. A cost horizon keeps the costs where the
+horizon puts them: for example, 512-step episodes with
+`cost_horizon_steps = 256` and the costs split 2.5 : 2 : 1.5 (body : step :
+legs) give a budget of 0.837, and per step 0.00136 for body contact, 0.00109
+for the step cost, and 0.00082 for leg contact, with 0.279 per halving of
+progress. Every training run prints these weights under its settings.
+Totals per segment over one episode of 256 steps, without discount,
 in units of `A`, for targets 30 to 60 mm away; they are the same for every
 segment, with its own contacts:
 
@@ -630,7 +656,8 @@ These are the keys of the environment sections of the configuration file (see
 | `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
 | `command_cost_ratio` | 0 | The [command cost](#optional-costs)'s weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`; 0 is off. Outside the cost budget, so rule R1 no longer holds when it is set. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
 | `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
-| `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole episodes of step cost |
+| `cost_horizon_steps` | `max_episode_steps` | The cost horizon: the rules are measured over an approach of this many steps ("Why a cost horizon" under [The rules](#the-rules)); shorter than the episode, it makes every cost and the progress weigh more against the arrival |
+| `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole cost horizons of step cost |
 | `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
 | `follower_progress_ratio` | Not set | Each follower's [own progress](#earlier-forms-of-the-reward) toward the spot where the segment ahead had been, as a share of the head's weight |
 | `distance_ratio_epsilon_m` (`ε`) | 0.000001 | Keeps the efficiency reward's ratio defined |

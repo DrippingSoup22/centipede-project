@@ -50,13 +50,22 @@ def rewards_for(state, arrived=(False, False), settings=SETTINGS, joint_action=N
 def test_the_worst_arrival_balances_to_zero_through_the_discount():
     """Rule R1: every cost on every step and an arrival on the last one add up
     to zero seen from the start, with the discount of rule R0; the costs take
-    their parts of that budget, and a halving is worth one episode of step cost."""
+    their parts of that budget, and a halving is worth one episode of step cost.
+    With a cost horizon, the same holds for an arrival on the horizon's last step."""
     weights = SETTINGS.weights(EPISODE_STEPS)
     discount = 2 ** (-1 / EPISODE_STEPS)
-    worst_cost = sum(weights.per_step[name] for name in weights.episode_shares)
-    discounted_steps = sum(discount**step for step in range(EPISODE_STEPS))
-    last_arrival = discount ** (EPISODE_STEPS - 1)
-    assert last_arrival - worst_cost * discounted_steps == pytest.approx(0, abs=1e-9)
+    short = RewardSettings.from_section({"cost_horizon_steps": 64})
+    for horizon, horizon_weights in (
+        (EPISODE_STEPS, weights),
+        (64, short.weights(EPISODE_STEPS)),
+    ):
+        per_step = horizon_weights.per_step
+        worst_cost = sum(per_step[name] for name in horizon_weights.episode_shares)
+        discounted_steps = sum(discount**step for step in range(horizon))
+        last_arrival = discount ** (horizon - 1)
+        assert last_arrival - worst_cost * discounted_steps == pytest.approx(
+            0, abs=1e-9
+        )
 
     shares = weights.episode_shares
     assert sum(shares.values()) == pytest.approx(0.6941, abs=1e-4)  # about ln 2

@@ -148,7 +148,7 @@ def reward_weights(
         )
     if episode_shares:
         lines.append(
-            "  a whole episode of each cost, in arrival rewards:  "
+            "  each cost over the cost horizon, in arrival rewards:  "
             + "  ".join(f"{name} {share:.3g}" for name, share in episode_shares.items())
             + f"  (budget {sum(episode_shares.values()):.3g})"
         )

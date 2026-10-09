@@ -104,7 +104,8 @@ class RewardWeights:
 
     ``per_step`` holds the weights the reward function multiplies its terms
     by, in its order of terms; ``episode_shares`` the cost of each cost term
-    over a whole episode, as a share of the arrival reward.
+    over the cost horizon (a whole episode unless ``cost_horizon_steps`` is
+    set), as a share of the arrival reward.
     """
 
     per_step: dict[str, float]
@@ -116,11 +117,13 @@ class RewardSettings:
     """The [environment.rewards] section: the reward, built from its rules.
 
     Everything is a proportion of ``arrival_reward``; docs/environment.md
-    explains the rules. The worst-case cost budget, what a whole episode of
-    every cost adds up to, is split into ``cost_budget_parts`` equal parts (by
+    explains the rules. The worst-case cost budget, what every cost adds up to
+    over the cost horizon, is split into ``cost_budget_parts`` equal parts (by
     default the sum of the costs' parts), and each cost takes its own number of
-    parts. The movement cost charges each segment for how far the joints it
-    commands move in a step, squared, in units of
+    parts. The cost horizon is ``cost_horizon_steps``, or a whole episode when
+    None; a horizon shorter than the episode makes every cost and the progress
+    weigh more against the arrival. The movement cost charges each segment for
+    how far the joints it commands move in a step, squared, in units of
     ``random_command_movement_deg``: how far a joint moves in a step under
     random commands. It is off (0 parts) unless a file sets it. The command
     cost, also off unless set, lies outside the budget: each step it charges
@@ -129,7 +132,7 @@ class RewardSettings:
     sum of its 8 squared commands against a reward of 1 for every step it stays
     healthy: a ratio of 4. Being outside the budget, it breaks rule R1 when set.
     ``head_progress_ratio`` is what one halving of the head's distance to its
-    target is worth, in whole episodes of step cost, and
+    target is worth, in step cost over the whole cost horizon, and
     ``follower_progress_share`` the share of the head's progress that every
     follower receives as well (1: the same). A cost of zero parts is switched
     off.
@@ -156,6 +159,7 @@ class RewardSettings:
     random_command_movement_deg: float | None
     command_cost_ratio: float | None
     cost_budget_parts: float | None
+    cost_horizon_steps: int | None
     head_progress_ratio: float | None
     follower_progress_share: float | None
     follower_progress_ratio: float | None
@@ -188,6 +192,7 @@ class RewardSettings:
                 random_command_movement_deg=None,
                 command_cost_ratio=None,
                 cost_budget_parts=None,
+                cost_horizon_steps=None,
                 head_progress_ratio=None,
                 follower_progress_share=None,
                 follower_progress_ratio=None,
@@ -235,6 +240,9 @@ class RewardSettings:
                     "command_cost_ratio", default=0.0, minimum=0.0
                 ),
                 cost_budget_parts=budget_parts,
+                cost_horizon_steps=section.positive_integer(
+                    "cost_horizon_steps", default=None
+                ),
                 head_progress_ratio=section.number(
                     "head_progress_ratio", default=1.0, minimum=0.0
                 ),
@@ -264,12 +272,13 @@ class RewardSettings:
     def weights(self, max_episode_steps: int) -> RewardWeights:
         """Each term's weight, for episodes of ``max_episode_steps`` steps.
 
-        The cost budget is ``T × (2^(1/T) − 1)`` times the arrival reward, about
-        ln 2: with the agents' discount at ``2^(−1/T)``, an episode that pays
-        every cost on every step and arrives on its last step adds up to zero,
-        seen from its start (rules R0 and R1 of docs/environment.md). Each cost
-        takes its parts of the budget, spread evenly over the episode's steps;
-        the movement cost appears only when it has parts.
+        The rules are measured over ``H`` steps: ``cost_horizon_steps``, or the
+        whole episode. With the agents' discount at ``2^(−1/T)``, an approach
+        that pays every cost on every step and arrives on step ``H`` adds up to
+        zero, seen from its start (rules R0 and R1 of docs/environment.md); for
+        ``H = T`` the budget is ``T × (2^(1/T) − 1)`` times the arrival reward,
+        about ln 2. Each cost takes its parts of the budget, spread evenly over
+        the ``H`` steps; the movement cost appears only when it has parts.
         """
         arrival = self.arrival_reward
         if self.uses_per_step_weights:
@@ -282,8 +291,12 @@ class RewardSettings:
                 },
                 episode_shares={},
             )
-        steps = max_episode_steps
-        budget = steps * (2 ** (1 / steps) - 1)
+        steps = self.cost_horizon_steps or max_episode_steps
+        discount = 2 ** (-1 / max_episode_steps)
+        every_cost_per_step = (
+            discount ** (steps - 1) * (1 - discount) / (1 - discount**steps)
+        )
+        budget = steps * every_cost_per_step
         shares = {
             name: budget * parts / self.cost_budget_parts
             for name, parts in (
