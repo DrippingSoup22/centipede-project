@@ -3,13 +3,14 @@
 Each launch is one session of the private Kaggle notebook
 ``<user>/centipede-training``: a script that runs on a machine with two T4s
 in the background, for up to 12 hours, whether or not the laptop is on, and
-trains one configuration file, or the same file with two seeds at once, one
-per GPU, each run followed by its evaluation. This script, run on the laptop
-from the repository root with the project's Python, controls it through
-Kaggle's command-line tool, installed in the project's environment and
-signed in once with ``kaggle auth login``:
+trains one configuration file, the same file with two seeds at once, or two
+files at once, one run per GPU, each run followed by its evaluation. This
+script, run on the laptop from the repository root with the project's
+Python, controls it through Kaggle's command-line tool, installed in the
+project's environment and signed in once with ``kaggle auth login``:
 
     python scripts/kaggle_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
+    python scripts/kaggle_gpu.py run configs/pink_study/01_gae_lambda09.toml configs/pink_study/04_hidden256.toml
     python scripts/kaggle_gpu.py watch    # follow the session, then fetch
     python scripts/kaggle_gpu.py status   # queued, running, complete, or error
     python scripts/kaggle_gpu.py fetch    # copy its results here once it ends
@@ -21,12 +22,14 @@ once as a private Kaggle dataset. ``run`` then pushes ``kaggle_session.py``,
 filled in with the configuration file as it is on the laptop and with the
 ``evaluation.toml`` beside it, if there is one, which evaluates each new run.
 With ``--seeds``, each run gets one of the seeds and the file's name with
-``_seed<N>`` added. The session first runs the tests, and trains only if
-they pass; ``--skip-tests`` leaves them out.
+``_seed<N>`` added. Two files must come from one folder, whose
+``evaluation.toml`` evaluates both runs. The session first runs the tests,
+and trains only if they pass; ``--skip-tests`` leaves them out.
 
 ``run`` then watches, like ``watch``: it shows the session's output as
 Kaggle streams it, one line per window once the window is done, marked with
-its seed when there are two, and when the session ends copies its output
+its seed or its file's name when there are two runs, and when the session
+ends copies its output
 into the laptop's ``runs/``: the run folders, as on the desktop, and
 ``runs/kaggle/<launch>/`` with the console output of
 every step and the session's whole output. Ctrl+C stops watching, not the
@@ -324,14 +327,31 @@ def watch_session(notebook: str) -> int:
 
 
 def run(arguments: argparse.Namespace) -> int:
-    configuration_path: Path = arguments.configuration
-    try:
-        configuration = read_configuration(configuration_path)
-    except SettingsError as error:
-        sys.exit(f"Configuration error: {error}")
-    if configuration.evaluation is not None or configuration.continue_from is not None:
-        sys.exit("Kaggle sessions train new runs only: give a training file.")
-    evaluation = configuration_path.with_name(EVALUATION_FILE)
+    paths: list[Path] = arguments.configurations
+    configurations = []
+    for path in paths:
+        try:
+            configuration = read_configuration(path)
+        except SettingsError as error:
+            sys.exit(f"Configuration error in {path}: {error}")
+        if configuration.evaluation is not None or configuration.continue_from is not None:
+            sys.exit("Kaggle sessions train new runs only: give training files.")
+        configurations.append(configuration)
+    if len({configuration.run.name for configuration in configurations}) < len(paths):
+        sys.exit("Two files need different run names, or their folders would clash.")
+    if len({path.resolve().parent for path in paths}) > 1:
+        sys.exit("Two files must come from one folder, whose evaluation.toml serves both.")
+    if arguments.seeds and len(paths) > 1:
+        sys.exit("--seeds trains one file with each seed: give a single file.")
+    # Each run: its file, its configuration, and the seed that replaces the file's.
+    jobs = (
+        [(paths[0], configurations[0], seed) for seed in arguments.seeds]
+        if arguments.seeds
+        else [(path, configuration, None) for path, configuration in zip(paths, configurations)]
+    )
+    if len(jobs) > GPUS:
+        sys.exit(f"At most {GPUS} runs per session, one per GPU.")
+    evaluation = paths[0].with_name(EVALUATION_FILE)
     evaluation_text = (
         evaluation.read_text(encoding="utf-8") if evaluation.exists() else ""
     )
@@ -340,30 +360,33 @@ def run(arguments: argparse.Namespace) -> int:
         run_values = tomllib.loads(evaluation_text).get("run", {})
         if run_values.get("mode") != "evaluate" or "source" not in run_values:
             sys.exit(f'{evaluation} needs mode = "evaluate" and a source in [run].')
-    seeds = arguments.seeds or [None]
-    if len(seeds) > GPUS:
-        sys.exit(f"At most {GPUS} seeds per session, one per GPU.")
     require_pushed_code()
     user = username()
     notebook = f"{user}/{NOTEBOOK_SLUG}"
     if session_status(notebook) in UNFINISHED:
         sys.exit("The latest session has not ended; 'watch' it or stop it on Kaggle.")
-    start_from = configuration.run.start_from
-    start_runs = [start_run_dataset(start_from, user)] if start_from else []
-    name = f"{datetime.now():%Y-%m-%d_%H%M%S}_{configuration_path.stem}"
-    text = configuration_path.read_text(encoding="utf-8")
+    start_runs = []
+    for configuration in configurations:
+        start_from = configuration.run.start_from
+        start = start_run_dataset(start_from, user) if start_from else None
+        if start and start not in start_runs:
+            start_runs.append(start)
+    stamp = f"{datetime.now():%Y-%m-%d_%H%M%S}"
+    name = "_".join([stamp, *(path.stem for path in paths)])
     runs = []
-    for seed in seeds:
+    for path, configuration, seed in jobs:
         values: dict[str, str | int] = {"runs_folder": SESSION_RUNS_FOLDER}
-        label = ""
+        run_name = f"{stamp}_{path.stem}"
+        label = path.stem if len(paths) > 1 else ""
         if seed is not None:
             label = f"seed{seed}"
+            run_name += f"_{label}"
             values |= {"seed": seed, "name": f"{configuration.run.name}_{label}"}
         runs.append(
             {
-                "name": f"{name}_{label}" if label else name,
+                "name": run_name,
                 "label": label,
-                "training": with_run_values(text, values),
+                "training": with_run_values(path.read_text(encoding="utf-8"), values),
             }
         )
     commit = git("rev-parse", "HEAD")
@@ -377,15 +400,9 @@ def run(arguments: argparse.Namespace) -> int:
     }
     push(notebook, launch, [f"{user}/{start['dataset']}" for start in start_runs])
     print(f"Started {name} on Kaggle")
-    print(f"  configuration  {configuration_path.as_posix()}")
-    print(
-        "  seeds          "
-        + (
-            ", ".join(f"{seed} on GPU {gpu}" for gpu, seed in enumerate(seeds))
-            if arguments.seeds
-            else "the file's"
-        )
-    )
+    for gpu, (path, _, seed) in enumerate(jobs):
+        seed_text = f"seed {seed}" if seed is not None else "the file's seed"
+        print(f"  GPU {gpu}          {path.as_posix()}, {seed_text}")
     print(f"  evaluation     {evaluation.as_posix() if evaluation_text else 'none'}")
     print(f"  tests          {'first' if launch['tests'] else 'skipped'}")
     print(f"  code           {commit[:7]}")
@@ -425,7 +442,13 @@ def main() -> None:
     run_parser = commands.add_parser(
         "run", help="start training and evaluating on Kaggle, watch, then fetch"
     )
-    run_parser.add_argument("configuration", type=Path, help="a training TOML file")
+    run_parser.add_argument(
+        "configurations",
+        type=Path,
+        nargs="+",
+        metavar="configuration",
+        help=f"a training TOML file, or {GPUS} from one folder, one per GPU",
+    )
     run_parser.add_argument(
         "--seeds",
         type=int,

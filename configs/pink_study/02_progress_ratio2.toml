@@ -13,7 +13,7 @@
 # often. More weight on progress pays for aim on every step. The rules still
 # hold: a halving stays worth more than a whole episode of leg contact (R2),
 # and the costs are unchanged (R1). Question: does the aim improve, and the
-# arrivals with it? About 50 minutes on the 3080.
+# arrivals with it? About 50 minutes on the 3080, 70 on a Kaggle T4.
 
 [run]
 mode = "train"

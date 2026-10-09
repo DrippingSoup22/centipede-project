@@ -3,9 +3,10 @@
 ``kaggle_gpu.py run`` pushes this file to Kaggle as a script, with ``LAUNCH``
 filled in, and Kaggle runs it in the background. The session clones
 Centipede at the laptop's commit, and RL_lib and MujocoReplay as they are on
-GitHub, installs them, runs the tests, and places the run that training
+GitHub, installs them, runs the tests, and places the runs that training
 starts from. Then it trains its runs, one per GPU at the same time (the same
-file with different seeds), and evaluates each run when its training ends.
+file with different seeds, or two files), and evaluates each run when its
+training ends.
 
 Kaggle keeps whatever is in ``/kaggle/working`` as the session's output, and
 that folder mirrors the laptop's ``runs/``: the run folders, whose
@@ -161,7 +162,7 @@ def place_start_runs() -> None:
                 f" {len(found)} times under {INPUT}."
             )
         checkpoints = CODE / start["folder"] / "checkpoints"
-        checkpoints.mkdir(parents=True)
+        checkpoints.mkdir(parents=True, exist_ok=True)
         shutil.copy(found[0], checkpoints)
         shutil.copy(found[0].parent / "configuration.toml", checkpoints.parent)
         print(f"Start run {start['folder']}, from {start['dataset']}", flush=True)

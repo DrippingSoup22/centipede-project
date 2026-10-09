@@ -9,9 +9,10 @@
 # the route massively parallel locomotion training takes (Rudin et al., CoRL
 # 2021: 4,096 robots at once). On the 3080 a step takes 0.82 s at 1,024
 # worlds against 0.40 s at 256: four times the samples for twice the time,
-# about 1 hour 40 minutes for the 96 cycles. The recordings keep 256 worlds,
-# spread over the ranks, so that they stay the size of test 05's. Question:
-# does the mean action learn more from the same number of updates?
+# about 1 hour 40 minutes for the 96 cycles (3.5 hours on a Kaggle T4). The
+# recordings keep 256 worlds, spread over the ranks, so that they stay the
+# size of test 05's. Question: does the mean action learn more from the same
+# number of updates?
 
 [run]
 mode = "train"

@@ -4,9 +4,11 @@
 # change per file. Each run is judged by the evaluation with the policy's mean
 # action on 128 episodes (evaluation.toml), against test 05's two seeds
 # evaluated the same way (configs/night/evaluations/). One seed per change
-# for screening; a second seed for what looks better.
+# for screening; a second seed for what looks better. Two files at a time on
+# Kaggle, one per T4, or one at a time on the 3080:
 #
-#   python scripts/gpu_desktop.py queue configs/pink_study --detach
+#   python scripts/kaggle_gpu.py run configs/pink_study/01_gae_lambda09.toml configs/pink_study/04_hidden256.toml
+#   python scripts/gpu_desktop.py run configs/pink_study/02_progress_ratio2.toml
 #
 # Test 01: GAE lambda 0.9 instead of 0.95, the value Andrychowicz et al.
 # (ICLR 2021) recommend for PPO. In test 05's last quarter the head's critic
@@ -15,7 +17,7 @@
 # segment's advantage is close to the sum of the shared rewards over the next
 # 1 / (1 - gamma lambda) steps: about 19 steps at 0.95, 10 at 0.9, so half as
 # much of the other segments' noise. Question: does the mean action arrive
-# more often, or aim better? About 50 minutes on the 3080.
+# more often, or aim better? About 50 minutes on the 3080, 70 on a Kaggle T4.
 
 [run]
 mode = "train"

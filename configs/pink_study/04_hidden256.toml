@@ -1,0 +1,59 @@
+# Pink-noise study, 2026-10-09 (results/pink_study/): night test 05 with one
+# change per file; see 01_gae_lambda09.toml for the protocol.
+#
+# Test 04: hidden layers of 256 units instead of 64, in both actor and
+# critic, still two layers. Each segment's network maps 85 inputs to 7
+# actions, a job the size of Gymnasium's Ant (27 inputs, or 105 with contact
+# forces, to 8 actions), which the PPO paper trained with 64 x 64. Andrychowicz
+# et al. (ICLR 2021) found that a wider critic never hurt, while the best
+# policy width depends on the task. The followers' critics, though, lack the
+# target rather than room (see test 01), so a bigger network may help less
+# than it seems. The agents are widened from the standing prototype: its
+# weights keep their places, and each new unit starts with random weights
+# from the layer below and none to the layer above, so the agents start out
+# acting exactly as the prototype's and then learn with their extra units
+# (Net2Net, Chen et al., ICLR 2016). Question: does the mean action learn more
+# with more room? About 70 minutes on a Kaggle T4, 50 on the 3080.
+
+[run]
+mode = "train"
+name = "pink_04_hidden256"
+seed = 1
+checkpoint_every_cycles = 16
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+hidden_layers = [256, 256]
+exploration_noise_beta = 1.0
+
+[agents.ppo]
+minibatch_size = 2048
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 96

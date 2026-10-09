@@ -209,6 +209,7 @@ Then, from the repository root with the project's Python:
 
 ```powershell
 python scripts/kaggle_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
+python scripts/kaggle_gpu.py run configs/pink_study/01_gae_lambda09.toml configs/pink_study/04_hidden256.toml
 python scripts/kaggle_gpu.py watch
 python scripts/kaggle_gpu.py status
 python scripts/kaggle_gpu.py fetch
@@ -219,11 +220,13 @@ laptop's commit, uploads the run that the file starts from as a private
 dataset the first time, and sends the configuration file as it is on the
 laptop, with the `evaluation.toml` beside it. With `--seeds`, the session
 trains the file once per seed at the same time, one run on each of the
-machine's two T4s, named with `_seed<N>`. The session,
+machine's two T4s, named with `_seed<N>`; given two files from one folder, it
+trains both at the same time, one on each T4, each evaluated with that
+folder's `evaluation.toml`. The session,
 [`scripts/kaggle_session.py`](scripts/kaggle_session.py), runs the tests
 (`--skip-tests` leaves them out), trains, and evaluates each new run. `run`
 shows its output as Kaggle streams it, one line per window, marked with its
-seed, and when it ends copies the run folders into `runs/` and the console
+seed or its file's name, and when it ends copies the run folders into `runs/` and the console
 output of every step into
 `runs/kaggle/<launch>/`, so Kaggle's web page is not needed. Ctrl+C stops
 watching, not the session; `watch` follows it again, `status` tells whether it
