@@ -42,7 +42,8 @@ neighbouring segments, left–right correlation) are to be written.
 | --- | --- | --- | --- |
 | 01 | [Baseline](01_baseline/README.md) | – | To run |
 | 02 | Command cost | A cost on the size of each command, `‖a‖²`, as in Gymnasium's Ant | Planned |
-| 03 | Smooth exploration noise | Exploration noise correlated over time (gSDE), in RL_lib | To be researched |
+| 03 | Colored exploration noise | Exploration noise correlated over time, `1/f^β` with β = 0.5 (the PPO default of Hollenstein et al., AAAI 2024), in RL_lib | Planned |
+| – | gSDE | State-dependent exploration noise (Raffin et al., CoRL 2021), only if colored noise is not enough | Fallback |
 | – | Dense steering | A reward for the head turning toward the target | Proposed |
 | – | Dense progress | More weight on the progress relative to the arrival | Proposed |
 

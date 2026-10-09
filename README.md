@@ -145,7 +145,7 @@ python scripts/gpu_desktop.py watch
 python scripts/gpu_desktop.py status
 ```
 
-`run` makes the desktop pull the pushed code (this project's and
+`run` makes the desktop pull the pushed code (this project's, RL_lib's and
 MujocoReplay's, never while a run or queue is running), sends it the configuration file
 as it is on the laptop, starts the run there, independently of the SSH
 connection, and shows its output as it is written: one line per window, with
@@ -194,8 +194,8 @@ can be given in `CENTIPEDE_GPU_HOST`.
 
 ### Training on Kaggle
 
-[`scripts/kaggle_gpu.py`](scripts/kaggle_gpu.py) trains one run and its
-evaluation on a Kaggle T4, in one session of the private notebook
+[`scripts/kaggle_gpu.py`](scripts/kaggle_gpu.py) trains a run and its
+evaluation on each of a Kaggle machine's two T4s, in one session of the private notebook
 `centipede-training`, launched and followed from the laptop. It uses Kaggle's
 command-line tool, installed in the project's environment and signed in once
 (the sign-in opens the browser):
