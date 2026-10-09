@@ -97,7 +97,7 @@ file, or a new function next to `train` and `evaluate`.
 | `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, recordings, and evaluation results |
 | `arrivals.py` | The arrival share of the last episode length of windows, which the curriculum and the plateau stop follow |
 | `curriculum.py` | The curriculum: the target's difficulty level, moved after each cycle from the arrival share, and its target ranges |
-| `plateau.py` | The plateau stop: whether a run's progress has stopped rising |
+| `plateau.py` | The plateau stop: whether a run's progress, averaged over the last three episode lengths, has stopped rising |
 | `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
 | `recordings.py` | Turning the recorded steps, one episode length in training, into a replay recording for the sibling MujocoReplay project |
 | `progress.py` | The terminal's view of training: one line per window, with a bar of `#` and `.` that fills as the window is collected (told each step by the loop's diagnostics), then the window's results |

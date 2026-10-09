@@ -102,7 +102,7 @@ The `[run]` settings of a training file:
 | `record_selection` | `"ranked"` | Which worlds a number keeps: `"ranked"` splits the worlds by the rank of their summed reward into as many bands as it keeps, from the best to the worst, and keeps the best world of each, the rule MujocoReplay's viewer uses; `"first"` keeps the first worlds, so that consecutive recordings show the same worlds |
 | `record_levels` | 4 | The recorded worlds' ranks are sorted into this many levels, which the viewer shows (for example "level 2 of 4") |
 | `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
-| `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
+| `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress, averaged over the last three episode lengths, has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
 | `plateau_progress` | 0.02 | The rise of the progress that counts as improving |
 
 A complete training file, with every section written out:
@@ -235,19 +235,32 @@ arrival share, measured as the curriculum measures it, plus the curriculum's
 level when there is one. Progress rises while the arrivals rise toward the
 share the curriculum holds, then while the level rises, and at the top level
 while the arrivals rise again; without a curriculum it is the arrival share
-alone, which stops a run once it has solved its task. A rise counts only if it
-beats the best so far by `plateau_progress`, so the noise of the share does not
-keep a run going.
+alone, which stops a run once it has solved its task.
+
+The arrival share swings with the rhythm of the episode length. All worlds
+start together, so those that run out of time end together and restart
+together: their endings come in one wave per episode length, and the share
+measured over the last episode length moves up and down by a few points around
+its trend (about ±3 in the first story runs with 512-step episodes). A world
+that arrives or leaves the range circle restarts at its own moment and leaves
+the waves for good, so they shrink as the agents improve. The stop therefore
+watches the average of the progress over the last three episode lengths of
+cycles (24 with 512-step episodes and 64-step windows), in which the swings
+cancel: a single lucky reading cannot set a best that later readings must
+beat. A rise of that average counts only if it beats the best so far by
+`plateau_progress`, and the count of cycles without a rise starts with the
+first average.
 
 When `plateau_cycles` cycles pass without a rise, the run records one more
 episode length, unless one is being recorded, so that its last recording shows
 its final behaviour; then it saves a checkpoint and its report, prints the
 cycle of its last rise, and ends normally, so an evaluation that follows it
 still runs. The rule was checked on the first runs of the story: with 48
-cycles and 0.02 it would have stopped two runs about 60 cycles after they had
-solved their task, and none that was still going to learn; with 32 cycles it
-would have stopped a slow learner during a stall of about 30 cycles, before it
-reached 95% of arrivals.
+cycles and 0.02 it would have stopped two runs about 50 to 60 cycles after
+they had solved their task (at cycles 150 and 126), and none that was still
+going to learn. Watching the latest reading instead of the average, with 32
+cycles and 0.05, would have stopped a slow learner during a stall of about 30
+cycles, before it reached 95% of arrivals.
 
 ### Starting from another run
 

@@ -290,7 +290,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         Plateau(
             run_settings.plateau_cycles,
             run_settings.plateau_progress,
-            completed_cycles + 1,
+            episode_windows=recording_windows,
         )
         if run_settings.plateau_cycles
         else None
@@ -381,8 +381,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
             print(
                 f"Stopped after cycle {cycle} of {total_cycles}: a plateau. The"
-                f" progress ({measure}) last rose by {plateau.min_progress:g} at"
-                f" cycle {plateau.best_cycle}, to {plateau.best:.3f}."
+                f" progress ({measure}, averaged over {plateau.average_cycles}"
+                f" cycles) last rose by {plateau.min_progress:g} at cycle"
+                f" {plateau.best_cycle}, to {plateau.best:.3f}."
             )
             return folder.path
     session_cycles = total_cycles - completed_cycles
