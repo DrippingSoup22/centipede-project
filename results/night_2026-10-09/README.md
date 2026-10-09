@@ -34,8 +34,9 @@ seed only when it looks promising.
 | 01 | 256 worlds, minibatch 2048 | 1 | 3080 | Done |
 | 02 | 01 + colored noise, beta 0.5 | 1 | 3080 | Done |
 | 03 | 01 + pink noise, beta 1 | 1, 2 | Kaggle | Ran; results still on Kaggle (login expired) |
-| 05 | 03 for 96 cycles | 1 | 3080 | Running |
-| 04 | 01 + command cost, ratio 4 | 1 | 3080 | Planned |
+| 05 | 03 for 96 cycles | 1 | 3080 | Done |
+| 04 | 01 + command cost, ratio 4 | 1 | 3080 | Running |
+| 07 | 05 + command cost, ratio 4 | 1 | 3080 | Planned |
 
 ## Results
 
@@ -51,6 +52,20 @@ while the training arrivals ended at 19-20%.
 | Baseline, seed 1 (64 worlds) | 0% | 8.6% | 8.1 mm | 0.3% | 0.95° | 0.01 |
 | 01 (256 worlds) | 0% | 8.4% | 22.9 mm | 22.5% | 1.25° | 0.01 |
 | 02 (beta 0.5) | 0% | **24.6%** | 20.7 mm | 6.1% | 2.26° | 0.03 |
+| 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
+
+**Buzz** of the legs' sweep joints: the share of the frame-to-frame change's
+power above 5 Hz, and the correlation of each change with the next (−1: the
+leg flips back and forth every 20 ms step):
+
+| Recording | Power above 5 Hz | Change-to-next correlation |
+| --- | --- | --- |
+| Baseline seed 1, mean action | 48% | +0.46 |
+| 01, mean action | 56% | +0.32 |
+| 02, mean action | 68% | +0.09 |
+| 05, training cycles 1-4 / 45-48 / 93-96 | 70% / 83% / 92% | +0.23 / −0.06 / −0.28 |
+| 05, mean action | **93%** | **−0.32** |
+| Random commands | 88% | −0.11 |
 
 **Training**, first → last quarter of 32 cycles:
 
@@ -59,6 +74,11 @@ while the training arrivals ended at 19-20%.
 | 01 | 16% → 22% | 14% → 22% | 24.6 → 26.1 mm/s | 4.4 → 3.7 mm/s | 0.68 | 0.450 → 0.431 |
 | 02 | 11% → 26% | 9% → 33% | 23.3 → 27.0 mm/s | 4.4 → 3.0 mm/s | 0.54 → 0.60 | 0.450 → 0.426 |
 | 03, seeds 1 and 2, cycles 1-22 | 0% → 1-2% | | 16-18 mm/s | 2-3 → 4-6 mm/s | | |
+
+Test 05 by quarters of its 96 cycles: arrivals 1% → 19% → 27% → 30%, no
+closer 8% → 18% → 41% → 49%, speed 16.9 → 22.6 → 30.4 → 35.5 mm/s, toward
+3.0 → 4.2 → 1.8 → 0.6 mm/s, heading error 33° → 62° → 91° → 102°, joint
+movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
 
 **Readings so far:**
 
@@ -72,3 +92,12 @@ while the training arrivals ended at 19-20%.
 - With beta 0.5 the mean action closed three times as much of the distance as
   with white noise (25% against 8%), one seed. It still arrived nowhere and
   its legs have no rhythm yet.
+- With beta 1 for 96 cycles (test 05) the mean action reached the target in
+  44% of the evaluation's episodes, where every earlier mean action reached
+  none: the policy now moves the body itself. But it moves it by buzzing:
+  each leg flips back and forth at the control rate, more than under random
+  commands, and the buzz grew over the training. Since pink noise cannot
+  buzz, the policy learned to buzz with its mean action. Its aim also got
+  worse as it got faster (heading error 33° → 102°): of the evaluation's 32
+  episodes, 14 arrived, 14 ran out of time no closer than they started, 2
+  ended closer, and 2 left the range circle.
