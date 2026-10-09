@@ -27,23 +27,23 @@ separately.
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
-- **Code: Stage 7 complete.** The physics simulation runs batches of worlds on
-  the CPU and, with MuJoCo Warp, on the GPU, and is covered by tests that pass
-  locally and on a Kaggle T4. The environment builds on it: targets, episodes,
-  observations, rewards, and diagnostics, tested locally. The agents, one
-  independent PPO learner per segment using RL_lib's batched PPO, act, store
-  their data, learn, and save, tested locally; they have not been trained yet.
-  The interaction loop connects them for training and evaluation, tested
-  locally with a short real run. The experiment runs everything from one
-  configuration file and writes each run's log, checkpoints, and an HTML report;
-  it is tested locally, and a first CPU probe run was trained, continued, and
-  evaluated. Training and evaluation also record the poses of chosen worlds
-  for replay in the sibling `../MujocoReplay` project, a viewer for recorded
-  MuJoCo poses that is developed separately. Nothing has learned to walk yet. On 2026-10-01 the project was restarted with
-  a new structure. A first implementation reached early learning on the CPU,
-  with the rear segments learning to avoid ground contact, but no standing or
-  walking. It is preserved in Git history (tag `cpu-stage8`) and in the local
-  archive.
+- **Code: complete** (all eight stages, the last closed on 2026-10-09). The
+  physics simulation runs batches of worlds on the CPU and, with MuJoCo Warp,
+  on the GPU. The environment builds on it: targets, episodes, observations,
+  rewards, and diagnostics. The agents, one independent PPO learner per
+  segment using RL_lib's batched PPO, act, store their data, learn, and save.
+  The interaction loop connects them for training and evaluation, and the
+  experiment runs everything from one configuration file and writes each run's
+  log, checkpoints, report, and recordings for replay in the sibling
+  `../MujocoReplay` viewer. Runs train on the GPU desktop, on Kaggle, or on GPUs
+  rented from Runpod, launched from the laptop. On 2026-10-01 the project was
+  restarted with a new structure; the first implementation is preserved in Git
+  history (tag `cpu-stage8`) and in the local archive.
+- **Training: in progress**, as studies in [`results/`](results/README.md).
+  The agents learn: in the best run so far (pink-noise study, test 04), the
+  policy's mean action reaches the target in 80-83% of 128 evaluation episodes
+  and turns toward it, but it moves by a buzz of the legs at the control rate,
+  not yet by a gait.
 
 ## Documentation
 
@@ -65,7 +65,7 @@ Centipede/
 ├─ src/centipede/    Program code, one folder per component
 ├─ configs/          TOML files for the smoke test, probe, training, and evaluation
 ├─ results/          The report's data: small files of the runs it uses, by study
-├─ scripts/          Controlling the GPU desktop and Kaggle from the laptop
+├─ scripts/          Controlling the GPU desktop, Kaggle, and Runpod from the laptop
 ├─ benchmarks/       Speed measurements, such as the physics simulation's
 │  └─ results/       Their saved results, one folder per measurement; local only
 ├─ tests/            Automated tests, one file per component
@@ -132,7 +132,7 @@ repository, `RL_lib`, and `MujocoReplay` side by side. It collects about 1,250
 transitions per second at 1,024 worlds, two and a half times a Kaggle T4. The
 laptop, whose MX330 cannot run the default solver, is used to write code, run
 the CPU tests, and read the results. While the desktop cannot be reached,
-training runs on Kaggle (below).
+training runs on Kaggle, free, or on GPUs rented from Runpod (below).
 
 The laptop controls the desktop over SSH, through
 [`scripts/gpu_desktop.py`](scripts/gpu_desktop.py), run from the repository
@@ -223,7 +223,7 @@ trains the file once per seed at the same time, one run on each of the
 machine's two T4s, named with `_seed<N>`; given two files from one folder, it
 trains both at the same time, one on each T4, each evaluated with that
 folder's `evaluation.toml`. The session,
-[`scripts/kaggle_session.py`](scripts/kaggle_session.py), runs the tests
+[`scripts/cloud_session.py`](scripts/cloud_session.py), runs the tests
 (`--skip-tests` leaves them out), trains, and evaluates each new run. `run`
 shows its output as Kaggle streams it, one line per window, marked with its
 seed or its file's name, and when it ends copies the run folders into `runs/` and the console
@@ -234,6 +234,64 @@ is queued, running, or ended, and `fetch` copies its results at any time,
 waiting while it runs. Only the latest session is followed or fetched, so a
 new one is refused until it has ended. Run folders made on Kaggle are named
 by its clock, in UTC.
+
+### Training on Runpod
+
+[`scripts/runpod_gpu.py`](scripts/runpod_gpu.py) trains up to four runs at
+the same time on GPUs rented from [Runpod](https://www.runpod.io), each run
+on a pod of its own with one GPU: by default an RTX 5090 in the community
+cloud, $0.69 an hour on 2026-10-09, which trained 1.7 times as fast as the
+RTX 3080 at 256 worlds and 2.4 times at 1,024. It needs, once:
+
+- a Runpod account with credit, and an API key made in the Runpod console
+  (Settings, API Keys), stored in the user environment variable
+  `RUNPOD_API_KEY` or in `~/.runpod/config.toml` as `apikey = "..."`;
+- the laptop's SSH public key (`~/.ssh/id_ed25519.pub`) registered in the
+  account (Settings, SSH Public Keys), with which the laptop reaches the pods.
+
+Then, from the repository root with the project's Python:
+
+```powershell
+python scripts/runpod_gpu.py run configs/pink_study/03_worlds1024.toml
+python scripts/runpod_gpu.py run configs/pink_study/02_progress_ratio2.toml configs/pink_study/03_worlds1024.toml
+python scripts/runpod_gpu.py run configs/reward_study/01_baseline.toml --seeds 1 2
+python scripts/runpod_gpu.py watch
+python scripts/runpod_gpu.py status
+python scripts/runpod_gpu.py fetch
+python scripts/runpod_gpu.py stop
+```
+
+`run` checks that the code is pushed, and refuses a launch that would make
+more than four pods rented at once. It rents a pod per run (`--gpu` and
+`--cloud` choose another GPU), waits until each answers over SSH, replaces a
+pod whose GPU is already busy before any work (a shared or faulty host),
+copies to it the run that the file starts from, and starts there the same session as on
+Kaggle, with the configuration file as it is on the laptop and the
+`evaluation.toml` beside it. On the pod,
+[`scripts/runpod_pod.sh`](scripts/runpod_pod.sh) runs the session in the
+background in a Python environment that keeps the image's PyTorch: the tests
+(`--skip-tests` leaves them out), the training, and the evaluation. If
+anything fails before every session has started, the launch's pods are
+deleted, so a failed launch costs nothing more.
+
+Each pod has a copier, a process of its own on the laptop like the desktop's,
+which checks the pod every minute and, when its session ends, copies the run
+folder into `runs/` and the console output of every step into
+`runs/runpod/<launch>/`, then deletes the pod. Its log is
+`runs/runpod/<launch>/copier.txt`; a copier stopped before the end is started
+again by the next command. So that a forgotten pod does not go on costing
+money, each pod also deletes itself three hours after its session ends, and in
+any case after `--max-hours` (12 by default) from its start: output not
+copied by then is lost.
+
+`run` shows the sessions' output, one line per window, each marked with its
+file or seed when there are several, then waits for the copies. Ctrl+C stops
+watching, not the runs or their copies. `watch` follows the latest launch
+again, `fetch` waits until its runs are copied and tries a failed copy again,
+`stop` copies what its pods hold so far and deletes them, and `status` lists
+the recent launches with how their copies ended, and the pods rented now with
+their cost so far. `watch`, `fetch`, and `stop` take part of a launch's name
+to choose another. Run folders made on a pod are named by its clock, in UTC.
 
 ## Archive
 

@@ -1,19 +1,21 @@
-"""Training runs and their evaluations on Kaggle's T4s, started by kaggle_gpu.py.
+"""Training runs and their evaluations on a cloud machine's GPUs.
 
-``kaggle_gpu.py run`` pushes this file to Kaggle as a script, with ``LAUNCH``
-filled in, and Kaggle runs it in the background. The session clones
-Centipede at the laptop's commit, and RL_lib and MujocoReplay as they are on
-GitHub, installs them, runs the tests, and places the runs that training
-starts from. Then it trains its runs, one per GPU at the same time (the same
-file with different seeds, or two files), and evaluates each run when its
-training ends.
+A launcher on the laptop sends this file with ``LAUNCH`` filled in:
+``kaggle_gpu.py`` pushes it to Kaggle as a script, which Kaggle runs in the
+background, and ``runpod_gpu.py`` copies it to a rented Runpod pod, which
+runs it with ``runpod_pod.sh``. The session clones Centipede at the laptop's
+commit, and RL_lib and MujocoReplay as they are on GitHub, installs them,
+runs the tests, and places the runs that training starts from. Then it
+trains its runs, one per GPU at the same time (the same file with different
+seeds, or two files), and evaluates each run when its training ends.
 
-Kaggle keeps whatever is in ``/kaggle/working`` as the session's output, and
-that folder mirrors the laptop's ``runs/``: the run folders, whose
-``launched/`` holds the configuration file and console output of the
-training and of its evaluation, as on the desktop, and ``kaggle/<launch>/``
-with the console output of every step, so that a failure before a run
-folder exists is kept too. The code goes to ``/tmp``, outside the output.
+The launch names the session's output folder, which mirrors the laptop's
+``runs/``: the run folders, whose ``launched/`` holds the configuration file
+and console output of the training and of its evaluation, as on the desktop,
+and ``<console>/<launch>/`` with the console output of every step, so that a
+failure before a run folder exists is kept too. On Kaggle that is
+``/kaggle/working``, which Kaggle keeps as the session's output. The code
+goes to ``/tmp``, outside the output.
 """
 
 import os
@@ -24,14 +26,14 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Filled in by kaggle_gpu.py when it pushes this file.
+# Filled in by the launcher when it sends this file. Besides the runs, it
+# names the folders: "output" for the results, "console" for the console
+# output's subfolder in it, and "input" where the start runs' files are.
 LAUNCH: dict = {}
 
 GITHUB = "https://github.com/DrippingSoup22"
 CODE = Path("/tmp/centipede")
 SIBLINGS = Path("/tmp")
-OUTPUT = Path("/kaggle/working")
-INPUT = Path("/kaggle/input")
 RUN_FOLDER = re.compile(r"Run folder: (\S+)")
 SOURCE_LINE = re.compile(r"^source\s*=.*$", re.MULTILINE)
 
@@ -115,7 +117,8 @@ def fetch_code() -> None:
 def install() -> None:
     """Install the siblings, then the package with the GPU backend and the test tools.
 
-    Kaggle provides PyTorch with CUDA, so it is not downloaded again.
+    Kaggle's Python and the Runpod pod's environment already have PyTorch with
+    CUDA, so it is not downloaded again.
     """
     shell(f"{sys.executable} -m pip install --quiet -e {SIBLINGS / 'RL_lib'}")
     shell(f"{sys.executable} -m pip install --quiet -e {SIBLINGS / 'MujocoReplay'}")
@@ -140,26 +143,29 @@ def check_gpus() -> None:
     if len(gpus) < len(LAUNCH["runs"]):
         sys.exit(f"{len(LAUNCH['runs'])} runs need as many GPUs; found {len(gpus)}.")
     if min(float(gpu.split(",")[1]) for gpu in gpus) < 7.0:
-        sys.exit("A GPU is older than Volta; the session needs T4s.")
+        sys.exit("A GPU is older than Volta, too old for MuJoCo Warp's Newton solver.")
 
 
 def place_start_runs() -> None:
-    """Rebuild each run that training starts from out of its dataset.
+    """Rebuild each run that training starts from out of its uploaded files.
 
-    A start run needs only its saved configuration and the checkpoint used;
-    it goes where the configuration file's ``start_from`` points, relative to
-    the code's folder, where the command runs.
+    The launcher uploads a start run's saved configuration and the checkpoint
+    used into a folder of the input, named as ``dataset`` says: a Kaggle
+    dataset, or a folder copied to the pod. The run goes where the
+    configuration file's ``start_from`` points, relative to the code's
+    folder, where the command runs.
     """
+    uploads = Path(LAUNCH["input"])
     for start in LAUNCH["start_runs"]:
         found = [
             path
-            for path in INPUT.rglob(start["checkpoint"])
+            for path in uploads.rglob(start["checkpoint"])
             if start["dataset"] in path.parts
         ]
         if len(found) != 1:
             sys.exit(
                 f"Dataset {start['dataset']}: {start['checkpoint']} found"
-                f" {len(found)} times under {INPUT}."
+                f" {len(found)} times under {uploads}."
             )
         checkpoints = CODE / start["folder"] / "checkpoints"
         checkpoints.mkdir(parents=True, exist_ok=True)
@@ -190,8 +196,8 @@ def train_and_evaluate(run: dict, gpu: int, console: Path) -> str:
 
 def main() -> None:
     name = LAUNCH["name"]
-    console = OUTPUT / "kaggle" / name
-    console.mkdir(parents=True)
+    console = Path(LAUNCH["output"]) / LAUNCH["console"] / name
+    console.mkdir(parents=True, exist_ok=True)
     check_gpus()
     fetch_code()
     install()

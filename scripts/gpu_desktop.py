@@ -293,12 +293,17 @@ def copier_log(name: str) -> Path:
 
 
 def take_copy_lock(name: str) -> IO[str] | None:
-    """The lock a launch's copier holds while it runs, or None if it is held.
+    """The lock a launch's copier holds while it runs, or None if it is held."""
+    COPIES.mkdir(parents=True, exist_ok=True)
+    return take_lock(COPIES / f"{name}.lock")
+
+
+def take_lock(path: Path) -> IO[str] | None:
+    """The lock held through the file at ``path``, or None if another holds it.
 
     The system lets it go when the process ends, however it ends.
     """
-    COPIES.mkdir(parents=True, exist_ok=True)
-    lock = (COPIES / f"{name}.lock").open("a")
+    lock = path.open("a")
     lock.seek(0)
     try:
         if os.name == "nt":
@@ -337,7 +342,13 @@ def start_copier(name: str, is_queue: bool) -> None:
         "--kind",
         "queue" if is_queue else "run",
     ]
-    with copier_log(name).open("a", encoding="utf-8") as log:
+    start_detached(command, copier_log(name))
+
+
+def start_detached(command: list[str], log_path: Path) -> None:
+    """Start a process of its own that outlives the terminal, its output added
+    to ``log_path``."""
+    with log_path.open("a", encoding="utf-8") as log:
         options = {
             "cwd": REPOSITORY,
             "stdin": NO_INPUT,

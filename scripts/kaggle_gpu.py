@@ -18,7 +18,7 @@ project's environment and signed in once with ``kaggle auth login``:
 ``run`` checks the configuration file, and that GitHub has the laptop's code,
 since Kaggle clones it from there at the laptop's commit. If the file starts
 from another run, that run (its configuration and checkpoints) is uploaded
-once as a private Kaggle dataset. ``run`` then pushes ``kaggle_session.py``,
+once as a private Kaggle dataset. ``run`` then pushes ``cloud_session.py``,
 filled in with the configuration file as it is on the laptop and with the
 ``evaluation.toml`` beside it, if there is one, which evaluates each new run.
 With ``--seeds``, each run gets one of the seeds and the file's name with
@@ -61,7 +61,7 @@ from centipede.settings_section import SettingsError
 KAGGLE = Path(sys.executable).with_name("kaggle.exe" if os.name == "nt" else "kaggle")
 # It writes the session's output, which is UTF-8, to the terminal and to files.
 KAGGLE_ENVIRONMENT = {**os.environ, "PYTHONUTF8": "1"}
-SESSION_FILE = Path(__file__).with_name("kaggle_session.py")
+SESSION_FILE = Path(__file__).with_name("cloud_session.py")
 LAUNCH_LINE = "LAUNCH: dict = {}"
 NOTEBOOK_SLUG = "centipede-training"
 NOTEBOOK_TITLE = "Centipede training"
@@ -74,8 +74,10 @@ STATUS = re.compile(r'has status "(?:\w+\.)?(\w+)"')
 NOT_FOUND = re.compile(r"404|403|was denied")
 RUN_LINE = re.compile(r"^\[run\][ \t]*$", re.MULTILINE)
 SECTION_LINE = re.compile(r"^\[", re.MULTILINE)
-# Where a session writes its runs, so that Kaggle keeps them as its output.
+# Where a session writes its runs, so that Kaggle keeps them as its output,
+# and where it finds its datasets.
 SESSION_RUNS_FOLDER = "/kaggle/working"
+SESSION_INPUT_FOLDER = "/kaggle/input"
 # Kaggle's T4 machine has two GPUs: at most one run on each.
 GPUS = 2
 WAIT_SECONDS = 60
@@ -195,13 +197,28 @@ def with_run_values(text: str, values: dict[str, str | int]) -> str:
     end = next_header.start() if next_header else len(text)
     section, added = text[header.end() : end], ""
     for key, value in values.items():
-        line = f"{key} = {json.dumps(value)}  # set by kaggle_gpu.py"
+        line = f"{key} = {json.dumps(value)}  # set by the launcher"
         section, count = re.subn(
             rf"^{key}\s*=.*$", line, section, count=1, flags=re.MULTILINE
         )
         if not count:
             added += f"\n{line}"
     return text[: header.end()] + added + section + text[end:]
+
+
+def evaluation_beside(path: Path) -> str:
+    """The text of the evaluation.toml beside a training file; empty if none.
+
+    Its source is replaced by the new run's folder in the session.
+    """
+    evaluation = path.with_name(EVALUATION_FILE)
+    if not evaluation.exists():
+        return ""
+    text = evaluation.read_text(encoding="utf-8")
+    run_values = tomllib.loads(text).get("run", {})
+    if run_values.get("mode") != "evaluate" or "source" not in run_values:
+        sys.exit(f'{evaluation} needs mode = "evaluate" and a source in [run].')
+    return text
 
 
 def push(notebook: str, launch: dict, datasets: list[str]) -> None:
@@ -352,14 +369,7 @@ def run(arguments: argparse.Namespace) -> int:
     if len(jobs) > GPUS:
         sys.exit(f"At most {GPUS} runs per session, one per GPU.")
     evaluation = paths[0].with_name(EVALUATION_FILE)
-    evaluation_text = (
-        evaluation.read_text(encoding="utf-8") if evaluation.exists() else ""
-    )
-    if evaluation_text:
-        # Its source is replaced by the new run's folder in the session.
-        run_values = tomllib.loads(evaluation_text).get("run", {})
-        if run_values.get("mode") != "evaluate" or "source" not in run_values:
-            sys.exit(f'{evaluation} needs mode = "evaluate" and a source in [run].')
+    evaluation_text = evaluation_beside(paths[0])
     require_pushed_code()
     user = username()
     notebook = f"{user}/{NOTEBOOK_SLUG}"
@@ -397,6 +407,9 @@ def run(arguments: argparse.Namespace) -> int:
         "runs": runs,
         "evaluation": evaluation_text,
         "start_runs": start_runs,
+        "output": SESSION_RUNS_FOLDER,
+        "console": "kaggle",
+        "input": SESSION_INPUT_FOLDER,
     }
     push(notebook, launch, [f"{user}/{start['dataset']}" for start in start_runs])
     print(f"Started {name} on Kaggle")
