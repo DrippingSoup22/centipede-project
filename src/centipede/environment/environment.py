@@ -120,6 +120,7 @@ class Environment:
             self.reward_function.term_names,
             self.device,
             self.simulation.diagnostics.facts,
+            clocks=self.clocks,
         )
 
         # Episode state, overwritten in place.
