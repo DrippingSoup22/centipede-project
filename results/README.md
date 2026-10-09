@@ -43,4 +43,5 @@ the evaluations' `.npz` files) and the checkpoints.
 | --- | --- | --- |
 | [`reward_study/`](reward_study/README.md) | Which reward components make the independent segments walk and steer, and whether a gait emerges | Baseline done |
 | [`night_2026-10-09/`](night_2026-10-09/README.md) | Screening tests of smooth exploration and smoothness costs, run by the assistant overnight: what makes the policy's mean action reach the target | Done; open questions listed |
+| [`pink_study/`](pink_study/README.md) | One change at a time on pink exploration noise (night test 05): training settings, networks, reward weights | Tests 01 and 04 done; 256 × 256 networks reached the target in 81% of 128 episodes, still by buzzing |
 | [`earlier/`](earlier/README.md) | Far targets and the movement cost; the follower's share of the progress, on the older task | Complete |
