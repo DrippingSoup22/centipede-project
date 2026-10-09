@@ -98,6 +98,20 @@ def test_update_learns_from_the_window_then_starts_a_new_one(device):
     )
 
 
+def test_temporal_smoothness_learns_from_the_stored_next_observations():
+    agent = make_agent(ppo={"minibatch_size": 4, "temporal_smoothness_coefficient": 1})
+    collect_window(agent)
+    # The last step's next observation is the one recorded after it.
+    torch.testing.assert_close(
+        agent.rollout_storage.next_observations[-1],
+        agent.observation_normaliser.normalize(observations(WINDOW_STEPS)),
+    )
+
+    agent.update()
+
+    assert agent.update_count == 1
+
+
 def test_a_scheduled_spread_is_set_and_never_learned():
     agent = make_agent(action_std_schedule="log_linear", final_action_std=0.1)
 

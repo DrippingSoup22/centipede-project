@@ -36,6 +36,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
             minibatch_size=64,
             max_gradient_norm=0.5,
             entropy_coefficient=0.001,
+            temporal_smoothness_coefficient=0.0,
         ),
     )
 

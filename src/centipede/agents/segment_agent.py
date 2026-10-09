@@ -78,6 +78,7 @@ class SegmentAgent:
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
+            temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
         )
         # Scheduled spreads are set by the experiment, never learned.
         if settings.action_std_schedule != "learned":
@@ -131,7 +132,9 @@ class SegmentAgent:
             final_observations, update_statistics=False
         )
         next_values = self.ppo.state_value(normalised_observations)
-        self.rollout_storage.store_outcome(rewards, terminated, truncated, next_values)
+        self.rollout_storage.store_outcome(
+            rewards, terminated, truncated, next_values, normalised_observations
+        )
 
     def set_learning_rate(self, learning_rate: float) -> None:
         """Use ``learning_rate`` in both optimizers from the next update on."""
@@ -147,12 +150,18 @@ class SegmentAgent:
     def update(self) -> PPOUpdateSummary:
         """Learn from this agent's full window, then start a new one."""
         ppo_settings = self.settings.ppo
+        storage = self.rollout_storage
         summary = self.ppo.update(
-            *self.rollout_storage.training_batch(
+            *storage.training_batch(
                 discount=ppo_settings.discount, gae_lambda=ppo_settings.gae_lambda
             ),
             update_epochs=ppo_settings.update_epochs,
             minibatch_size=ppo_settings.minibatch_size,
+            next_observations=storage.next_observations.reshape(
+                -1, storage.next_observations.shape[-1]
+            )
+            if ppo_settings.temporal_smoothness_coefficient
+            else None,
         )
         self.rollout_storage.clear()
         self.update_count += 1

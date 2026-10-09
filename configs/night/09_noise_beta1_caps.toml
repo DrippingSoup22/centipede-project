@@ -1,0 +1,60 @@
+# Night tests, 2026-10-09 (results/night_2026-10-09/): the assistant runs
+# short tests one at a time while the user sleeps, each on the reward-study
+# baseline with 256 worlds (test 01) and one change, judged by the evaluation
+# with the policy's mean action.
+#
+# Test 09: test 05 (pink noise, beta 1) with CAPS's temporal term (Mysore et
+# al., ICRA 2021) in each agent's actor loss: 0.1 times the distance between
+# its mean actions in consecutive steps. In tests 05, 07 and 08 the mean action
+# learned to reach the target by buzzing, flipping its legs at the control
+# rate, and neither the command cost nor the movement cost moved it off: a
+# reward term is outweighed by what the arrivals pay. CAPS acts on the policy
+# itself. With 0.1, test 05's buzz (a mean action changing by about 2.6 per
+# step, over 7 actions in [-1, 1]) costs about 0.26 in the loss, ten times a
+# typical surrogate loss (0.025), while a calm stroke (about 0.26 per step)
+# costs about as much as the surrogate. 64 cycles, about 33 minutes, to end
+# before the 3080's limit: compare with test 05 at the same cycles (its
+# training log, its checkpoint at cycle 64, and its recording of cycles 61-64).
+
+[run]
+mode = "train"
+name = "night_09_noise_beta1_caps"
+seed = 1
+checkpoint_every_cycles = 8
+start_from = "runs/2026-10-07_2221_baseline_stage2"
+
+[environment]
+max_episode_steps = 256
+spine_control = true
+
+[environment.simulation]
+model_path = "models/assembly_v3.xml"
+backend = "gpu"
+world_count = 256
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-30, 30]
+arrival = "head"
+range_circle_ratio = 2.5
+
+[environment.rewards]
+arrival_reward = 1
+step_cost_parts = 2
+body_contact_cost_parts = 3
+leg_contact_cost_parts = 1
+movement_cost_parts = 0
+head_progress_ratio = 1
+follower_progress_share = 1
+
+[agents]
+device = "cuda"
+exploration_noise_beta = 1.0
+
+[agents.ppo]
+minibatch_size = 2048
+temporal_smoothness_coefficient = 0.1
+
+[interaction_loop]
+rollout_window_steps = 64
+update_cycles = 64

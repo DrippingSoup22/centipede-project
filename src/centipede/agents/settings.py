@@ -13,6 +13,9 @@ class PPOSettings:
     """The [agents.ppo] section: how each segment agent learns from its data.
 
     ``clip_ratio`` must lie strictly between 0 and 1, as PPO requires.
+    ``temporal_smoothness_coefficient`` weighs CAPS's temporal term (Mysore et
+    al., ICRA 2021) in the actor's loss: the distance between the mean actions
+    of consecutive steps (RL_lib's PPO); 0 leaves it out.
     """
 
     discount: float
@@ -22,6 +25,7 @@ class PPOSettings:
     minibatch_size: int
     max_gradient_norm: float
     entropy_coefficient: float
+    temporal_smoothness_coefficient: float
 
     @classmethod
     def from_section(cls, values: dict) -> "PPOSettings":
@@ -42,6 +46,9 @@ class PPOSettings:
             max_gradient_norm=section.positive_number("max_gradient_norm", default=0.5),
             entropy_coefficient=section.number(
                 "entropy_coefficient", default=0.001, minimum=0.0
+            ),
+            temporal_smoothness_coefficient=section.number(
+                "temporal_smoothness_coefficient", default=0.0, minimum=0.0
             ),
         )
         section.reject_unknown_keys()

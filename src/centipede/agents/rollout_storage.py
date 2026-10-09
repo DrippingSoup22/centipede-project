@@ -38,7 +38,8 @@ class RolloutStorage:
         )
         self.values = torch.zeros_like(self.log_probabilities)
         self.rewards = torch.zeros_like(self.log_probabilities)
-        # The critic's value of the observation right after each step.
+        # The observation right after each step, normalised, and its value.
+        self.next_observations = torch.zeros_like(self.observations)
         self.next_values = torch.zeros_like(self.log_probabilities)
         self.terminated = torch.zeros(step_rows, dtype=torch.bool, device=device)
         # Terminated or truncated: the next row starts a new episode.
@@ -62,6 +63,7 @@ class RolloutStorage:
         terminated: torch.Tensor,
         truncated: torch.Tensor,
         next_values: torch.Tensor,
+        next_observations: torch.Tensor,
     ) -> None:
         """Write the outcome side of the current step, then move to the next row."""
         row = self.step_index
@@ -69,6 +71,7 @@ class RolloutStorage:
         self.terminated[row].copy_(terminated)
         torch.logical_or(terminated, truncated, out=self.episode_ended[row])
         self.next_values[row].copy_(next_values)
+        self.next_observations[row].copy_(next_observations)
         self.step_index += 1
 
     def training_batch(

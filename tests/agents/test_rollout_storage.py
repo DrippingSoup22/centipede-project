@@ -38,13 +38,21 @@ def test_steps_fill_rows_in_place_and_clearing_reuses_them(device):
                 sample_for_step(step, device),
             )
             storage.store_outcome(
-                torch.ones(2, device=device), no, no, torch.zeros(2, device=device)
+                torch.ones(2, device=device),
+                no,
+                no,
+                torch.zeros(2, device=device),
+                torch.full((2, 3), 100.0 * window + step + 1, device=device),
             )
 
     # The second window overwrote the first, in the same memory, on the device.
     assert storage.observations.data_ptr() == memory
     assert storage.observations.device.type == device
     assert storage.observations[:, :, 0].tolist() == [[100.0, 100.0], [101.0, 101.0]]
+    assert storage.next_observations[:, :, 0].tolist() == [
+        [101.0, 101.0],
+        [102.0, 102.0],
+    ]
     # Learning keeps the latent sample, never the action the environment got.
     assert storage.policy_actions[:, :, 0].tolist() == [[10.0, 10.0], [11.0, 11.0]]
     assert storage.log_probabilities.tolist() == [[20.0, 20.0], [21.0, 21.0]]
@@ -61,7 +69,11 @@ def test_training_batch_estimates_each_world_by_how_its_episodes_ended():
     for step in range(2):
         storage.store_action(torch.full((2, 1), float(step)), sample_for_step(step))
         storage.store_outcome(
-            torch.ones(2), terminated[step], truncated[step], next_values[step]
+            torch.ones(2),
+            terminated[step],
+            truncated[step],
+            next_values[step],
+            torch.full((2, 1), step + 1.0),
         )
 
     observations, policy_actions, log_probabilities, advantages, return_targets = (

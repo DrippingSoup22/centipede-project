@@ -194,6 +194,7 @@ These are the keys of the agents sections of the configuration file (see
 | `minibatch_size` | 64 | Samples per gradient step |
 | `max_gradient_norm` | 0.5 | Gradient clipping |
 | `entropy_coefficient` | 0.001 | Weight of the entropy bonus |
+| `temporal_smoothness_coefficient` | 0 | Weight of CAPS's temporal term in the actor's loss (Mysore et al., ICRA 2021): the distance between the mean actions in consecutive steps, so that the policy's mean action changes smoothly; each segment agent keeps the observation after every step for it ([RL_lib's action-smoothness.md](../../RL_lib/docs/action-smoothness.md)). 0 leaves it out |
 
 Fixed by design rather than configured: actor and critic are separate networks,
 the policy is a Gaussian squashed by tanh into −1 to 1, each action's spread is
