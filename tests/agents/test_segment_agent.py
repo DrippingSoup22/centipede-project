@@ -206,6 +206,24 @@ def test_the_seed_alone_decides_the_starting_networks():
     assert not all(map(torch.equal, starting_weights(0), starting_weights(1)))
 
 
+def test_the_settings_choose_the_activation_the_starting_mean_and_the_noise():
+    values = {"hidden_activation": "tanh", "exploration_noise_beta": 1.0}
+    plain = make_agent(**values)
+    agent = make_agent(
+        **values, actor_last_layer_scale=0.01, exploration_noise_sequence_steps=256
+    )
+
+    actor, critic = agent.ppo.actor_network, agent.ppo.critic_network
+    assert isinstance(actor.mean_network[1], torch.nn.Tanh)
+    assert isinstance(critic.network[1], torch.nn.Tanh)
+    # The same starting actor, its last layer a hundred times smaller.
+    torch.testing.assert_close(
+        actor.mean_network[-1].weight,
+        plain.ppo.actor_network.mean_network[-1].weight * 0.01,
+    )
+    assert agent.ppo.policy.noise_sequence_steps == 256
+
+
 def test_the_settings_choose_the_optimizer_and_loading_keeps_this_agents_own():
     def agent_with(**values):
         settings = AgentSettings.from_section({"hidden_layers": [8], **values})

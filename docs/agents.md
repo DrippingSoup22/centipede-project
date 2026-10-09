@@ -146,8 +146,10 @@ physical state, targets, or unfinished episodes, so continuing from a checkpoint
 starts new episodes. The optimizers' saved state also brings back the
 settings they were saved with, so after loading, each agent applies its own
 weight decay and momentum, and the experiment sets the learning rate before
-every update. A new run that starts from a checkpoint must use the same kind of
-optimizer (see [configuration.md](configuration.md#starting-from-another-run)).
+every update. A new run that starts from a checkpoint must use the same hidden
+activation, since trained weights mean something else under another one, and
+the same kind of optimizer (see
+[configuration.md](configuration.md#starting-from-another-run)).
 
 **Widening.** A new run may give its agents more to see or to command than the
 run it starts from, as spine control does: two more inputs, after all the
@@ -184,11 +186,14 @@ These are the keys of the agents sections of the configuration file (see
 | --- | ---: | --- |
 | **`[agents]`** | | |
 | `device` | `cpu` | Where networks and stored data live: `cpu` or `cuda` |
-| `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU); a run that starts from another may make them wider, never fewer or narrower ([Checkpoints](#checkpoints)) |
+| `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic; a run that starts from another may make them wider, never fewer or narrower ([Checkpoints](#checkpoints)) |
+| `hidden_activation` | `relu` | The hidden layers' activation in actor and critic: `relu` or `tanh`, which Andrychowicz et al. (ICLR 2021) found best for networks of this size, and ReLU worst. A run that starts from another must keep its activation |
+| `actor_last_layer_scale` | 1 | Multiplies the starting weights of the actor's last layer, which gives the mean action ([Starting policy](#starting-policy)); used only by fresh agents, since a run that starts from another loads its weights |
 | `initial_action_std` | 0.5 | Starting value of every learned action spread, including an action a widened agent gains |
 | `action_std_schedule` | `learned` | `learned`: each action's spread is a learned value; `log_linear`: the spreads are not learned, and every cycle sets them all, from `initial_action_std` in the first cycle to `final_action_std` in the last, in a straight line of their logarithms (overriding a saved run's spreads), as the PPO paper annealed its humanoid tasks' log spread (Schulman et al., 2017) |
 | `final_action_std` | initial_action_std | The spread of the last cycle, with a `log_linear` schedule |
 | `exploration_noise_beta` | 0 | Colors the exploration noise over time, `1/f^β`: 0 is white noise, drawn afresh at every step; 0.5 the PPO default of Hollenstein et al. (AAAI 2024), 1 pink noise (Eberhard et al., ICLR 2023). Each step's noise stays standard normal, so the policy's probabilities are unchanged ([RL_lib's colored-noise.md](../../RL_lib/docs/colored-noise.md)) |
+| `exploration_noise_sequence_steps` | 1000 | How many steps of colored noise each world's actions draw at a time: 1,000 as Hollenstein et al. do, or one episode length (`max_episode_steps`) as Eberhard et al.'s code does. The longer the sequences, the more of the noise drifts more slowly than an episode. Unused with white noise |
 | `optimizer` | `adam` | Each network's optimizer: `adam`, `adamw` (Adam with decoupled weight decay), or `sgd` |
 | `learning_rate` | 3e-4 | Learning rate of the first update |
 | `learning_rate_schedule` | `constant` | How the rate changes over the run's update cycles: `constant`, `linear`, or `cosine` (half a cosine, slow at both ends) |
@@ -213,6 +218,18 @@ one learned value that does not depend on the observation (RL_lib's
 `std_mode = "global"`), and actor and critic each have their own optimizer,
 of the same kind and with the same settings. RL_lib's PPO takes the
 optimizers ready-made, so choosing them needs nothing from the library.
+
+### Starting policy
+
+A fresh actor's last layer gives the mean action. With PyTorch's starting
+weights, that mean already differs from one observation to the next, as if
+the agent began with random reflexes. With `actor_last_layer_scale = 0.01`
+the layer starts a hundred times smaller, so every mean action starts near
+0 whatever the agent sees: at first the actions differ only by their
+exploration noise, whose spread starts at `initial_action_std`. Andrychowicz
+et al. (ICLR 2021) found that the starting policy matters surprisingly much
+for on-policy learning, and recommend this start with a spread of 0.5, which
+did best in four of their five tasks.
 
 The experiment sets the learning rate before every update with the agents'
 `set_learning_rate`, computed from the schedule and the run's cycle

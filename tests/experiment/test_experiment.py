@@ -200,6 +200,11 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     )
     with pytest.raises(SettingsError, match="optimizer must match"):
         run_file(tmp_path, other_optimizer, NAME="other")
+    other_activation = harder_file.replace(
+        "hidden_layers = [16]", 'hidden_layers = [16]\nhidden_activation = "tanh"'
+    )
+    with pytest.raises(SettingsError, match="hidden_activation must match"):
+        run_file(tmp_path, other_activation, NAME="other")
     deeper = harder_file.replace("hidden_layers = [16]", "hidden_layers = [16, 16]")
     with pytest.raises(SettingsError, match="as many layers"):
         run_file(tmp_path, deeper, NAME="deeper")

@@ -346,9 +346,10 @@ def _check_agents_can_start_from(
     """Fail clearly where a checkpoint's agents differ from the new run's.
 
     The networks must have as many hidden layers, each at least as wide (a
-    wider one is widened), and the optimizers must be of the same kind, since
-    each kind keeps its own state. Checkpoints saved before the optimizer
-    could be chosen used Adam.
+    wider one is widened), with the same activation, since trained weights
+    mean something else under another one; and the optimizers must be of the
+    same kind, since each kind keeps its own state. Checkpoints saved before
+    the activation or the optimizer could be chosen used ReLU and Adam.
     """
     saved = checkpoint["agents"]["settings"]
     saved_layers = tuple(saved["hidden_layers"])
@@ -360,6 +361,12 @@ def _check_agents_can_start_from(
             f"[agents] hidden_layers must have as many layers as the checkpoint "
             f"{path}, each at least as wide: {list(saved_layers)}, got "
             f"{list(settings.hidden_layers)}"
+        )
+    saved_activation = saved.get("hidden_activation", "relu")
+    if saved_activation != settings.hidden_activation:
+        raise SettingsError(
+            f"[agents] hidden_activation must match the checkpoint {path}: "
+            f"{saved_activation!r}, got {settings.hidden_activation!r}"
         )
     saved_optimizer = saved.get("optimizer", "adam")
     if saved_optimizer != settings.optimizer:

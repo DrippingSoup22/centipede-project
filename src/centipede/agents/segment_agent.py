@@ -56,10 +56,13 @@ class SegmentAgent:
                 hidden_sizes=settings.hidden_layers,
                 initial_std=settings.initial_action_std,
                 std_mode="global",
+                activation=settings.hidden_activation,
+                mean_output_scale=settings.actor_last_layer_scale,
             )
             critic_network = StateValueNetwork(
                 observation_size=observation_size,
                 hidden_sizes=settings.hidden_layers,
+                activation=settings.hidden_activation,
             )
         # Optimizers keep references to the parameters, so they are created
         # after the networks have moved to the device.
@@ -78,6 +81,7 @@ class SegmentAgent:
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
+            noise_sequence_steps=settings.exploration_noise_sequence_steps,
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
         )
         # Scheduled spreads are set by the experiment, never learned.

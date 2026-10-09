@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from centipede.settings_section import SettingsSection
 
+HIDDEN_ACTIVATIONS = ("relu", "tanh")
 OPTIMIZERS = ("adam", "adamw", "sgd")
 LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine")
 ACTION_STD_SCHEDULES = ("learned", "log_linear")
@@ -59,7 +60,12 @@ class PPOSettings:
 class AgentSettings:
     """The [agents] section, with its nested PPO section.
 
-    ``device`` is where networks and stored data live. ``initial_action_std``
+    ``device`` is where networks and stored data live. Actor and critic have
+    ``hidden_layers`` with the ``hidden_activation`` "relu" or "tanh".
+    ``actor_last_layer_scale`` multiplies the starting weights of the actor's
+    last layer, which gives the mean action: 0.01 starts every mean action
+    near 0 whatever the agent sees (Andrychowicz et al., ICLR 2021); 1 keeps
+    PyTorch's starting weights. ``initial_action_std``
     is the starting value of the six learned action spreads. With
     ``action_std_schedule`` "log_linear" the spreads are not learned: every
     cycle sets them all (``action_std_at``), from ``initial_action_std`` in
@@ -68,7 +74,9 @@ class AgentSettings:
     al., 2017). ``exploration_noise_beta`` colors the exploration noise over
     time: 0 is white noise, fresh at every step; 0.5 is the PPO default of
     Hollenstein et al. (AAAI 2024) and 1 pink noise (RL_lib's
-    ``SquashedGaussianPolicy``).
+    ``SquashedGaussianPolicy``). Its sequences are drawn
+    ``exploration_noise_sequence_steps`` steps at a time: Hollenstein et al.'s
+    1,000 by default, while Eberhard et al. (ICLR 2023) draw one episode length.
     Normalised observations are clipped to plus or minus ``observation_clip``.
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
@@ -78,10 +86,13 @@ class AgentSettings:
 
     device: str
     hidden_layers: tuple[int, ...]
+    hidden_activation: str
+    actor_last_layer_scale: float
     initial_action_std: float
     action_std_schedule: str
     final_action_std: float
     exploration_noise_beta: float
+    exploration_noise_sequence_steps: int
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
@@ -133,6 +144,12 @@ class AgentSettings:
             hidden_layers=section.integer_list(
                 "hidden_layers", default=(64, 64), minimum=1
             ),
+            hidden_activation=section.choice(
+                "hidden_activation", HIDDEN_ACTIVATIONS, default="relu"
+            ),
+            actor_last_layer_scale=section.positive_number(
+                "actor_last_layer_scale", default=1.0
+            ),
             initial_action_std=initial_action_std,
             action_std_schedule=section.choice(
                 "action_std_schedule", ACTION_STD_SCHEDULES, default="learned"
@@ -142,6 +159,9 @@ class AgentSettings:
             ),
             exploration_noise_beta=section.number(
                 "exploration_noise_beta", default=0.0, minimum=0.0, maximum=2.0
+            ),
+            exploration_noise_sequence_steps=section.integer(
+                "exploration_noise_sequence_steps", default=1000, minimum=2
             ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,
