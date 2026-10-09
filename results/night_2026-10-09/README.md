@@ -36,7 +36,8 @@ seed only when it looks promising.
 | 03 | 01 + pink noise, beta 1 | 1, 2 | Kaggle | Ran; results still on Kaggle (login expired) |
 | 05 | 03 for 96 cycles | 1 | 3080 | Done |
 | 04 | 01 + command cost, ratio 4 | 1 | 3080 | Done |
-| 07 | 05 + command cost, ratio 4 | 1 | 3080 | Running |
+| 07 | 05 + command cost, ratio 4 | 1 | 3080 | Done |
+| 08 | 05 + movement cost aimed at the buzz (2 parts, 10° unit) | 1 | 3080 | Running |
 
 ## Results
 
@@ -54,6 +55,7 @@ while the training arrivals ended at 19-20%.
 | 02 (beta 0.5) | 0% | **24.6%** | 20.7 mm | 6.1% | 2.26° | 0.03 |
 | 05 (beta 1, 96 cycles) | **44%** | 4.1% | 146.9 mm (174 steps) | 2.3% | 10.68° | 0.15 |
 | 04 (command cost 4) | 0% | 9.1% | 11.6 mm | 16.1% | 1.19° | 0.00 |
+| 07 (beta 1 + command cost 4, 96 cycles) | **41%** | −24.3% | 155.3 mm (168 steps) | 7.5% | 10.73° | 0.16 |
 
 **Buzz** of the legs' sweep joints: the share of the frame-to-frame change's
 power above 5 Hz, and the correlation of each change with the next (−1: the
@@ -66,6 +68,7 @@ leg flips back and forth every 20 ms step):
 | 02, mean action | 68% | +0.09 |
 | 05, training cycles 1-4 / 45-48 / 93-96 | 70% / 83% / 92% | +0.23 / −0.06 / −0.28 |
 | 05, mean action | **93%** | **−0.32** |
+| 07, mean action | **95%** | **−0.39** |
 | Random commands | 88% | −0.11 |
 
 **Training**, first → last quarter of 32 cycles:
@@ -109,3 +112,12 @@ movement 0.32 → 0.46 → 0.65 → 0.78, legs' spread 0.445 → 0.395.
   barely moved (0.186 → 0.177) and neither did the spreads. While the noise
   does the walking, a cost on it reaches the policy only through the slowly
   learned spreads.
+- With pink noise, the command cost (test 07) did not stop the buzz either:
+  the mean action arrived in 41% of the episodes (13 of 32; 10 left the range
+  circle) and buzzed even more (95% above 5 Hz), its mean squared command rose
+  from 0.18 to 0.22, and its spreads fell further (0.436 → 0.376, against
+  0.395 without the cost). The cost, about 0.0008 per step, is less than half
+  of what the arrivals pay per step by the end (0.0018): buzzing still pays.
+  Its training followed test 05's almost exactly (arrivals 1% → 19% → 26% →
+  30%, speed 16.5 → 36.2 mm/s, heading error 33° → 99°, joint movement 0.32 →
+  0.84).
