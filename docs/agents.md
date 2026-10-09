@@ -29,13 +29,16 @@ and out is a PyTorch tensor on the agents' device. The group is created from
 the environment's `segment_count`, `observation_size`, `world_count`, and
 `segment_action_sizes`, the interaction loop's `rollout_window_steps`, which
 sizes the storage, and the run's seed. It works for any number of segments.
-Each segment agent has as many actions as its segment commands: six for its
-legs, and with spine control a seventh, the spine joint behind it, for every
-segment but the rear ([environment.md](environment.md#actions-and-timing)).
+Each segment agent has as many actions as its segment takes: six for its
+legs; with spine control, the spine joint behind it, for every segment but
+the rear (only the head with a passive follower spine); and with clocks, last,
+its clock's tempo ([environment.md](environment.md#actions-and-timing)). With
+`tempo_actions`, the group knows that each agent's last action is a tempo,
+which only its learning diagnostics need.
 
 | Operation | Takes | Returns or does |
 | --- | --- | --- |
-| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`, or `(W, N, 7)` with spine control, where a segment with fewer actions gets zeros as padding; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
+| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, action_size)`, where a segment with fewer actions gets zeros as padding; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
 | `record(rewards, terminated, truncated, final_observations)` | The environment's results for the step just taken | Each segment agent stores its own part |
 | `update()` | Nothing | Each segment agent learns from its own stored data, then clears it |
 | `state_dict()`, `load_state_dict(state)` | — | All segment agents' state, for checkpoints; the experiment writes it to a file |

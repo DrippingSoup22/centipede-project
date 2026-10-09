@@ -17,13 +17,13 @@ in v1). Everything passed in and out is a PyTorch tensor.
 | Operation | Takes | Returns |
 | --- | --- | --- |
 | `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
-| `step(joint_action)` | Actions `(W, N, 6)`, or `(W, N, 7)` with spine control | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
+| `step(joint_action)` | Actions `(W, N, action_size)`: six per segment, plus a spine command and a clock tempo where it has them | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
 | `set_target_ranges(distance_range_m, bearing_range_deg)` | Two `(low, high)` pairs | Nothing; new targets are drawn from these ranges from now on |
 
 The environment also reports `segment_count`, `observation_size`,
 `segment_action_sizes` (how many actions each segment takes), and
 `action_size` (the joint action's width), which the experiment uses to create
-the agents. When an episode ends in a world, `step`
+the agents, and `clocks`, the segments' [clocks](#clocks) when they have them. When an episode ends in a world, `step`
 starts the next one by itself, resetting the world or, after an arrival, perhaps
 only giving it a new target (see [Episodes](#episodes)): the observations it
 returns are already the new episode's, and the final observations hold, for that world, the observation the
@@ -39,6 +39,7 @@ The environment lives in `src/centipede/environment/`.
 | `environment.py` | Front file: `reset()` and `step()`, in two sections: episode state and coordination |
 | `observation_builder.py` | What each segment observes |
 | `reward_function.py` | Each segment's reward |
+| `clocks.py` | Each segment's [clock](#clocks) |
 | `settings.py` | Environment settings |
 | `diagnostics.py` | The environment's [diagnostics](diagnostics.md) |
 | `simulation/simulation.py` | Front file of the physics simulation: loads the model, chooses the backend, offers `reset()`, `step()`, and the physical state |
@@ -58,15 +59,17 @@ decides which worlds must be reset. **Coordination:** on every `step`, it runs t
 other parts in order:
 
 1. Keep the current body positions and joint angles as the "previous" ones.
-2. The physics simulation applies the actions and advances 20 ms.
+2. The physics simulation applies the actions and advances 20 ms. With
+   clocks, every clock turns at the tempo its segment chose, and every foot
+   that touched the ground before and after the step is measured for slip.
 3. Each world is checked for arrival or the time limit.
 4. The reward function computes each segment's reward; the arrival reward
    needs the result of step 3.
 5. The observation builder builds the next observations, and the diagnostics
    are updated.
 6. Worlds whose episodes ended get a new target and fresh observations, and
-   are reset unless they walk on after an arrival; their final observations
-   are returned as well.
+   are reset, clocks included, unless they walk on after an arrival; their
+   final observations are returned as well.
 
 ## Physics simulation
 
@@ -139,6 +142,18 @@ ownership would suggest, would leave the head without a spine motor and give
 its neck to segment 1, which cannot see the target. A real centipede's body
 follows its head; nothing here tells the segments to, only that they can.
 
+**A passive follower spine.** With `passive_follower_spine` as well, only the
+head commands a spine joint, its neck, as its seventh action; the followers'
+joints bend passively against their springs. The head steers, and the body
+follows the bend it makes: in models and robots of centipedes, the body's
+bending can come from its own mechanics rather than from muscles (Aoi, Egi &
+Tsuchiya, Phys. Rev. E, 2013), so the followers need no motor to follow.
+Every segment still observes the joint behind it, which tells a follower how
+the body bends at its place, and on which side a turn's inside lies.
+
+**The clock's tempo.** With [clocks](#clocks), every segment takes one more
+action, its last: its clock's tempo.
+
 All segments act at the same time and the body moves once for all of them.
 Actions are never clipped, because the executed action must be exactly the one
 the agent learns from.
@@ -210,6 +225,7 @@ segment, in the order given by the last column.
 | `leg_leg_contact` | `(W, N)` | One of its legs touches another leg | 26 |
 | `body_planar_position` | `(W, N, 2)` | World `x`, `y` of the centre | Not observed; rewards only |
 | `head_tip_position` | `(W, 3)` | World position of the head's tip | Not observed; rewards and target only |
+| `foot_planar_position` | `(W, N, 2, 2)` | World `x`, `y` of each segment's left and right foot | Not observed; rewards only |
 | `spine_yaw_position` | `(W, N)` | Angle of the spine joint behind the segment, rad; 0 for the rear | With spine control, after the target values |
 | `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values |
 
@@ -240,11 +256,15 @@ segments away (`k`, first value 1). Every observation has the same layout:
 4. two target values: the target's position relative to the head's tip, turned
    into the head's own direction, in metres. **Forward** is positive in front of
    the head; **sideways** is positive to its left;
-5. with spine control, the angle and speed of the spine joint behind it.
+5. with spine control, the angle and speed of the spine joint behind it;
+6. with clocks, its own clock: `cos φ` and `sin φ` of its hand, and its tempo
+   action (see [Clocks](#clocks)).
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
-every segment and any number of segments, and two more with spine control
-(**85** at radius 1). The spine's values come last so that a run with spine
+every segment and any number of segments, two more with spine control
+(**85** at radius 1), and three more with clocks (**88** at radius 1). A
+segment's clock is in its own observation only, never in the blocks its
+neighbours see. The spine's values come last so that a run with spine
 control can start from agents trained without it: their inputs keep their
 places, and the new ones are added at the end (see
 [agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
@@ -374,6 +394,40 @@ walking away can never become a way to stop paying the costs. At 2.5 times the
 start distance, a centipede that overshoots can still walk one and a half times
 its first distance past the target and turn back before it is cut. The circle
 grows with the target's distance, so it suits any range of targets.
+
+## Clocks
+
+With `clocks = true`, every segment has a **clock**: a hand that turns at a
+tempo the segment chooses, so that each segment can keep its own rhythm and
+learn to keep it in step with its neighbours'. It is a designed memory: a
+segment's networks see only the present, and the clock is the one thing a
+rhythm must remember, where the segment is in its cycle.
+
+- **Tempo.** A segment's last action `a`, from −1 to 1, sets its clock's
+  tempo to `middle_tempo_hz × 2^(a × tempo_range_octaves)` turns per second:
+  1 to 4 with the defaults, so that a turn takes 12.5 to 50 steps.
+- **Phase.** Every step, the hand `φ` moves on by `360° × tempo × 0.02 s`.
+  Nothing else moves it: a segment changes its phase against a neighbour's
+  only by running faster or slower for a while, as coupled oscillators do
+  (Kuramoto, 1984; for locomotion, Ijspeert, Neural Networks, 2008).
+- **Start.** Every restart draws each hand at random and sets the middle
+  tempo, so no agreement between segments comes for free; the clocks keep
+  running through an arrival when the body walks on. Hands have their own
+  random sequence, seeded with the starting poses' seed.
+- **What a segment sees.** Its own hand, as `cos φ` and `sin φ` so that the
+  end of a turn and the start of the next look alike, and its tempo action.
+  It never sees another segment's clock: it can only read it from that
+  segment's legs, if they move with it.
+
+Nothing about the movement itself is fixed: the clock only gives a segment a
+rhythm to keep. Two costs judge the rhythm (see [Walking
+costs](#walking-costs)): whether the legs repeat their movement with the
+clock, and whether the clocks agree on a tempo.
+
+The environment's `clocks` holds every hand, `phase` `(W, N)` in rad from 0 to
+2π, and the tempo of the last step, `tempo_hz` and `tempo_octaves`
+(`log2(tempo ÷ middle tempo)`); like the physical state, they are overwritten
+in place by every `reset` and `step`, for the diagnostics to read.
 
 ## Rewards
 
@@ -559,6 +613,56 @@ keeps the step cost and progress of the full reward with
 `body_contact_cost_parts = 0`, `leg_contact_cost_parts = 0`, and
 `cost_budget_parts = 6`.
 
+### Walking costs
+
+Three more costs judge how a segment walks, each from 0 to 1 per step, paid by
+every segment for its own legs, and each switched on by giving it parts of the
+budget. None prescribes a gait.
+
+- **Foot slip** `S_i` (`foot_slip_cost_parts`): each foot that touches the
+  ground at both ends of a step pays how fast it slid along it, in units of
+  `foot_slip_unit_m_per_s` (10 mm/s), at most 1; the mean over the two feet.
+  A foot standing still on a still body costs nothing, so a segment may stand
+  still; a foot dragged along by the moving body costs. When the head walks,
+  its neighbours are dragged unless they walk along, and so on down the body:
+  this is what makes a walking head pull the others into walking. Foot slip
+  costs are common in legged robots (Hwangbo et al., Science Robotics, 2019).
+- **Legs off tempo** `Q_i` (`legs_off_tempo_cost_parts`, with clocks): each
+  leg angle against its angle when the segment's clock last passed the same
+  point of its turn; the mean over the six leg angles of the difference
+  squared, in units of `legs_off_tempo_unit_deg` (20°), at most 1. It asks the
+  legs to repeat their movement with the clock, whatever the movement is, so
+  that a neighbour can read the clock from them. A leg standing still repeats
+  too. The clock remembers the legs at 64 points of its turn; the first turn
+  after a restart costs nothing.
+- **Out of tempo** `D_i` (`out_of_tempo_cost_parts`, with clocks): the mean,
+  over the neighbours the segment sees (its observation radius), of the tempo
+  difference in octaves divided by the largest possible, 2 octaves. Both
+  segments of a pair pay; the head pays `head_tempo_share` (0.25) of its own,
+  so that the others follow its tempo more than it follows theirs. Two clocks
+  at the same tempo keep their offset forever, so this cost keeps every offset
+  steady without choosing it; which offsets suit the legs is left to the leg
+  and body contact costs.
+
+**The head's task alone.** A reward may also give the task to the head alone:
+`follower_arrival_share = 0` and `follower_progress_share = 0` leave the
+followers only their costs, which their own observations show, and the head
+leads by walking. Without a step cost (`step_cost_parts = 0`), a halving is
+given in parts of the budget (`progress_parts`), and `arrival_payout` pays the
+arrival a share of `A`, the unit the rules measure every cost in: at 0.5 the
+costs weigh twice as much against the arrival, so that the head cares how it
+walks even when it arrives often. A budget split into fewer parts than the
+costs take (`cost_budget_parts`) makes them overspend it, and the worst
+arrival then ends below zero; it still pays once its progress is counted.
+
+With the head's task alone, these proportions keep walking worth more than
+standing still. Over the horizon, one halving of the distance (3 parts) is
+worth more than legs touching (2 parts) or legs off tempo (1.5 parts) alone,
+but a little less than both together: a careless walk at the slowest pace
+still loses a little, a careful one gains, and standing still gains nothing.
+Body contact weighs most (2.5), then legs touching and foot slip (2), legs off
+tempo (1.5), and out of tempo least (1).
+
 ### Optional costs
 
 Two more costs can be added to the reward, each charged to every segment for
@@ -631,6 +735,11 @@ These are the keys of the environment sections of the configuration file (see
 | `max_episode_steps` | 8,192 | Time limit, in 20 ms steps (about 164 s) |
 | `observation_radius` | 1 | Neighbours seen on each side; 0 means only itself; must be less than `N` |
 | `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; when false, the spine motors receive zero |
+| `passive_follower_spine` | false | With spine control, only the head commands a spine joint, its neck; the followers' joints are passive. Every segment still observes the joint behind it |
+| `clocks` | false | Every segment has a [clock](#clocks): one more action, its tempo, and three more observed values |
+| **`[environment.clock]`** | | |
+| `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
+| `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo must stay below 12.5 Hz |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
@@ -649,15 +758,24 @@ These are the keys of the environment sections of the configuration file (see
 | `after_arrival` | `"restart"` | `"restart"`: an arrival restarts the world, like every other end; `"new_target"`: the body walks on from where it arrived, toward a new target ([Episodes](#episodes)) |
 | **`[environment.rewards]`** | | |
 | `arrival_reward` (`A`) | 1.0 | Shared reward for reaching the target: the unit of every other weight |
+| `arrival_payout` | 1 | What an arrival pays, as a share of `A`; the costs keep the weights `A` gives them |
+| `follower_arrival_share` | 1 | The share of the arrival each follower receives as well |
 | `step_cost_parts` | 2 | The step cost's parts of the cost budget |
 | `body_contact_cost_parts` | 3 | Body contact's parts of the cost budget |
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
+| `foot_slip_cost_parts` | 0 | [Foot slip](#walking-costs)'s parts of the cost budget; 0 is off |
+| `legs_off_tempo_cost_parts` | 0 | [Legs off tempo](#walking-costs)'s parts; needs clocks |
+| `out_of_tempo_cost_parts` | 0 | [Out of tempo](#walking-costs)'s parts; needs clocks |
+| `foot_slip_unit_m_per_s` | 0.010 | Foot slip's unit: the sliding speed that costs 1 |
+| `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |
+| `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays |
 | `movement_cost_parts` | 0 | The [movement cost](#optional-costs)'s parts of the cost budget; 0 is off |
 | `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
 | `command_cost_ratio` | 0 | The [command cost](#optional-costs)'s weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`; 0 is off. Outside the cost budget, so rule R1 no longer holds when it is set. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
-| `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused |
+| `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused, fewer makes the costs overspend it |
 | `cost_horizon_steps` | `max_episode_steps` | The cost horizon: the rules are measured over an approach of this many steps ("Why a cost horizon" under [The rules](#the-rules)); shorter than the episode, it makes every cost and the progress weigh more against the arrival |
 | `head_progress_ratio` | 1 | What one halving of the head's distance is worth, in whole cost horizons of step cost |
+| `progress_parts` | Not set | Instead of `head_progress_ratio`: what one halving is worth, in parts of the budget; a reward without a step cost needs it |
 | `follower_progress_share` | 1 | The share of the head's progress each follower receives as well (0 in a file that sets `follower_progress_ratio`) |
 | `follower_progress_ratio` | Not set | Each follower's [own progress](#earlier-forms-of-the-reward) toward the spot where the segment ahead had been, as a share of the head's weight |
 | `distance_ratio_epsilon_m` (`ε`) | 0.000001 | Keeps the efficiency reward's ratio defined |

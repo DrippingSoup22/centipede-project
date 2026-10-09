@@ -159,9 +159,10 @@ into one joint action.
 The problem the agents must solve. `reset` starts new episodes, and `step` takes a
 joint action and returns the next observations, one reward per segment, and which
 episodes ended. Its front file keeps the episode state (targets, step counts,
-previous positions) and coordinates its parts: the observation builder, the
-reward function, its diagnostics, and the physics simulation. It does not store
-data for learning.
+previous positions, and each segment's clock when there are clocks) and
+coordinates its parts: the observation builder, the reward function, the
+clocks, its diagnostics, and the physics simulation. It does not store data
+for learning.
 
 **Details:** [environment.md](environment.md)
 
@@ -172,7 +173,8 @@ each segment's motors and contact shapes by name, applies the leg and spine
 actions (the spine's are zero unless the environment's spine control sends
 them), advances the physics, resets worlds, and reports the physical state. It also offers the
 head's outline seen from above, read from the model's head shape, which the
-environment uses to decide arrival. A CPU backend uses
+environment uses to decide arrival, and every foot's position, which it uses
+to measure slip. A CPU backend uses
 MuJoCo and a GPU backend uses MuJoCo Warp; the configuration chooses one, and
 nothing outside the simulation can tell the difference.
 
