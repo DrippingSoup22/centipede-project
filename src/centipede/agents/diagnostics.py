@@ -56,6 +56,10 @@ class LearningSummary:
         "The learned spread of the command for the spine joint behind the"
         " segment, before squashing; 0 for a segment without one, (N,)"
     )
+    tempo_action_std: torch.Tensor = measure(
+        "The learned spread of the segment's clock tempo action, before"
+        " squashing; 0 without clocks, (N,)"
+    )
 
 
 # The values copied straight from RL_lib's update summary, in its order.
@@ -65,8 +69,15 @@ SUMMARY_NAMES = tuple(item.name for item in fields(PPOUpdateSummary))
 class AgentDiagnostics:
     """Fills the agents' learning category, ``learning``, which the experiment reads."""
 
-    def __init__(self, segment_count: int, device: torch.device | str) -> None:
-        """Allocate the category, all zero."""
+    def __init__(
+        self, segment_count: int, tempo_actions: bool, device: torch.device | str
+    ) -> None:
+        """Allocate the category, all zero.
+
+        With ``tempo_actions``, each agent's last action is its clock's tempo;
+        a spine command, when there is one, comes right after the leg actions.
+        """
+        self.tempo_actions = tempo_actions
         self.learning = LearningSummary(
             **{
                 name: torch.zeros(segment_count, device=device)
@@ -75,6 +86,7 @@ class AgentDiagnostics:
             learning_rate=torch.zeros((), device=device),
             action_std=torch.zeros((segment_count, LEG_ACTION_COUNT), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
+            tempo_action_std=torch.zeros(segment_count, device=device),
         )
 
     def record_update(
@@ -99,7 +111,9 @@ class AgentDiagnostics:
                 # The policy clamps the log spread to [-20, 2] before using it.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
                 self.learning.action_std[segment_index].copy_(spread[:LEG_ACTION_COUNT])
-                if agent.action_size > LEG_ACTION_COUNT:
-                    self.learning.spine_action_std[segment_index] = spread[
-                        LEG_ACTION_COUNT
-                    ]
+                others = spread[LEG_ACTION_COUNT:]
+                if self.tempo_actions:
+                    self.learning.tempo_action_std[segment_index] = others[-1]
+                    others = others[:-1]
+                if len(others):
+                    self.learning.spine_action_std[segment_index] = others[0]

@@ -31,12 +31,15 @@ class Agents:
         settings: AgentSettings,
         seed: int,
         segment_action_sizes: list[int] | None = None,
+        tempo_actions: bool = False,
     ):
         """Create one segment agent per segment, each with its own seed.
 
         Every (run seed, segment) pair gets a different agent seed.
-        ``segment_action_sizes`` is the environment's: how many motors each
-        segment commands, six each when not given.
+        ``segment_action_sizes`` is the environment's: how many actions each
+        segment takes, six each when not given. With ``tempo_actions``, each
+        segment's last action sets its clock's tempo, which only the learning
+        diagnostics need to know.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
@@ -59,7 +62,9 @@ class Agents:
             for segment_index in range(segment_count)
         ]
 
-        self.diagnostics = AgentDiagnostics(segment_count, device=self.settings.device)
+        self.diagnostics = AgentDiagnostics(
+            segment_count, tempo_actions, device=self.settings.device
+        )
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.

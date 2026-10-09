@@ -244,6 +244,9 @@ def test_physical_state_matches_cpu_mujoco(model, mapping):
                 ],
                 "body_angular_velocity": velocity[:3],
                 "body_linear_velocity": velocity[3:],
+                "foot_planar_position": data.geom_xpos[
+                    mapping.foot_geom_ids[segment_index], :2
+                ],
                 # The joint behind the segment; the rear has none.
                 "spine_yaw_position": 0.0,
                 "spine_yaw_velocity": 0.0,

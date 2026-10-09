@@ -8,6 +8,7 @@ keys, defaults, and how the nested sections are handed on.
 import pytest
 
 from centipede.environment.settings import (
+    ClockSettings,
     EnvironmentSettings,
     RewardSettings,
     TargetSettings,
@@ -45,17 +46,28 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         0.001,
         None,
     )
+    assert not settings.passive_follower_spine and not settings.clocks
+    assert settings.clock == ClockSettings(middle_tempo_hz=2.0, tempo_range_octaves=1.0)
     assert settings.rewards == RewardSettings(
         arrival_reward=1.0,
+        arrival_payout=1.0,
+        follower_arrival_share=1.0,
         step_cost_parts=2.0,
         body_contact_cost_parts=3.0,
         leg_contact_cost_parts=1.0,
+        foot_slip_cost_parts=0.0,
+        legs_off_tempo_cost_parts=0.0,
+        out_of_tempo_cost_parts=0.0,
         movement_cost_parts=0.0,
         random_command_movement_deg=25.0,
+        foot_slip_unit_m_per_s=0.010,
+        legs_off_tempo_unit_deg=20.0,
+        head_tempo_share=0.25,
         command_cost_ratio=0.0,
         cost_budget_parts=6.0,
         cost_horizon_steps=None,
         head_progress_ratio=1.0,
+        progress_parts=None,
         follower_progress_share=1.0,
         follower_progress_ratio=None,
         efficiency_cost=None,
@@ -101,7 +113,14 @@ def test_nested_sections_are_read_by_their_own_classes():
             {"rewards": {"efficiency_cost": 0.003, "step_cost_parts": 2}},
             "mixes the per-step weights",
         ),
-        ({"rewards": {"cost_budget_parts": 5}}, "cannot take more than the budget"),
+        ({"rewards": {"cost_budget_parts": 0}}, "must be above zero"),
+        (
+            {"rewards": {"progress_parts": 3, "head_progress_ratio": 1}},
+            "gives the progress twice",
+        ),
+        ({"passive_follower_spine": True}, "needs spine_control"),
+        ({"rewards": {"out_of_tempo_cost_parts": 1}}, "need the segments' clocks"),
+        ({"clock": {"middle_tempo_hz": 8}}, "below 12.5 turns per second"),
         ({"target": {"range_circle_ratio": 0.8}}, "must be 0 .no circle. or above 1"),
         (
             {"target": {"arrival": "head", "arrival_radius_m": 0.001}},

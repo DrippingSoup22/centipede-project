@@ -6,6 +6,8 @@ finished worlds. Target positions are read back through the head's two target
 values, which give the target in the head's own directions.
 """
 
+import math
+
 import pytest
 import torch
 
@@ -193,6 +195,44 @@ def test_with_spine_control_each_segment_but_the_rear_bends_the_joint_behind_it(
         (squared[:, :-1].mean(dim=-1), squared[:, -1:, :6].mean(dim=-1)), dim=1
     )
     assert torch.allclose(env.diagnostics.step.joint_movement, expected.sqrt())
+
+
+def test_with_clocks_every_segment_sets_its_tempo_and_only_the_head_bends_its_neck():
+    env = environment(
+        world_count=2,
+        max_episode_steps=3,
+        spine_control=True,
+        passive_follower_spine=True,
+        clocks=True,
+        rewards={"legs_off_tempo_cost_parts": 1.5, "out_of_tempo_cost_parts": 1},
+    )
+    assert env.segment_action_sizes == [8] + [7] * 7 and env.action_size == 8
+    assert env.observation_size == environment().observation_size + 2 + 3
+    env.reset(seed=2)
+    start = env.clocks.phase.clone()
+    action = torch.zeros(2, env.segment_count, 8)
+    action[:, 0, 6] = 1.0  # the head bends its neck
+    action[:, 1:, 6] = 1.0  # a follower's seventh action is its tempo: 4 Hz
+    action[:, 0, 7] = -1.0  # the head's tempo is its eighth: 1 Hz
+
+    observations, *_ = env.step(action)
+
+    backend = env.simulation._backend
+    for data in backend.world_data:
+        assert (
+            data.ctrl[backend.mapping.spine_actuator_ids].tolist() == [1.0] + [0.0] * 6
+        )
+    turned = (env.clocks.phase - start).remainder(2 * math.pi)
+    tempo = torch.tensor([1.0] + [4.0] * 7)
+    assert torch.allclose(turned, (2 * math.pi * 0.02 * tempo).expand(2, -1), rtol=1e-5)
+    # Each segment sees its own clock, last: its hand and its tempo action.
+    assert torch.allclose(observations[..., -3], torch.cos(env.clocks.phase))
+    assert observations[0, :, -1].tolist() == [-1.0] + [1.0] * 7
+
+    # The third step reaches the time limit: the worlds' clocks start afresh.
+    env.step(action)
+    env.step(action)
+    assert not env.clocks.tempo_octaves.any() and not env.clocks.remembered.any()
 
 
 def test_an_observation_radius_reaching_past_the_body_is_rejected():

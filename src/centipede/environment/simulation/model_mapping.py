@@ -43,6 +43,7 @@ class ModelMapping:
     """Index tables linking each segment to its parts in a loaded model.
 
     The parts are its motors, joints, body, centre site, and collision shapes;
+    ``foot_geom_ids`` ``(N, 2)`` are its left and right foot shapes, and
     ``head_outline`` is the head's shape seen from above. The spine tables have
     one entry per spine joint, ``(N - 1,)``: entry ``i`` is the yaw joint that
     joins segment ``i`` to segment ``i + 1`` behind it.
@@ -61,6 +62,7 @@ class ModelMapping:
     root_qpos_address: int
     geom_owner_indices: np.ndarray
     geom_categories: np.ndarray
+    foot_geom_ids: np.ndarray
     head_outline: HeadOutline
 
     @classmethod
@@ -98,6 +100,9 @@ class ModelMapping:
             root_qpos_address=root_qpos_address,
             geom_owner_indices=geom_owner_indices,
             geom_categories=geom_categories,
+            foot_geom_ids=_foot_geom_ids(
+                geom_owner_indices, geom_categories, segment_count
+            ),
             head_outline=head_outline,
         )
 
@@ -299,6 +304,21 @@ def _head_outline(
         front_m=float(corners[:, 0].max()),
         half_width_m=float(np.abs(corners[:, 1]).max()),
     )
+
+
+def _foot_geom_ids(
+    owner_indices: np.ndarray, categories: np.ndarray, segment_count: int
+) -> np.ndarray:
+    """Each segment's left and right foot shape, ``(N, 2)``.
+
+    ``_read_geom_metadata`` has already checked that each exists exactly once.
+    """
+    foot_geom_ids = np.zeros((segment_count, 2), dtype=np.int32)
+    for segment_index in range(segment_count):
+        for side, category in enumerate((LEFT_FOOT_CATEGORY, RIGHT_FOOT_CATEGORY)):
+            owned = (owner_indices == segment_index) & (categories == category)
+            foot_geom_ids[segment_index, side] = np.flatnonzero(owned)[0]
+    return foot_geom_ids
 
 
 def _read_geom_metadata(

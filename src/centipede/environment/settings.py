@@ -80,6 +80,39 @@ class TargetSettings:
         return settings
 
 
+@dataclass(frozen=True)
+class ClockSettings:
+    """The [environment.clock] section: each segment's clock, with ``clocks`` on.
+
+    A segment's tempo action ``a``, from −1 to 1, sets its clock's tempo to
+    ``middle_tempo_hz × 2^(a × tempo_range_octaves)`` turns per second: 1 to 4
+    with the defaults.
+    """
+
+    middle_tempo_hz: float
+    tempo_range_octaves: float
+
+    @classmethod
+    def from_section(cls, values: dict) -> "ClockSettings":
+        """Check the section's values and fill in the defaults."""
+        section = SettingsSection(values, "environment.clock")
+        settings = cls(
+            middle_tempo_hz=section.positive_number("middle_tempo_hz", default=2.0),
+            tempo_range_octaves=section.positive_number(
+                "tempo_range_octaves", default=1.0
+            ),
+        )
+        fastest = settings.middle_tempo_hz * 2**settings.tempo_range_octaves
+        if fastest >= 12.5:
+            raise SettingsError(
+                "[environment.clock] the fastest tempo must stay below 12.5 turns per"
+                " second, a quarter of a turn per 20 ms step, or a step could skip"
+                f" past half a turn; got {fastest:g}"
+            )
+        section.reject_unknown_keys()
+        return settings
+
+
 # The settings of the earlier efficiency reward: per-step weights, with
 # efficiency as one term. A file that sets any of them uses that reward, so
 # runs configured with it keep their reward when continued or evaluated.
@@ -88,14 +121,23 @@ PROPORTION_KEYS = (
     "step_cost_parts",
     "body_contact_cost_parts",
     "leg_contact_cost_parts",
+    "foot_slip_cost_parts",
+    "legs_off_tempo_cost_parts",
+    "out_of_tempo_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
+    "foot_slip_unit_m_per_s",
+    "legs_off_tempo_unit_deg",
+    "head_tempo_share",
     "command_cost_ratio",
     "cost_budget_parts",
     "head_progress_ratio",
+    "progress_parts",
     "follower_progress_share",
     "follower_progress_ratio",
 )
+# The costs that need each segment's clock.
+CLOCK_COST_KEYS = ("legs_off_tempo_cost_parts", "out_of_tempo_cost_parts")
 
 
 @dataclass(frozen=True)
@@ -132,10 +174,25 @@ class RewardSettings:
     sum of its 8 squared commands against a reward of 1 for every step it stays
     healthy: a ratio of 4. Being outside the budget, it breaks rule R1 when set.
     ``head_progress_ratio`` is what one halving of the head's distance to its
-    target is worth, in step cost over the whole cost horizon, and
-    ``follower_progress_share`` the share of the head's progress that every
-    follower receives as well (1: the same). A cost of zero parts is switched
-    off.
+    target is worth, in step cost over the whole cost horizon; a file may give
+    it instead as ``progress_parts``, parts of the budget, which a reward
+    without a step cost needs. ``follower_progress_share`` is the share of the
+    head's progress that every follower receives as well (1: the same), and
+    ``follower_arrival_share`` the share of the arrival. ``arrival_payout`` is
+    what an arrival pays, as a share of ``arrival_reward``, the unit the rules
+    measure every cost in: below 1, the costs weigh more against the arrival.
+    A cost of zero parts is switched off and left out of the terms. A budget
+    split into fewer parts than the costs take makes them overspend it: the
+    worst arrival then ends below zero.
+
+    Three costs judge how a segment walks. Foot slip charges each foot that
+    touches the ground at both ends of a step for how fast it slid along it,
+    in units of ``foot_slip_unit_m_per_s``. Legs off tempo and out of tempo
+    need the segments' clocks: the first charges how far the legs are from
+    where they were when the clock last passed the same point of its turn, in
+    units of ``legs_off_tempo_unit_deg``, and the second how far the
+    segment's tempo is from its neighbours', of which the head pays
+    ``head_tempo_share``.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -152,15 +209,24 @@ class RewardSettings:
     """
 
     arrival_reward: float
+    arrival_payout: float
+    follower_arrival_share: float
     step_cost_parts: float | None
     body_contact_cost_parts: float | None
     leg_contact_cost_parts: float | None
+    foot_slip_cost_parts: float | None
+    legs_off_tempo_cost_parts: float | None
+    out_of_tempo_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
+    foot_slip_unit_m_per_s: float | None
+    legs_off_tempo_unit_deg: float | None
+    head_tempo_share: float | None
     command_cost_ratio: float | None
     cost_budget_parts: float | None
     cost_horizon_steps: int | None
     head_progress_ratio: float | None
+    progress_parts: float | None
     follower_progress_share: float | None
     follower_progress_ratio: float | None
     efficiency_cost: float | None
@@ -173,6 +239,10 @@ class RewardSettings:
         """Check the section's values and fill in the defaults."""
         section = SettingsSection(values, "environment.rewards")
         arrival_reward = section.number("arrival_reward", default=1.0, minimum=0.0)
+        arrival_payout = section.number("arrival_payout", default=1.0, minimum=0.0)
+        follower_arrival_share = section.number(
+            "follower_arrival_share", default=1.0, minimum=0.0
+        )
         epsilon = section.positive_number("distance_ratio_epsilon_m", default=1e-6)
         per_step = [key for key in PER_STEP_WEIGHT_KEYS if key in values]
         proportions = [key for key in PROPORTION_KEYS if key in values]
@@ -185,15 +255,24 @@ class RewardSettings:
         if per_step:
             settings = cls(
                 arrival_reward=arrival_reward,
+                arrival_payout=arrival_payout,
+                follower_arrival_share=follower_arrival_share,
                 step_cost_parts=None,
                 body_contact_cost_parts=None,
                 leg_contact_cost_parts=None,
+                foot_slip_cost_parts=None,
+                legs_off_tempo_cost_parts=None,
+                out_of_tempo_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
+                foot_slip_unit_m_per_s=None,
+                legs_off_tempo_unit_deg=None,
+                head_tempo_share=None,
                 command_cost_ratio=None,
                 cost_budget_parts=None,
                 cost_horizon_steps=None,
                 head_progress_ratio=None,
+                progress_parts=None,
                 follower_progress_share=None,
                 follower_progress_ratio=None,
                 efficiency_cost=section.number(
@@ -214,27 +293,48 @@ class RewardSettings:
                     ("step_cost_parts", 2.0),
                     ("body_contact_cost_parts", 3.0),
                     ("leg_contact_cost_parts", 1.0),
+                    ("foot_slip_cost_parts", 0.0),
+                    ("legs_off_tempo_cost_parts", 0.0),
+                    ("out_of_tempo_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
                 "cost_budget_parts", default=sum(parts), minimum=0.0
             )
-            if budget_parts < sum(parts) or budget_parts == 0:
+            if budget_parts == 0:
                 raise SettingsError(
-                    "[environment.rewards] cost_budget_parts must be above zero and"
-                    f" at least the costs' parts together ({sum(parts):g}), got"
-                    f" {budget_parts:g}: the costs cannot take more than the budget"
+                    "[environment.rewards] cost_budget_parts must be above zero"
+                )
+            if "progress_parts" in values and "head_progress_ratio" in values:
+                raise SettingsError(
+                    "[environment.rewards] gives the progress twice: as"
+                    " head_progress_ratio (in step cost) and as progress_parts"
+                    " (in parts of the budget); use one"
                 )
             own_goals = "follower_progress_ratio" in values
             settings = cls(
                 arrival_reward=arrival_reward,
+                arrival_payout=arrival_payout,
+                follower_arrival_share=follower_arrival_share,
                 step_cost_parts=parts[0],
                 body_contact_cost_parts=parts[1],
                 leg_contact_cost_parts=parts[2],
-                movement_cost_parts=parts[3],
+                foot_slip_cost_parts=parts[3],
+                legs_off_tempo_cost_parts=parts[4],
+                out_of_tempo_cost_parts=parts[5],
+                movement_cost_parts=parts[6],
                 random_command_movement_deg=section.positive_number(
                     "random_command_movement_deg", default=25.0
+                ),
+                foot_slip_unit_m_per_s=section.positive_number(
+                    "foot_slip_unit_m_per_s", default=0.010
+                ),
+                legs_off_tempo_unit_deg=section.positive_number(
+                    "legs_off_tempo_unit_deg", default=20.0
+                ),
+                head_tempo_share=section.number(
+                    "head_tempo_share", default=0.25, minimum=0.0
                 ),
                 command_cost_ratio=section.number(
                     "command_cost_ratio", default=0.0, minimum=0.0
@@ -243,8 +343,13 @@ class RewardSettings:
                 cost_horizon_steps=section.positive_integer(
                     "cost_horizon_steps", default=None
                 ),
-                head_progress_ratio=section.number(
-                    "head_progress_ratio", default=1.0, minimum=0.0
+                head_progress_ratio=(
+                    None
+                    if "progress_parts" in values
+                    else section.number("head_progress_ratio", default=1.0, minimum=0.0)
+                ),
+                progress_parts=section.number(
+                    "progress_parts", default=None, minimum=0.0
                 ),
                 follower_progress_share=section.number(
                     "follower_progress_share",
@@ -278,13 +383,16 @@ class RewardSettings:
         zero, seen from its start (rules R0 and R1 of docs/environment.md); for
         ``H = T`` the budget is ``T × (2^(1/T) − 1)`` times the arrival reward,
         about ln 2. Each cost takes its parts of the budget, spread evenly over
-        the ``H`` steps; the movement cost appears only when it has parts.
+        the ``H`` steps; a cost with no parts is left out. The arrival pays
+        ``arrival_payout`` of the arrival reward, and a halving of the head's
+        distance ``progress_parts`` of the budget, or ``head_progress_ratio``
+        times the step cost's share.
         """
         arrival = self.arrival_reward
         if self.uses_per_step_weights:
             return RewardWeights(
                 per_step={
-                    "arrival": arrival,
+                    "arrival": arrival * self.arrival_payout,
                     "efficiency": self.efficiency_cost,
                     "body_contact": self.body_contact_cost,
                     "leg_contact": self.leg_contact_cost,
@@ -296,28 +404,37 @@ class RewardSettings:
         every_cost_per_step = (
             discount ** (steps - 1) * (1 - discount) / (1 - discount**steps)
         )
-        budget = steps * every_cost_per_step
+        part = steps * every_cost_per_step / self.cost_budget_parts
         shares = {
-            name: budget * parts / self.cost_budget_parts
+            name: part * parts
             for name, parts in (
                 ("step_cost", self.step_cost_parts),
                 ("body_contact", self.body_contact_cost_parts),
                 ("leg_contact", self.leg_contact_cost_parts),
+                ("foot_slip", self.foot_slip_cost_parts),
+                ("legs_off_tempo", self.legs_off_tempo_cost_parts),
+                ("out_of_tempo", self.out_of_tempo_cost_parts),
                 ("movement", self.movement_cost_parts),
             )
+            if parts
         }
-        if not shares["movement"]:
-            del shares["movement"]
+        progress_parts = (
+            self.progress_parts
+            if self.progress_parts is not None
+            else self.head_progress_ratio * self.step_cost_parts
+        )
         per_step = {
-            "arrival": arrival,
+            "arrival": arrival * self.arrival_payout,
             # Per halving of the head's distance; the term itself gives the
             # followers their share of it.
-            "progress": self.head_progress_ratio * shares["step_cost"] * arrival,
+            "progress": progress_parts * part * arrival,
             **{name: share * arrival / steps for name, share in shares.items()},
         }
         # Outside the budget, so not among the episode shares.
         if self.command_cost_ratio:
-            per_step["command"] = self.command_cost_ratio * per_step["step_cost"]
+            per_step["command"] = (
+                self.command_cost_ratio * self.step_cost_parts * part * arrival / steps
+            )
         return RewardWeights(per_step=per_step, episode_shares=shares)
 
 
@@ -329,15 +446,22 @@ class EnvironmentSettings:
     0 means it sees only itself. With ``spine_control`` each segment but the
     rear also commands the spine joint behind it and observes its angle and
     speed; without it, as in every run saved before it existed, the spine
-    motors receive zero.
+    motors receive zero. With ``passive_follower_spine`` as well, only the
+    head commands a spine joint, its neck; the followers' joints bend
+    passively against their springs, and every segment still observes the
+    joint behind it. With ``clocks`` every segment has a clock, whose tempo it
+    sets with one more action and whose hand it observes.
     """
 
     max_episode_steps: int
     observation_radius: int
     spine_control: bool
+    passive_follower_spine: bool
+    clocks: bool
     simulation: SimulationSettings
     target: TargetSettings
     rewards: RewardSettings
+    clock: ClockSettings
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -355,9 +479,26 @@ class EnvironmentSettings:
                 "observation_radius", default=1, minimum=0
             ),
             spine_control=section.boolean("spine_control", default=False),
+            passive_follower_spine=section.boolean(
+                "passive_follower_spine", default=False
+            ),
+            clocks=section.boolean("clocks", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
             rewards=RewardSettings.from_section(section.table("rewards")),
+            clock=ClockSettings.from_section(section.table("clock")),
         )
         section.reject_unknown_keys()
+        if settings.passive_follower_spine and not settings.spine_control:
+            raise SettingsError(
+                "[environment] passive_follower_spine leaves the head its neck, which"
+                " needs spine_control = true"
+            )
+        rewards = settings.rewards
+        clock_costs = [key for key in CLOCK_COST_KEYS if getattr(rewards, key)]
+        if clock_costs and not settings.clocks:
+            raise SettingsError(
+                f"[environment.rewards] {', '.join(clock_costs)} need the segments'"
+                " clocks: set clocks = true in [environment]"
+            )
         return settings

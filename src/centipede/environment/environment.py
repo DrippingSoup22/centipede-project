@@ -1,16 +1,17 @@
 """The environment's front file: the learning task built on the physics simulation.
 
-It keeps each world's episode state (target, step count, previous positions)
-and coordinates the observation builder, the reward function, the diagnostics,
-and the physics simulation. The interaction loop uses only ``reset`` and
-``step``; the experiment reads ``segment_count``, ``observation_size``, and the
-action sizes to create the agents, and its curriculum changes the target
-ranges between update cycles with ``set_target_ranges``. See
-docs/environment.md.
+It keeps each world's episode state (target, step count, previous positions,
+and with clocks each segment's clock) and coordinates the observation builder,
+the reward function, the diagnostics, and the physics simulation. The
+interaction loop uses only ``reset`` and ``step``; the experiment reads
+``segment_count``, ``observation_size``, and the action sizes to create the
+agents, and its curriculum changes the target ranges between update cycles
+with ``set_target_ranges``. See docs/environment.md.
 """
 
 import torch
 
+from centipede.environment.clocks import Clocks
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.observation_builder import (
     ObservationBuilder,
@@ -30,9 +31,11 @@ class Environment:
     the world, or after an arrival may only give it a new target.
 
     ``segment_action_sizes`` lists how many actions each segment takes: six for
-    its legs, and with spine control a seventh, the spine joint behind it, for
-    every segment but the rear. ``action_size`` is the width of the joint
-    action, the largest of them; the rear's seventh column is padding.
+    its legs; with spine control, the spine joint behind it, for every segment
+    but the rear (only for the head with a passive follower spine); and with
+    clocks, last, its clock's tempo. ``action_size`` is the width of the joint
+    action, the largest of them; a segment with fewer actions is padded.
+    ``clocks`` holds the segments' clocks, or None without them.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -57,22 +60,36 @@ class Environment:
             self.world_count,
             self.device,
             spine_observed=settings.spine_control,
+            clock_observed=settings.clocks,
         )
         self.observation_size = self.observation_builder.observation_size
+        # Which segments command the spine joint behind them: with spine
+        # control every segment but the rear, or only the head.
         spine_count = self.segment_count - 1
-        if settings.spine_control:
-            self.segment_action_sizes = [7] * spine_count + [6]
-        else:
-            self.segment_action_sizes = [6] * self.segment_count
+        commanders = 1 if settings.passive_follower_spine else spine_count
+        commands_spine = [
+            settings.spine_control and segment_index < commanders
+            for segment_index in range(self.segment_count)
+        ]
+        self.segment_action_sizes = [
+            6 + int(commands) + int(settings.clocks) for commands in commands_spine
+        ]
         self.action_size = max(self.segment_action_sizes)
+        # Each spine command, column 6 of the segment ahead of its joint, is
+        # kept or replaced by zero; a follower's column 6 may be its tempo.
+        self.spine_command_mask = torch.tensor(
+            commands_spine[:spine_count], dtype=torch.float32, device=self.device
+        )
+        # Each segment's tempo action is its last.
+        self.tempo_columns = torch.tensor(
+            [size - 1 for size in self.segment_action_sizes], device=self.device
+        )
         # The joints each segment commands, among its six leg joints and the
         # spine joint behind it.
         commanded_joints = torch.ones(
             (self.segment_count, 7), dtype=torch.float32, device=self.device
         )
-        commanded_joints[:, 6] = 0.0
-        if settings.spine_control:
-            commanded_joints[:spine_count, 6] = 1.0
+        commanded_joints[:, 6] = torch.tensor(commands_spine, dtype=torch.float32)
         # Arrival under the head counts progress no closer than half the head's
         # width: within the head's reach, nothing pays more.
         self.head_outline = self.simulation.head_outline
@@ -84,6 +101,18 @@ class Environment:
             if target.arrival == "head"
             else target.arrival_radius_m,
             commanded_joints,
+        )
+        self.clocks = (
+            Clocks(
+                settings.clock,
+                self.world_count,
+                self.segment_count,
+                settings.observation_radius,
+                self.simulation.step_duration_s,
+                self.device,
+            )
+            if settings.clocks
+            else None
         )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
@@ -111,6 +140,16 @@ class Environment:
         self.previous_joint_position = torch.zeros(
             (self.world_count, self.segment_count, 7),
             dtype=torch.float32,
+            device=self.device,
+        )
+        self.previous_foot_planar_position = torch.zeros(
+            (self.world_count, self.segment_count, 2, 2),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.previous_foot_contact = torch.zeros(
+            (self.world_count, self.segment_count, 2),
+            dtype=torch.bool,
             device=self.device,
         )
         # The radius of each world's range circle, around its target; infinite
@@ -143,21 +182,23 @@ class Environment:
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
 
-        A ``seed`` restarts both the starting poses' and the targets' random
-        sequences, so the same seed repeats the same episodes' starts.
+        A ``seed`` restarts the starting poses', the targets' and the clocks'
+        random sequences, so the same seed repeats the same episodes' starts.
         """
         self.simulation.reset(seed=seed)
         if seed is not None:
             self.target_generator.manual_seed(seed)
 
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
+        if self.clocks is not None:
+            self.clocks.reset(every_world, seed)
         self._place_targets(every_world)
         self.episode_steps.zero_()
         state = self.simulation.physical_state
         self.diagnostics.start_episodes(
             every_world, state, self.target_position, self.range_radius
         )
-        return self.observation_builder.build(state, self.target_position)
+        return self._observations()
 
     def step(
         self, joint_action: torch.Tensor
@@ -177,14 +218,38 @@ class Environment:
         self.previous_body_planar_position.copy_(state.body_planar_position)
         self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
         self.previous_joint_position.copy_(joint_angles(state))
+        self.previous_foot_planar_position.copy_(state.foot_planar_position)
+        self.previous_foot_contact.copy_(_foot_contact(state))
 
-        # 2. Move the body. With spine control, column 6 holds each segment's
-        # command for the spine joint behind it; without, the spine is passive.
+        # 2. Move the body. With spine control, column 6 holds the command for
+        # the spine joint behind each segment that commands one; without, the
+        # spine is passive.
         if self.settings.spine_control:
-            self.simulation.step(joint_action[..., :6], joint_action[:, :-1, 6])
+            self.simulation.step(
+                joint_action[..., :6],
+                joint_action[:, :-1, 6] * self.spine_command_mask,
+            )
         else:
-            self.simulation.step(joint_action)
+            self.simulation.step(joint_action[..., :6])
         self.episode_steps += 1
+
+        # The clocks turn at the tempo each segment chose, and the feet that
+        # touched the ground before and after the step are measured for slip.
+        clock_step = None
+        if self.clocks is not None:
+            tempo_columns = self.tempo_columns.expand(self.world_count, -1)
+            tempo_action = joint_action.gather(2, tempo_columns[..., None])
+            clock_step = self.clocks.step(
+                tempo_action.squeeze(-1), state.leg_joint_position
+            )
+        planted = self.previous_foot_contact & _foot_contact(state)
+        foot_slip_speed = (
+            (state.foot_planar_position - self.previous_foot_planar_position).norm(
+                dim=-1
+            )
+            / self.simulation.step_duration_s
+            * planted
+        )
 
         # 3. Arrival, or a cut: the time limit or leaving the range circle,
         # which end the episode alike. Arrival wins when both happen.
@@ -207,9 +272,11 @@ class Environment:
             self.target_position,
             terminated,
             self.previous_joint_position,
-            joint_action,
+            joint_action[..., :7],
+            foot_slip_speed,
+            clock_step,
         )
-        observations = self.observation_builder.build(state, self.target_position)
+        observations = self._observations()
         self.diagnostics.record_step(
             state,
             self.previous_body_planar_position,
@@ -229,15 +296,18 @@ class Environment:
         final_observations = observations
         if ended.any():
             if self.settings.target.after_arrival == "new_target":
-                self.simulation.reset(truncated)
+                restarted = truncated
             else:
-                self.simulation.reset(ended)
+                restarted = ended
+            self.simulation.reset(restarted)
+            if self.clocks is not None:
+                self.clocks.reset(restarted)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
             self.diagnostics.start_episodes(
                 ended, state, self.target_position, self.range_radius
             )
-            observations = self.observation_builder.build(state, self.target_position)
+            observations = self._observations()
 
         return (
             observations,
@@ -245,6 +315,14 @@ class Environment:
             terminated,
             truncated,
             final_observations,
+        )
+
+    def _observations(self) -> torch.Tensor:
+        """Every segment's observation of the current state."""
+        return self.observation_builder.build(
+            self.simulation.physical_state,
+            self.target_position,
+            None if self.clocks is None else self.clocks.observation_values(),
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:
@@ -302,3 +380,10 @@ class Environment:
             & (along <= outline.front_m)
             & (across.abs() <= outline.half_width_m)
         )
+
+
+def _foot_contact(state) -> torch.Tensor:
+    """Each segment's left and right foot on the ground, ``(W, N, 2)``."""
+    return torch.stack(
+        (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
+    )

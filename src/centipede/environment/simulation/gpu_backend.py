@@ -172,11 +172,13 @@ def _read_segment_state(
     spine_qpos_addresses: wp.array1d[int],
     spine_dof_addresses: wp.array1d[int],
     head_tip_site_id: int,
+    foot_geom_ids: wp.array2d[int],
     # In: model
     site_bodyid: wp.array1d[int],
     body_rootid: wp.array1d[int],
     # In: data
     site_xpos: wp.array2d[wp.vec3],
+    geom_xpos: wp.array2d[wp.vec3],
     site_xmat: wp.array2d[wp.mat33],
     xquat: wp.array2d[wp.quat],
     qpos: wp.array2d[float],
@@ -192,10 +194,11 @@ def _read_segment_state(
     leg_joint_position: wp.array3d[float],
     leg_joint_velocity: wp.array3d[float],
     head_tip_position: wp.array1d[wp.vec3],
+    foot_planar_position: wp.array3d[wp.vec2],
     spine_yaw_position: wp.array2d[float],
     spine_yaw_velocity: wp.array2d[float],
 ) -> None:
-    """Copy each segment's position, orientation, joints and velocity.
+    """Copy each segment's position, orientation, joints, velocity and feet.
 
     Launched with one thread per (world, segment); each thread writes only its
     own segment's row. The velocity is what ``mj_objectVelocity`` returns for
@@ -215,6 +218,12 @@ def _read_segment_state(
 
     body_id = body_ids[segment_index]
     body_quaternion[world_index, segment_index] = xquat[world_index, body_id]
+
+    for side in range(2):
+        foot_position = geom_xpos[world_index, foot_geom_ids[segment_index, side]]
+        foot_planar_position[world_index, segment_index, side] = wp.vec2(
+            foot_position[0], foot_position[1]
+        )
 
     for leg_joint_index in range(6):
         qpos_address = leg_qpos_addresses[segment_index, leg_joint_index]
@@ -370,6 +379,7 @@ class GPUBackend:
         self.geom_owner_indices = to_gpu(mapping.geom_owner_indices)
         self.geom_categories = to_gpu(mapping.geom_categories)
         self.head_tip_site_id = mapping.head_tip_site_id
+        self.foot_geom_ids = to_gpu(mapping.foot_geom_ids)
 
         self.physical_state = PhysicalState.allocate(
             world_count, mapping.segment_count, torch_device
@@ -390,6 +400,9 @@ class GPUBackend:
         self._leg_joint_position = wp.from_torch(state.leg_joint_position)
         self._leg_joint_velocity = wp.from_torch(state.leg_joint_velocity)
         self._head_tip_position = wp.from_torch(state.head_tip_position, dtype=wp.vec3)
+        self._foot_planar_position = wp.from_torch(
+            state.foot_planar_position, dtype=wp.vec2
+        )
         self._spine_yaw_position = wp.from_torch(state.spine_yaw_position)
         self._spine_yaw_velocity = wp.from_torch(state.spine_yaw_velocity)
         self._left_foot_ground_contact = wp.from_torch(state.left_foot_ground_contact)
@@ -599,9 +612,11 @@ class GPUBackend:
                 self.spine_qpos_addresses,
                 self.spine_dof_addresses,
                 self.head_tip_site_id,
+                self.foot_geom_ids,
                 self.gpu_model.site_bodyid,
                 self.gpu_model.body_rootid,
                 self.gpu_data.site_xpos,
+                self.gpu_data.geom_xpos,
                 self.gpu_data.site_xmat,
                 self.gpu_data.xquat,
                 self.gpu_data.qpos,
@@ -618,6 +633,7 @@ class GPUBackend:
                 self._leg_joint_position,
                 self._leg_joint_velocity,
                 self._head_tip_position,
+                self._foot_planar_position,
                 self._spine_yaw_position,
                 self._spine_yaw_velocity,
             ],

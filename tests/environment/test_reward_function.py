@@ -11,6 +11,7 @@ import math
 import pytest
 import torch
 
+from centipede.environment.clocks import ClockStep
 from centipede.environment.reward_function import RewardFunction
 from centipede.environment.settings import RewardSettings
 from centipede.environment.simulation import PhysicalState
@@ -32,7 +33,14 @@ def unchanged_state() -> PhysicalState:
     return state
 
 
-def rewards_for(state, arrived=(False, False), settings=SETTINGS, joint_action=None):
+def rewards_for(
+    state,
+    arrived=(False, False),
+    settings=SETTINGS,
+    joint_action=None,
+    foot_slip_speed=None,
+    clock=None,
+):
     function = RewardFunction(settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS)
     step = function.compute(
         state,
@@ -42,6 +50,10 @@ def rewards_for(state, arrived=(False, False), settings=SETTINGS, joint_action=N
         arrived=torch.tensor(arrived),
         previous_joint_position=torch.zeros(2, 3, 7),
         joint_action=torch.zeros(2, 3, 7) if joint_action is None else joint_action,
+        foot_slip_speed=(
+            torch.zeros(2, 3, 2) if foot_slip_speed is None else foot_slip_speed
+        ),
+        clock=clock,
     )
     parts = dict(zip(function.term_names, step.reward_parts.unbind(-1), strict=True))
     return step, parts, function.weights.per_step
@@ -73,7 +85,8 @@ def test_the_worst_arrival_balances_to_zero_through_the_discount():
     assert shares["step_cost"] == pytest.approx(2 * shares["leg_contact"])
     assert weights.per_step["progress"] == pytest.approx(shares["step_cost"])
 
-    # Costs switched off keep the others' parts: the budget stays in six parts.
+    # Costs switched off keep the others' parts, the budget staying in six
+    # parts, and are left out of the terms.
     any_cost = RewardSettings.from_section(
         {
             "body_contact_cost_parts": 0,
@@ -83,7 +96,8 @@ def test_the_worst_arrival_balances_to_zero_through_the_discount():
     ).weights(EPISODE_STEPS)
     step_cost = weights.per_step["step_cost"]
     assert any_cost.per_step["step_cost"] == pytest.approx(step_cost)
-    assert any_cost.per_step["body_contact"] == any_cost.per_step["leg_contact"] == 0
+    assert "body_contact" not in any_cost.per_step
+    assert "leg_contact" not in any_cost.per_step
 
 
 def test_progress_counts_the_heads_halvings_for_every_segment():
@@ -131,6 +145,80 @@ def test_costs_and_arrival_take_their_weights_and_add_up():
         [0.0, -weights["leg_contact"], -weights["leg_contact"]]
     )
     assert torch.allclose(step.rewards, step.reward_parts.sum(dim=-1))
+
+
+def test_the_task_can_be_the_heads_alone_with_progress_in_parts_of_the_budget():
+    """The oscillator reward: no step cost, so a halving is given in parts of the
+    budget; the arrival pays half; the followers get neither arrival nor
+    progress. A budget in fewer parts than the costs take makes them weigh more."""
+    settings = RewardSettings.from_section(
+        {
+            "arrival_payout": 0.5,
+            "follower_arrival_share": 0,
+            "follower_progress_share": 0,
+            "step_cost_parts": 0,
+            "body_contact_cost_parts": 2.5,
+            "leg_contact_cost_parts": 2,
+            "foot_slip_cost_parts": 2,
+            "progress_parts": 3,
+            "cost_budget_parts": 7,
+        }
+    )
+    state = unchanged_state()
+    state.head_tip_position[1, 0] += 0.0075  # one halving
+
+    _, parts, weights = rewards_for(state, arrived=(False, True), settings=settings)
+
+    budget = sum(SETTINGS.weights(EPISODE_STEPS).episode_shares.values())
+    assert weights["progress"] == pytest.approx(3 / 7 * budget)
+    assert weights["leg_contact"] == pytest.approx(2 / 7 * budget / EPISODE_STEPS)
+    assert "step_cost" not in weights
+    assert parts["arrival"][1].tolist() == [0.5, 0.0, 0.0]
+    assert parts["progress"][1].tolist() == pytest.approx(
+        [weights["progress"], 0.0, 0.0], rel=1e-5
+    )
+
+
+def test_walking_costs_charge_slipping_feet_and_legs_and_tempo_off_the_clock():
+    settings = RewardSettings.from_section(
+        {
+            "foot_slip_cost_parts": 2,
+            "legs_off_tempo_cost_parts": 1.5,
+            "out_of_tempo_cost_parts": 1,
+        }
+    )
+    foot_slip_speed = torch.zeros(2, 3, 2)
+    foot_slip_speed[1, 0, 0] = 0.020  # twice the unit: counts 1; the other foot 0
+    foot_slip_speed[1, 1] = 0.005  # half the unit, both feet
+    leg_difference = torch.zeros(2, 3, 6)
+    leg_difference[1, 0] = math.radians(10)  # (10 / 20)² = 0.25
+    leg_difference[1, 1:] = math.radians(40)  # at most 1 ...
+    known = torch.ones(2, 3, dtype=torch.bool)
+    known[1, 2] = False  # ... and nothing before the clock passed that point
+    mismatch = torch.zeros(2, 3)
+    mismatch[1] = torch.tensor([0.4, 0.2, 0.1])
+    clock = ClockStep(leg_difference, known, mismatch)
+
+    _, parts, weights = rewards_for(
+        unchanged_state(),
+        settings=settings,
+        foot_slip_speed=foot_slip_speed,
+        clock=clock,
+    )
+
+    slip, legs, tempo = (
+        weights[name] for name in ("foot_slip", "legs_off_tempo", "out_of_tempo")
+    )
+    assert parts["foot_slip"][1].tolist() == pytest.approx([-slip / 2, -slip / 2, 0])
+    assert parts["legs_off_tempo"][1].tolist() == pytest.approx(
+        [-legs * 0.25, -legs, 0.0]
+    )
+    # The head pays a quarter of its tempo mismatch.
+    assert parts["out_of_tempo"][1].tolist() == pytest.approx(
+        [-tempo * 0.1, -tempo * 0.2, -tempo * 0.1]
+    )
+    for name in ("foot_slip", "legs_off_tempo", "out_of_tempo"):
+        assert not parts[name][0].any()
 
 
 def test_movement_costs_the_square_of_how_far_the_commanded_joints_moved():

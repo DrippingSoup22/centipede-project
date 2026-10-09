@@ -77,6 +77,8 @@ def test_mapping_matches_the_elements_found_by_name():
         geom_id = model.geom(name).id
         assert mapping.geom_owner_indices[geom_id] == owner
         assert mapping.geom_categories[geom_id] == category
+    feet = [model.geom(f"segment_03_{side}_foot").id for side in ("left", "right")]
+    assert mapping.foot_geom_ids[3].tolist() == feet
 
 
 def test_v1_is_rejected_because_its_feet_share_one_category():

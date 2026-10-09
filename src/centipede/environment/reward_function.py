@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import torch
 
+from centipede.environment.clocks import ClockStep
 from centipede.environment.settings import RewardSettings
 from centipede.environment.simulation import PhysicalState
 
@@ -25,6 +26,10 @@ class RewardContext:
     commands, of how far each moved on the step, squared, in rad².
     ``command_size`` is ``(W, N)``: the mean, over the same joints, of the
     segment's command for the step, squared, from 0 (none) to 1 (full).
+    ``foot_slip_speed`` is ``(W, N, 2)``: how fast each foot slid along the
+    ground during the step, m/s, counted only for a foot that touched the
+    ground at both ends of it. ``clock`` is the clocks' step, or None without
+    clocks.
     """
 
     physical_state: PhysicalState
@@ -34,6 +39,8 @@ class RewardContext:
     arrival_radius_m: float
     joint_movement: torch.Tensor
     command_size: torch.Tensor
+    foot_slip_speed: torch.Tensor
+    clock: ClockStep | None
 
     @classmethod
     def from_step(
@@ -47,6 +54,8 @@ class RewardContext:
         previous_joint_position: torch.Tensor,
         commanded_joints: torch.Tensor,
         joint_action: torch.Tensor,
+        foot_slip_speed: torch.Tensor,
+        clock: ClockStep | None,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
@@ -56,7 +65,7 @@ class RewardContext:
         ``previous_joint_position`` is ``(W, N, 7)``, the ``joint_angles``
         before the step; ``commanded_joints`` is ``(N, 7)``, 1.0 for the joints
         each segment commands and 0.0 for the others; ``joint_action`` is the
-        step's ``(W, N, 6 or 7)`` command, as ``Environment.step`` receives it.
+        step's ``(W, N, 6 or 7)`` motor commands, without the tempo actions.
         New tensors are built, so neither the physical state nor the saved
         copies change.
         """
@@ -88,6 +97,8 @@ class RewardContext:
             arrival_radius_m=arrival_radius_m,
             joint_movement=squared_movement.sum(dim=-1) / joint_count,
             command_size=squared_command.sum(dim=-1) / joint_count,
+            foot_slip_speed=foot_slip_speed,
+            clock=clock,
         )
 
 
@@ -109,8 +120,11 @@ def joint_angles(physical_state: PhysicalState) -> torch.Tensor:
 
 
 def arrival(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
-    """1 for every segment of a world whose head arrived on this step, else 0."""
-    return context.arrived[:, None].expand_as(context.distance_after)
+    """1 for the head of a world whose head arrived on this step, else 0; each
+    follower receives ``follower_arrival_share`` of it (1: the same)."""
+    rewards = context.arrived[:, None].repeat(1, context.distance_after.shape[1])
+    rewards[:, 1:] *= settings.follower_arrival_share
+    return rewards
 
 
 def progress(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
@@ -170,6 +184,47 @@ def leg_contact(context: RewardContext, settings: RewardSettings) -> torch.Tenso
     return -context.physical_state.leg_leg_contact.float()
 
 
+def foot_slip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how fast the segment's feet slid along the ground, from 0 to 1.
+
+    Each foot that touched the ground at both ends of the step counts its
+    sliding speed in units of ``foot_slip_unit_m_per_s``, at most 1; a foot in
+    the air counts 0. The mean over the two feet. A foot standing still on a
+    still body costs nothing; a foot dragged along by the body costs.
+    """
+    unit = settings.foot_slip_unit_m_per_s
+    return -(context.foot_slip_speed / unit).clamp(max=1.0).mean(dim=-1)
+
+
+def legs_off_tempo(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how far the legs are from where they were at this point of the last turn.
+
+    Each leg angle is compared with its angle when the segment's clock last
+    passed the same point of its turn: the mean, over the six leg angles, of
+    the difference squared in units of ``legs_off_tempo_unit_deg``, at most 1,
+    and 0 at a point the clock had not passed since the world restarted. It
+    asks the legs to repeat their movement with the clock, whatever the
+    movement is: a leg standing still repeats too.
+    """
+    unit = math.radians(settings.legs_off_tempo_unit_deg)
+    clock = context.clock
+    error = (clock.leg_difference / unit).square().mean(dim=-1).clamp(max=1.0)
+    return -error * clock.leg_difference_known
+
+
+def out_of_tempo(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how far the segment's tempo is from its neighbours', from 0 to 1.
+
+    The mean, over the neighbours the segment sees, of the tempo difference
+    in octaves divided by the largest possible. Both segments of a pair pay;
+    the head pays ``head_tempo_share`` of its own, so that the others follow
+    its tempo more than it follows theirs.
+    """
+    mismatch = context.clock.tempo_mismatch.clone()
+    mismatch[:, 0] *= settings.head_tempo_share
+    return -mismatch
+
+
 def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−(how far the segment's joints moved on the step)², in random-command units.
 
@@ -203,12 +258,17 @@ class StepRewards:
     function's term names; the parts add up to ``rewards``.
     ``segment_progress`` is ``(W, N)``: metres each segment came closer to its
     goal on this step; ``joint_movement`` is the context's, in rad².
+    ``foot_slip`` and ``legs_off_tempo`` are ``(W, N)``: the two walking costs
+    before their weights, from 0 to 1, whether or not they are paid; None in
+    the earlier efficiency reward, and ``legs_off_tempo`` also without clocks.
     """
 
     rewards: torch.Tensor
     reward_parts: torch.Tensor
     segment_progress: torch.Tensor
     joint_movement: torch.Tensor
+    foot_slip: torch.Tensor | None = None
+    legs_off_tempo: torch.Tensor | None = None
 
 
 # The terms of each reward, in order: the current one, built from its rules,
@@ -220,6 +280,9 @@ TERMS = {
     "efficiency": efficiency,
     "body_contact": body_contact,
     "leg_contact": leg_contact,
+    "foot_slip": foot_slip,
+    "legs_off_tempo": legs_off_tempo,
+    "out_of_tempo": out_of_tempo,
     "movement": movement,
     "command": command,
 }
@@ -264,6 +327,8 @@ class RewardFunction:
         arrived: torch.Tensor,
         previous_joint_position: torch.Tensor,
         joint_action: torch.Tensor,
+        foot_slip_speed: torch.Tensor,
+        clock: ClockStep | None = None,
     ) -> StepRewards:
         """Every segment's reward for the step just taken, with its parts.
 
@@ -279,6 +344,8 @@ class RewardFunction:
             previous_joint_position,
             self.commanded_joints,
             joint_action,
+            foot_slip_speed,
+            clock,
         )
         reward_parts = torch.stack(
             [
@@ -287,9 +354,16 @@ class RewardFunction:
             ],
             dim=-1,
         )
+        rules = not self.settings.uses_per_step_weights
         return StepRewards(
             rewards=reward_parts.sum(dim=-1),
             reward_parts=reward_parts,
             segment_progress=context.distance_before - context.distance_after,
             joint_movement=context.joint_movement,
+            foot_slip=-foot_slip(context, self.settings) if rules else None,
+            legs_off_tempo=(
+                -legs_off_tempo(context, self.settings)
+                if rules and clock is not None
+                else None
+            ),
         )

@@ -74,6 +74,7 @@ class CPUBackend:
         self._leg_leg_contact = self.physical_state.leg_leg_contact.numpy()
         self._body_planar_position = self.physical_state.body_planar_position.numpy()
         self._head_tip_position = self.physical_state.head_tip_position.numpy()
+        self._foot_planar_position = self.physical_state.foot_planar_position.numpy()
         self._spine_yaw_position = self.physical_state.spine_yaw_position.numpy()
         self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
@@ -199,6 +200,9 @@ class CPUBackend:
         self._leg_joint_position[world_index] = data.qpos[mapping.leg_qpos_addresses]
         self._leg_joint_velocity[world_index] = data.qvel[mapping.leg_dof_addresses]
         self._head_tip_position[world_index] = data.site_xpos[mapping.head_tip_site_id]
+        self._foot_planar_position[world_index] = data.geom_xpos[
+            mapping.foot_geom_ids, :2
+        ]
         # Each segment's joint behind it; the rear segment's entry stays zero.
         self._spine_yaw_position[world_index, :-1] = data.qpos[
             mapping.spine_qpos_addresses
