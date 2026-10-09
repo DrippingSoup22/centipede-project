@@ -1,0 +1,11 @@
+# A larger evaluation of night test 07 (pink noise with the command cost, 96
+# cycles): two more evaluation seeds, 64 worlds each, so that its mean
+# action's arrival rate rests on 128 episodes instead of 32.
+
+[run]
+mode = "evaluate"
+source = "runs/2026-10-09_0313_night_07_noise_beta1_command_cost4_long"
+
+[evaluation]
+seeds = [102, 103]
+episodes_per_seed = 64
