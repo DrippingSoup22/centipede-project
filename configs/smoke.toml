@@ -1,6 +1,7 @@
 # Smoke test: checks that training runs from start to finish, in seconds, on
 # the CPU. It writes a run folder with its configuration, log, checkpoints, and
-# a replay recording of every window, but no report; its results mean nothing.
+# a replay recording of every episode length, but no report; its results mean
+# nothing.
 #
 #   python -m centipede configs/smoke.toml
 
@@ -10,7 +11,7 @@ name = "smoke"
 seed = 1
 checkpoint_every_cycles = 1
 report = false
-record_every_episodes = 1
+recordings = "all"
 
 [environment]
 max_episode_steps = 8

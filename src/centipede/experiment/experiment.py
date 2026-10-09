@@ -6,8 +6,8 @@
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
-  every ``record_every_episodes`` episode lengths it writes one episode length
-  of windows as a replay recording.
+  it records ``recordings`` episode lengths of windows for replay, the first,
+  the last, and the others spread evenly between, one file each.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -142,8 +142,16 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
     )
     recording_frames = recording_windows * loop_settings.rollout_window_steps
-    if run_settings.record_every_episodes:
+    if run_settings.recordings:
         _check_recording_fits(environment, recording_frames)
+    total_cycles = loop_settings.update_cycles
+    # The cycles where the recorded episode lengths start, over the whole run.
+    recording_starts = {
+        block * recording_windows + 1
+        for block in recorded_blocks(
+            math.ceil(total_cycles / recording_windows), run_settings.recordings
+        )
+    }
 
     if continue_from is not None:
         folder = RunFolder.open(continue_from)
@@ -161,7 +169,6 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         )
     )
 
-    total_cycles = loop_settings.update_cycles
     print(f"Run folder: {folder.path}")
     if continue_from is not None:
         print(f"Continues at update cycle {completed_cycles + 1} of {total_cycles}")
@@ -188,12 +195,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         ),
         end="\n\n",
     )
-    if run_settings.record_every_episodes:
-        blocks = recording_windows * run_settings.record_every_episodes
-        file_count = sum(
-            (cycle - 1) % blocks == 0
-            for cycle in range(completed_cycles + 1, total_cycles + 1)
-        )
+    if run_settings.recordings:
+        file_count = sum(cycle > completed_cycles for cycle in recording_starts)
         world_count, position_count = environment.diagnostics.simulation.qpos.shape
         kept = run_settings.record_worlds
         kept = world_count if kept == "all" else min(kept, world_count)
@@ -222,17 +225,13 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # before the recording's first window and taken once it is complete, or
     # when the session ends; both happen between cycles.
     recorder = loop.diagnostics.recorder
-    record_every = run_settings.record_every_episodes
     recording_first_cycle = 0
-
-    def recording_starts(cycle: int) -> bool:
-        blocks = recording_windows * record_every
-        return record_every > 0 and (cycle - 1) % blocks == 0
-
     scene = (
-        RecordingScene.from_run(configuration, environment) if record_every else None
+        RecordingScene.from_run(configuration, environment)
+        if run_settings.recordings
+        else None
     )
-    if recording_starts(completed_cycles + 1):
+    if completed_cycles + 1 in recording_starts:
         recorder.arm(recording_frames)
         recording_first_cycle = completed_cycles + 1
 
@@ -297,7 +296,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                     folder,
                 ),
             )
-        if cycle < total_cycles and recording_starts(cycle + 1):
+        if cycle < total_cycles and cycle + 1 in recording_starts:
             recorder.arm(recording_frames)
             recording_first_cycle = cycle + 1
         if (
@@ -326,6 +325,23 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     return folder.path
 
 
+def recorded_blocks(block_count: int, recordings: int | str) -> set[int]:
+    """Which of a run's episode lengths are recorded, numbered from 0.
+
+    The first and the last, and the others spread as evenly as the whole
+    numbers allow; every one with ``"all"`` or when there are no more than
+    ``recordings``; none with 0.
+    """
+    if recordings == "all" or recordings >= block_count:
+        return set(range(block_count))
+    if recordings == 1:
+        return {0}
+    return {
+        round(index * (block_count - 1) / (recordings - 1))
+        for index in range(recordings)
+    }
+
+
 def _check_recording_fits(environment: Environment, frames: int) -> None:
     """Fail clearly where recording one episode length would take too much
     device memory: the poses, targets, and episode starts of every world."""
@@ -336,7 +352,7 @@ def _check_recording_fits(environment: Environment, frames: int) -> None:
             f"Recording one episode length ({frames:,} steps of {world_count:,}"
             f" worlds) needs {needed / 2**30:.1f} GiB of device memory, more than"
             f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: shorten the episodes,"
-            " use fewer worlds, or set [run] record_every_episodes = 0"
+            " use fewer worlds, or set [run] recordings = 0"
         )
 
 

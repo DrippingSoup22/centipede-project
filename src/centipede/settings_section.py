@@ -95,15 +95,18 @@ class SettingsSection:
         """A whole number of at least 1, such as a count of worlds."""
         return self.integer(key, default, minimum=1)
 
-    def count_or_all(self, key: str, default: Any = REQUIRED) -> int | str:
-        """A whole number of at least 1, or ``"all"``, such as worlds to keep."""
+    def count_or_all(
+        self, key: str, default: Any = REQUIRED, minimum: int = 1
+    ) -> int | str:
+        """A whole number of at least ``minimum``, or ``"all"``, such as worlds
+        to keep."""
         if self._missing(key, default):
             return default
         value = self.values[key]
         if value == "all":
             return value
-        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-            problem = 'must be "all" or a whole number of at least 1'
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            problem = f'must be "all" or a whole number of at least {minimum}'
             raise self._error(key, problem, value)
         return value
 

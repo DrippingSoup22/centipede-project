@@ -46,10 +46,11 @@ class RunSettings:
     """The [run] section of a training run.
 
     ``start_from`` is a run folder (its latest checkpoint) or a checkpoint
-    file whose agents the new run begins with. The ``record_*`` settings say
-    which episode lengths are recorded for replay, each as one file, how many
-    worlds each keeps (``record_worlds``: a number, or ``"all"``), which ones
-    when not all, and how many levels their ranks are sorted into.
+    file whose agents the new run begins with. ``recordings`` is how many
+    episode lengths are recorded for replay, each as one file: the first, the
+    last, and the others spread evenly between, or ``"all"``. The ``record_*``
+    settings say how many worlds each keeps (a number, or ``"all"``), which
+    ones when not all, and how many levels their ranks are sorted into.
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
     with a checkpoint, before a cycle that would end after it. See
     docs/configuration.md.
@@ -61,7 +62,7 @@ class RunSettings:
     report: bool
     runs_folder: Path
     start_from: Path | None
-    record_every_episodes: int
+    recordings: int | str
     record_levels: int
     record_worlds: int | str
     record_selection: str
@@ -78,6 +79,12 @@ class RunSettings:
                 ' how many worlds a recording keeps in all, or "all" (the default);'
                 " record_levels x record_per_level gives the number it kept"
             )
+        if "record_every_episodes" in values:
+            raise SettingsError(
+                "[run] record_every_episodes was replaced on 2026-10-09 by"
+                " recordings, how many episode lengths a run records, spread from"
+                ' the first to the last (5 by default), or "all"'
+            )
         checkpoint_every_cycles = section.positive_integer(
             "checkpoint_every_cycles", default=16
         )
@@ -88,11 +95,9 @@ class RunSettings:
             report=section.boolean("report", default=True),
             runs_folder=section.path("runs_folder", default=Path("runs")),
             start_from=section.path("start_from", default=None),
-            record_every_episodes=section.integer(
-                "record_every_episodes", default=1, minimum=0
-            ),
+            recordings=section.count_or_all("recordings", default=5, minimum=0),
             record_levels=section.positive_integer("record_levels", default=4),
-            record_worlds=section.count_or_all("record_worlds", default="all"),
+            record_worlds=section.count_or_all("record_worlds", default=64),
             record_selection=section.choice(
                 "record_selection", ("ranked", "first"), default="ranked"
             ),
@@ -328,9 +333,12 @@ def _with_episode_discount(agents_values: dict, max_episode_steps: int) -> dict:
 
 # Settings that older runs saved and the current code no longer has, by
 # section. record_every_cycles recorded single windows; record_every_episodes
-# replaced it, with its own default. record_per_level kept that many worlds of
-# each level; record_worlds replaced it, keeping every world by default.
-RETIRED_SETTINGS = {"run": ("record_every_cycles", "record_per_level")}
+# replaced it, and recordings replaced that, each with its own default.
+# record_per_level kept that many worlds of each level; record_worlds replaced
+# it.
+RETIRED_SETTINGS = {
+    "run": ("record_every_cycles", "record_every_episodes", "record_per_level")
+}
 
 
 def _saved_configuration(source: Path) -> dict:

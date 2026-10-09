@@ -13,7 +13,7 @@ seed = 1
 checkpoint_every_cycles = 3
 # No replay recordings: one whole episode (8,192 steps) of 1,024 worlds would
 # need about 2.2 GiB of GPU memory while it is recorded.
-record_every_episodes = 0
+recordings = 0
 
 [environment.simulation]
 model_path = "models/assembly_v3.xml"

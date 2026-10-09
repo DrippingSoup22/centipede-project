@@ -2,9 +2,9 @@
 
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
-files, continuing a run, starting from another run's agents with its own
-learning rate and, with the spine, more to see and command, and evaluating
-without changing anything.
+files and the episode lengths it records, continuing a run, starting from
+another run's agents with its own learning rate and, with the spine, more to
+see and command, and evaluating without changing anything.
 """
 
 import json
@@ -14,7 +14,7 @@ import pytest
 import torch
 from mujoco_replay.recording import read_recording
 
-from centipede.experiment.experiment import run
+from centipede.experiment.experiment import recorded_blocks, run
 from centipede.settings_section import SettingsError
 
 TRAINING_FILE = """
@@ -57,6 +57,13 @@ def run_file(tmp_path, text, **replacements):
 def logged_cycles(folder):
     lines = (folder / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
     return [json.loads(line)["cycle"] for line in lines]
+
+
+def test_recordings_spread_from_the_first_episode_length_to_the_last():
+    assert recorded_blocks(64, 5) == {0, 16, 32, 47, 63}
+    assert recorded_blocks(64, 1) == {0}
+    assert recorded_blocks(3, 5) == recorded_blocks(3, "all") == {0, 1, 2}
+    assert recorded_blocks(64, 0) == set()
 
 
 def saved_update_count(checkpoint_path):
@@ -104,7 +111,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
         [2],
         ("update 3",),
     )
-    assert recording.setup["configuration"]["run"]["record_every_episodes"] == 1
+    assert recording.setup["configuration"]["run"]["recordings"] == 5
     assert "<include" not in recording.model_xml
 
     continuing = (
@@ -169,8 +176,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         .replace("max_episode_steps = 3", "max_episode_steps = 3\nspine_control = true")
         .replace(
             'runs_folder = "RUNS"',
-            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
-            "record_every_episodes = 0",
+            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\nrecordings = 0',
         )
         .replace(
             "hidden_layers = [8]",

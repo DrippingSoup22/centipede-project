@@ -190,11 +190,12 @@ episode summary's `episode_ended` are kept alongside. These are a few small
 tensor operations that never wait for the GPU. When the recording is complete,
 or the session ends, the experiment takes the kept worlds between cycles and
 writes the file: the worlds are ranked by their summed reward over the whole
-recording and written in rank order, best first. By default every world is
-kept; a number of worlds (`record_worlds` in
-[configuration.md](configuration.md#training-files)) keeps that many, evenly
-spaced over the ranks with MujocoReplay's `selected_ranks` (one band), so that
-the file holds the best, the middle, and the worst. Only the kept worlds are
+recording and written in rank order, best first. A number of worlds
+(`record_worlds` in [configuration.md](configuration.md#training-files), 64 by
+default) splits the ranks into as many bands, from the best to the worst, and
+keeps the best world of each, with MujocoReplay's `selected_ranks` (one world
+per band, the rule its viewer uses), so that the file holds every level of
+performance, from the best world to the best of the worst. Only the kept worlds are
 copied to the CPU. Each file also gives every world's rank among all the run's
 worlds and its level among `record_levels`, so the viewer shows, for example,
 "rank 37 of 1,024" and "level 2 of 4". With every world in the file, the

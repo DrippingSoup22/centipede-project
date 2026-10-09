@@ -124,11 +124,12 @@ class WindowRecorder:
         """The recording's chosen worlds, copied to the CPU; ends it, complete or not.
 
         ``worlds`` is how many worlds to keep, or ``"all"``; every world is
-        kept when there are no more than that. Otherwise ``"ranked"`` keeps
-        worlds evenly spaced over the ranks of the summed reward, the best and
-        the worst included (MujocoReplay's ``selected_ranks`` with one band),
-        and ``"first"`` keeps the first worlds, for continuity across
-        recordings. Worlds come out in rank order, best first, each with its
+        kept when there are no more than that. Otherwise ``"ranked"`` splits
+        the worlds by the rank of their summed reward into as many bands as
+        it keeps, from the best to the worst, and keeps the best world of each
+        (MujocoReplay's ``selected_ranks`` with one world per band, the rule
+        its viewer uses); ``"first"`` keeps the first worlds, for continuity
+        across recordings. Worlds come out in rank order, best first, each with its
         level among ``levels``.
         """
         self._recording = False
@@ -139,7 +140,7 @@ class WindowRecorder:
             chosen = order
             ranks = np.arange(self._world_count)
         elif selection == "ranked":
-            ranks, _ = selected_ranks(self._world_count, 1, kept)
+            ranks, _ = selected_ranks(self._world_count, kept, 1)
             chosen = order[torch.as_tensor(ranks, device=self._device)]
         else:
             rank_of_world = torch.empty_like(order)
