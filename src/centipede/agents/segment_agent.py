@@ -182,13 +182,13 @@ class SegmentAgent:
         this agent's own weight decay and momentum replace them, and the
         experiment sets the learning rate before every update.
 
-        With ``widen``, a state saved for fewer observations or actions is
-        widened to this agent's sizes. The saved weights keep their places and
-        the new inputs and outputs start with zero weights, so the agent acts
-        exactly as before and commands zero to its new motors; each new
-        action's spread starts at ``initial_action_std``. The saved optimizers
-        and random generator no longer fit, so the agent keeps its fresh ones,
-        and its normaliser gives each new input a mean of 0 and a spread of 1.
+        With ``widen``, a state saved for fewer observations or actions, or
+        for narrower hidden layers, is widened to this agent's sizes
+        (``_widened``): the agent acts exactly as before and commands zero to
+        its new motors; each new action's spread starts at
+        ``initial_action_std``. The saved optimizers and random generator no
+        longer fit, so the agent keeps its fresh ones, and its normaliser gives
+        each new input a mean of 0 and a spread of 1.
         """
         ppo_state = state["ppo"]
         normaliser_state = state["observation_normaliser"]
@@ -227,9 +227,17 @@ def _widened(
 ) -> dict[str, torch.Tensor]:
     """A network's saved tensors, each in the leading corner of its fresh one.
 
-    Grown parts of weights and biases are zero; grown parts of the log spread
-    keep their fresh value. A saved tensor larger than its fresh one fails.
+    The widened network computes exactly what the saved one did. No saved
+    unit takes anything from a new input or a new unit of the layer below, and
+    the output layer's new actions start at zero. A new hidden unit keeps its
+    fresh random weights from the layer below, so that it can learn, while
+    nothing above takes from it yet: the function-preserving growth of Net2Net
+    (Chen et al., ICLR 2016). Grown parts of the log spread keep their fresh
+    value. A saved tensor larger than its fresh one fails.
     """
+    # The last weight matrix belongs to the output layer.
+    output_layer = [name for name, tensor in fresh.items() if tensor.dim() == 2][-1]
+    output_prefix = output_layer.removesuffix("weight")
     widened = {}
     for name, fresh_tensor in fresh.items():
         saved_tensor = saved[name].to(fresh_tensor.device)
@@ -246,11 +254,12 @@ def _widened(
                 f"A saved {name} of shape {tuple(saved_tensor.shape)} cannot be"
                 f" widened to {tuple(fresh_tensor.shape)}"
             )
-        tensor = (
-            fresh_tensor.clone()
-            if name == "log_std"
-            else torch.zeros_like(fresh_tensor)
-        )
+        if name.startswith(output_prefix):
+            tensor = torch.zeros_like(fresh_tensor)
+        else:
+            tensor = fresh_tensor.clone()
+            if tensor.dim() == 2:
+                tensor[: saved_tensor.shape[0], saved_tensor.shape[1] :] = 0
         tensor[tuple(slice(0, size) for size in saved_tensor.shape)] = saved_tensor
         widened[name] = tensor
     return widened

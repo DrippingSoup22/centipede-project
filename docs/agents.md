@@ -161,8 +161,19 @@ networks, so the optimizers start fresh, and so does the random generator,
 from the run's seed. The normaliser keeps its statistics and gives each new
 input a mean of 0 and a spread of 1; since the saved statistics count
 millions of observations, the new inputs keep about that scale, the spine's
-angle in radians and its speed in radians per second. Continuing or evaluating
-a run never widens: the sizes must match.
+angle in radians and its speed in radians per second.
+
+A new run may also give its agents wider hidden layers: as many layers as
+before, each at least as wide. Every saved weight again keeps its place, and
+no saved unit takes anything from a new unit of the layer below. A new hidden
+unit keeps the random weights a fresh network gives it from the layer below,
+so that it can learn, while the layer above takes nothing from it yet: the
+network computes exactly what the saved one did, and the new units grow into
+use as training goes on. This is the function-preserving growth of Net2Net
+(Chen, Goodfellow & Shlens, ICLR 2016), which starts a larger network from a
+trained smaller one instead of from scratch; a new unit with zero weights on
+both sides would never learn, since no gradient would reach it. Continuing or
+evaluating a run never widens: the sizes must match.
 
 ## Settings
 
@@ -173,7 +184,7 @@ These are the keys of the agents sections of the configuration file (see
 | --- | ---: | --- |
 | **`[agents]`** | | |
 | `device` | `cpu` | Where networks and stored data live: `cpu` or `cuda` |
-| `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU) |
+| `hidden_layers` | [64, 64] | Hidden layer sizes of both actor and critic (ReLU); a run that starts from another may make them wider, never fewer or narrower ([Checkpoints](#checkpoints)) |
 | `initial_action_std` | 0.5 | Starting value of every learned action spread, including an action a widened agent gains |
 | `action_std_schedule` | `learned` | `learned`: each action's spread is a learned value; `log_linear`: the spreads are not learned, and every cycle sets them all, from `initial_action_std` in the first cycle to `final_action_std` in the last, in a straight line of their logarithms (overriding a saved run's spreads), as the PPO paper annealed its humanoid tasks' log spread (Schulman et al., 2017) |
 | `final_action_std` | initial_action_std | The spread of the last cycle, with a `log_linear` schedule |

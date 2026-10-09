@@ -134,7 +134,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 checkpoint, configuration.agents, checkpoint_path
             )
         # A new run may give its agents more to see or command than the run
-        # it starts from, such as the spine: its agents are then widened.
+        # it starts from, such as the spine, or wider layers: its agents are
+        # then widened.
         agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
     # A recording covers whole windows: the episode length, rounded up.
     recording_windows = math.ceil(
@@ -344,15 +345,21 @@ def _check_agents_can_start_from(
 ) -> None:
     """Fail clearly where a checkpoint's agents differ from the new run's.
 
-    The networks must have the same layers, and the optimizers must be of the
-    same kind, since each kind keeps its own state. Checkpoints saved before
-    the optimizer could be chosen used Adam.
+    The networks must have as many hidden layers, each at least as wide (a
+    wider one is widened), and the optimizers must be of the same kind, since
+    each kind keeps its own state. Checkpoints saved before the optimizer
+    could be chosen used Adam.
     """
     saved = checkpoint["agents"]["settings"]
-    if tuple(saved["hidden_layers"]) != settings.hidden_layers:
+    saved_layers = tuple(saved["hidden_layers"])
+    if len(saved_layers) != len(settings.hidden_layers) or any(
+        size < saved_size
+        for saved_size, size in zip(saved_layers, settings.hidden_layers)
+    ):
         raise SettingsError(
-            f"[agents] hidden_layers must match the checkpoint {path}: "
-            f"{list(saved['hidden_layers'])}, got {list(settings.hidden_layers)}"
+            f"[agents] hidden_layers must have as many layers as the checkpoint "
+            f"{path}, each at least as wide: {list(saved_layers)}, got "
+            f"{list(settings.hidden_layers)}"
         )
     saved_optimizer = saved.get("optimizer", "adam")
     if saved_optimizer != settings.optimizer:

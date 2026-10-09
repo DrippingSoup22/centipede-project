@@ -186,10 +186,12 @@ new run counts its cycles from zero and keeps its own log and report, which
 names the checkpoint it started from. Training in stages is a chain of such
 runs.
 
-Two agent settings must match the checkpoint, and a difference is rejected:
-`hidden_layers`, because the networks must have the same shape, and
-`optimizer`, because each kind of optimizer keeps its own state (checkpoints
-from before the optimizer could be chosen count as Adam). The learning rate,
+Two agent settings are checked against the checkpoint. `hidden_layers` must
+have as many layers as the checkpoint's, each at least as wide: wider layers
+are widened, starting exactly as the saved networks act (see
+[agents.md](agents.md#checkpoints)), while fewer or narrower ones are
+rejected. `optimizer` must match, because each kind of optimizer keeps its own
+state (checkpoints from before the optimizer could be chosen count as Adam). The learning rate,
 its schedule, weight decay, and momentum may differ: the new run's own values
 replace those the optimizers were saved with, and its schedule counts the new
 run's cycles from the first. The number of segments must match too. The new

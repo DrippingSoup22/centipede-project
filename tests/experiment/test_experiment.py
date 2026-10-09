@@ -174,7 +174,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         )
         .replace(
             "hidden_layers = [8]",
-            "hidden_layers = [8]\nlearning_rate = 1e-3\n"
+            "hidden_layers = [16]\nlearning_rate = 1e-3\n"
             'learning_rate_schedule = "linear"\nfinal_learning_rate = 1e-4',
         )
     )
@@ -182,8 +182,10 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     child = run_file(tmp_path, harder_file, NAME="harder")
 
     # The child's agents continued from the parent's three updates, widened to
-    # command the spine joint behind every segment but the rear.
+    # wider layers and to command the spine joint behind every segment but
+    # the rear.
     checkpoint = torch.load(child / "checkpoints" / "cycle_0003.pt", weights_only=True)
+    assert checkpoint["agents"]["settings"]["hidden_layers"] == (16,)
     assert checkpoint["agents"]["segment_action_sizes"] == [7] * 7 + [6]
     assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
     assert logged_cycles(child) == [1, 2, 3]
@@ -194,10 +196,13 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     assert rates == pytest.approx([1e-3, 5.5e-4, 1e-4])
 
     other_optimizer = harder_file.replace(
-        "hidden_layers = [8]", 'hidden_layers = [8]\noptimizer = "sgd"'
+        "hidden_layers = [16]", 'hidden_layers = [16]\noptimizer = "sgd"'
     )
     with pytest.raises(SettingsError, match="optimizer must match"):
         run_file(tmp_path, other_optimizer, NAME="other")
+    deeper = harder_file.replace("hidden_layers = [16]", "hidden_layers = [16, 16]")
+    with pytest.raises(SettingsError, match="as many layers"):
+        run_file(tmp_path, deeper, NAME="deeper")
     assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
 
 

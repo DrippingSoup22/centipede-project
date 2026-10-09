@@ -170,6 +170,33 @@ def test_a_widened_agent_acts_as_before_and_commands_zero_to_its_new_motor():
     assert widened.update_count == 1
 
 
+def test_wider_layers_start_as_the_saved_ones_and_their_new_units_learn():
+    """A new run whose hidden layers are wider than its parent's."""
+    original = make_agent()
+    collect_window(original)
+    original.update()
+    wider = make_agent(hidden_layers=[16], seed=1)
+
+    wider.load_state_dict(copy.deepcopy(original.state_dict()), widen=True)
+
+    def value(agent: SegmentAgent) -> torch.Tensor:
+        normaliser = agent.observation_normaliser
+        return agent.ppo.state_value(
+            normaliser.normalize(observations(9), update_statistics=False)
+        )
+
+    torch.testing.assert_close(
+        wider.act(observations(9), training=False),
+        original.act(observations(9), training=False),
+    )
+    torch.testing.assert_close(value(wider), value(original))
+    output_weights = wider.ppo.actor_network.mean_network[-1].weight
+    assert not output_weights[:, 8:].any()  # the new units start with no effect
+    collect_window(wider)
+    wider.update()
+    assert output_weights[:, 8:].any()  # and they learn
+
+
 def test_the_seed_alone_decides_the_starting_networks():
     def starting_weights(seed: int) -> list[torch.Tensor]:
         torch.manual_seed(100)  # the same global state for every agent seed

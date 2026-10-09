@@ -126,8 +126,9 @@ class Agents:
         """Restore every agent; a checkpoint made for another body is rejected.
 
         With ``widen``, as a new run that starts from another run's agents
-        does, agents saved with fewer observations or actions are widened to
-        these agents' sizes (see ``SegmentAgent.load_state_dict``). Checkpoints
+        does, agents saved with fewer observations or actions, or narrower
+        layers, are widened to these agents' sizes (see
+        ``SegmentAgent.load_state_dict``). Checkpoints
         saved before the spine could be commanded hold six actions per segment.
         """
         saved_sizes = state.get(
