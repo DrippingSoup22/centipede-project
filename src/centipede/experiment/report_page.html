@@ -1970,6 +1970,19 @@ function evaluationReport(root) {
     root.append(section(index + 1, spec, ...content));
   });
 
+  // The agents' walk: every world walks a fixed number of steps, walking on
+  // after each arrival as in training, and every episode counts.
+  if ((data.walk || []).length) {
+    const legs = (record) => mean(record.step_facts.contact_flags.map((flags) => flags[3]));
+    const share = (counts) => counts[0] / counts.reduce((a, b) => a + b, 0);
+    const toward = (record) => record.step_facts.segment_progress[0] * 1000 / data.step_seconds;
+    const rows = data.walk.map((record) => [String(record.seed), number(record.targets_per_minute),
+      `${number(100 * share(record.episode_distributions.ending))}%`, `${number(100 * legs(record))}%`, number(toward(record))]);
+    root.append(html("section", {}, html("h2", {}, "The agents' walk"),
+      html("p", { class: "note" }, `Every world walks ${count(facts.walk_steps)} steps with the mean action, starting a new episode after each one ends, and every episode counts: targets reached per world and minute, the share of the walk's episodes that arrived, the share of steps with legs touching (over the segments), and the head's speed toward its target in mm/s.`),
+      table(["Seed", "Targets/min", "Arrived", "Legs", "Toward"], rows, 1)));
+  }
+
   // Details: the episodes in bins, each segment's return, every value per
   // actor, the evaluation's facts, and the settings.
   const details = [];

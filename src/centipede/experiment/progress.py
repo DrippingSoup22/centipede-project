@@ -17,18 +17,21 @@ pass.
 In training a pass is one window. Its results are the time it took, values of
 every step of every world, which do not depend on where each world is in its
 episode and so move smoothly from window to window (the reward per step, the
-head's speed along the ground and toward its target, and the share of steps
-with a body on the ground), and how episodes ended. All worlds start
-together, so their episodes end in waves; the endings are therefore shares of
-the episodes that ended over the last episode length of windows, in which
-every world ends at least one. A run with a curriculum also shows the level
-its window's new targets were drawn at.
+head's speed along the ground and toward its target, and the shares of steps
+with a body on the ground and with legs touching), and how episodes ended. All
+worlds start together, so their episodes end in waves; the endings are
+therefore shares of the episodes that ended over the last episode length of
+windows, in which every world ends at least one, and the targets reached per
+world and minute are counted over the same windows. A run with a curriculum
+also shows the level its window's new targets were drawn at.
 
 In evaluation a pass is one actor and seed: every world runs its first
 episode, which ends at the target, out of the range circle, or at the time
 limit, so the bar fills toward the time limit and jumps to full when every
 world has finished sooner. Its results are the same values over the steps of
-those first episodes, and how they ended.
+those first episodes, and how they ended. A walk pass instead runs every world
+for a fixed number of steps and counts every episode, with the targets reached
+per world and minute.
 """
 
 import math
@@ -36,6 +39,7 @@ import time
 from collections import deque
 from typing import Any
 
+from centipede.experiment.arrivals import targets_per_minute
 from centipede.experiment.report import STEP_SECONDS
 
 BAR_WIDTH = 20
@@ -46,14 +50,16 @@ SETTINGS_LINE_WIDTH = 100
 ENDINGS = ("arrived", "<1/4", "<1/2", "closer", "not closer", "left circle")
 TRAINING_COLUMNS = (
     "{cycle}  {took:>6}  |  {reward:>11}  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {episodes:>8}  {endings}  |  {level}{left:>6}"
+    "  {legs:>5}  |  {episodes:>8}  {per_minute:>11}  {endings}  |  {level}{left:>6}"
 )
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {endings}"
+    "  {legs:>5}  |  {per_minute:>11}  {endings}"
 )
-# Where the body-on-ground flag sits among a segment's contact flags.
+# Where the body-on-ground and legs-touching flags sit among a segment's
+# contact flags.
 BODY_ON_GROUND = 2
+LEGS_TOUCHING = 3
 
 
 def duration(seconds: float) -> str:
@@ -199,12 +205,14 @@ def _bar(filled: int) -> str:
 
 
 def _legend(counted_episodes: str) -> str:
-    """What the speeds and the endings mean, printed above the column names."""
+    """What the columns mean, printed above their names."""
     return (
         "speed: the head's, along the ground; toward: how fast it closes on its"
-        f" target.\nEndings: shares of {counted_episodes}. Those out of time are"
-        " split by how much of\nthe start distance was left: <1/4, <1/2, closer"
-        " (less than all of it), or not closer."
+        " target;\nbody down, legs: shares of steps with a body on the ground and"
+        " with legs touching,\nover the segments. targets/min: targets reached"
+        f" per world and minute.\nEndings: shares of {counted_episodes}. Those"
+        " out of time are split by how much of\nthe start distance was left:"
+        " <1/4, <1/2, closer (less than all of it), or not closer."
     )
 
 
@@ -213,13 +221,16 @@ def _speed(metres_per_step: float) -> str:
 
 
 def _behaviour(step: dict[str, Any]) -> dict[str, str]:
-    """The head's speeds and the share of steps with a body down, from step facts."""
+    """The head's speeds and the shares of steps with a body down and with legs
+    touching, from step facts."""
     flags = step["contact_flags"]
     body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
+    legs = sum(segment[LEGS_TOUCHING] for segment in flags) / len(flags)
     return {
         "speed": _speed(step["segment_moved"][0]),
         "toward": _speed(step["segment_progress"][0]),
         "body_down": f"{body_down:.0%}",
+        "legs": f"{legs:.0%}",
     }
 
 
@@ -278,9 +289,11 @@ class TrainingProgress(_RedrawnLine):
         total_cycles: int,
         window_steps: int,
         episode_steps: int,
+        world_count: int,
         curriculum: bool = False,
     ) -> None:
         super().__init__(window_steps)
+        self._world_count = world_count
         self._curriculum = curriculum
         self._cycle = first_cycle
         self._total_cycles = total_cycles
@@ -317,7 +330,9 @@ class TrainingProgress(_RedrawnLine):
                 speed="speed",
                 toward="toward",
                 body_down="body down",
+                legs="legs",
                 episodes="episodes",
+                per_minute="targets/min",
                 endings="  ".join(ENDINGS),
                 level="level  |  " if self._curriculum else "",
                 left="left",
@@ -345,6 +360,7 @@ class TrainingProgress(_RedrawnLine):
                 reward=f"{reward_per_step:+.5f}",
                 **_behaviour(step),
                 episodes=f"{round(sum(counts))}",
+                per_minute=f"{self._per_minute(counts[0]):.1f}",
                 endings=_endings(counts),
                 level=(
                     f"{record['curriculum']['level']:>5.3f}  |  "
@@ -356,6 +372,11 @@ class TrainingProgress(_RedrawnLine):
         )
         self._cycle += 1
 
+    def _per_minute(self, arrivals: float) -> float:
+        """Targets reached per world and minute over the counted windows."""
+        steps = len(self._recent_endings) * self._steps_per_pass
+        return targets_per_minute(arrivals, self._world_count, steps)
+
     def _label(self) -> str:
         return f"{self._cycle}/{self._total_cycles}".rjust(self._cycle_width)
 
@@ -365,6 +386,7 @@ class EvaluationProgress(_RedrawnLine):
 
     def __init__(self, total_passes: int, max_episode_steps: int) -> None:
         super().__init__(max_episode_steps)
+        self._max_episode_steps = max_episode_steps
         self._total_passes = total_passes
         self._number_width = max(len("pass"), 2 * len(str(total_passes)) + 1)
         self._done = 0
@@ -373,7 +395,10 @@ class EvaluationProgress(_RedrawnLine):
 
     def header(self) -> None:
         """The legend and the column names, once before the first pass."""
-        print(_legend("every world's first episode"), flush=True)
+        print(
+            _legend("every world's first episode, or of every episode of a walk"),
+            flush=True,
+        )
         print(
             EVALUATION_COLUMNS.format(
                 number="pass".rjust(self._number_width),
@@ -382,26 +407,33 @@ class EvaluationProgress(_RedrawnLine):
                 speed="speed",
                 toward="toward",
                 body_down="body down",
+                legs="legs",
+                per_minute="targets/min",
                 endings="  ".join(ENDINGS),
             ),
             flush=True,
         )
 
-    def start(self, actor_name: str, seed: int) -> None:
+    def start(self, actor_name: str, seed: int, steps: int | None = None) -> None:
+        """Begin a pass; ``steps`` is a walk's length, None up to the time limit."""
         self._actor = f"{actor_name}, seed {seed}"
+        self._steps_per_pass = steps or self._max_episode_steps
         self._started = time.monotonic()
 
     def finish(self, record: dict[str, Any]) -> None:
-        """Replace the line with the pass's first episodes."""
+        """Replace the line with the pass's results; a walk's record holds
+        ``targets_per_minute``."""
         took = time.monotonic() - self._started
         number = self._number()
         self._done += 1
+        per_minute = record.get("targets_per_minute")
         self._end_pass(
             EVALUATION_COLUMNS.format(
                 number=number,
                 actor=self._actor,
                 took=duration(took),
                 **_behaviour(record["step_facts"]),
+                per_minute="-" if per_minute is None else f"{per_minute:.1f}",
                 endings=_endings(record["episode_distributions"]["ending"]),
             )
         )

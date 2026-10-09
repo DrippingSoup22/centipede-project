@@ -4,9 +4,11 @@ It passes observations to the agents, their joint action to the environment,
 and the results back to the agents, and calculates nothing itself. Training
 collects a window of steps in every world, then lets the agents learn; a window
 ending never resets the environment. Evaluation uses the same exchange without
-recording or learning. ``diagnostics`` times both and summarises the
-environment's diagnostics over each window. The experiment creates the loop
-and calls ``train`` or ``evaluate``. See docs/architecture.md.
+recording or learning: ``evaluate`` counts each world's first episode, and
+``walk`` every episode of a fixed number of steps. ``diagnostics`` times them
+and summarises the environment's diagnostics over each window. The experiment
+creates the loop and calls ``train``, ``evaluate``, or ``walk``. See
+docs/architecture.md.
 """
 
 from collections.abc import Iterator
@@ -85,3 +87,23 @@ class InteractionLoop:
                 )
                 self.diagnostics.step_taken(~first_episode_ended)
                 first_episode_ended |= terminated | truncated
+
+    def walk(
+        self,
+        actor: Agents | ZeroActionBaseline | RandomActionBaseline,
+        seed: int,
+        steps: int,
+    ) -> None:
+        """Run every world for ``steps`` steps, from a reset with ``seed``.
+
+        As in ``evaluate``, ``actor`` acts without training. Every episode
+        that ends within the steps counts in the diagnostics, however many a
+        world goes through, so they show how many targets the actor reaches
+        in a fixed time.
+        """
+        observations = self.environment.reset(seed)
+        with self.diagnostics.collecting():
+            for _ in range(steps):
+                actions = actor.act(observations, training=False)
+                observations, _, _, _, _ = self.environment.step(actions)
+                self.diagnostics.step_taken()

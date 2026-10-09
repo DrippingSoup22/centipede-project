@@ -83,10 +83,12 @@ def write_evaluation_report(
     categories: Sequence[LoggedCategory],
     results: dict[str, list[dict[str, Any]]],
     settings: dict[str, Any],
+    walk: list[dict[str, Any]],
 ) -> None:
     """Write an evaluation's page; ``results`` holds one record per seed and actor.
 
-    ``run_facts`` describe the evaluation, such as the checkpoint and seeds.
+    ``run_facts`` describe the evaluation, such as the checkpoint and seeds, and
+    ``walk`` holds one record per seed of the agents' walk, if there was one.
     """
     data = {
         "kind": "evaluation",
@@ -95,6 +97,7 @@ def write_evaluation_report(
         "step_seconds": STEP_SECONDS,
         "categories": [_outline(category) for category in categories],
         "results": results,
+        "walk": walk,
         "settings": settings,
     }
     _write_page(path, data)

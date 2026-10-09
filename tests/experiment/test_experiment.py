@@ -130,6 +130,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     evaluation = (
         f'[run]\nmode = "evaluate"\nsource = "{folder.as_posix()}"\n'
         '[evaluation]\nseeds = [7, 8]\nepisodes_per_seed = 2\nbaselines = ["zero"]\n'
+        "walk_steps = 5\n"
     )
     run_file(tmp_path, evaluation)
 
@@ -143,6 +144,8 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert evaluation_recordings == [
         "_agents_seed7.npz",
         "_agents_seed8.npz",
+        "_agents_walking_seed7.npz",
+        "_agents_walking_seed8.npz",
         "_zero_action_seed7.npz",
         "_zero_action_seed8.npz",
     ]
@@ -154,7 +157,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert first_episodes.level is None and first_episodes.rank is None
     assert first_episodes.setup["actor"] == "agents"
     results = json.loads(results_path.read_text())["results"]
-    assert list(results) == ["agents", "zero action"]
+    assert list(results) == ["agents", "zero action"]  # the walk is kept apart
     for records in results.values():
         assert [record["seed"] for record in records] == [7, 8]
         # Each of the two worlds counts its first episode only, in every histogram.
@@ -162,6 +165,17 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
             assert record["episodes"]["episode_ended"] == 2
             for counts in record["episode_distributions"].values():
                 assert sum(counts) == 2
+    # The walk counts every episode of its 5 steps: one time-out per world, at
+    # the 3-step time limit, and none that reaches a target 30 mm away.
+    walk = read_recording(
+        folder / "evaluations" / (results_path.stem + "_agents_walking_seed7.npz")
+    )
+    assert walk.qpos.shape[:2] == (5, 2)
+    walk_records = json.loads(results_path.read_text())["walk"]
+    assert [record["seed"] for record in walk_records] == [7, 8]
+    for record in walk_records:
+        assert record["episodes"]["episode_ended"] == 2
+        assert record["targets_per_minute"] == 0.0
 
 
 def test_a_curriculum_level_is_logged_saved_and_kept_when_continuing(tmp_path):
@@ -186,8 +200,13 @@ def test_a_curriculum_level_is_logged_saved_and_kept_when_continuing(tmp_path):
     # The continued session goes on at the saved level, and again waits for an
     # episode length of windows before it moves it.
     lines = (folder / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
-    levels = [json.loads(line)["curriculum"]["level"] for line in lines]
+    records = [json.loads(line) for line in lines]
+    levels = [record["curriculum"]["level"] for record in records]
     assert levels == [0.0, 0.0, 0.25, 0.5, 0.5]
+    # Each world reaches a target on every step: over 4 steps of 20 ms, 4 each.
+    assert records[0]["arrivals"] == {"share": None, "targets_per_minute": None}
+    assert records[1]["arrivals"]["share"] == 1.0
+    assert records[1]["arrivals"]["targets_per_minute"] == pytest.approx(3000)
     checkpoint = torch.load(folder / "checkpoints" / "cycle_0005.pt", weights_only=True)
     assert checkpoint["curriculum_level"] == 0.75
 

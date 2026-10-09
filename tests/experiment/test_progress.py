@@ -8,10 +8,10 @@ from centipede.experiment.progress import (
 )
 
 # Step facts of two segments, as the log holds them: the head moves 0.4 mm per
-# 20 ms step, 0.3 mm of it toward its target.
+# 20 ms step, 0.3 mm of it toward its target; legs touch in 30% of the steps.
 STEP_FACTS = {
     "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
-    "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
+    "contact_flags": [[1, 1, 0.5, 0.2], [1, 1, 0.0, 0.4]],
     "segment_moved": [0.0004, 0.0002],
     "segment_progress": [0.0003, 0.0001],
 }
@@ -26,9 +26,10 @@ def window(endings):
 
 
 def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys):
-    # Episodes of two windows: the endings count the last two windows.
+    # Episodes of two windows: the endings count the last two windows, and so
+    # do the targets per world and minute (two worlds, 20 ms steps).
     progress = TrainingProgress(
-        first_cycle=3, total_cycles=12, window_steps=4, episode_steps=8
+        first_cycle=3, total_cycles=12, window_steps=4, episode_steps=8, world_count=2
     )
     for steps_taken in range(1, 5):
         progress.step(steps_taken)
@@ -43,15 +44,19 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert drawings[4].startswith(" 3/12  [####################]  learning")
     assert drawings[5].endswith("\n")  # the results end the window's line
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
-    # The time left: the 9 windows after window 3 at 23.1 s each.
+    # The time left: the 9 windows after window 3 at 23.1 s each. One arrival
+    # in 4 steps of 2 worlds is 375 targets per world and minute.
     assert drawings[5].split() == [
         *("3/12", "23.1", "s", "|", "-0.00300", "20.0", "mm/s", "15.0", "mm/s"),
-        *("25%", "|", "4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m28s"),
+        *("25%", "30%", "|", "4", "375.0", "25%", "0%", "0%", "25%", "50%", "0%"),
+        *("|", "3m28s"),
     ]
-    assert drawings[6].split()[-9:] == [
-        *("4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m05s")
+    assert drawings[6].split()[-10:] == [
+        *("4", "187.5", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m05s")
     ]
-    assert drawings[7].split()[-9:-2] == ["2", "0%", "50%", "0%", "0%", "0%", "50%"]
+    assert drawings[7].split()[-10:-2] == [
+        *("2", "0.0", "0%", "50%", "0%", "0%", "0%", "50%")
+    ]
 
 
 def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
@@ -61,10 +66,16 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
     progress.start("agents", seed=7)
     for steps_taken in range(1, 6):  # every world arrived after 5 steps
         progress.step(steps_taken)
+    episodes = {"ending": [1, 1, 0, 0, 0, 0]}
+    progress.finish({"step_facts": STEP_FACTS, "episode_distributions": episodes})
+    # A walk fills toward its own length and shows the targets per minute.
+    progress.start("agents walking", seed=7, steps=20)
+    progress.step(1)
     progress.finish(
         {
             "step_facts": STEP_FACTS,
-            "episode_distributions": {"ending": [1, 1, 0, 0, 0, 0]},
+            "episode_distributions": episodes,
+            "targets_per_minute": 12.5,
         }
     )
 
@@ -72,12 +83,14 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
     assert drawings[0].startswith(" 1/2  agents, seed 7  ")
     assert "[##..................]  1/10 steps" in drawings[0]
     # Finished early, and the row holds the first episodes.
-    row = drawings[-1].split()
-    assert row[:4] == ["1/2", "agents,", "seed", "7"]
-    assert row[-13:] == [
-        *("|", "20.0", "mm/s", "15.0", "mm/s", "25%", "|"),
+    rows = [drawing.split() for drawing in drawings if drawing.endswith("\n")]
+    assert rows[0][:4] == ["1/2", "agents,", "seed", "7"]
+    assert rows[0][-15:] == [
+        *("|", "20.0", "mm/s", "15.0", "mm/s", "25%", "30%", "|", "-"),
         *("50%", "50%", "0%", "0%", "0%", "0%"),
     ]
+    assert "[#...................]  1/20 steps" in drawings[-2]
+    assert rows[1][-7:-6] == ["12.5"]
 
 
 def test_the_settings_header_names_the_six_training_settings_and_what_they_make():

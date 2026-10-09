@@ -328,6 +328,7 @@ source = "runs/2026-10-07_1432_probe" # a run folder (its latest checkpoint) or 
 seeds = [101, 102, 103, 104]
 episodes_per_seed = 8
 baselines = ["zero", "random"]        # optional; leave out for none
+walk_steps = 1024                     # optional: the agents' walk; 0 or left out for none
 
 [environment.simulation]              # optional: replaces the run's own values
 backend = "cpu"
@@ -339,6 +340,7 @@ backend = "cpu"
 | `episodes_per_seed` | 8 | The number of worlds, so the number of episodes per seed |
 | `baselines` | none | `"zero"`, `"random"`, or both, run on the same seeds as the agents |
 | `record` | `true` | Write a replay recording of every world for each actor and seed |
+| `walk_steps` | 0 | After the first episodes, each seed lets the agents walk this many steps in every world, counting every episode; 0 leaves the walk out |
 
 An evaluation file may also contain `[environment]` sections, whose values
 replace the run's: `backend = "cpu"` evaluates a run trained on a GPU on the
@@ -352,6 +354,16 @@ are not identical.
 Each world counts only its first episode; worlds that finish early start new
 episodes, which are not counted. An evaluation lasts up to `max_episode_steps`
 steps per seed and per actor, so long episodes on the CPU take a while.
+
+The first episodes tell how often a target is reached from the starting pose.
+**The agents' walk** tells how many targets they collect: with `walk_steps`,
+each seed resets the environment again and every world walks that many steps
+with the agents' mean action, starting a new episode after each one ends, as
+in training (after an arrival the body walks on when the run's
+`after_arrival` says so). Every episode that ends during the walk counts, and
+its line and results add the targets reached per world and minute. Its
+results are kept apart from the actors' (`walk` in the results file, a section
+of its own in the report), since its episodes are not one per world.
 
 Baselines are off unless listed: `"zero"` always sends zero actions, which shows
 whether the agents do better than doing nothing; `"random"` sends uniformly
@@ -371,6 +383,7 @@ runs/2026-10-07_1432_probe/
 ├─ recordings/          cycles_0001-0004.npz, cycles_0005-0008.npz, ...: replays, one episode length each
 └─ evaluations/         <date>_<time>_<checkpoint>.json and .html for each evaluation,
                         and <the same>_<actor>_seed<seed>.npz recordings
+                        (the walk's actor is agents_walking)
 ```
 
 Folders are created only when missing, and a run is never overwritten: a new run
@@ -398,27 +411,36 @@ holds:
 - values of every step of every world, which do not depend on where each world
   is in its episode: the reward per step, averaged over the segments; the
   head's speed along the ground and how fast it closes on its target, which
-  together tell walking from steering; and the share of steps with a body on
-  the ground;
+  together tell walking from steering; and the shares of steps with a body on
+  the ground and with legs touching, over the segments;
 - how episodes ended, as shares: arrived; ran out of time with less than a
   quarter of the start distance left, less than half, less than all of it
   (closer), or no closer; or left the range circle. All worlds start together,
   so their episodes end in waves; the shares therefore count the episodes that
   ended over the last episode length of windows, in which every world ends at
   least one, and the line says how many those are;
+- the targets reached per world and minute over the same windows
+  (`targets/min`): how many targets the agents collect, which the arrival share
+  alone does not say once the body walks on after each arrival. It falls as a
+  curriculum moves the targets farther, so runs compare on it at the same
+  level;
 - with a curriculum, the level the window's new targets were drawn at.
 
 The last line gives the session's time and overall speed, or, for a run that
 stops at a plateau, the cycle of its last rise. In evaluation a pass
 is one actor and seed: the bar fills toward the time limit and jumps to full
 when every world's first episode has ended; the line then holds the time it
-took, the same speeds and body share over the steps of those first episodes,
-and how they ended.
+took, the same speeds and shares over the steps of those first episodes, and
+how they ended. A walk's line holds the same values over every step and
+episode of the walk, and its targets per minute.
 
 The log and `run_info.json` hold what the reports need. Each log line has the
 cycle, the world steps collected so far, and every diagnostics category,
 including the bin counts of the episode histograms (`episode_distributions`,
-see [diagnostics.md](diagnostics.md#episode-summary)); with a curriculum, also
+see [diagnostics.md](diagnostics.md#episode-summary)); `arrivals`, the
+arrival share (`arrivals.share`) and the targets reached per world and minute
+(`arrivals.targets_per_minute`) over the last episode length of windows, both
+`null` until that span is full; with a curriculum, also
 `curriculum.level`, the level the window's new targets were drawn at. Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
@@ -585,7 +607,11 @@ each actor next to the others where training puts the first episode length
 next to the last; it does not need baselines. Its header lists the seeds and
 episodes, and its chips mark the settings changed for the evaluation. Every
 value counts each world's first episode, and every actor starts from the same
-poses and targets, which the seeds decide.
+poses and targets, which the seeds decide. An evaluation with a walk adds a
+section after the numbered ones, **the agents' walk**: per seed, the targets
+reached per world and minute, the share of the walk's episodes that arrived,
+the share of steps with legs touching, and the head's speed toward its
+target.
 
 - **1 · Results.** The same six tiles as in training, each holding the agents'
   value over every seed and the lowest and highest seed. When baselines are

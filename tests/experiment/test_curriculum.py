@@ -20,13 +20,15 @@ def make_curriculum() -> Curriculum:
 
 
 def test_the_arrival_share_waits_for_a_whole_episode_length_of_windows():
-    share = ArrivalShare(window_steps=4, episode_steps=8)  # two windows
+    # Two windows of two worlds; targets per world and minute over them.
+    share = ArrivalShare(window_steps=4, episode_steps=8, world_count=2)
     # Endings, in the environment's order: arrived, within a quarter, within
     # half, closer, not closer, left the circle.
     share.add([4, 0, 0, 0, 0, 0])
     assert share.value is None
     share.add([3, 0, 0, 0, 1, 0])
     assert share.value == 7 / 8
+    assert share.targets_per_minute == pytest.approx(7 / 2 / (8 * 0.02 / 60))
     share.add([0, 0, 0, 0, 4, 0])  # the first window has left the span
     assert share.value == 3 / 8
 

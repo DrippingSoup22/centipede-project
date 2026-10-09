@@ -43,7 +43,7 @@ from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBase
 from centipede.agents.settings import AgentSettings
 from centipede.diagnostics_category import descriptions, values
 from centipede.environment.environment import Environment
-from centipede.experiment.arrivals import ArrivalShare
+from centipede.experiment.arrivals import ArrivalShare, targets_per_minute
 from centipede.experiment.configuration import (
     Configuration,
     EvaluationSettings,
@@ -76,6 +76,8 @@ from centipede.settings_section import SettingsError
 
 # What evaluation can run: the trained agents or a baseline, all with ``act``.
 Actor = Agents | ZeroActionBaseline | RandomActionBaseline
+# The evaluation's name for the agents' walk of a fixed number of steps.
+WALK = "agents walking"
 
 # The most device memory a training recording may hold while it runs: the
 # poses of every world for one episode length.
@@ -264,6 +266,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         total_cycles,
         loop_settings.rollout_window_steps,
         configuration.environment.max_episode_steps,
+        environment.world_count,
         curriculum is not None,
     )
     loop.diagnostics.progress = progress
@@ -284,7 +287,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # plateau stop watches. At a plateau the run records one more episode
     # length, to show its final behaviour, and stops after stop_cycle.
     arrival_share = ArrivalShare(
-        loop_settings.rollout_window_steps, configuration.environment.max_episode_steps
+        loop_settings.rollout_window_steps,
+        configuration.environment.max_episode_steps,
+        environment.world_count,
     )
     plateau = (
         Plateau(
@@ -302,6 +307,10 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         arrival_share.add(record["episode_distributions"]["ending"])
+        record["arrivals"] = {
+            "share": arrival_share.value,
+            "targets_per_minute": arrival_share.targets_per_minute,
+        }
         if curriculum is not None:
             # The level this window's new targets were drawn at; the next
             # window's follows from the arrival share.
@@ -675,14 +684,18 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         actors["random action"] = lambda seed: RandomActionBaseline(
             environment.device, seed, environment.action_size
         )
+    walk_steps = evaluation.walk_steps
     print(f"Evaluating {checkpoint_path}")
     print(
         f"{environment.world_count} worlds, {len(evaluation.seeds)} seeds,"
         f" {', '.join(actors)}; each world's first episode, up to"
-        f" {configuration.environment.max_episode_steps:,} steps\n"
+        f" {configuration.environment.max_episode_steps:,} steps"
+        + (f"; then the agents walk {walk_steps:,} steps" if walk_steps else "")
+        + "\n"
     )
+    passes_per_seed = len(actors) + (1 if walk_steps else 0)
     progress = EvaluationProgress(
-        len(actors) * len(evaluation.seeds),
+        passes_per_seed * len(evaluation.seeds),
         configuration.environment.max_episode_steps,
     )
     loop.diagnostics.progress = progress
@@ -694,18 +707,34 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         if evaluation.record
         else None
     )
+    # The agents' walk, after the first episodes, counts every episode.
+    passes = [(name, make_actor, None) for name, make_actor in actors.items()]
+    if walk_steps:
+        passes.append((WALK, actors["agents"], walk_steps))
     results: dict[str, list[dict[str, Any]]] = {name: [] for name in actors}
-    for actor_name, make_actor in actors.items():
+    walk_results: list[dict[str, Any]] = []
+    for actor_name, make_actor, steps in passes:
         for seed in evaluation.seeds:
             if evaluation.record:
-                recorder.arm(configuration.environment.max_episode_steps)
-            progress.start(actor_name, seed)
-            loop.evaluate(make_actor(seed), seed)
+                recorder.arm(steps or configuration.environment.max_episode_steps)
+            progress.start(actor_name, seed, steps)
+            if steps:
+                loop.walk(make_actor(seed), seed, steps)
+            else:
+                loop.evaluate(make_actor(seed), seed)
             record = {"seed": seed}
             record |= {
                 category.name: category.plain_values() for category in categories
             }
-            results[actor_name].append(record)
+            if steps:
+                record["targets_per_minute"] = targets_per_minute(
+                    record["episode_distributions"]["ending"][0],
+                    environment.world_count,
+                    steps,
+                )
+                walk_results.append(record)
+            else:
+                results[actor_name].append(record)
             progress.finish(record)
             if evaluation.record:
                 window = recorder.take(1, "all", "ranked")
@@ -727,16 +756,29 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         "cycles_trained": checkpoint["completed_cycles"],
         "seeds": list(evaluation.seeds),
         "episodes_per_seed": evaluation.episodes_per_seed,
+        "walk_steps": walk_steps,
         "agents_act_with": "their policy's mean action, without exploration",
         "changed_from_training": evaluation.environment_changes,
     }
     settings = configuration.training_values()
     folder.write_evaluation(
-        stem, {"run_facts": run_facts, "settings": settings, "results": results}
+        stem,
+        {
+            "run_facts": run_facts,
+            "settings": settings,
+            "results": results,
+            "walk": walk_results,
+        },
     )
     report_path = folder.evaluations / f"{stem}.html"
     write_evaluation_report(
-        report_path, folder.path.name, run_facts, categories, results, settings
+        report_path,
+        folder.path.name,
+        run_facts,
+        categories,
+        results,
+        settings,
+        walk_results,
     )
     print(f"\nResults: {report_path}")
     return folder.path
@@ -750,16 +792,21 @@ def _evaluation_categories(
         LoggedCategory(
             "episodes",
             "Episodes",
-            "Each world's first episode only. Tables show the mean over seeds and, "
-            "below it, the lowest to highest seed; charts show the mean over seeds.",
+            "Each world's first episode only; in the agents' walk, every episode"
+            " that ended during it. Tables show the mean over seeds and, below it,"
+            " the lowest to highest seed; charts show the mean over seeds.",
             loop.diagnostics.episode_window.descriptions,
             loop.diagnostics.episode_window.result,
         ),
         _distribution_category(
-            loop, "How many of each world's first episodes fell in each bin."
+            loop,
+            "How many of each world's first episodes, or of the walk's episodes,"
+            " fell in each bin.",
         ),
         _step_category(
-            loop, environment, "Means over the steps of each world's first episode."
+            loop,
+            environment,
+            "Means over the steps of each world's first episode, or of the walk.",
         ),
         _timing_category(loop),
         _physics_category(loop),

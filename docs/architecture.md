@@ -95,7 +95,7 @@ file, or a new function next to `train` and `evaluate`.
 | `experiment.py` | Front file: `run(path)` trains or evaluates as the file's mode says |
 | `configuration.py` | Reading the three kinds of file, the checks across sections, and saving the complete configuration |
 | `run_folder.py` | A run's folder: creating it, the log, checkpoints, session facts, recordings, and evaluation results |
-| `arrivals.py` | The arrival share of the last episode length of windows, which the curriculum and the plateau stop follow |
+| `arrivals.py` | The arrival share of the last episode length of windows, which the curriculum and the plateau stop follow, and the targets reached per world and minute over the same windows |
 | `curriculum.py` | The curriculum: the target's difficulty level, moved after each cycle from the arrival share, and its target ranges |
 | `plateau.py` | The plateau stop: whether a run's progress, averaged over the last three episode lengths, has stopped rising |
 | `report.py`, `report_page.html` | The training and evaluation reports: the data, and the page that draws it |
@@ -127,12 +127,16 @@ learned. Worlds that finish early start new episodes as usual, but only each
 world's first episode counts in the diagnostics. The experiment calls it once
 per seed and reads the results from the loop's diagnostics.
 
+`walk(actor, seed, steps)` resets the environment with the seed and runs every
+world for a fixed number of steps, counting every episode that ends, so the
+experiment can tell how many targets the agents reach in a fixed time.
+
 `diagnostics` also carries the recorder: the experiment arms it before a
 window it wants recorded, the loop's diagnostics feed it every step, and the
 experiment takes the chosen worlds' poses afterwards
 (see [diagnostics.md](diagnostics.md#recordings)).
 
-**Files:** `interaction_loop.py` (front file: `train()` and `evaluate()`),
+**Files:** `interaction_loop.py` (front file: `train()`, `evaluate()`, and `walk()`),
 `settings.py`, which holds `rollout_window_steps` (steps per world before each
 update, first value 256) and `update_cycles` (number of collect-and-learn
 cycles, first value 128), `diagnostics.py`, which times each window and

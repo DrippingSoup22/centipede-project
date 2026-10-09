@@ -162,6 +162,9 @@ class EvaluationSettings:
     agents and for every listed baseline. ``environment_changes`` lists the
     environment settings the file changed from training, by dotted name.
     ``record`` writes a replay recording of every world for each actor and seed.
+    With ``walk_steps``, each seed also lets the agents walk that many steps in
+    every world, counting every episode, for the targets they reach in a fixed
+    time; 0 leaves it out.
     """
 
     source: Path
@@ -170,6 +173,7 @@ class EvaluationSettings:
     baselines: tuple[str, ...]
     environment_changes: dict[str, Any] = field(default_factory=dict)
     record: bool = True
+    walk_steps: int = 0
 
     @classmethod
     def from_section(
@@ -184,6 +188,7 @@ class EvaluationSettings:
             baselines=section.choice_list("baselines", ("zero", "random"), default=()),
             environment_changes=environment_changes,
             record=section.boolean("record", default=True),
+            walk_steps=section.integer("walk_steps", default=0, minimum=0),
         )
         section.reject_unknown_keys()
         return settings
