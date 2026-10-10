@@ -159,10 +159,12 @@ into one joint action.
 The problem the agents must solve. `reset` starts new episodes, and `step` takes a
 joint action and returns the next observations, one reward per segment, and which
 episodes ended. Its front file keeps the episode state (targets, step counts,
-previous positions, and each segment's clock when there are clocks) and
-coordinates its parts: the observation builder, the reward function, the
-clocks, its diagnostics, and the physics simulation. It does not store data
-for learning.
+previous positions, and the clocks of the segments or of the legs when there
+are clocks) and coordinates its parts: the observation builder, the reward
+function, the clocks, its diagnostics, and the physics simulation. With a
+clock per leg, the clocks turn the segments' leg actions into the legs'
+targets before the simulation applies them. It does not store data for
+learning.
 
 **Details:** [environment.md](environment.md)
 

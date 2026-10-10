@@ -73,7 +73,7 @@ out later from `contact_flags` over time.
 Refreshed on every step, for every world, in a run whose segments have
 [clocks](environment.md#clocks), from the clocks as the step left them and the
 two walking costs before their weights. Each segment's phase φ is its clock's
-hand.
+hand; with a clock per leg, its left leg's.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |

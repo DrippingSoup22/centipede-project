@@ -47,8 +47,16 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         None,
     )
     assert not settings.passive_follower_spine and not settings.clocks
-    assert not settings.neighbour_clocks
-    assert settings.clock == ClockSettings(middle_tempo_hz=2.0, tempo_range_octaves=1.0)
+    assert not settings.leg_clocks and not settings.neighbour_clocks
+    assert settings.clock == ClockSettings(
+        middle_tempo_hz=2.0,
+        tempo_range_octaves=1.0,
+        load_feedback_rad_per_s=0.0,
+        centre_time_constant_s=0.0,
+        coupling="both",
+    )
+    # Leg clocks' centres follow the actions with a time constant of 0.5 s.
+    assert read(leg_clocks=True).clock.centre_time_constant_s == 0.5
     assert settings.rewards == RewardSettings(
         arrival_reward=1.0,
         arrival_payout=1.0,
@@ -59,6 +67,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         foot_slip_cost_parts=0.0,
         legs_off_tempo_cost_parts=0.0,
         out_of_tempo_cost_parts=0.0,
+        no_support_cost_parts=0.0,
         movement_cost_parts=0.0,
         random_command_movement_deg=25.0,
         foot_slip_unit_m_per_s=0.010,
@@ -122,7 +131,28 @@ def test_nested_sections_are_read_by_their_own_classes():
         ({"passive_follower_spine": True}, "needs spine_control"),
         ({"rewards": {"out_of_tempo_cost_parts": 1}}, "need the segments' clocks"),
         ({"neighbour_clocks": True}, "neighbour_clocks .* set clocks = true"),
+        ({"clocks": True, "leg_clocks": True}, "set only one"),
+        (
+            {"clocks": True, "clock": {"load_feedback_rad_per_s": 6.0}},
+            "holds a loaded foot's clock in stance, which needs a clock per leg",
+        ),
+        (
+            {"clocks": True, "clock": {"centre_time_constant_s": 0.5}},
+            "slows the centres .* which needs a clock per leg",
+        ),
+        (
+            {"clock": {"coupling": "ahead"}, "rewards": {"head_tempo_share": 0.25}},
+            "the head already pays nothing",
+        ),
+        (
+            {"leg_clocks": True, "rewards": {"legs_off_tempo_cost_parts": 1}},
+            "legs follow their clocks by construction",
+        ),
         ({"clock": {"middle_tempo_hz": 8}}, "below 12.5 turns per second"),
+        (
+            {"leg_clocks": True, "clock": {"load_feedback_rad_per_s": 6.3}},
+            "below 2π times the slowest tempo, 6.283 rad/s",
+        ),
         ({"target": {"range_circle_ratio": 0.8}}, "must be 0 .no circle. or above 1"),
         (
             {"target": {"arrival": "head", "arrival_radius_m": 0.001}},

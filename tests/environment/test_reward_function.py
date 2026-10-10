@@ -220,6 +220,29 @@ def test_walking_costs_charge_slipping_feet_and_legs_and_tempo_off_the_clock():
     for name in ("foot_slip", "legs_off_tempo", "out_of_tempo"):
         assert not parts[name][0].any()
 
+    # With the clocks' coupling ahead, the head has no share: what the clocks
+    # charge it, only its legs' mismatch with each other, it pays in full.
+    ahead = RewardSettings.from_section({"out_of_tempo_cost_parts": 1}, "ahead")
+    _, parts, weights = rewards_for(unchanged_state(), settings=ahead, clock=clock)
+    assert parts["out_of_tempo"][1, 0].item() == pytest.approx(
+        -weights["out_of_tempo"] * 0.4
+    )
+
+
+def test_no_support_charges_a_segment_with_neither_foot_on_the_ground():
+    settings = RewardSettings.from_section({"no_support_cost_parts": 1.5})
+    state = unchanged_state()
+    state.left_foot_ground_contact[:, 0] = True  # the head stands on its left foot
+    state.right_foot_ground_contact[:, 1] = True  # segment 1 on its right foot
+
+    _, parts, weights = rewards_for(state, settings=settings)
+
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares["no_support"] == pytest.approx(1.5 * shares["leg_contact"])
+    assert parts["no_support"][1].tolist() == pytest.approx(
+        [0.0, 0.0, -weights["no_support"]]  # the rear is carried
+    )
+
 
 def test_movement_costs_the_square_of_how_far_the_commanded_joints_moved():
     settings = RewardSettings.from_section({"movement_cost_parts": 1})

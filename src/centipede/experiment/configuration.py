@@ -39,8 +39,8 @@ SAVED_CONFIGURATION_NAME = "configuration.toml"
 DEVICE_FOR_BACKEND = {"cpu": "cpu", "gpu": "cuda"}
 
 TRAINING_SECTIONS = ("run", "environment", "agents", "interaction_loop", "curriculum")
-# The cycles a run whose segments have clocks trains, by default, before its
-# plateau stop may end it.
+# The cycles a run whose segments or legs have clocks trains, by default,
+# before its plateau stop may end it.
 CLOCK_PLATEAU_MINIMUM_CYCLES = 128
 
 
@@ -356,7 +356,9 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
     configuration = Configuration(
         mode=mode,
         run=RunSettings.from_section(
-            _with_plateau_minimum(file_section.table("run"), environment.clocks)
+            _with_plateau_minimum(
+                file_section.table("run"), environment.clocks or environment.leg_clocks
+            )
         ),
         environment=environment,
         agents=AgentSettings.from_section(
@@ -403,10 +405,10 @@ def _with_episode_discount(agents_values: dict, max_episode_steps: int) -> dict:
 def _with_plateau_minimum(run_values: dict, clocks: bool) -> dict:
     """The [run] values, with ``plateau_minimum_cycles`` when they set none.
 
-    A run whose segments have clocks trains CLOCK_PLATEAU_MINIMUM_CYCLES
-    before its plateau stop may end it, since its segments first need to find
-    a common tempo and their offsets; any other run, none. The value is then
-    saved with the run like any other.
+    A run whose segments or legs have clocks trains
+    CLOCK_PLATEAU_MINIMUM_CYCLES before its plateau stop may end it, since its
+    clocks first need to find a common tempo and their offsets; any other
+    run, none. The value is then saved with the run like any other.
     """
     if "plateau_minimum_cycles" in run_values:
         return run_values

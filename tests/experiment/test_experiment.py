@@ -306,6 +306,12 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     deeper = harder_file.replace("hidden_layers = [16]", "hidden_layers = [16, 16]")
     with pytest.raises(SettingsError, match="as many layers"):
         run_file(tmp_path, deeper, NAME="deeper")
+    # Leg clocks give the same leg actions other meanings than motor commands.
+    leg_clocks = harder_file.replace("assembly_v3", "assembly_v4").replace(
+        "spine_control = true", "spine_control = true\nleg_clocks = true"
+    )
+    with pytest.raises(SettingsError, match="leg_clocks must match"):
+        run_file(tmp_path, leg_clocks, NAME="leg_clocks")
     assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
 
 

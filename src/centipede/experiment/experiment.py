@@ -139,13 +139,17 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         configuration.agents,
         run_settings.seed,
         environment.segment_action_sizes,
-        tempo_actions=environment.clocks is not None,
+        environment.tempo_columns,
+        environment.motor_columns,
     )
     completed_cycles = 0
     saved_level = 0.0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
             checkpoint_path, configuration.agents.device
+        )
+        _check_leg_clocks_match(
+            checkpoint, configuration.environment.leg_clocks, checkpoint_path
         )
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
@@ -440,6 +444,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 cycle,
                 agents.state_dict(),
                 None if curriculum is None else curriculum.level,
+                configuration.environment.leg_clocks,
             )
             if run_settings.report:
                 _write_training_report(folder, configuration, categories, stop_message)
@@ -504,6 +509,25 @@ def _check_recording_fits(environment: Environment, frames: int) -> None:
             f" worlds) needs {needed / 2**30:.1f} GiB of device memory, more than"
             f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: shorten the episodes,"
             " use fewer worlds, or set [run] recordings = 0"
+        )
+
+
+def _check_leg_clocks_match(
+    checkpoint: dict[str, Any], leg_clocks: bool, path: Path
+) -> None:
+    """Fail clearly where a checkpoint's agents drove their legs otherwise.
+
+    With leg clocks, a segment's leg actions set its legs' clocks and step
+    shapes; without, they command the leg motors: the same actions mean other
+    things, so starting from, continuing or evaluating a checkpoint needs the
+    same kind of legs. Checkpoints saved before leg clocks existed had none.
+    """
+    saved = checkpoint.get("leg_clocks", False)
+    if saved != leg_clocks:
+        driven = "drove their legs with leg clocks" if saved else "commanded the motors"
+        raise SettingsError(
+            f"[environment] leg_clocks must match the checkpoint {path}, whose"
+            f" agents {driven}: set leg_clocks = {str(saved).lower()}"
         )
 
 
@@ -777,9 +801,13 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         configuration.agents,
         configuration.run.seed,
         environment.segment_action_sizes,
-        tempo_actions=environment.clocks is not None,
+        environment.tempo_columns,
+        environment.motor_columns,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
+    _check_leg_clocks_match(
+        checkpoint, configuration.environment.leg_clocks, checkpoint_path
+    )
     agents.load_state_dict(checkpoint["agents"])
     loop = InteractionLoop(environment, agents, configuration.interaction_loop)
     categories = _evaluation_categories(loop, environment)

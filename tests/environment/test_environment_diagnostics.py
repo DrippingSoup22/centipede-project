@@ -167,6 +167,16 @@ def test_the_rhythm_follows_the_clocks_and_the_legs_costs():
     assert torch.equal(rhythm.foot_slip, rewards.foot_slip)
     assert make_diagnostics().rhythm is None  # without clocks
 
+    # Leg clocks, read through their left legs, never compare the legs.
+    leg_diagnostics = EnvironmentDiagnostics(
+        2, 2, ["first", "second"], "cpu", simulation.facts, clocks=clocks
+    )
+    leg_step = SimpleNamespace(leg_difference_known=None)
+    no_legs = replace(rewards, legs_off_tempo=None)
+    record(leg_diagnostics, state, state, no_legs, clock_step=leg_step)
+    assert not leg_diagnostics.rhythm.legs_compared.any()
+    assert torch.equal(leg_diagnostics.rhythm.tempo, clocks.tempo_hz)
+
 
 def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     diagnostics = make_diagnostics()

@@ -1,17 +1,17 @@
 """The environment's front file: the learning task built on the physics simulation.
 
 It keeps each world's episode state (target, step count, previous positions,
-and with clocks each segment's clock) and coordinates the observation builder,
-the reward function, the diagnostics, and the physics simulation. The
-interaction loop uses only ``reset`` and ``step``; the experiment reads
-``segment_count``, ``observation_size``, and the action sizes to create the
-agents, and its curriculum changes the target ranges between update cycles
-with ``set_target_ranges``. See docs/environment.md.
+and with clocks each segment's or each leg's clock) and coordinates the
+observation builder, the reward function, the diagnostics, and the physics
+simulation. The interaction loop uses only ``reset`` and ``step``; the
+experiment reads ``segment_count``, ``observation_size``, and the action sizes
+and columns to create the agents, and its curriculum changes the target ranges
+between update cycles with ``set_target_ranges``. See docs/environment.md.
 """
 
 import torch
 
-from centipede.environment.clocks import Clocks
+from centipede.environment.clocks import Clocks, leg_targets
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.observation_builder import (
     ObservationBuilder,
@@ -31,11 +31,15 @@ class Environment:
     the world, or after an arrival may only give it a new target.
 
     ``segment_action_sizes`` lists how many actions each segment takes: six for
-    its legs; with spine control, the spine joint behind it, for every segment
-    but the rear (only for the head with a passive follower spine); and with
-    clocks, last, its clock's tempo. ``action_size`` is the width of the joint
-    action, the largest of them; a segment with fewer actions is padded.
-    ``clocks`` holds the segments' clocks, or None without them.
+    its legs, or with leg clocks twelve, six per leg: its clock's tempo and
+    five values of its step shape; with spine control, the spine joint behind
+    it, for every segment but the rear (only for the head with a passive
+    follower spine); and with a clock per segment, last, its clock's tempo.
+    ``action_size`` is the width of the joint action, the largest of them; a
+    segment with fewer actions is padded. ``tempo_columns`` lists each
+    segment's tempo actions, and ``motor_columns`` the action that sets each
+    of its motors (with leg clocks, each leg joint's centre), for the agents'
+    learning diagnostics. ``clocks`` holds the clocks, or None without them.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -53,14 +57,34 @@ class Environment:
                 f"[environment] observation_radius must be less than the model's "
                 f"{self.segment_count} segments, got {settings.observation_radius}"
             )
+        # The model comes from the configuration too: the step shape gives
+        # every leg joint a target angle.
+        if settings.leg_clocks and not self.simulation.legs_take_angles:
+            raise SettingsError(
+                "[environment] leg_clocks drive the legs through a step shape of"
+                " target angles, which needs a model whose legs take angles, such"
+                f" as models/assembly_v4.xml; {settings.simulation.model_path}'s"
+                " legs take torques"
+            )
 
+        self.clocks = None
+        if settings.clocks or settings.leg_clocks:
+            self.clocks = Clocks(
+                settings.clock,
+                self.world_count,
+                self.segment_count,
+                settings.observation_radius,
+                self.simulation.step_duration_s,
+                self.device,
+                per_leg=settings.leg_clocks,
+            )
         self.observation_builder = ObservationBuilder(
             self.segment_count,
             settings.observation_radius,
             self.world_count,
             self.device,
             spine_observed=settings.spine_control,
-            clock_observed=settings.clocks,
+            clock_value_count=0 if self.clocks is None else self.clocks.value_count,
             neighbour_clock_observed=settings.neighbour_clocks,
         )
         self.observation_size = self.observation_builder.observation_size
@@ -72,19 +96,41 @@ class Environment:
             settings.spine_control and segment_index < commanders
             for segment_index in range(self.segment_count)
         ]
+        # The leg actions come first, then the spine command, then a clock
+        # per segment's tempo. With leg clocks, each leg's six actions are its
+        # clock's tempo and its step shape: sweep and lift amplitudes, then
+        # sweep, lift and knee centres.
+        leg_action_count = 12 if settings.leg_clocks else 6
         self.segment_action_sizes = [
-            6 + int(commands) + int(settings.clocks) for commands in commands_spine
+            leg_action_count + int(commands) + int(settings.clocks)
+            for commands in commands_spine
         ]
         self.action_size = max(self.segment_action_sizes)
-        # Each spine command, column 6 of the segment ahead of its joint, is
-        # kept or replaced by zero; a follower's column 6 may be its tempo.
+        self.spine_column = leg_action_count
+        # Each spine command, of the segment ahead of its joint, is kept or
+        # replaced by zero; a follower's spine column may hold its tempo.
         self.spine_command_mask = torch.tensor(
             commands_spine[:spine_count], dtype=torch.float32, device=self.device
         )
-        # Each segment's tempo action is its last.
-        self.tempo_columns = torch.tensor(
-            [size - 1 for size in self.segment_action_sizes], device=self.device
-        )
+        # Each segment's tempo actions, and the action that sets each of its
+        # motors, for the agents' learning diagnostics.
+        if settings.leg_clocks:
+            self.tempo_columns = [[0, 6] for _ in commands_spine]
+            leg_motor_columns = [3, 4, 5, 9, 10, 11]
+        else:
+            self.tempo_columns = [
+                [size - 1] if settings.clocks else []
+                for size in self.segment_action_sizes
+            ]
+            leg_motor_columns = [0, 1, 2, 3, 4, 5]
+        self.motor_columns = [
+            leg_motor_columns + [self.spine_column] * commands
+            for commands in commands_spine
+        ]
+        # A clock per segment reads its tempo from the joint action by index.
+        self.tempo_index = torch.tensor(
+            self.tempo_columns, dtype=torch.long, device=self.device
+        ).expand(self.world_count, -1, -1)
         # The joints each segment commands, among its six leg joints and the
         # spine joint behind it.
         commanded_joints = torch.ones(
@@ -102,18 +148,6 @@ class Environment:
             if target.arrival == "head"
             else target.arrival_radius_m,
             commanded_joints,
-        )
-        self.clocks = (
-            Clocks(
-                settings.clock,
-                self.world_count,
-                self.segment_count,
-                settings.observation_radius,
-                self.simulation.step_duration_s,
-                self.device,
-            )
-            if settings.clocks
-            else None
         )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
@@ -223,26 +257,39 @@ class Environment:
         self.previous_foot_planar_position.copy_(state.foot_planar_position)
         self.previous_foot_contact.copy_(_foot_contact(state))
 
-        # 2. Move the body. With spine control, column 6 holds the command for
-        # the spine joint behind each segment that commands one; without, the
+        # 2. Move the body. With leg clocks, the clocks first turn at the tempo
+        # chosen for each leg, with load feedback from the feet on the ground
+        # now, the centres follow the centre actions, and each leg's joints
+        # get their targets from the step shape at its clock's new phase.
+        # With spine control, the spine column holds the command for the
+        # spine joint behind each segment that commands one; without, the
         # spine is passive.
-        if self.settings.spine_control:
-            self.simulation.step(
-                joint_action[..., :6],
-                joint_action[:, :-1, 6] * self.spine_command_mask,
+        clock_step = None
+        if self.settings.leg_clocks:
+            leg_values = joint_action[..., :12].unflatten(-1, (2, 6))
+            clock_step = self.clocks.step(
+                leg_values[..., 0], foot_contact=self.previous_foot_contact
+            )
+            centres = self.clocks.follow_centres(leg_values[..., 3:])
+            leg_actions = leg_targets(
+                self.clocks.clock_phase, leg_values[..., 1:3], centres
             )
         else:
-            self.simulation.step(joint_action[..., :6])
+            leg_actions = joint_action[..., :6]
+        spine_actions = None
+        if self.settings.spine_control:
+            spine_actions = (
+                joint_action[:, :-1, self.spine_column] * self.spine_command_mask
+            )
+        self.simulation.step(leg_actions, spine_actions)
         self.episode_steps += 1
 
-        # The clocks turn at the tempo each segment chose, and the feet that
-        # touched the ground before and after the step are measured for slip.
-        clock_step = None
-        if self.clocks is not None:
-            tempo_columns = self.tempo_columns.expand(self.world_count, -1)
-            tempo_action = joint_action.gather(2, tempo_columns[..., None])
+        # A clock per segment turns at the tempo its segment chose, and the
+        # feet that touched the ground before and after the step are measured
+        # for slip.
+        if self.settings.clocks:
             clock_step = self.clocks.step(
-                tempo_action.squeeze(-1),
+                joint_action.gather(2, self.tempo_index),
                 self.previous_joint_position[..., :6],
                 state.leg_joint_position,
             )
@@ -268,7 +315,10 @@ class Environment:
         time_is_up = self.episode_steps >= self.settings.max_episode_steps
         truncated = (time_is_up | left_range) & ~terminated
 
-        # 4. and 5. Rewards, observations, diagnostics.
+        # 4. and 5. Rewards, observations, diagnostics. The motor commands are
+        # the leg actions and the spine column, which the reward masks for the
+        # segments that command no spine joint.
+        spine_command = joint_action[..., self.spine_column : self.spine_column + 1]
         step_rewards = self.reward_function.compute(
             state,
             self.previous_body_planar_position,
@@ -276,7 +326,7 @@ class Environment:
             self.target_position,
             terminated,
             self.previous_joint_position,
-            joint_action[..., :7],
+            torch.cat((leg_actions, spine_command), dim=-1),
             foot_slip_speed,
             clock_step,
         )

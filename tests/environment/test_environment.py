@@ -1,4 +1,5 @@
-"""Tests for the environment's front file, with the real model v3.
+"""Tests for the environment's front file, with the real model v3 (v4 with
+leg clocks, which need legs that take angles).
 
 The parts have their own tests; these cover only what the front adds: episode
 state (targets, step counts, previous positions), episode ends, and resetting
@@ -19,9 +20,11 @@ from centipede.settings_section import SettingsError
 BACKENDS = ["cpu"] + (["gpu"] if torch.cuda.is_available() else [])
 
 
-def environment(backend="cpu", world_count=3, **changes) -> Environment:
+def environment(
+    backend="cpu", world_count=3, model_path="models/assembly_v3.xml", **changes
+) -> Environment:
     simulation = {
-        "model_path": "models/assembly_v3.xml",
+        "model_path": model_path,
         "backend": backend,
         "world_count": world_count,
         "gpu_solver": "cg",  # also runs on GPUs older than Volta
@@ -237,6 +240,51 @@ def test_with_clocks_every_segment_sets_its_tempo_and_only_the_head_bends_its_ne
     env.step(action)
     env.step(action)
     assert not env.clocks.tempo_octaves.any() and not env.clocks.remembered.any()
+
+
+def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
+    """The left legs turn at 2 Hz to the start of their turn, the right legs
+    at 4 Hz to its three quarters, where each foot is lifted highest."""
+    env = environment(
+        world_count=1,
+        model_path="models/assembly_v4.xml",
+        spine_control=True,
+        passive_follower_spine=True,
+        leg_clocks=True,
+        neighbour_clocks=True,
+        rewards={"out_of_tempo_cost_parts": 1, "no_support_cost_parts": 1.5},
+    )
+    assert env.segment_action_sizes == [13] + [12] * 7 and env.action_size == 13
+    assert env.tempo_columns == [[0, 6]] * 8
+    assert env.motor_columns == [[3, 4, 5, 9, 10, 11, 12]] + [[3, 4, 5, 9, 10, 11]] * 7
+    assert env.observation_size == environment().observation_size + 2 + 6 + 2 * 6
+    env.reset(seed=2)
+    turns = 2 * math.pi * 0.02 * torch.tensor([2.0, 4.0])
+    env.clocks.clock_phase.copy_(
+        (torch.tensor([0.0, 1.5 * math.pi]) - turns).remainder(2 * math.pi)
+    )
+    # Each leg: tempo, sweep and lift amplitudes, sweep, lift and knee centres.
+    shape = [0.5, 0.4, 0.1, -0.2, -0.3]
+    action = torch.tensor([[[0.0, *shape, 1.0, *shape, 0.0]] * 8])
+    action[0, 0, 12] = 1.0  # the head bends its neck
+
+    observations, *_ = env.step(action)
+
+    backend = env.simulation._backend
+    mapping, data = backend.mapping, backend.world_data[0]
+    angle_range = backend.model.actuator_ctrlrange[mapping.leg_actuator_ids]
+    lower, upper = angle_range[..., 0], angle_range[..., 1]
+    target = [0.6, -0.2, -0.3, 0.1, 0.2, -0.3]  # in action units
+    angles = (lower + upper) / 2 + (upper - lower) / 2 * target
+    assert data.ctrl[mapping.leg_actuator_ids] == pytest.approx(angles, abs=1e-6)
+    assert data.ctrl[mapping.spine_actuator_ids].tolist() == [1.0] + [0.0] * 6
+    # Each segment sees its legs' clocks, then its two neighbours' legs'.
+    own = torch.tensor([1.0, 0.0, 0.0, 0.0, -1.0, 1.0])
+    assert torch.allclose(observations[0, :, -18:-12], own, atol=1e-6)
+
+    # Leg clocks drive the legs with target angles, which v3's legs do not take.
+    with pytest.raises(SettingsError, match="leg_clocks .* legs take torques"):
+        environment(world_count=1, leg_clocks=True)
 
 
 def test_an_observation_radius_reaching_past_the_body_is_rejected():

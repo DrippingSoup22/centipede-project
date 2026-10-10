@@ -1,6 +1,5 @@
 import torch
 
-from centipede.environment.clocks import CLOCK_VALUE_COUNT
 from centipede.environment.simulation import PhysicalState
 
 BLOCK_SIZE = 27
@@ -31,8 +30,9 @@ class ObservationBuilder:
     to ``observation_radius`` ahead and behind (nearest first), and two target
     values that are real only for the head; with ``spine_observed``, the
     angle and speed of the spine joint behind it (zero for the rear segment);
-    with ``clock_observed``, its own clock's three values; and with
-    ``neighbour_clock_observed``, last, three values for the clock of each
+    with clocks, the ``clock_value_count`` values of its own clocks (three for
+    a clock per segment, six for one per leg); and with
+    ``neighbour_clock_observed``, last, as many values for the clocks of each
     neighbour it sees, in the blocks' order.
     A missing neighbour is a block of zeros. The layout is fixed in
     docs/environment.md.
@@ -45,7 +45,7 @@ class ObservationBuilder:
         world_count: int,
         device: torch.device | str,
         spine_observed: bool = False,
-        clock_observed: bool = False,
+        clock_value_count: int = 0,
         neighbour_clock_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
@@ -58,7 +58,7 @@ class ObservationBuilder:
         self.world_count = world_count
         self.segment_count = segment_count
         self.spine_observed = spine_observed
-        self.clock_observed = clock_observed
+        self.clock_value_count = clock_value_count
         self.neighbour_clock_observed = neighbour_clock_observed
         missing_neighbour = segment_count
 
@@ -91,9 +91,9 @@ class ObservationBuilder:
             (2 * observation_radius + 1) * BLOCK_SIZE
             + TARGET_VALUE_COUNT
             + (SPINE_VALUE_COUNT if spine_observed else 0)
-            + (CLOCK_VALUE_COUNT if clock_observed else 0)
+            + clock_value_count
             + (
-                2 * observation_radius * CLOCK_VALUE_COUNT
+                2 * observation_radius * clock_value_count
                 if neighbour_clock_observed
                 else 0
             )
@@ -109,10 +109,10 @@ class ObservationBuilder:
         """Every segment's observation, ``(W, N, observation_size)``.
 
         ``target_position`` is each world's target as a flat ``(W, 2)`` point;
-        ``clock_values`` ``(W, N, 3)`` each segment's own clock, needed only
-        with ``clock_observed``; ``neighbour_clock_values`` ``(W, N, 2k, 3)``
-        its neighbours' clocks relative to its own, needed only with
-        ``neighbour_clock_observed``.
+        ``clock_values`` ``(W, N, c)`` each segment's own clocks, needed only
+        with clocks, for ``c`` = ``clock_value_count``;
+        ``neighbour_clock_values`` ``(W, N, 2k, c)`` its neighbours' clocks
+        relative to its own, needed only with ``neighbour_clock_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -156,7 +156,7 @@ class ObservationBuilder:
                     dim=-1,
                 )
             )
-        if self.clock_observed:
+        if self.clock_value_count:
             parts.append(clock_values)
         if self.neighbour_clock_observed:
             parts.append(neighbour_clock_values.flatten(start_dim=2))

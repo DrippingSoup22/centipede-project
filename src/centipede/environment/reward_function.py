@@ -65,7 +65,8 @@ class RewardContext:
         ``previous_joint_position`` is ``(W, N, 7)``, the ``joint_angles``
         before the step; ``commanded_joints`` is ``(N, 7)``, 1.0 for the joints
         each segment commands and 0.0 for the others; ``joint_action`` is the
-        step's ``(W, N, 6 or 7)`` motor commands, without the tempo actions.
+        step's ``(W, N, 6 or 7)`` motor commands: with leg clocks, the leg
+        targets of the step shape.
         New tensors are built, so neither the physical state nor the saved
         copies change.
         """
@@ -216,13 +217,30 @@ def out_of_tempo(context: RewardContext, settings: RewardSettings) -> torch.Tens
     """−how far the segment's tempo is from its neighbours', from 0 to 1.
 
     The mean, over the neighbours the segment sees, of the tempo difference
-    in octaves divided by the largest possible. Both segments of a pair pay;
-    the head pays ``head_tempo_share`` of its own, so that the others follow
-    its tempo more than it follows theirs.
+    in octaves divided by the largest possible; with leg clocks, each leg's
+    against its sibling's and the same side's legs of those neighbours, and
+    the mean of the two legs. Both segments of a pair pay; the head pays
+    ``head_tempo_share`` of its own, so that the others follow its tempo
+    more than it follows theirs. With the clocks' ``coupling = "ahead"``, a
+    segment is compared only with the neighbours ahead of it, so only the
+    rear segment of a pair pays and the share is None: the head pays nothing
+    for its neighbours, only, with leg clocks, its own legs' mismatch.
     """
     mismatch = context.clock.tempo_mismatch.clone()
-    mismatch[:, 0] *= settings.head_tempo_share
+    if settings.head_tempo_share is not None:
+        mismatch[:, 0] *= settings.head_tempo_share
     return -mismatch
+
+
+def no_support(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−1 for each segment with neither foot on the ground after the step.
+
+    A segment carried by its neighbours pays; one standing on its feet, even
+    still, pays nothing.
+    """
+    state = context.physical_state
+    carried = ~state.left_foot_ground_contact & ~state.right_foot_ground_contact
+    return -carried.float()
 
 
 def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
@@ -260,7 +278,8 @@ class StepRewards:
     goal on this step; ``joint_movement`` is the context's, in rad².
     ``foot_slip`` and ``legs_off_tempo`` are ``(W, N)``: the two walking costs
     before their weights, from 0 to 1, whether or not they are paid; None in
-    the earlier efficiency reward, and ``legs_off_tempo`` also without clocks.
+    the earlier efficiency reward, and ``legs_off_tempo`` also without a clock
+    per segment, the only kind that compares the legs.
     """
 
     rewards: torch.Tensor
@@ -283,6 +302,7 @@ TERMS = {
     "foot_slip": foot_slip,
     "legs_off_tempo": legs_off_tempo,
     "out_of_tempo": out_of_tempo,
+    "no_support": no_support,
     "movement": movement,
     "command": command,
 }
@@ -355,6 +375,7 @@ class RewardFunction:
             dim=-1,
         )
         rules = not self.settings.uses_per_step_weights
+        compares_legs = clock is not None and clock.leg_difference_known is not None
         return StepRewards(
             rewards=reward_parts.sum(dim=-1),
             reward_parts=reward_parts,
@@ -363,7 +384,7 @@ class RewardFunction:
             foot_slip=-foot_slip(context, self.settings) if rules else None,
             legs_off_tempo=(
                 -legs_off_tempo(context, self.settings)
-                if rules and clock is not None
+                if rules and compares_legs
                 else None
             ),
         )

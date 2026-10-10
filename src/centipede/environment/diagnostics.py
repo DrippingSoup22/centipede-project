@@ -514,8 +514,10 @@ class EnvironmentDiagnostics:
         rhythm.tempo.copy_(self.clocks.tempo_hz)
         rhythm.neighbour_offset.copy_(_wrapped(phase[:, :-1] - phase[:, 1:]))
         rhythm.head_offset.copy_(_wrapped(phase[:, :1] - phase))
-        rhythm.legs_compared.copy_(clock_step.leg_difference_known)
-        rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
+        # Leg clocks never compare the legs: legs_compared stays all False.
+        if step_rewards.legs_off_tempo is not None:
+            rhythm.legs_compared.copy_(clock_step.leg_difference_known)
+            rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
         rhythm.foot_slip.copy_(step_rewards.foot_slip)
 
 

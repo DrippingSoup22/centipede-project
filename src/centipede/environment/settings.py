@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 
 from centipede.environment.simulation import SimulationSettings
@@ -82,32 +83,70 @@ class TargetSettings:
 
 @dataclass(frozen=True)
 class ClockSettings:
-    """The [environment.clock] section: each segment's clock, with ``clocks`` on.
+    """The [environment.clock] section: the clocks, with ``clocks`` or ``leg_clocks``.
 
-    A segment's tempo action ``a``, from −1 to 1, sets its clock's tempo to
+    A tempo action ``a``, from −1 to 1, sets its clock's tempo to
     ``middle_tempo_hz × 2^(a × tempo_range_octaves)`` turns per second: 1 to 4
-    with the defaults.
+    with the defaults. With leg clocks, ``load_feedback_rad_per_s`` (σ) holds a
+    loaded foot's clock in stance: its hand turns at ``ω + σ N cos φ`` rad/s,
+    ``ω`` the tempo's and ``N`` 1 while the foot touches the ground; 0 is off.
+    σ must stay below the slowest tempo's ω, so that no hand can ever stop.
+    With leg clocks too, each leg joint's centre follows its centre action
+    with the time constant ``centre_time_constant_s`` (0.5 by default with leg
+    clocks, else 0); 0 follows the actions at once. ``coupling`` says which
+    neighbours' clocks a segment sees and is compared with: ``"both"``, those
+    ahead and behind, or ``"ahead"``, only those ahead, so that the rhythm
+    passes from the head backward.
     """
 
     middle_tempo_hz: float
     tempo_range_octaves: float
+    load_feedback_rad_per_s: float
+    centre_time_constant_s: float
+    coupling: str
 
     @classmethod
-    def from_section(cls, values: dict) -> "ClockSettings":
-        """Check the section's values and fill in the defaults."""
+    def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
+        """Check the section's values and fill in the defaults.
+
+        ``leg_clocks`` is [environment]'s, which sets the centres' default.
+        """
         section = SettingsSection(values, "environment.clock")
         settings = cls(
             middle_tempo_hz=section.positive_number("middle_tempo_hz", default=2.0),
             tempo_range_octaves=section.positive_number(
                 "tempo_range_octaves", default=1.0
             ),
+            load_feedback_rad_per_s=section.number(
+                "load_feedback_rad_per_s", default=0.0, minimum=0.0
+            ),
+            centre_time_constant_s=section.number(
+                "centre_time_constant_s",
+                default=0.5 if leg_clocks else 0.0,
+                minimum=0.0,
+            ),
+            coupling=section.choice("coupling", ("both", "ahead"), default="both"),
         )
+        # A loaded hand turns at ω + σ cos φ: at least ω − σ, which must stay
+        # above zero at the slowest tempo. A stopped hand would never move on,
+        # since the foot leaves the ground only in swing.
+        slowest = settings.middle_tempo_hz / 2**settings.tempo_range_octaves
+        if settings.load_feedback_rad_per_s >= 2 * math.pi * slowest:
+            raise SettingsError(
+                "[environment.clock] load_feedback_rad_per_s must stay below 2π times"
+                f" the slowest tempo, {2 * math.pi * slowest:.4g} rad/s: at or above"
+                " it, a foot on the ground can stop its leg's clock in stance, and"
+                " since the foot leaves the ground only in swing, the clock would"
+                f" never move on; got {settings.load_feedback_rad_per_s:g}"
+            )
         fastest = settings.middle_tempo_hz * 2**settings.tempo_range_octaves
+        # Load feedback can hurry a hand by up to σ rad/s.
+        fastest += settings.load_feedback_rad_per_s / (2 * math.pi)
         if fastest >= 12.5:
             raise SettingsError(
-                "[environment.clock] the fastest tempo must stay below 12.5 turns per"
-                " second, a quarter of a turn per 20 ms step, or a step could skip"
-                f" past half a turn; got {fastest:g}"
+                "[environment.clock] the fastest tempo, load feedback included, must"
+                " stay below 12.5 turns per second, a quarter of a turn per 20 ms"
+                f" step, or a step could skip past half a turn; got {fastest:g}"
             )
         section.reject_unknown_keys()
         return settings
@@ -124,6 +163,7 @@ PROPORTION_KEYS = (
     "foot_slip_cost_parts",
     "legs_off_tempo_cost_parts",
     "out_of_tempo_cost_parts",
+    "no_support_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
     "foot_slip_unit_m_per_s",
@@ -136,7 +176,7 @@ PROPORTION_KEYS = (
     "follower_progress_share",
     "follower_progress_ratio",
 )
-# The costs that need each segment's clock.
+# The costs that need clocks; legs off tempo needs a clock per segment.
 CLOCK_COST_KEYS = ("legs_off_tempo_cost_parts", "out_of_tempo_cost_parts")
 
 
@@ -185,14 +225,18 @@ class RewardSettings:
     split into fewer parts than the costs take makes them overspend it: the
     worst arrival then ends below zero.
 
-    Three costs judge how a segment walks. Foot slip charges each foot that
+    Four costs judge how a segment walks. Foot slip charges each foot that
     touches the ground at both ends of a step for how fast it slid along it,
-    in units of ``foot_slip_unit_m_per_s``. Legs off tempo and out of tempo
-    need the segments' clocks: the first charges how far the legs are from
-    where they were when the clock last passed the same point of its turn, in
-    units of ``legs_off_tempo_unit_deg``, and the second how far the
-    segment's tempo is from its neighbours', of which the head pays
-    ``head_tempo_share``.
+    in units of ``foot_slip_unit_m_per_s``, and no support each step on which
+    neither of the segment's feet touches the ground. Legs off tempo and out
+    of tempo need clocks: the first, only with a clock per segment, charges
+    how far the legs are from where they were when the clock last passed the
+    same point of its turn, in units of ``legs_off_tempo_unit_deg``, and the
+    second how far the segment's tempos are from those they are compared
+    with, of which the head pays ``head_tempo_share``. With the clocks'
+    ``coupling = "ahead"``, a segment is compared only with the clocks ahead
+    of it, so the head pays nothing for its neighbours, and
+    ``head_tempo_share`` is None.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -217,6 +261,7 @@ class RewardSettings:
     foot_slip_cost_parts: float | None
     legs_off_tempo_cost_parts: float | None
     out_of_tempo_cost_parts: float | None
+    no_support_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
     foot_slip_unit_m_per_s: float | None
@@ -235,9 +280,20 @@ class RewardSettings:
     distance_ratio_epsilon_m: float
 
     @classmethod
-    def from_section(cls, values: dict) -> "RewardSettings":
-        """Check the section's values and fill in the defaults."""
+    def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
+        """Check the section's values and fill in the defaults.
+
+        ``coupling`` is [environment.clock]'s, which decides whether the head
+        pays a share of its tempo mismatch.
+        """
         section = SettingsSection(values, "environment.rewards")
+        if coupling == "ahead" and "head_tempo_share" in values:
+            raise SettingsError(
+                "[environment.rewards] head_tempo_share sets the share of its tempo"
+                ' mismatch the head pays; with [environment.clock] coupling = "ahead"'
+                " every segment is compared only with the clocks ahead of it, so the"
+                " head already pays nothing for its neighbours: leave it out"
+            )
         arrival_reward = section.number("arrival_reward", default=1.0, minimum=0.0)
         arrival_payout = section.number("arrival_payout", default=1.0, minimum=0.0)
         follower_arrival_share = section.number(
@@ -263,6 +319,7 @@ class RewardSettings:
                 foot_slip_cost_parts=None,
                 legs_off_tempo_cost_parts=None,
                 out_of_tempo_cost_parts=None,
+                no_support_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
                 foot_slip_unit_m_per_s=None,
@@ -296,6 +353,7 @@ class RewardSettings:
                     ("foot_slip_cost_parts", 0.0),
                     ("legs_off_tempo_cost_parts", 0.0),
                     ("out_of_tempo_cost_parts", 0.0),
+                    ("no_support_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
                 )
             ]
@@ -323,7 +381,8 @@ class RewardSettings:
                 foot_slip_cost_parts=parts[3],
                 legs_off_tempo_cost_parts=parts[4],
                 out_of_tempo_cost_parts=parts[5],
-                movement_cost_parts=parts[6],
+                no_support_cost_parts=parts[6],
+                movement_cost_parts=parts[7],
                 random_command_movement_deg=section.positive_number(
                     "random_command_movement_deg", default=25.0
                 ),
@@ -333,8 +392,10 @@ class RewardSettings:
                 legs_off_tempo_unit_deg=section.positive_number(
                     "legs_off_tempo_unit_deg", default=20.0
                 ),
-                head_tempo_share=section.number(
-                    "head_tempo_share", default=0.25, minimum=0.0
+                head_tempo_share=(
+                    None
+                    if coupling == "ahead"
+                    else section.number("head_tempo_share", default=0.25, minimum=0.0)
                 ),
                 command_cost_ratio=section.number(
                     "command_cost_ratio", default=0.0, minimum=0.0
@@ -414,6 +475,7 @@ class RewardSettings:
                 ("foot_slip", self.foot_slip_cost_parts),
                 ("legs_off_tempo", self.legs_off_tempo_cost_parts),
                 ("out_of_tempo", self.out_of_tempo_cost_parts),
+                ("no_support", self.no_support_cost_parts),
                 ("movement", self.movement_cost_parts),
             )
             if parts
@@ -450,9 +512,12 @@ class EnvironmentSettings:
     head commands a spine joint, its neck; the followers' joints bend
     passively against their springs, and every segment still observes the
     joint behind it. With ``clocks`` every segment has a clock, whose tempo it
-    sets with one more action and whose hand it observes; with
-    ``neighbour_clocks`` as well, it also observes the clocks of the
-    neighbours it sees, relative to its own.
+    sets with one more action and whose hand it observes. With ``leg_clocks``
+    every leg has a clock instead, whose hand drives the leg through a step
+    shape; it needs a model whose legs take angles, which only the
+    environment can check, once the model is loaded. With
+    ``neighbour_clocks`` as well as either, a segment also observes the
+    clocks of the neighbours it sees, relative to its own.
     """
 
     max_episode_steps: int
@@ -460,6 +525,7 @@ class EnvironmentSettings:
     spine_control: bool
     passive_follower_spine: bool
     clocks: bool
+    leg_clocks: bool
     neighbour_clocks: bool
     simulation: SimulationSettings
     target: TargetSettings
@@ -474,6 +540,8 @@ class EnvironmentSettings:
         that the simulation's model file and backend are always required.
         """
         section = SettingsSection(values, "environment")
+        leg_clocks = section.boolean("leg_clocks", default=False)
+        clock = ClockSettings.from_section(section.table("clock"), leg_clocks)
         settings = cls(
             max_episode_steps=section.positive_integer(
                 "max_episode_steps", default=8192
@@ -486,11 +554,14 @@ class EnvironmentSettings:
                 "passive_follower_spine", default=False
             ),
             clocks=section.boolean("clocks", default=False),
+            leg_clocks=leg_clocks,
             neighbour_clocks=section.boolean("neighbour_clocks", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
-            rewards=RewardSettings.from_section(section.table("rewards")),
-            clock=ClockSettings.from_section(section.table("clock")),
+            rewards=RewardSettings.from_section(
+                section.table("rewards"), clock.coupling
+            ),
+            clock=clock,
         )
         section.reject_unknown_keys()
         if settings.passive_follower_spine and not settings.spine_control:
@@ -498,16 +569,41 @@ class EnvironmentSettings:
                 "[environment] passive_follower_spine leaves the head its neck, which"
                 " needs spine_control = true"
             )
-        if settings.neighbour_clocks and not settings.clocks:
+        if settings.clocks and settings.leg_clocks:
+            raise SettingsError(
+                "[environment] clocks and leg_clocks are two kinds of clock, one per"
+                " segment or one per leg: set only one"
+            )
+        has_clocks = settings.clocks or settings.leg_clocks
+        if settings.neighbour_clocks and not has_clocks:
             raise SettingsError(
                 "[environment] neighbour_clocks shows each segment its neighbours'"
-                " clocks, which need the segments' clocks: set clocks = true"
+                " clocks, which need the segments' clocks: set clocks = true or"
+                " leg_clocks = true"
             )
         rewards = settings.rewards
         clock_costs = [key for key in CLOCK_COST_KEYS if getattr(rewards, key)]
-        if clock_costs and not settings.clocks:
+        if clock_costs and not has_clocks:
             raise SettingsError(
                 f"[environment.rewards] {', '.join(clock_costs)} need the segments'"
                 " clocks: set clocks = true in [environment]"
+            )
+        if settings.clock.load_feedback_rad_per_s and not settings.leg_clocks:
+            raise SettingsError(
+                "[environment.clock] load_feedback_rad_per_s holds a loaded foot's"
+                " clock in stance, which needs a clock per leg: set leg_clocks = true"
+                " in [environment]"
+            )
+        if settings.clock.centre_time_constant_s and not settings.leg_clocks:
+            raise SettingsError(
+                "[environment.clock] centre_time_constant_s slows the centres of the"
+                " legs' step shape, which needs a clock per leg: set leg_clocks ="
+                " true in [environment]"
+            )
+        if settings.leg_clocks and rewards.legs_off_tempo_cost_parts:
+            raise SettingsError(
+                "[environment.rewards] legs_off_tempo_cost_parts compares each"
+                " segment's legs with its clock's last turn; with leg_clocks the legs"
+                " follow their clocks by construction: leave it out"
             )
         return settings

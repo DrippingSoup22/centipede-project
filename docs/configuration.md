@@ -104,7 +104,7 @@ The `[run]` settings of a training file:
 | `time_limit_hours` | none | Bounds one training session: after each cycle, if one more cycle (at this session's average time per cycle) would end after the limit, the run saves a checkpoint and its report and stops, to be continued in a new session. A continuing file may set a new value |
 | `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress, averaged over the last three episode lengths, has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
 | `plateau_progress` | 0.02 | The rise of the progress that counts as improving |
-| `plateau_minimum_cycles` | 128 with clocks, else 0 | The plateau stop never ends a run before this many cycles: with `[environment] clocks`, the segments first need time to find a common tempo and their offsets |
+| `plateau_minimum_cycles` | 128 with clocks, else 0 | The plateau stop never ends a run before this many cycles: with `[environment] clocks` or `leg_clocks`, the clocks first need time to find a common tempo and their offsets |
 | `solved_arrival_share` | 0.95 | With `plateau_cycles`, a run also stops once its task is solved: its arrival share, averaged like the progress, reaches this at the curriculum's final level (at any time without a curriculum), and its targets per world and minute have not risen by `plateau_progress` (as a relative rise: 0.02 is 2%) for `plateau_cycles` cycles, nor, with clocks, the wave ([The plateau stop](#the-plateau-stop)) |
 
 A complete training file, with every section written out:
@@ -241,7 +241,8 @@ share the curriculum holds, then while the level rises, and at the top level
 while the arrivals rise again; without a curriculum it is the arrival share
 alone, which stops a run once it has solved its task.
 
-In a run whose segments have clocks (`[environment] clocks`), the stop also
+In a run whose segments or legs have clocks (`[environment] clocks` or
+`leg_clocks`), the stop also
 watches a second signal, the **wave**: how alike the phase offsets between
 neighbours are across every world and step of a window (their consistency, in
 [diagnostics.md](diagnostics.md#rhythm)), averaged over the pairs. Every clock
@@ -319,6 +320,12 @@ run may give its agents more to see or command than the checkpoint's, as
 `spine_control` does: its agents are then widened, starting exactly as the
 saved ones act, with fresh optimizers (see
 [agents.md](agents.md#checkpoints)). Fewer is rejected when loading.
+`[environment] leg_clocks` must match as well, here as when continuing or
+evaluating a run: with leg clocks, a segment's leg actions set its legs'
+clocks and step shapes, and without them they command the motors, so the
+same weights would mean other things. Every checkpoint records whether leg
+clocks drove its agents' legs; checkpoints from before leg clocks count as
+without.
 
 ### Continuing a run
 

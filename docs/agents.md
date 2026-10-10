@@ -30,11 +30,16 @@ the environment's `segment_count`, `observation_size`, `world_count`, and
 `segment_action_sizes`, the interaction loop's `rollout_window_steps`, which
 sizes the storage, and the run's seed. It works for any number of segments.
 Each segment agent has as many actions as its segment takes: six for its
-legs; with spine control, the spine joint behind it, for every segment but
-the rear (only the head with a passive follower spine); and with clocks, last,
-its clock's tempo ([environment.md](environment.md#actions-and-timing)). With
-`tempo_actions`, the group knows that each agent's last action is a tempo,
-which only its learning diagnostics need.
+legs, or with leg clocks twelve, six per leg (its clock's tempo and five
+values of its step shape); with spine control, the spine joint behind it, for
+every segment but the rear (only the head with a passive follower spine); and
+with a clock per segment, last, its clock's tempo
+([environment.md](environment.md#actions-and-timing)). The environment's
+`tempo_columns` and `motor_columns` tell the group which of each agent's
+actions set clock tempos and which sets each of its motors, which only its
+learning diagnostics need: a segment's tempo spread is the mean over its
+tempo actions, and with leg clocks its leg motors' spreads are those of its
+joints' centres.
 
 | Operation | Takes | Returns or does |
 | --- | --- | --- |
@@ -89,8 +94,8 @@ per step, so it is not worth the added complexity.
 ## Observations
 
 Every segment agent has the same input size, `observation_size`: 83 with the
-first observation radius of 1, and more with spine control, clocks, or
-neighbour clocks (see
+first observation radius of 1, and more with spine control, clocks of either
+kind, or neighbour clocks (see
 [environment.md](environment.md#what-each-segment-sees)). Inputs that are always
 zero for a segment, such as the head's missing neighbour ahead, never affect its
 network.

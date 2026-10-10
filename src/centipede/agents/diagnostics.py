@@ -42,7 +42,8 @@ class LearningSummary:
         "The optimizers' learning rate in the update, the same for every agent"
     )
     action_std: torch.Tensor = measure(
-        "Each leg action's learned spread, before squashing, (N, 6)",
+        "Each leg action's learned spread, before squashing; with leg clocks,"
+        " each leg joint's centre's, (N, 6)",
         parts=(
             "left shoulder sweep",
             "left shoulder lift",
@@ -58,7 +59,8 @@ class LearningSummary:
     )
     tempo_action_std: torch.Tensor = measure(
         "The learned spread of the segment's clock tempo action, before"
-        " squashing; 0 without clocks, (N,)"
+        " squashing; with leg clocks, the mean of its two legs'; 0 without"
+        " clocks, (N,)"
     )
 
 
@@ -70,14 +72,20 @@ class AgentDiagnostics:
     """Fills the agents' learning category, ``learning``, which the experiment reads."""
 
     def __init__(
-        self, segment_count: int, tempo_actions: bool, device: torch.device | str
+        self,
+        tempo_columns: list[list[int]],
+        motor_columns: list[list[int]],
+        device: torch.device | str,
     ) -> None:
         """Allocate the category, all zero.
 
-        With ``tempo_actions``, each agent's last action is its clock's tempo;
-        a spine command, when there is one, comes right after the leg actions.
+        For each segment, ``tempo_columns`` lists its clock tempo actions,
+        and ``motor_columns`` the action that sets each of its motors: its six
+        leg motors, then the spine joint behind it when it commands one.
         """
-        self.tempo_actions = tempo_actions
+        self.tempo_columns = tempo_columns
+        self.motor_columns = motor_columns
+        segment_count = len(tempo_columns)
         self.learning = LearningSummary(
             **{
                 name: torch.zeros(segment_count, device=device)
@@ -110,10 +118,12 @@ class AgentDiagnostics:
             for segment_index, agent in enumerate(segment_agents):
                 # The policy clamps the log spread to [-20, 2] before using it.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
-                self.learning.action_std[segment_index].copy_(spread[:LEG_ACTION_COUNT])
-                others = spread[LEG_ACTION_COUNT:]
-                if self.tempo_actions:
-                    self.learning.tempo_action_std[segment_index] = others[-1]
-                    others = others[:-1]
-                if len(others):
-                    self.learning.spine_action_std[segment_index] = others[0]
+                motors = spread[self.motor_columns[segment_index]]
+                self.learning.action_std[segment_index].copy_(motors[:LEG_ACTION_COUNT])
+                if len(motors) > LEG_ACTION_COUNT:
+                    self.learning.spine_action_std[segment_index] = motors[-1]
+                tempo_columns = self.tempo_columns[segment_index]
+                if tempo_columns:
+                    self.learning.tempo_action_std[segment_index] = spread[
+                        tempo_columns
+                    ].mean()

@@ -17,13 +17,16 @@ in v1). Everything passed in and out is a PyTorch tensor.
 | Operation | Takes | Returns |
 | --- | --- | --- |
 | `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
-| `step(joint_action)` | Actions `(W, N, action_size)`: six per segment, plus a spine command and a clock tempo where it has them | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
+| `step(joint_action)` | Actions `(W, N, action_size)`: six per segment (twelve with leg clocks), plus a spine command and a clock tempo where it has them | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
 | `set_target_ranges(distance_range_m, bearing_range_deg)` | Two `(low, high)` pairs | Nothing; new targets are drawn from these ranges from now on |
 
 The environment also reports `segment_count`, `observation_size`,
 `segment_action_sizes` (how many actions each segment takes), and
 `action_size` (the joint action's width), which the experiment uses to create
-the agents, and `clocks`, the segments' [clocks](#clocks) when they have them. When an episode ends in a world, `step`
+the agents; `tempo_columns` and `motor_columns`, which of each segment's actions
+set clock tempos and which sets each of its motors, for the agents' learning
+diagnostics; and `clocks`, the [clocks](#clocks) of the segments or the legs
+when they have them. When an episode ends in a world, `step`
 starts the next one by itself, resetting the world or, after an arrival, perhaps
 only giving it a new target (see [Episodes](#episodes)): the observations it
 returns are already the new episode's, and the final observations hold, for that world, the observation the
@@ -39,7 +42,7 @@ The environment lives in `src/centipede/environment/`.
 | `environment.py` | Front file: `reset()` and `step()`, in two sections: episode state and coordination |
 | `observation_builder.py` | What each segment observes |
 | `reward_function.py` | Each segment's reward |
-| `clocks.py` | Each segment's [clock](#clocks) |
+| `clocks.py` | The [clocks](#clocks), one per segment or one per leg, and the legs' step shape |
 | `settings.py` | Environment settings |
 | `diagnostics.py` | The environment's [diagnostics](diagnostics.md) |
 | `simulation/simulation.py` | Front file of the physics simulation: loads the model, chooses the backend, offers `reset()`, `step()`, and the physical state |
@@ -59,9 +62,12 @@ decides which worlds must be reset. **Coordination:** on every `step`, it runs t
 other parts in order:
 
 1. Keep the current body positions and joint angles as the "previous" ones.
-2. The physics simulation applies the actions and advances 20 ms. With
-   clocks, every clock turns at the tempo its segment chose, and every foot
-   that touched the ground before and after the step is measured for slip.
+2. With leg clocks, every leg's clock turns and gives the leg's joints their
+   targets on the step shape ([Actions and timing](#actions-and-timing)). The
+   physics simulation applies the actions and advances 20 ms. With a clock
+   per segment, every clock then turns at the tempo its segment chose. Every
+   foot that touched the ground before and after the step is measured for
+   slip.
 3. Each world is checked for arrival or the time limit.
 4. The reward function computes each segment's reward; the arrival reward
    needs the result of step 3.
@@ -165,8 +171,63 @@ Tsuchiya, Phys. Rev. E, 2013), so the followers need no motor to follow.
 Every segment still observes the joint behind it, which tells a follower how
 the body bends at its place, and on which side a turn's inside lies.
 
-**The clock's tempo.** With [clocks](#clocks), every segment takes one more
-action, its last: its clock's tempo.
+**The clock's tempo.** With a [clock](#clocks) per segment, every segment
+takes one more action, its last: its clock's tempo.
+
+**Leg clocks.** With a clock per leg (`leg_clocks = true`), a segment no longer
+commands its leg motors directly. Each leg's clock drives the leg through a
+fixed **step shape**, and the segment sets, for each leg and at every step,
+the clock's tempo, the size of the steps, and the joints' centres. Its leg
+actions are twelve, six per leg, the left leg's first; with spine control,
+the spine command follows them, as index 12:
+
+| Index, left leg | Index, right leg | Action |
+| ---: | ---: | --- |
+| 0 | 6 | Tempo of the leg's clock |
+| 1 | 7 | Sweep amplitude |
+| 2 | 8 | Lift amplitude |
+| 3 | 9 | Sweep centre |
+| 4 | 10 | Lift centre |
+| 5 | 11 | Knee centre |
+
+At every step, each leg's three joints get their targets, in action units,
+from its clock's hand φ:
+
+```text
+sweep target = sweep centre + sweep amplitude × cos φ
+lift target  = lift centre  + lift amplitude  × max(0, −sin φ)
+knee target  = knee centre
+```
+
+The simulation maps the targets onto the joints' ranges like any leg action,
+so leg clocks need a model whose legs take angles, model v4; a model whose
+legs take torques is refused. A positive sweep moves the foot forward on
+either side, so over the first half of a turn, φ from 0 to π, the foot sweeps
+from front to back with the leg down: the stance, which pushes the body
+forward. Over the second half the foot comes forward again, lifted by up to
+the lift amplitude: the swing. The amplitudes and centres are raw actions
+from −1 to 1, neither clipped nor mapped onto a positive range: a negative
+sweep amplitude steps backward, and the agents learn what each value does.
+
+The centres set the legs' posture and, differing between the two sides, can
+turn the body. They follow their actions slowly, as a first-order lag with
+the time constant `centre_time_constant_s` (τ, 0.5 s): each step covers
+`1 − e^(−0.02 s / τ)` of the way, so that a sudden change of a centre action
+is 63% covered after τ. Slow centres set posture and turning but cannot make
+a rhythm by themselves, which is the clocks' job. On the first step after a
+restart, the centres start at their actions, so that an episode starts in
+the posture the agent asks for; they keep running through an arrival when
+the body walks on.
+
+This arrangement is CPG-RL's (Bellegarda and Ijspeert, IEEE Robotics and
+Automation Letters, 2022): oscillators drive the legs through a fixed foot
+trajectory, which the joints' controllers track, and the policy, which sees
+the oscillators' phases, sets each leg's frequency and amplitude at every
+step. Here the position actuators of model v4 track the targets
+([model.md](model.md#model-v4)). With amplitudes of 0.5, the centres at the
+model's pose, and a wave from the head to the tail, the step shape walks the
+body forward open-loop at 10 mm/s, as model.md's walking check measured with
+the same shape.
 
 All segments act at the same time and the body moves once for all of them.
 Actions are never clipped, because the executed action must be exactly the one
@@ -273,18 +334,22 @@ segments away (`k`, first value 1). Every observation has the same layout:
    the head; **sideways** is positive to its left;
 5. with spine control, the angle and speed of the spine joint behind it;
 6. with clocks, its own clock: `cos φ` and `sin φ` of its hand, and its tempo
-   action (see [Clocks](#clocks));
+   action (see [Clocks](#clocks)); with leg clocks, these three values for
+   each leg's clock, the left leg's first;
 7. with neighbour clocks, the clocks of the neighbours it sees, relative to
-   its own, three values each, in the order of the blocks: the `k` ahead,
-   nearest first, then the `k` behind.
+   its own, three values each (six with leg clocks), in the order of the
+   blocks: the `k` ahead, nearest first, then the `k` behind, which are
+   zeros with `coupling = "ahead"`.
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
 every segment and any number of segments, two more with spine control
 (**85** at radius 1), three more with clocks (**88** at radius 1), and
-`6k` more with neighbour clocks (**94** at radius 1). A segment's clock is
-never in the blocks its neighbours see; they see it only through the
-neighbour clocks. The spine's values come last so that a run with spine
-control can start from agents trained without it: their inputs keep their
+`6k` more with neighbour clocks (**94** at radius 1). Leg clocks add six and
+`12k`: at radius 2 with spine control and neighbour clocks, 137 + 2 + 6 + 24 =
+**169**. A segment's clocks are never in the blocks its neighbours see; they
+see them only through the neighbour clocks. The spine's values come last so
+that a run with spine control can start from agents trained without it: their
+inputs keep their
 places, and the new ones are added at the end (see
 [agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
 only the head receives real target values:
@@ -416,49 +481,133 @@ grows with the target's distance, so it suits any range of targets.
 
 ## Clocks
 
-With `clocks = true`, every segment has a **clock**: a hand that turns at a
-tempo the segment chooses, so that each segment can keep its own rhythm and
-learn to keep it in step with its neighbours'. It is a designed memory: a
-segment's networks see only the present, and the clock is the one thing a
-rhythm must remember, where the segment is in its cycle.
+A **clock** is a hand that turns at a tempo an agent chooses. There are two
+kinds, and a run has at most one.
 
-- **Tempo.** A segment's last action `a`, from −1 to 1, sets its clock's
-  tempo to `middle_tempo_hz × 2^(a × tempo_range_octaves)` turns per second:
-  1 to 4 with the defaults, so that a turn takes 12.5 to 50 steps.
+**A clock per segment** (`clocks = true`) gives every segment a rhythm of its
+own, which it can learn to keep in step with its neighbours'. It is a
+designed memory: a segment's networks see only the present, and the clock is
+the one thing a rhythm must remember, where the segment is in its cycle. The
+clock moves nothing: the legs move with it only as far as the segment learns
+to move them so, which the legs-off-tempo cost asks for ([Walking
+costs](#walking-costs)), and a neighbour can read the rhythm only from those
+legs.
+
+**A clock per leg** (`leg_clocks = true`) drives its leg through the step
+shape of [Actions and timing](#actions-and-timing), so the leg moves with its
+clock by construction, and the body carries each leg's rhythm to the others
+from the first step. Oscillators that walk robots work this way: in CPG-RL
+they drive the legs while the policy modulates them (Bellegarda and Ijspeert,
+IEEE Robotics and Automation Letters, 2022), and in the quadruped of Owaki
+and Ishiguro (Scientific Reports, 2017) they drive the legs while the body's
+load pushes their phases, as the load feedback below can.
+
+Both kinds follow the same rules:
+
+- **Tempo.** A tempo action `a`, from −1 to 1, sets its clock's tempo to
+  `middle_tempo_hz × 2^(a × tempo_range_octaves)` turns per second: 1 to 4
+  with the defaults, so that a turn takes 12.5 to 50 steps.
 - **Phase.** Every step, the hand `φ` moves on by `360° × tempo × 0.02 s`.
-  Nothing else moves it: a segment changes its phase against a neighbour's
-  only by running faster or slower for a while, as coupled oscillators do
-  (Kuramoto, 1984; for locomotion, Ijspeert, Neural Networks, 2008).
-- **Start.** Every restart draws each hand at random and sets the middle
-  tempo, so no agreement between segments comes for free; the clocks keep
-  running through an arrival when the body walks on. Hands have their own
-  random sequence, seeded with the starting poses' seed.
+  Nothing else moves it but load feedback: a clock changes its phase against
+  another's only by running faster or slower for a while, as coupled
+  oscillators do (Kuramoto, 1984; for locomotion, Ijspeert, Neural Networks,
+  2008).
+- **Start.** Every restart draws each hand at random, every leg's on its own,
+  and sets the middle tempo, so no agreement between clocks comes for free;
+  the clocks keep running through an arrival when the body walks on. Hands
+  have their own random sequence, seeded with the starting poses' seed.
 - **What a segment sees.** Its own hand, as `cos φ` and `sin φ` so that the
-  end of a turn and the start of the next look alike, and its tempo action.
+  end of a turn and the start of the next look alike, and its tempo action;
+  with leg clocks, these three values for each leg, the left leg's first.
   Without `neighbour_clocks`, it never sees another segment's clock: it can
-  only read it from that segment's legs, if they move with it.
+  only read it from that segment's legs.
 - **What a segment sees of its neighbours.** With `neighbour_clocks = true`,
   it also sees the clock of each neighbour within its observation radius,
   relative to its own: for neighbour `n` of segment `i`, `cos(φ_n − φ_i)`,
   `sin(φ_n − φ_i)`, and the tempo difference in octaves over the largest
   possible, `(tempo_octaves_n − tempo_octaves_i) ÷ (2 × tempo_range_octaves)`,
-  from −1 to 1. A neighbour that does not exist gives three zeros, like its
-  block. A segment can keep an offset to a neighbour's phase only if it can
-  tell where that phase is. The policy of CPG-RL observes the phase of every
-  oscillator it coordinates (Bellegarda and Ijspeert, IEEE Robotics and
-  Automation Letters, 2022), and decentralised leg controllers that learn to
-  walk together observe their neighbouring legs (Schilling et al., 2020,
-  arXiv:2005.11164).
+  from −1 to 1. With leg clocks, each of the neighbour's legs is seen
+  relative to the segment's leg on the same side: six values. A neighbour
+  that does not exist gives zeros, like its block. A segment can keep an
+  offset to a neighbour's phase only if it can tell where that phase is. The
+  policy of CPG-RL observes the phase of every oscillator it coordinates, and
+  decentralised leg controllers that learn to walk together observe their
+  neighbouring legs (Schilling et al., 2020, arXiv:2005.11164).
+- **Coupling.** `coupling` decides which neighbours' clocks count for a
+  segment. With `"both"`, the default, a segment sees, and is compared with,
+  the neighbours ahead of it and behind it. With `"ahead"`, only those ahead:
+  the values of the neighbours behind are zeros, in the same layout, and the
+  [out-of-tempo cost](#walking-costs) compares a segment only with the clocks
+  ahead of it. The head, with nothing ahead, sees no other clock. Information
+  about the rhythm then flows from the head backward, one segment per step at
+  radius 1, and the head leads by construction, since nothing behind it pulls
+  its tempo. The segment controllers of Chen, Wang and Revzen
+  (arXiv:2603.09147) are coupled this way, each taking its input from the
+  segment in front, and in insects the walking rhythm of the legs' circuits
+  is started and steered by signals descending from the head (Bidaye et al.,
+  Journal of Neurophysiology, 2018).
 
-Nothing about the movement itself is fixed: the clock only gives a segment a
-rhythm to keep. Two costs judge the rhythm (see [Walking
+**Load feedback.** With leg clocks, `load_feedback_rad_per_s` (σ, 0 by
+default: off) lets the body push the phases. Owaki and Ishiguro's oscillators turn
+at `dφ/dt = ω − σ N cos φ`, with `N` the leg's load, which pulls a loaded
+leg's phase toward the middle of its stance, at 3π/2 in their convention.
+Here stance is the first half of the turn, centred at π/2, so the rule
+becomes `dφ/dt = ω + σ N cos φ`, applied once per step as
+`φ ← φ + (ω + σ N cos φ) × 0.02 s`, with `ω` the tempo's, in rad/s, and `N` 1
+when the leg's foot touched the ground at the end of the last physics step,
+else 0. Before mid-stance a loaded leg's hand hurries toward it; after it,
+the hand is held back, so a leg that bears the body stays longer in stance
+while the others take their turn. Owaki and Ishiguro's quadruped, whose
+oscillators interact only through its body, changed by itself from walking
+to trotting to galloping as its speed rose.
+
+σ must stay below `ω` at the slowest tempo,
+`2π × middle_tempo_hz ÷ 2^tempo_range_octaves` (6.28 rad/s with the
+defaults), and the settings refuse more. With `σ N ≥ ω`, a loaded hand stops
+where `cos φ = −ω / (σ N)`, near the end of stance, until the load leaves.
+But `N` here says whether the foot touches the ground, and the foot leaves
+the ground only in swing, which a stopped hand never reaches: the leg would
+stay in stance for good. Model v4's open-loop wave
+([model.md](model.md#model-v4), Walking), run through the step shape at 2 Hz
+(`ω` = 12.57 rad/s) for 5 s, measured:
+
+| σ (rad/s) | Forward speed (mm/s) | Feet on the ground (of 16) | Planted foot-steps sliding faster than 10 mm/s |
+| ---: | ---: | ---: | ---: |
+| 0 | 10.2 | 8.8 | 44% |
+| 6.0 | 13.1 | 9.2 | 33% |
+| 6.3 | 13.4 | 9.2 | 34% |
+| 12.6 | 0.8 | 15.8 | 2% |
+
+Below `ω` the feedback reshapes the hand-set wave, and the body walks faster
+and slips less. At 12.6 rad/s, just above `ω`, every leg's clock stopped in
+stance early in the run, after half a turn on average, and the body stood
+still on all its feet. 6.3 rad/s still walks at 2 Hz, but at the slowest
+tempo, 1 Hz, it could stop the clocks too: 6.3 and 12.6 rad/s lie above the
+limit, and the settings refuse them.
+
+The environment's `clocks` holds every hand, `clock_phase` `(W, N, C)` in rad
+from 0 to 2π, with `C` one clock per segment or two, the left leg's then the
+right's, and the tempo of the last step, `clock_tempo_hz` and
+`clock_tempo_octaves` (`log2(tempo ÷ middle tempo)`). `phase`, `tempo_hz` and
+`tempo_octaves` `(W, N)` are each segment's own clock, or with leg clocks its
+left leg's, which the [rhythm diagnostics](diagnostics.md#rhythm) read as the
+segment's. Like the physical state, they are overwritten in place by every
+`reset` and `step`.
+
+A clock per segment fixes nothing about the movement itself: it only gives a
+segment a rhythm to keep, and two costs judge the rhythm ([Walking
 costs](#walking-costs)): whether the legs repeat their movement with the
-clock, and whether the clocks agree on a tempo.
+clock, and whether the clocks agree on a tempo. With leg clocks, only the
+shape of a step is fixed; the tempos, the size of the steps, the posture,
+and how the legs keep time with one another are learnt, and only the second
+cost applies.
 
-The environment's `clocks` holds every hand, `phase` `(W, N)` in rad from 0 to
-2π, and the tempo of the last step, `tempo_hz` and `tempo_octaves`
-(`log2(tempo ÷ middle tempo)`); like the physical state, they are overwritten
-in place by every `reset` and `step`, for the diagnostics to read.
+**Open questions.** `N` is a contact flag, where Owaki and Ishiguro's is the
+load the leg bears: a measured load would let the clock of a lightly loaded
+foot move on, and would allow σ above the slowest tempo's `ω`; whether that
+is worth having is not settled. With `coupling = "ahead"` the head sees no
+other clock; a head that also sees the clocks behind it, without paying for
+them, is a possible later study.
 
 ## Rewards
 
@@ -646,7 +795,7 @@ keeps the step cost and progress of the full reward with
 
 ### Walking costs
 
-Three more costs judge how a segment walks, each from 0 to 1 per step, paid by
+Four more costs judge how a segment walks, each from 0 to 1 per step, paid by
 every segment for its own legs, and each switched on by giving it parts of the
 budget. None prescribes a gait.
 
@@ -658,8 +807,10 @@ budget. None prescribes a gait.
   its neighbours are dragged unless they walk along, and so on down the body:
   this is what makes a walking head pull the others into walking. Foot slip
   costs are common in legged robots (Hwangbo et al., Science Robotics, 2019).
-- **Legs off tempo** `Q_i` (`legs_off_tempo_cost_parts`, with clocks): each
-  leg angle against its angle when the segment's clock last passed the same
+- **Legs off tempo** `Q_i` (`legs_off_tempo_cost_parts`, with a clock per
+  segment only; refused with leg clocks, whose legs follow their clocks by
+  construction): each leg angle against its angle when the segment's clock
+  last passed the same
   point of its turn; the mean over the six leg angles of the difference
   squared, in units of `legs_off_tempo_unit_deg` (20°), at most 1. It asks the
   legs to repeat their movement with the clock, whatever the movement is, so
@@ -678,7 +829,22 @@ budget. None prescribes a gait.
   so that the others follow its tempo more than it follows theirs. Two clocks
   at the same tempo keep their offset forever, so this cost keeps every offset
   steady without choosing it; which offsets suit the legs is left to the leg
-  and body contact costs.
+  and body contact costs. With leg clocks, each leg's tempo is compared with
+  its sibling leg's and with the same side's legs of those neighbours, and
+  the segment pays the mean of its two legs. With `coupling = "ahead"`
+  ([Clocks](#clocks)), a segment is compared only with the clocks ahead of
+  it: each pair's difference is paid by the segment behind alone, so the head
+  pays nothing for its neighbours (with leg clocks, only its own legs'
+  difference, in full), and `head_tempo_share` has no role: a file that sets
+  it is refused.
+- **No support** `U_i` (`no_support_cost_parts`): 1 on a step after which
+  neither of the segment's feet touches the ground, else 0. A segment carried
+  by its neighbours pays; one standing on its feet pays nothing, even
+  standing still, so the cost asks every segment to bear its part of the
+  body's weight without asking it to move. The legs of a few segments can
+  carry the whole body, three with model v4
+  ([model.md](model.md#model-v4), Carrying), so without this cost a segment
+  can rest its legs while its neighbours carry it.
 
 **The head's task alone.** A reward may also give the task to the head alone:
 `follower_arrival_share = 0` and `follower_progress_share = 0` leave the
@@ -697,7 +863,8 @@ worth more than legs touching (2 parts) or legs off tempo (1.5 parts) alone,
 but a little less than both together: a careless walk at the slowest pace
 still loses a little, a careful one gains, and standing still gains nothing.
 Body contact weighs most (2.5), then legs touching and foot slip (2), legs off
-tempo (1.5), and out of tempo least (1).
+tempo (1.5), and out of tempo least (1). With leg clocks, no support takes
+the 1.5 parts of legs off tempo, so that every other cost keeps its weight.
 
 ### Optional costs
 
@@ -773,10 +940,14 @@ These are the keys of the environment sections of the configuration file (see
 | `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; when false, the spine motors receive zero |
 | `passive_follower_spine` | false | With spine control, only the head commands a spine joint, its neck; the followers' joints are passive. Every segment still observes the joint behind it |
 | `clocks` | false | Every segment has a [clock](#clocks): one more action, its tempo, and three more observed values |
-| `neighbour_clocks` | false | Every segment also observes the clocks of the neighbours it sees, relative to its own: three more values per neighbour, `6 × observation_radius` in all; needs clocks |
+| `leg_clocks` | false | Every leg has a [clock](#clocks) that drives it through a [step shape](#actions-and-timing): twelve leg actions per segment instead of six, and six observed clock values; needs a model whose legs take angles (v4); excludes `clocks` |
+| `neighbour_clocks` | false | Every segment also observes the clocks of the neighbours it sees, relative to its own: three more values per neighbour (six with leg clocks), `6 × observation_radius` in all (`12 ×` with leg clocks); needs clocks of either kind |
 | **`[environment.clock]`** | | |
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
-| `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo must stay below 12.5 Hz |
+| `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo, plus `σ / 2π` with load feedback, must stay below 12.5 Hz |
+| `load_feedback_rad_per_s` | 0 | With leg clocks, σ of the [load feedback](#clocks): a foot on the ground holds its clock in stance; 0 is off. Must stay below 2π times the slowest tempo, 6.28 rad/s with the defaults, or a clock could stop for good |
+| `centre_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each joint's centre follows its action ([Actions and timing](#actions-and-timing)); 0 follows at once |
+| `coupling` | `"both"` | Which neighbours' clocks a segment sees and is compared with: `"both"`, those ahead and behind; `"ahead"`, only those ahead, so that the rhythm passes from the head backward ([Clocks](#clocks)) |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
 | `backend` | Required | `cpu` or `gpu` |
@@ -801,11 +972,12 @@ These are the keys of the environment sections of the configuration file (see
 | `body_contact_cost_parts` | 3 | Body contact's parts of the cost budget |
 | `leg_contact_cost_parts` | 1 | Leg contact's parts of the cost budget |
 | `foot_slip_cost_parts` | 0 | [Foot slip](#walking-costs)'s parts of the cost budget; 0 is off |
-| `legs_off_tempo_cost_parts` | 0 | [Legs off tempo](#walking-costs)'s parts; needs clocks |
-| `out_of_tempo_cost_parts` | 0 | [Out of tempo](#walking-costs)'s parts; needs clocks |
+| `legs_off_tempo_cost_parts` | 0 | [Legs off tempo](#walking-costs)'s parts; needs a clock per segment, and is refused with leg clocks |
+| `out_of_tempo_cost_parts` | 0 | [Out of tempo](#walking-costs)'s parts; needs clocks of either kind |
+| `no_support_cost_parts` | 0 | [No support](#walking-costs)'s parts; 0 is off |
 | `foot_slip_unit_m_per_s` | 0.010 | Foot slip's unit: the sliding speed that costs 1 |
 | `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |
-| `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays |
+| `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays; with `coupling = "ahead"` the head pays nothing for its neighbours, and a file that sets it is refused |
 | `movement_cost_parts` | 0 | The [movement cost](#optional-costs)'s parts of the cost budget; 0 is off |
 | `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3). It was measured with v3's torque motors and does not hold for v4, whose leg actions are target angles |
 | `command_cost_ratio` | 0 | The [command cost](#optional-costs)'s weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`; 0 is off. Outside the cost budget, so rule R1 no longer holds when it is set. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |

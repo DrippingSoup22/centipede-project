@@ -33,10 +33,10 @@ class PhysicsSimulation:
     It loads the model named in the settings, checks it against the segment
     contract and the action's duration, and runs every world on the chosen
     backend. Leg actions run from -1 to 1 whatever the model: when its legs
-    take target angles (model v4), each action is mapped onto its joint's
-    range before the backend applies it. ``physical_state`` is refreshed in
-    place by every ``reset`` and ``step``, and so is ``diagnostics.facts``, the
-    simulation's diagnostics category.
+    take target angles (model v4, ``legs_take_angles``), each action is
+    mapped onto its joint's range before the backend applies it.
+    ``physical_state`` is refreshed in place by every ``reset`` and ``step``,
+    and so is ``diagnostics.facts``, the simulation's diagnostics category.
     """
 
     def __init__(self, settings: SimulationSettings) -> None:
@@ -71,6 +71,7 @@ class PhysicsSimulation:
             )
 
         self.segment_count = mapping.segment_count
+        self.legs_take_angles = mapping.legs_take_angles
         self.head_outline = mapping.head_outline
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
