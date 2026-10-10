@@ -187,6 +187,10 @@ def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():
     assert episode.body_contact_share[1].tolist() == [0.5, 0.0]
     assert episode.foot_contact_share[1, :, 0].tolist() == [0.0, 0.0]
     assert episode.upside_down_share[1] == 0.0
+    # World 1's target lay behind and to the side of the head: 117 degrees.
+    assert episode.start_bearing[1] == pytest.approx(math.atan2(0.010, -0.005))
+    assert episode.arrived_by_bearing[1].tolist() == [0.0, 0.0, 1.0, 0.0]
+    assert episode.arrival_steps_by_bearing[1].tolist() == [0.0, 0.0, 2.0, 0.0]
     assert episode.length_steps[0] == 0  # world 0's episode is still running
 
     diagnostics.start_episodes(torch.tensor([False, True]), moved, TARGET, RANGE)

@@ -112,8 +112,11 @@ ended, and every other value as a mean over those episodes.
 | `body_contact_share`, `leg_contact_share` | `(W, N)` | Share of steps with the body on the ground, or legs touching |
 | `foot_contact_share` | `(W, N, 2)` | Share of steps each foot was on the ground |
 | `upside_down_share` | `(W,)` | Share of steps with the head upside down |
+| `start_bearing` | `(W,)` | The target's bearing from the head's forward direction at the start, either way, rad: from 0 (ahead) to π (behind) |
+| `arrived_by_bearing` | `(W, 4)` | 1 in the column of the start bearing's class if the episode arrived, else 0: ahead (below 45°), side (45° to 90°), behind side (90° to 135°), behind (135° to 180°) |
+| `arrival_steps_by_bearing` | `(W, 4)` | The length of an episode that arrived, in the column of its start bearing's class, else 0 |
 
-Five of these values are also counted in **histograms**, so that the report
+Six of these values are also counted in **histograms**, so that the report
 can show how the episodes spread and not only their mean. With many worlds, a
 mean hides whether every episode went halfway or some arrived while the rest
 flipped over. The bins are fixed, the same for every run:
@@ -125,6 +128,7 @@ flipped over. The bins are fixed, the same for every run:
 | `distance_closed` | From −100% to 100% in steps of 10% |
 | `length_steps` | Edges at 0, 16, 24, 32, 48, 64, … 12,288, 16,384 steps: each about 1.5 times the last, including every power of two, so that a time limit such as 1,024 or 8,192 steps starts its own bin and time-outs are not mixed with arrivals |
 | `upside_down_share` | From 0% to 100% in steps of 10% |
+| `start_bearing` | Four classes of 45°: ahead, side, behind side, behind |
 
 Values beyond the outer edges count in the first or the last bin.
 
