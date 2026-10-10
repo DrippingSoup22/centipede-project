@@ -77,6 +77,8 @@ class CPUBackend:
         self._foot_planar_position = self.physical_state.foot_planar_position.numpy()
         self._spine_yaw_position = self.physical_state.spine_yaw_position.numpy()
         self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
+        self._foot_normal_force = self.physical_state.foot_normal_force.numpy()
+        self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
@@ -226,6 +228,7 @@ class CPUBackend:
             self._body_linear_velocity[world_index, segment_index] = site_velocity[3:]
 
         self._read_contacts(world_index)
+        self._read_foot_normal_forces(world_index)
 
     def _read_contacts(self, world_index: int) -> None:
         """Set one world's four contact flags from MuJoCo's current contact list.
@@ -266,3 +269,35 @@ class CPUBackend:
             ground_flag = ground_flags.get(int(categories[other_geom_id]))
             if ground_flag is not None:
                 ground_flag[world_index, owner_indices[other_geom_id]] = True
+
+    def _read_foot_normal_forces(self, world_index: int) -> None:
+        """Sum the normal force of every contact of each foot, in newtons.
+
+        The constraint solver gives each contact a few rows in ``efc_force``,
+        starting at its ``efc_address``. With MuJoCo's elliptic friction cone,
+        as in the models, the first row is the normal force; with a pyramidal
+        cone, the normal force is the sum of the contact's ``2 (dim - 1)``
+        rows (one row for a frictionless contact), as in MuJoCo's own touch
+        sensor. A contact the solver left out
+        (``efc_address`` below 0) carries no force. Any contact of a foot
+        counts, with the floor or with another leg.
+        """
+        forces = self._foot_normal_force[world_index]
+        forces[:] = 0.0
+        data = self.world_data[world_index]
+        owner_indices = self.mapping.geom_owner_indices
+        categories = self.mapping.geom_categories
+        foot_sides = {LEFT_FOOT_CATEGORY: 0, RIGHT_FOOT_CATEGORY: 1}
+
+        contact = data.contact
+        for geom_ids, efc_address, dimension in zip(
+            contact.geom, contact.efc_address, contact.dim, strict=True
+        ):
+            if efc_address < 0:
+                continue
+            row_count = max(2 * (dimension - 1), 1) if self.pyramidal_cone else 1
+            normal_force = data.efc_force[efc_address : efc_address + row_count].sum()
+            for geom_id in geom_ids:
+                side = foot_sides.get(int(categories[geom_id]))
+                if side is not None:
+                    forces[owner_indices[geom_id], side] += normal_force

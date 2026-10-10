@@ -336,6 +336,7 @@ more end it (below).
 | `foot_planar_position` | `(W, N, 2, 2)` | World `x`, `y` of each segment's left and right foot | Not observed; rewards only |
 | `spine_yaw_position` | `(W, N)` | Angle of the spine joint behind the segment, rad; 0 for the rear | With spine control, after the target values |
 | `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values |
+| `foot_normal_force` | `(W, N, 2)` | Normal force on each segment's left and right foot, N | Not observed; the clocks' [load feedback](#clocks) only |
 
 In the block, contact flags become 0 or 1. A segment never observes its position
 in the world.
@@ -366,6 +367,19 @@ happened along the way:
 | Ground and a leg part that is not a foot | Nothing |
 | Two leg or foot parts, even of the same segment | `leg_leg_contact` of both owners |
 | A leg and a body | Nothing |
+
+**The feet's normal forces.** `foot_normal_force` is, for each foot, the sum
+of the normal forces of all its contacts, with the floor or with another
+leg, at the end of the step like the flags. MuJoCo's constraint solver gives
+every contact a few rows of constraint forces (`efc_force`, one entry per
+row): with the models' elliptic friction cone, the contact's first row is its
+normal force; with a pyramidal cone, the normal force is the sum of its
+`2 (dim − 1)` rows, `dim` being the contact's number of directions. This is
+the arithmetic of MuJoCo's touch sensor, and of MuJoCo Warp's, which the GPU
+backend follows over its pool of contacts from all worlds. Model v4 standing
+on its feet with its legs at the model's pose (0.643 g, a weight of
+6.31 mN) settles within 0.1 s: its sixteen feet then carry 1.0000 of its
+weight, each about half of its segment's 0.79 mN (0.47 to 0.61).
 
 ### What each segment sees
 

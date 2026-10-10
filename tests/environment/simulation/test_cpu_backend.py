@@ -287,6 +287,34 @@ def test_contact_flags_follow_the_contact_list(model, mapping):
     assert all(seen.values()), seen
 
 
+@pytest.mark.parametrize("cone", ["elliptic", "pyramidal"])
+def test_the_feet_carry_a_standing_bodys_weight(cone):
+    """Model v4's position actuators hold the legs at the model's pose, so the
+    body settles on its feet. Each foot's force is the normal part of MuJoCo's
+    own contact forces on it, and all of them together carry the body."""
+    model = mujoco.MjModel.from_xml_path("models/assembly_v4.xml")
+    model.opt.cone = getattr(mujoco.mjtCone, f"mjCONE_{cone.upper()}")
+    backend = make_backend(model, ModelMapping.from_model(model), world_count=1)
+    for _ in range(5):
+        backend.step(torch.zeros(1, SEGMENT_COUNT, 6))
+
+    data = backend.world_data[0]
+    expected = np.zeros((SEGMENT_COUNT, 2))
+    contact_force = np.zeros(6)
+    for contact_index in range(data.ncon):
+        mujoco.mj_contactForce(model, data, contact_index, contact_force)
+        for geom_id in data.contact.geom[contact_index]:
+            name = model.geom(geom_id).name
+            for side_index, side in enumerate(("left", "right")):
+                if name.endswith(f"_{side}_foot"):
+                    expected[int(name.split("_")[1]), side_index] += contact_force[0]
+
+    actual = backend.physical_state.foot_normal_force[0].numpy()
+    assert np.allclose(actual, expected, rtol=1e-5, atol=0)
+    weight = model.body_subtreemass[model.body("segment_00").id] * 9.81
+    assert actual.sum() == pytest.approx(weight, rel=0.01)
+
+
 # -- Failure -------------------------------------------------------------------
 
 

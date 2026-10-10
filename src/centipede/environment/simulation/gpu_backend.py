@@ -315,6 +315,67 @@ def _read_contact_flags(
         right_foot_ground_contact[world_index, owner_index] = True
 
 
+@wp.kernel
+def _read_foot_normal_forces(
+    # In: model
+    pyramidal_cone: bool,
+    # In: data
+    nacon: wp.array1d[int],
+    contact_geom: wp.array1d[wp.vec2i],
+    contact_worldid: wp.array1d[int],
+    contact_dim: wp.array1d[int],
+    contact_efc_address: wp.array2d[int],
+    efc_force: wp.array2d[float],
+    # In: tables
+    geom_owner_indices: wp.array1d[int],
+    geom_categories: wp.array1d[int],
+    # Out
+    foot_normal_force: wp.array3d[float],
+) -> None:
+    """Add each foot contact's normal force to its foot, in newtons.
+
+    Launched with one thread per pool slot, like ``_read_contact_flags``. The
+    arithmetic is that of the CPU backend and of MuJoCo Warp's own touch
+    sensor (``_sensor_touch``): the contact's first constraint row is its
+    normal force, and with a pyramidal friction cone its first ``2 (dim - 1)``
+    rows together. MuJoCo Warp keeps every row's address, and each world's
+    constraint forces in its own row of ``efc_force``. Several contacts may
+    touch one foot, so the forces are added atomically into a cleared array.
+    """
+    contact_index = wp.tid()
+    if contact_index >= nacon[0]:
+        return
+    efc_address = contact_efc_address[contact_index, 0]
+    if efc_address < 0:
+        return
+
+    world_index = contact_worldid[contact_index]
+    normal_force = efc_force[world_index, efc_address]
+    if pyramidal_cone:
+        for row in range(1, 2 * (contact_dim[contact_index] - 1)):
+            normal_force += efc_force[
+                world_index, contact_efc_address[contact_index, row]
+            ]
+
+    pair = contact_geom[contact_index]
+    for end in range(2):
+        geom_id = pair[end]
+        category = geom_categories[geom_id]
+        side = -1
+        if category == LEFT_FOOT_CATEGORY:
+            side = 0
+        elif category == RIGHT_FOOT_CATEGORY:
+            side = 1
+        if side >= 0:
+            wp.atomic_add(
+                foot_normal_force,
+                world_index,
+                geom_owner_indices[geom_id],
+                side,
+                normal_force,
+            )
+
+
 class GPUBackend:
     """Runs every world at once on the GPU with MuJoCo Warp.
 
@@ -409,6 +470,8 @@ class GPUBackend:
         self._right_foot_ground_contact = wp.from_torch(state.right_foot_ground_contact)
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
+        self._foot_normal_force = wp.from_torch(state.foot_normal_force)
+        self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
 
         # The simulation's category, as views of MuJoCo Warp's own arrays: the
         # physics refreshes them, so nothing is copied per step.
@@ -599,7 +662,8 @@ class GPUBackend:
 
         Run after ``forward``, so that site positions, orientations, velocities
         and contacts all belong to the current positions and speeds. The
-        contact kernel only sets flags, so they are cleared before it runs.
+        contact kernels only set flags and add forces, so the flags and the
+        feet's forces are cleared before they run.
         """
         wp.launch(
             kernel=_read_segment_state,
@@ -661,5 +725,24 @@ class GPUBackend:
                 self._body_ground_contact,
                 self._leg_leg_contact,
             ],
+            device=self.device,
+        )
+
+        self._foot_normal_force.zero_()
+        wp.launch(
+            _read_foot_normal_forces,
+            dim=self.gpu_data.naconmax,
+            inputs=[
+                self.pyramidal_cone,
+                self.gpu_data.nacon,
+                self.gpu_data.contact.geom,
+                self.gpu_data.contact.worldid,
+                self.gpu_data.contact.dim,
+                self.gpu_data.contact.efc_address,
+                self.gpu_data.efc.force,
+                self.geom_owner_indices,
+                self.geom_categories,
+            ],
+            outputs=[self._foot_normal_force],
             device=self.device,
         )

@@ -12,7 +12,8 @@ class PhysicalState:
     The first ten fields form each segment's observation block, in order; the
     next three are used only for rewards and targets. The spine fields describe,
     for each segment, the yaw joint that joins it to the segment behind; the
-    rear segment has none, and its entries stay zero.
+    rear segment has none, and its entries stay zero. The last field, the
+    normal force on each foot, is used only by the clocks' load feedback.
 
     The tensors are created once and overwritten in place by every ``step()``
     and ``reset()``. After either returns, they describe the current state of
@@ -35,6 +36,7 @@ class PhysicalState:
     foot_planar_position: torch.Tensor  # (W, N, 2, 2), left and right, world x, y
     spine_yaw_position: torch.Tensor  # (W, N), joint behind the segment, rad
     spine_yaw_velocity: torch.Tensor  # (W, N), joint behind the segment, rad/s
+    foot_normal_force: torch.Tensor  # (W, N, 2), left and right, N
 
     @classmethod
     def allocate(
@@ -64,4 +66,5 @@ class PhysicalState:
             foot_planar_position=zeros(n, 2, 2),
             spine_yaw_position=zeros(n),
             spine_yaw_velocity=zeros(n),
+            foot_normal_force=zeros(n, 2),
         )

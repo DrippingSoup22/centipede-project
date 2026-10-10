@@ -337,7 +337,15 @@ def test_gpu_physics_matches_cpu_physics_under_zero_commands(model_path):
     floor, and v4's position actuators hold the legs at the model's pose,
     angle zero. Neither is chaotic, unlike random flailing, so positions and
     orientations must agree after 60 ms; speeds and contact flags at the
-    moment of impact are too sensitive to compare."""
+    moment of impact are too sensitive to compare.
+
+    The feet's normal forces are compared within 5% of the weight one
+    segment carries (0.79 mN). Many contacts share the body's weight, and
+    the solver's split among them is not unique: it stops at its tolerance,
+    in 32-bit floats on the GPU. Measured with the conjugate-gradient
+    solver, v4 standing on its feet agreed within 0.1% of a segment's
+    weight, and v3, lying on its body with the feet barely loaded, within
+    2.4%."""
     cpu_model = mujoco.MjModel.from_xml_path(model_path)
     cpu_model.opt.solver = SOLVERS[SOLVER]
     gpu_model = mujoco.MjModel.from_xml_path(model_path)
@@ -354,12 +362,16 @@ def test_gpu_physics_matches_cpu_physics_under_zero_commands(model_path):
         cpu.step(torch.zeros(2, mapping.segment_count, 6))
         gpu.step(torch.zeros(2, mapping.segment_count, 6, device="cuda"))
 
+    segment_weight = (
+        cpu_model.body_subtreemass[mapping.body_ids[0]] * 9.81 / mapping.segment_count
+    )
     for field, tolerance in (
         ("body_height", 1e-4),
         ("body_planar_position", 1e-4),
         ("head_tip_position", 1e-4),
         ("body_quaternion", 1e-2),
         ("leg_joint_position", 1e-2),
+        ("foot_normal_force", 0.05 * segment_weight),
     ):
         expected = getattr(cpu.physical_state, field)
         actual = getattr(gpu.physical_state, field).cpu()
