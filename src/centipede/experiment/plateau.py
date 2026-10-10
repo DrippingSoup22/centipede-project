@@ -25,10 +25,12 @@ their learning has failed.
 A run also stops once its task is solved: when the task's average reaches
 ``solved_task`` (the curriculum's final level plus the solved arrival
 share) and the speed, the targets reached per world and minute, has not
-risen for ``cycles`` cycles, again never before ``minimum_cycles``. A
-centipede that nearly always arrives can still learn to arrive sooner, so
-the run goes on while it gets faster. The speed is read as its logarithm,
-so that ``min_progress`` counts as a relative rise: 0.02 is 2%.
+risen for ``cycles`` cycles, nor the wave in a run with clocks, again
+never before ``minimum_cycles``. A centipede that nearly always arrives
+can still learn to arrive sooner, and its segments may still find a
+common wave, so the run goes on while either improves. The speed is read
+as its logarithm, so that ``min_progress`` counts as a relative rise: 0.02
+is 2%.
 """
 
 import math
@@ -102,10 +104,11 @@ class Plateau:
         )
 
     def solved(self, cycle: int) -> bool:
-        """Whether the task's average has reached ``solved_task`` and the speed
-        has not risen for ``cycles`` cycles, and the run has trained its
-        ``minimum_cycles``."""
+        """Whether the task's average has reached ``solved_task``, neither the
+        speed nor the wave (in a run with clocks) has risen for ``cycles``
+        cycles, and the run has trained its ``minimum_cycles``."""
         task, speed = self.signals.get("task"), self.signals.get(SPEED)
+        wave = self.signals.get("wave")
         return (
             self.solved_task is not None
             and cycle >= self.minimum_cycles
@@ -114,4 +117,5 @@ class Plateau:
             and task.average is not None
             and task.average >= self.solved_task
             and speed.stalled(cycle, self.cycles)
+            and (wave is None or wave.stalled(cycle, self.cycles))
         )

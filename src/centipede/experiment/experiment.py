@@ -394,6 +394,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             )
         elif stopping and cycle < total_cycles and solved:
             task, speed = plateau.signals["task"], plateau.signals["speed"]
+            wave = plateau.signals.get("wave")
             share = task.average - (0.0 if curriculum is None else 1.0)
             stop_message = (
                 f"Stopped after cycle {cycle} of {total_cycles}: the task is solved."
@@ -403,7 +404,15 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 f" {share:.3f} (at least {run_settings.solved_arrival_share:g}),"
                 f" and the targets per world and minute last rose by"
                 f" {plateau.min_progress:.0%} at cycle {speed.best_cycle}, to"
-                f" {math.exp(speed.best):.2f}."
+                f" {math.exp(speed.best):.2f}"
+                + (
+                    ""
+                    if wave is None
+                    else f"; the wave consistency last rose by"
+                    f" {plateau.min_progress:g} at cycle {wave.best_cycle}, to"
+                    f" {wave.best:.3f}"
+                )
+                + "."
             )
         elif stopping and cycle < total_cycles:
             measure = "arrival share" + (" + level" if curriculum is not None else "")

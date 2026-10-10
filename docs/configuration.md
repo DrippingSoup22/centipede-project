@@ -105,7 +105,7 @@ The `[run]` settings of a training file:
 | `plateau_cycles` | 0 | Stops a run that has stopped improving: once its progress, averaged over the last three episode lengths, has not risen by `plateau_progress` for this many cycles, it records one more episode length and stops with a checkpoint (see [The plateau stop](#the-plateau-stop)). 0: never |
 | `plateau_progress` | 0.02 | The rise of the progress that counts as improving |
 | `plateau_minimum_cycles` | 128 with clocks, else 0 | The plateau stop never ends a run before this many cycles: with `[environment] clocks`, the segments first need time to find a common tempo and their offsets |
-| `solved_arrival_share` | 0.95 | With `plateau_cycles`, a run also stops once its task is solved: its arrival share, averaged like the progress, reaches this at the curriculum's final level (at any time without a curriculum), and its targets per world and minute have not risen by `plateau_progress` (as a relative rise: 0.02 is 2%) for `plateau_cycles` cycles ([The plateau stop](#the-plateau-stop)) |
+| `solved_arrival_share` | 0.95 | With `plateau_cycles`, a run also stops once its task is solved: its arrival share, averaged like the progress, reaches this at the curriculum's final level (at any time without a curriculum), and its targets per world and minute have not risen by `plateau_progress` (as a relative rise: 0.02 is 2%) for `plateau_cycles` cycles, nor, with clocks, the wave ([The plateau stop](#the-plateau-stop)) |
 
 A complete training file, with every section written out:
 
@@ -285,8 +285,10 @@ centipede that nearly always arrives can still learn to arrive sooner: in
 the oscillators' run 04 the arrivals reached 99% while its targets per
 minute still rose from about 8 to 12.6, so the run goes on while it gets
 faster. The speed is averaged as its logarithm, so `plateau_progress`
-counts as a relative rise (0.02 is 2%). The wave does not hold this stop
-back, and `plateau_minimum_cycles` applies to it too. The run then ends as
+counts as a relative rise (0.02 is 2%). In a run with clocks the wave must
+also have stopped rising, since the segments may find a common wave only
+after the head has solved the task, and `plateau_minimum_cycles` applies
+to this stop too. The run then ends as
 at a plateau, with one more recorded episode length, and the console and
 the report say that the task is solved, with the arrival share and the
 cycle of the speed's last rise. Harder targets are then the next run's,
