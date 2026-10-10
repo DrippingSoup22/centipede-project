@@ -33,7 +33,7 @@ from centipede.environment.simulation.simulation import (  # noqa: E402
 )
 
 SOLVER = "newton" if torch.cuda.get_device_capability() >= (7, 0) else "cg"
-# Physics steps per action of the model the tests use, model v3.
+# Physics steps per action of the models the tests use, v3 and v4 (the same).
 STEPS = physics_steps_per_action(mujoco.MjModel.from_xml_path("models/assembly_v3.xml"))
 
 
@@ -328,14 +328,19 @@ def test_contact_flags_follow_the_contact_pool(model, mapping):
     assert all(seen.values()), seen
 
 
-def test_gpu_physics_matches_cpu_physics_while_settling():
-    """From the same state, with motors off, both backends let the body sink
-    onto the floor in the same way. Settling is not chaotic, unlike random
-    flailing, so positions and orientations must agree after 60 ms; speeds and
-    contact flags at the moment of impact are too sensitive to compare."""
-    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+@pytest.mark.parametrize(
+    "model_path", ["models/assembly_v3.xml", "models/assembly_v4.xml"]
+)
+def test_gpu_physics_matches_cpu_physics_under_zero_commands(model_path):
+    """From the same state, with every command at zero, both backends move
+    the body in the same way: v3's motors are off, so the body sinks onto the
+    floor, and v4's position actuators hold the legs at the model's pose,
+    angle zero. Neither is chaotic, unlike random flailing, so positions and
+    orientations must agree after 60 ms; speeds and contact flags at the
+    moment of impact are too sensitive to compare."""
+    cpu_model = mujoco.MjModel.from_xml_path(model_path)
     cpu_model.opt.solver = SOLVERS[SOLVER]
-    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    gpu_model = mujoco.MjModel.from_xml_path(model_path)
     mapping = ModelMapping.from_model(cpu_model)
     cpu = CPUBackend(cpu_model, mapping, world_count=2, physics_steps_per_action=STEPS)
     cpu.reset(seed=1)

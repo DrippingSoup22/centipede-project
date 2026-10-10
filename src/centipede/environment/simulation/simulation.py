@@ -32,9 +32,11 @@ class PhysicsSimulation:
 
     It loads the model named in the settings, checks it against the segment
     contract and the action's duration, and runs every world on the chosen
-    backend. ``physical_state`` is refreshed in place by every ``reset`` and
-    ``step``, and so is ``diagnostics.facts``, the simulation's diagnostics
-    category.
+    backend. Leg actions run from -1 to 1 whatever the model: when its legs
+    take target angles (model v4), each action is mapped onto its joint's
+    range before the backend applies it. ``physical_state`` is refreshed in
+    place by every ``reset`` and ``step``, and so is ``diagnostics.facts``, the
+    simulation's diagnostics category.
     """
 
     def __init__(self, settings: SimulationSettings) -> None:
@@ -75,6 +77,18 @@ class PhysicsSimulation:
         self.physical_state = self._backend.physical_state
         self.diagnostics = self._backend.diagnostics
 
+        # Legs that take angles: the middle and half the width of each leg
+        # joint's range, (N, 6) each, which the mapping checked is the range
+        # of angles its motor accepts. None when the legs take torques.
+        self._leg_angle_range: tuple[torch.Tensor, torch.Tensor] | None = None
+        if mapping.legs_take_angles:
+            lower, upper = torch.as_tensor(
+                model.actuator_ctrlrange[mapping.leg_actuator_ids],
+                dtype=torch.float32,
+                device=self.physical_state.body_height.device,
+            ).unbind(dim=-1)
+            self._leg_angle_range = ((lower + upper) / 2, (upper - lower) / 2)
+
     def reset(
         self, world_mask: torch.Tensor | None = None, seed: int | None = None
     ) -> None:
@@ -87,6 +101,12 @@ class PhysicsSimulation:
         """Hold the (W, N, 6) leg and (W, N - 1) spine actions for one step.
 
         Spine command ``i`` drives the joint between segments ``i`` and ``i + 1``;
-        without spine actions, the spine motors receive zero.
+        without spine actions, the spine motors receive zero. When the legs
+        take angles, each leg action becomes a target angle on its joint's
+        range: -1 its lower limit, 0 its middle, 1 its upper limit. Nothing is
+        clipped; MuJoCo holds each target within its range.
         """
+        if self._leg_angle_range is not None:
+            middle, half_width = self._leg_angle_range
+            leg_actions = torch.addcmul(middle, leg_actions, half_width)
         self._backend.step(leg_actions, spine_actions)

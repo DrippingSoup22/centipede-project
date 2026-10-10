@@ -95,7 +95,10 @@ entry `i` for the joint between segments `i` and `i + 1`, with their joints'
 addresses. It then
 checks that each motor's name matches the owning segment stored in the XML, that
 it drives the right joint and accepts commands from −1 to 1, and that every motor
-is found exactly once with none left over (`6N + N − 1`, which is 55 for v1). It
+is found exactly once with none left over (`6N + N − 1`, which is 55 for v1). A
+leg motor may instead take target angles, as in model v4: a MuJoCo position
+actuator with gear 1 that accepts exactly its joint's range. The leg motors
+must all take torques or all take angles, and the simulation records which. It
 also checks that every collision shape records its owning segment and its
 category (floor, body, leg, left foot, right foot, or membrane; see
 [model.md](model.md#contacts-and-friction)). From the head's body shape it
@@ -121,6 +124,17 @@ Each segment controls only its own two legs. Its action is six numbers between
 | 3 | Right shoulder sweep |
 | 4 | Right shoulder lift |
 | 5 | Right knee |
+
+**Torques or target angles.** What a leg action asks for depends on the
+model's leg motors. In models v1 to v3 they are torque motors, and an action is
+a share of the joint's maximum torque. In model v4 they are position actuators
+([model.md](model.md#model-v4)): the simulation maps each action linearly onto
+its joint's range, −1 to the lower limit and 1 to the upper, so 0 is the middle
+of the range, and the actuator pulls the joint toward that target angle at
+every physics step. The model's pose, every leg angle at 0, is the action 0 for
+the sweep, −0.231 for the lift, and −0.429 for the knee. The mapping is one
+tensor operation per step in the simulation's front file, the same for both
+backends, and clips nothing: MuJoCo keeps each target within its joint's range.
 
 With **spine control** (`spine_control = true`), every segment but the rear
 also commands the spine yaw motor of the joint **behind** it, as a seventh
@@ -159,7 +173,8 @@ Actions are never clipped, because the executed action must be exactly the one
 the agent learns from.
 
 An action is held for **20 ms**, or 50 decisions per second: as many physics
-steps as the model's timestep fits into it, 134 steps of 0.149 ms for model v3.
+steps as the model's timestep fits into it, 134 steps of 0.149 ms for models v3
+and v4.
 The simulation computes that number from the model and rejects a model whose
 timestep does not divide 20 ms evenly. On the GPU, an action's physics steps
 are replayed from a CUDA graph recorded on the first step, so the CPU does not
@@ -196,7 +211,7 @@ Known differences of the GPU backend:
   at rest already reaches 40 contacts and 256 constraint rows.
 - Its default Newton solver needs a GPU of the Volta generation (compute
   capability 7.0) or newer, such as a T4; older GPUs such as the MX330 or the
-  P100 cannot compile it. With models v2 and v3, the MX330 can run the GPU
+  P100 cannot compile it. With models v2 to v4, the MX330 can run the GPU
   backend using the conjugate-gradient solver (`gpu_solver = "cg"`), slowly and
   less converged, which is enough for functional tests.
 
@@ -792,7 +807,7 @@ These are the keys of the environment sections of the configuration file (see
 | `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |
 | `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays |
 | `movement_cost_parts` | 0 | The [movement cost](#optional-costs)'s parts of the cost budget; 0 is off |
-| `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3) |
+| `random_command_movement_deg` | 25 | The movement cost's unit: how far a joint moves in one step under random commands (the root of the mean square, measured for model v3). It was measured with v3's torque motors and does not hold for v4, whose leg actions are target angles |
 | `command_cost_ratio` | 0 | The [command cost](#optional-costs)'s weight `w_command`, in step costs: each step a segment pays this many times the step cost's weight times `C_i`; 0 is off. Outside the cost budget, so rule R1 no longer holds when it is set. Gymnasium's Ant charges 0.5 times the sum of its 8 squared commands against a reward of 1 per healthy step, a ratio of 4 |
 | `cost_budget_parts` | The costs' parts together | How many equal parts the budget is split into; more than the costs' parts leaves some unused, fewer makes the costs overspend it |
 | `cost_horizon_steps` | `max_episode_steps` | The cost horizon: the rules are measured over an approach of this many steps ("Why a cost horizon" under [The rules](#the-rules)); shorter than the episode, it makes every cost and the progress weigh more against the arrival |

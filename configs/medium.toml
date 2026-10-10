@@ -12,7 +12,7 @@ seed = 1
 checkpoint_every_cycles = 4
 
 [environment.simulation]
-model_path = "models/assembly_v3.xml"
+model_path = "models/assembly_v4.xml"
 backend = "gpu"
 world_count = 256
 

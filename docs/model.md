@@ -7,16 +7,19 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The current model is **v3**, used for training. It is v2 with a longer physics
+The current model is **v4**, used for training. It is v3 with position
+actuators on the legs, whose commands are target angles, and weaker lift and
+knee motors (see [Model v4](#model-v4)). v3 is v2 with a longer physics
 timestep (see [Model v3](#model-v3)). v2 has exactly the body and physics of the
-original **v1 flat-ground baseline**. v2 and v1 are kept unchanged for
-reference. All three are frozen: training work may change observations,
+original **v1 flat-ground baseline**. v3, v2 and v1 are kept unchanged for
+reference. All four are frozen: training work may change observations,
 rewards, targets, and learning, but never a model. A physical change requires a
 new, separately named version with its own validation.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, the complete centipede used for training | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
+| [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, the complete centipede used for training | `930ffd8fb32a5c3640a88f2c1cf8cedcc4ac87ecab16481557079faf77478a56` |
+| [`models/assembly_v3.xml`](../models/assembly_v3.xml) | v3, the same body with torque motors on the legs | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
 | [`models/assembly.xml`](../models/assembly.xml) | v1, the original baseline | `92143cf54b030856e436a1de6f4333c327ffb9a5f812a0e4a0b4c4aed107d50e` |
 | [`models/segment.xml`](../models/segment.xml) | One isolated trunk unit, for reference | |
@@ -46,7 +49,8 @@ v2 changes three things and nothing else:
   joint of the head's body, `segment_00`, which must be a child of the world:
   turning it turns the whole centipede, which is how a reset varies the
   starting heading.
-- 69 position coordinates, 68 velocity coordinates, and 55 motors.
+- 69 position coordinates, 68 velocity coordinates, and 55 motors: 48 on the
+  legs and 7 on the spine.
 - Total mass 643.4 mg.
 
 This is a simplified centipede. It keeps the body chain, paired legs, the main
@@ -95,8 +99,8 @@ for several real leg joints.
 | Joint | Range | Maximum torque | Damping | Armature |
 | --- | ---: | ---: | ---: | ---: |
 | Shoulder sweep | ±40° | ±8 µN·m | 2e-7 N·m·s/rad | 2e-11 kg·m² |
-| Shoulder lift | −25° to +40° | ±18 µN·m | 2e-7 N·m·s/rad | 2e-11 kg·m² |
-| Knee | −20° to +50° | ±10 µN·m | 1e-7 N·m·s/rad | 2e-12 kg·m² |
+| Shoulder lift | −25° to +40° | ±18 µN·m (v4: ±13.5) | 2e-7 N·m·s/rad | 2e-11 kg·m² |
+| Knee | −20° to +50° | ±10 µN·m (v4: ±7.5) | 1e-7 N·m·s/rad | 2e-12 kg·m² |
 
 The upper link starts 10° below horizontal, so the lift range corresponds to
 roughly −35° to +30° of real elevation. The two links start 25° apart, giving a
@@ -104,7 +108,7 @@ knee bend of about 5° to 75°.
 
 The sweep range is based on measured leg motion in *S. polymorpha*. No suitable
 3D measurements were found for lift or the knee, so those ranges are engineering
-approximations.
+approximations, and so are all the maximum torques.
 
 ## Spine
 
@@ -125,15 +129,20 @@ smaller engineering approximation.
 
 ## Motors
 
-All 55 motors take a command between −1 and 1, which the model scales to the
-maximum torques above. The head owns its six leg motors; every other unit owns
-its six leg motors and the yaw motor connecting it to the unit ahead, giving
-6 × 8 + 7 = 55. Pitch has no motor. Each motor's owning unit is also stored in the
-XML (`actuator_user`), so ownership can be checked without relying on the order
-of motors in the file. Ownership says which unit a motor sits in; which agent
-commands it is the environment's choice: with spine control, each yaw motor is
-commanded by the unit ahead of its joint. How motors become agent actions is
-described in [environment.md](environment.md#actions-and-timing).
+In v1 to v3, all 55 motors are torque motors: each takes a command between −1
+and 1, which the model scales to the maximum torques above. In v4, the 48 leg
+motors are position actuators instead: each takes a target angle within its
+joint's range and pulls the joint toward it at every physics step, with a
+torque limited to the joint's maximum (see [Model v4](#model-v4)); the seven
+spine yaw motors stay torque motors. The head owns its six leg motors; every
+other unit owns its six leg motors and the yaw motor connecting it to the unit
+ahead, giving 6 × 8 + 7 = 55. Pitch has no motor. Each motor's owning unit is
+also stored in the XML (`actuator_user`), so ownership can be checked without
+relying on the order of motors in the file. Ownership says which unit a motor
+sits in; which agent commands it is the environment's choice: with spine
+control, each yaw motor is commanded by the unit ahead of its joint. How
+motors become agent actions is described in
+[environment.md](environment.md#actions-and-timing).
 
 ## Mass and inertia
 
@@ -236,8 +245,9 @@ These checks show the model is stable and mechanically capable. They do not show
 that it can walk; that is what learning has to achieve.
 
 With every motor off, the body cannot hold itself up: it settles onto its belly
-within about 33 ms, in both versions. Holding the body off the ground is the
-first thing the agents have to learn.
+within about 33 ms, in v1 to v3. Holding the body off the ground was the first
+thing their agents had to learn. In v4, legs held at the model's pose carry the
+body by themselves (see [Model v4](#model-v4)).
 
 v2 was checked against v1 with these results. The automated tests in
 `tests/models/test_model_v2.py` repeat the first three checks and one of the
@@ -296,6 +306,127 @@ that settling for 2 s with motors off ends with the same contacts and body
 positions within 0.013 mm of v2's (deepest penetration 0.020 mm against
 0.018 mm), and that no leg passes through a body under random commands.
 
+## Model v4
+
+v4 is v3 with two changes, both in the leg motors. The bodies, joints, masses,
+contacts, sites, spine motors, and physics settings are v3's.
+
+**1. The legs take target angles.** Each of the 48 leg motors is a MuJoCo
+position actuator instead of a torque motor. Its command is the angle its
+joint should reach, and at every physics step it applies the torque
+
+```text
+torque = kp × (target − angle) − kv × angular speed
+```
+
+limited to the joint's maximum torque. A leg can then follow a step shape,
+the angles that its clock's phase asks for, which a torque motor does not
+track by itself. This is the layer that CPG-RL (Bellegarda and Ijspeert, 2022)
+has below its policy: there, the joint angles a step shape asks for are
+tracked by a PD controller at 1 kHz; here, the position actuators track them
+at every 0.149 ms physics step. The seven spine yaw motors stay torque motors.
+
+Each leg actuator accepts its joint's range, in radians: `inheritrange="1"`
+copies the joint's range, whereas a command range written into the XML would
+not be converted from degrees by the compiler's `angle="degree"`. The gear is
+1, so the actuator's force range is the joint's maximum torque. The values are
+set once for each joint role, in three default classes (`leg_sweep`,
+`leg_lift`, `leg_knee`). How the agents' actions, from −1 to 1, become target
+angles is described in
+[environment.md](environment.md#actions-and-timing).
+
+**2. Weaker lift and knee.** In training runs with v3, the followers' feet
+touched the ground only 25% to 29% of the time, so some segments were very
+likely carried by their neighbours: with v3's maximum torques, the legs of two
+segments can carry the whole body (see Carrying below). v4 scales v3's lift and
+knee torques by 0.75, to 13.5 and 7.5 µN·m, so that the legs of three segments
+can carry the body and those of two cannot. The sweep keeps 8 µN·m; standing
+loads only the lift and the knee.
+
+**Gains.** Every leg actuator has kp = 2e-4 N·m/rad and kv = 1e-7 N·m·s/rad,
+chosen from the measured step response of one leg in the air: the head is
+welded to the world 20 mm above the floor, every target is the model's pose,
+and the target of one joint of the head's left leg steps from 0° to 20° and
+back. The damping ratio counts the joint's own damping and kv:
+
+| Joint | Inertia moved | Damping ratio | 90% of the step | Overshoot | Within 2% after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Shoulder sweep | 9.3e-11 kg·m² | 1.10 | 8.5 ms | None | 10.0 ms |
+| Shoulder lift | 1.0e-10 kg·m² | 1.04 | 5.5 ms | 0.16% at most | 7.0 ms |
+| Knee | 1.9e-11 kg·m² | 1.64 | 4.6 ms | 0.03% at most | 5.8 ms |
+
+The sweep cannot be much faster: its maximum torque against the joint's own
+damping, 8e-6 N·m against 2e-7 N·m·s/rad, limits it to 40 rad/s, so 20° takes
+at least 8.7 ms. kv acts within the torque limit, so it does not slow that
+part. Without kv, kp above 1e-4 overshoots (the lift by about 3% at 2e-4); the
+first estimate, kp = 6e-5, damps the motion more than needed, settles the
+sweep only after 13.9 ms, and lets the standing body sink 0.8 mm. MuJoCo
+integrates the actuators' stiffness explicitly (the `implicitfast` integrator
+treats only velocity-dependent forces implicitly), which stays stable while
+the fastest natural frequency times the timestep is below 2. On its three
+actuators, a leg's fastest natural frequency is 5,100 rad/s, which gives 0.76
+at 0.149 ms. A quarter of the timestep changes the step responses by at most
+0.1°.
+
+**Standing.** With every leg target at the model's pose for 2 s, the body
+settles within 20 ms and stays 4.78 to 4.85 mm high (head lowest), against
+5.10 mm in the model's pose, whose feet hang 0.05 mm above the floor. Under
+the body's weight, the lift joints sit at most 1.3° from their targets and the
+knees at most 0.7°; all 16 feet are on the ground and no body touches it. v3
+with every motor off lies on its belly, 1.70 mm high, after 40 ms.
+
+**Carrying.** The body stands for 0.2 s on all its legs; then every segment
+outside a chosen set lifts its legs (lift target 40°), and the body is watched
+for 2 s. The set carries the body if no body shape touches the floor. The sets
+are spread along the body so that its centre of mass, at segment 3.4 (the head
+is heavier), lies between them; then the legs' strength decides. With only the
+front segments standing, even five of them, the body tips back onto its tail
+within 30 ms at any strength, also with ten times v3's torques: that is
+balance, not strength. Of the pairs that bracket the centre of mass, (0, 7),
+(1, 6), (2, 5) and (3, 4), only segments 1 and 6 stand with strong legs; with
+the others, the spine sags between or beyond them onto the floor.
+The smallest share of v3's lift and knee torques at which a set still stands,
+found by bisection with v4's gains:
+
+| Standing segments | Smallest share of v3's torques | Lift / knee torque |
+| --- | ---: | ---: |
+| 0, 4, 7 | 0.605 | 10.9 / 6.1 µN·m |
+| 0, 3, 7 | 0.562 | 10.1 / 5.6 µN·m |
+| 1, 4, 6 | 0.677 | 12.2 / 6.8 µN·m |
+| 1, 6 | 0.893 | 16.1 / 8.9 µN·m |
+
+The lift always gives way first: with a knee ten times stronger, every set
+needs the same lift torque as in the table, while with a lift ten times
+stronger, the knee alone would need only 3 to 6.5 µN·m. With v3's torques,
+segments 1 and 6 carry the body with their lifts at 89% of their maximum. At
+v4's 0.75, near the middle of the window between three segments and two, every
+three-segment set stands, with the body at least 2.1 mm above the floor; for
+segments 0, 4 and 7 the legs are 24% stronger than they must be. Segments 1
+and 6 lower the body onto the floor within 200 ms and would need 19% more
+torque.
+
+**Walking.** As a check before any learning, an open-loop wave drives every leg
+with a fixed step shape, turning twice per second: the sweep swings 20° each
+way about the pose, moving the foot back over half of each turn, and the lift
+raises the leg by up to 16° while the foot comes forward. The right leg runs
+half a turn after the left, and each segment an eighth of a turn after the one
+ahead. With this wave travelling from the head to the tail, the body walks
+forward at 10.1 mm/s (0.3 body lengths per second) for 5 s, about 4.7 mm high,
+with 8.8 of its 16 feet on the ground on average and no body or leg contact;
+travelling from the tail to the head, at 6.7 mm/s. With every segment in
+phase, it does not walk (0.2 mm/s): the legs of one side carry it alone, and it
+rolls onto the other. The feet on the ground slide: with the head leading, a
+foot that stays on the ground through a 20 ms step slides faster than 10 mm/s
+in 44% of such steps.
+
+**Measured and chosen.** The step responses, the standing, carrying, and
+walking results, and the thresholds in the table are measurements in the
+model. The thresholds also depend on the spine's pitch springs and limits,
+which share the load between the standing segments, and on the procedure:
+settling on all legs before lifting the others, and 2 s of watching. The
+gains, the share 0.75, and therefore v4's maximum torques are engineering
+choices made from these measurements, not measured centipede properties.
+
 ## Possible future versions
 
 These are outside v1 and would each be a new model version:
@@ -323,3 +454,8 @@ These are outside v1 and would each be a new model version:
   [DOI](https://doi.org/10.1242/jeb.245261)
 - MuJoCo contact parameters:
   [documentation](https://mujoco.readthedocs.io/en/stable/modeling.html#contact-parameters)
+- MuJoCo position actuators:
+  [documentation](https://mujoco.readthedocs.io/en/stable/XMLreference.html#actuator-position)
+- Bellegarda and Ijspeert (2022), CPG-RL, joint angles from oscillators tracked
+  by PD control, IEEE Robotics and Automation Letters:
+  [DOI](https://doi.org/10.1109/LRA.2022.3218167)

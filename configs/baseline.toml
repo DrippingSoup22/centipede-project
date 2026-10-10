@@ -20,7 +20,7 @@ checkpoint_every_cycles = 8
 max_episode_steps = 1024
 
 [environment.simulation]
-model_path = "models/assembly_v3.xml"
+model_path = "models/assembly_v4.xml"
 backend = "gpu"
 world_count = 64
 

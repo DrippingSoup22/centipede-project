@@ -128,7 +128,7 @@ max_episode_steps = 8192
 observation_radius = 1
 
 [environment.simulation]
-model_path = "models/assembly_v3.xml" # required
+model_path = "models/assembly_v4.xml" # required
 backend = "cpu"                       # required: "cpu" or "gpu"
 world_count = 4
 # gpu_solver = "newton"               # GPU only: "newton" or "cg"

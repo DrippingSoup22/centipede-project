@@ -19,7 +19,7 @@ checkpoint_every_cycles = 16
 recordings = 0
 
 [environment.simulation]
-model_path = "models/assembly_v3.xml"
+model_path = "models/assembly_v4.xml"
 backend = "gpu"
 world_count = 1024
 

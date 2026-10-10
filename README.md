@@ -22,8 +22,8 @@ separately.
 
 ## Status
 
-- **Model: complete and frozen.** The current body, v3, is in
-  [`models/assembly_v3.xml`](models/assembly_v3.xml) and described in
+- **Model: complete and frozen.** The current body, v4, is in
+  [`models/assembly_v4.xml`](models/assembly_v4.xml) and described in
   [`docs/model.md`](docs/model.md).
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.

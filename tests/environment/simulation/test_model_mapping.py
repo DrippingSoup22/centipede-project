@@ -81,6 +81,37 @@ def test_mapping_matches_the_elements_found_by_name():
     assert mapping.foot_geom_ids[3].tolist() == feet
 
 
+def test_v4_legs_take_angles_and_v3_legs_take_torques():
+    v4 = mujoco.MjModel.from_xml_path("models/assembly_v4.xml")
+    mapping = ModelMapping.from_model(v4)
+
+    assert mapping.legs_take_angles
+    assert not ModelMapping.from_model(load()).legs_take_angles
+    knee = v4.actuator("segment_03_left_knee_motor")
+    assert mapping.leg_actuator_ids[3, 2] == knee.id
+
+
+def test_broken_v4_leg_motors_are_rejected():
+    knee = "segment_03_left_knee_motor"
+
+    other_range = mujoco.MjModel.from_xml_path("models/assembly_v4.xml")
+    other_range.actuator_ctrlrange[other_range.actuator(knee).id] = (-1, 1)
+    with pytest.raises(ModelContractError, match="angles from -1.0000 to 1.0000 rad"):
+        ModelMapping.from_model(other_range)
+
+    geared = mujoco.MjModel.from_xml_path("models/assembly_v4.xml")
+    geared.actuator_gear[geared.actuator(knee).id, 0] = 2
+    with pytest.raises(ModelContractError, match="position actuator with gear 1"):
+        ModelMapping.from_model(geared)
+
+    one_torque_motor = mujoco.MjModel.from_xml_path("models/assembly_v4.xml")
+    knee_id = one_torque_motor.actuator(knee).id
+    one_torque_motor.actuator_biastype[knee_id] = mujoco.mjtBias.mjBIAS_NONE
+    one_torque_motor.actuator_ctrlrange[knee_id] = (-1, 1)
+    with pytest.raises(ModelContractError, match="take angles and others torques"):
+        ModelMapping.from_model(one_torque_motor)
+
+
 def test_v1_is_rejected_because_its_feet_share_one_category():
     v1 = mujoco.MjModel.from_xml_path("models/assembly.xml")
 
