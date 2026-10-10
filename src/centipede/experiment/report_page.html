@@ -385,9 +385,12 @@ const SETTING_CHIPS = [
       if (!(e.clocks || e.leg_clocks) || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
       // Only leg clocks have load feedback, which holds a loaded foot's clock
-      // in stance, and a clock in use that follows its actions slowly: the
-      // whole clock, or in earlier runs only the centres and amplitudes.
-      const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` : "";
+      // in stance, its load read from the foot's contact (in runs before the
+      // choice, always) or from the force it carries, and a clock in use that
+      // follows its actions slowly: the whole clock, or in earlier runs only
+      // the centres and amplitudes.
+      const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` +
+        (e.clock.load_feedback_source === "force" ? " from the foot's force" : " from foot contact") : "";
       const lags = e.clock.clock_time_constant_s !== undefined ? [["clocks", e.clock.clock_time_constant_s]]
         : [["centres", e.clock.centre_time_constant_s], ["amplitudes", e.clock.amplitude_time_constant_s]];
       const following = e.leg_clocks ? lags.filter(([, seconds]) => seconds)
