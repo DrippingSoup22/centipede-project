@@ -33,10 +33,13 @@ those first episodes, and how they ended. A walk pass instead runs every world
 for a fixed number of steps and counts every episode, with the targets reached
 per world and minute.
 
-In a run whose segments have clocks, a second line under each pass shows its
-rhythm: the clocks' tempo, the phase offset between neighbours with how steady
-it is, how well the legs keep time, how much the feet slip, and the reward per
-step of the head and of the followers, whose rewards differ in kind.
+In a run with clocks, a second line under each pass shows its rhythm: the
+clocks' tempo, the phase offset between neighbours with how steady it is, how
+well the legs keep time, how much the feet slip, and the reward per step of
+the head and of the followers, whose rewards differ in kind. With a clock per
+leg, the clocks are the left legs', and the legs' timing is replaced by the
+offset between each segment's two legs, the right legs' wave, and the mean
+sweep and lift amplitudes.
 """
 
 import math
@@ -73,6 +76,18 @@ CLOCK_LEGEND = (
     " world and step, both 0 to 1; legs on tempo: 1 - the legs-off-tempo\ncost,"
     " on the steps the clock compared the legs; slip: the foot-slip cost, 0 to"
     " 1; head,\nfollowers: the reward per step."
+)
+LEG_CLOCK_LEGEND = (
+    "clocks: the left legs' mean tempo (lowest-highest segment); offset: the mean"
+    " phase offset\nbetween neighbours' left legs, positive when the rear lags (a"
+    " wave from head to tail), in\ndegrees and in steps; lock: how steady each"
+    " pair's offset stays within a world;\nconsistency: how alike the offsets are"
+    " across every world and step, both 0 to 1;\nleft-right: the offset between"
+    " each segment's left and right legs, either way (180\nalternating, 0"
+    " together), with its consistency; right side: the right legs' offset\nbetween"
+    " neighbours, with"
+    " its consistency; sweep, lift: the mean step amplitudes; slip: the foot-slip"
+    " cost, 0 to 1;\nhead, followers: the reward per step."
 )
 
 
@@ -257,42 +272,68 @@ def _endings(counts: list[float]) -> str:
     )
 
 
-def _clock_line(record: dict[str, Any], indent: int) -> str:
-    """A pass's rhythm, from its log record, printed under its row."""
-    rhythm = record["rhythm"]
-    tempo = rhythm["tempo"]
-    mean_tempo = sum(tempo) / len(tempo)
-    # The mean offset of all pairs: the direction of the mean of the pairs'
-    # mean unit vectors, whose lengths are their consistencies.
-    pairs = list(
-        zip(
-            rhythm["neighbour_offset"],
-            rhythm["neighbour_offset_consistency"],
-            strict=True,
-        )
-    )
+def _mean_offset(category: dict[str, Any], name: str) -> tuple[float, float]:
+    """An offset's mean over its pairs, in degrees, and its mean consistency:
+    the direction of the mean of the pairs' mean unit vectors, whose lengths
+    are their consistencies."""
+    pairs = list(zip(category[name], category[f"{name}_consistency"], strict=True))
     offset = math.degrees(
         math.atan2(
             sum(length * math.sin(angle) for angle, length in pairs),
             sum(length * math.cos(angle) for angle, length in pairs),
         )
     )
+    return offset, sum(length for _, length in pairs) / len(pairs)
+
+
+def _clock_line(record: dict[str, Any], indent: int) -> str:
+    """A pass's rhythm, from its log record, printed under its row."""
+    rhythm = record["rhythm"]
+    tempo = rhythm["tempo"]
+    mean_tempo = sum(tempo) / len(tempo)
+    offset, consistency = _mean_offset(rhythm, "neighbour_offset")
     # The offset as a delay: its share of a turn, times the steps of a turn.
     delay_steps = offset / 360 / (mean_tempo * STEP_SECONDS)
-    consistency = sum(length for _, length in pairs) / len(pairs)
-    lock = sum(rhythm["neighbour_offset_lock"]) / len(pairs)
-    # None for a segment whose clock compared no legs in the window, as in a
-    # window shorter than a turn after a restart.
-    compared = [share for share in rhythm["legs_on_tempo"] if share is not None]
-    on_tempo = f"{sum(compared) / len(compared):.0%}" if compared else "-"
+    lock = sum(rhythm["neighbour_offset_lock"]) / len(rhythm["neighbour_offset_lock"])
+    if "legs" in record:
+        legs = _legs_fields(record["legs"])
+    else:
+        # None for a segment whose clock compared no legs in the window, as
+        # in a window shorter than a turn after a restart.
+        compared = [share for share in rhythm["legs_on_tempo"] if share is not None]
+        on_tempo = f"{sum(compared) / len(compared):.0%}" if compared else "-"
+        legs = f"legs on tempo {on_tempo}"
     slip = sum(rhythm["foot_slip"]) / len(tempo)
     rewards = [sum(parts) for parts in record["step_facts"]["reward_parts"]]
     followers = sum(rewards[1:]) / len(rewards[1:])
     return (
         f"{' ' * indent}clocks {mean_tempo:.2f} Hz ({min(tempo):.2f}-{max(tempo):.2f})"
         f"  offset {offset:+.0f} deg = {delay_steps:+.1f} steps  lock {lock:.2f}"
-        f"  consistency {consistency:.2f}  legs on tempo {on_tempo}"
+        f"  consistency {consistency:.2f}  {legs}"
         f"  slip {slip:.2f}  |  head {rewards[0]:+.5f}  followers {followers:+.5f}"
+    )
+
+
+def _legs_fields(legs: dict[str, Any]) -> str:
+    """With a clock per leg, where the clocks line reads the left legs: the
+    offset between each segment's legs and the right legs' wave, each with
+    its consistency, and the mean step: sweep and lift amplitudes. The
+    offset between a segment's legs counts either way, so that segments
+    whose legs alternate one way and the other still average to 180."""
+    offsets = legs["left_right_offset"]
+    left_right = math.degrees(sum(abs(offset) for offset in offsets) / len(offsets))
+    left_right_consistency = sum(legs["left_right_offset_consistency"]) / len(offsets)
+    right, right_consistency = _mean_offset(legs, "right_neighbour_offset")
+
+    def degrees(name: str) -> float:
+        per_leg = [amplitude for segment in legs[name] for amplitude in segment]
+        return math.degrees(sum(per_leg) / len(per_leg))
+
+    return (
+        f"left-right {left_right:.0f} deg ({left_right_consistency:.2f})"
+        f"  right side {right:+.0f} deg ({right_consistency:.2f})"
+        f"  sweep {degrees('sweep_amplitude'):.0f} lift"
+        f" {degrees('lift_amplitude'):.0f} deg"
     )
 
 
@@ -348,11 +389,13 @@ class TrainingProgress(_RedrawnLine):
         world_count: int,
         curriculum: bool = False,
         clocks: bool = False,
+        leg_clocks: bool = False,
     ) -> None:
         super().__init__(window_steps)
         self._world_count = world_count
         self._curriculum = curriculum
         self._clocks = clocks
+        self._clock_legend = LEG_CLOCK_LEGEND if leg_clocks else CLOCK_LEGEND
         self._cycle = first_cycle
         self._total_cycles = total_cycles
         self._cycle_width = max(len("cycle"), 2 * len(str(total_cycles)) + 1)
@@ -381,7 +424,7 @@ class TrainingProgress(_RedrawnLine):
                 flush=True,
             )
         if self._clocks:
-            print(CLOCK_LEGEND, flush=True)
+            print(self._clock_legend, flush=True)
         print(
             TRAINING_COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
@@ -446,11 +489,16 @@ class EvaluationProgress(_RedrawnLine):
     """One line per actor and seed: a bar toward the time limit, then results."""
 
     def __init__(
-        self, total_passes: int, max_episode_steps: int, clocks: bool = False
+        self,
+        total_passes: int,
+        max_episode_steps: int,
+        clocks: bool = False,
+        leg_clocks: bool = False,
     ) -> None:
         super().__init__(max_episode_steps)
         self._max_episode_steps = max_episode_steps
         self._clocks = clocks
+        self._clock_legend = LEG_CLOCK_LEGEND if leg_clocks else CLOCK_LEGEND
         self._total_passes = total_passes
         self._number_width = max(len("pass"), 2 * len(str(total_passes)) + 1)
         self._done = 0
@@ -464,7 +512,7 @@ class EvaluationProgress(_RedrawnLine):
             flush=True,
         )
         if self._clocks:
-            print(CLOCK_LEGEND, flush=True)
+            print(self._clock_legend, flush=True)
         print(
             EVALUATION_COLUMNS.format(
                 number="pass".rjust(self._number_width),

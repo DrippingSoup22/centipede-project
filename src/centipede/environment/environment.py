@@ -156,6 +156,9 @@ class Environment:
             self.device,
             self.simulation.diagnostics.facts,
             clocks=self.clocks,
+            leg_angle_range=(
+                self.simulation.leg_angle_range if settings.leg_clocks else None
+            ),
         )
 
         # Episode state, overwritten in place.
@@ -265,15 +268,15 @@ class Environment:
         # spine joint behind each segment that commands one; without, the
         # spine is passive.
         clock_step = None
+        leg_amplitudes = None
         if self.settings.leg_clocks:
             leg_values = joint_action[..., :12].unflatten(-1, (2, 6))
+            leg_amplitudes = leg_values[..., 1:3]
             clock_step = self.clocks.step(
                 leg_values[..., 0], foot_contact=self.previous_foot_contact
             )
             centres = self.clocks.follow_centres(leg_values[..., 3:])
-            leg_actions = leg_targets(
-                self.clocks.clock_phase, leg_values[..., 1:3], centres
-            )
+            leg_actions = leg_targets(self.clocks.clock_phase, leg_amplitudes, centres)
         else:
             leg_actions = joint_action[..., :6]
         spine_actions = None
@@ -341,6 +344,7 @@ class Environment:
             truncated,
             left_range,
             clock_step,
+            leg_amplitudes,
         )
 
         # 6. Start a new episode in the worlds whose episode ended: restart

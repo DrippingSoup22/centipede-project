@@ -1,10 +1,11 @@
-"""The environment's diagnostics: step facts, episode summaries, and rhythm.
+"""The environment's diagnostics: step facts, episode summaries, rhythm, legs.
 
 The categories are allocated once and refreshed in place. The front file fills
 them with two calls: ``record_step`` after each step's rewards and episode ends
 are known, and ``start_episodes`` whenever worlds start a new episode. The
-rhythm category exists only in a run whose segments have clocks. Nothing here
-waits for the GPU. The values are listed in docs/diagnostics.md.
+rhythm category exists only in a run with clocks, and the legs category only
+in a run with a clock per leg. Nothing here waits for the GPU. The values are
+listed in docs/diagnostics.md.
 """
 
 import math
@@ -173,6 +174,55 @@ class RhythmFacts:
     )
 
 
+LEGS = ("left", "right")
+
+
+@dataclass(frozen=True)
+class LegFacts:
+    """Each leg's clock and step shape in the last step, in every world; only
+    in a run with a clock per leg. The rhythm reads each segment's left leg;
+    this adds the right legs and how the two legs of a segment relate. The
+    step shape is in joint angles: an amplitude is how far the joint swings,
+    a centre the joint's angle."""
+
+    tempo: torch.Tensor = measure("Each leg's clock tempo, (W, N, 2)", "Hz", parts=LEGS)
+    left_right_offset: torch.Tensor = measure(
+        "Phase offset between the segment's two legs: the left leg's clock"
+        " phase minus the right's; ±pi when they alternate, 0 when they move"
+        " together, (W, N)",
+        "rad",
+        summary="angle",
+    )
+    right_neighbour_offset: torch.Tensor = measure(
+        "Phase offset between neighbours' right legs: the segment's right leg's"
+        " phase minus the next one's, positive when the rear one lags; the"
+        " rhythm's neighbour offset is the left legs', (W, N - 1)",
+        "rad",
+        summary="angle",
+    )
+    sweep_amplitude: torch.Tensor = measure(
+        "How far each leg sweeps either way of its sweep centre; negative steps"
+        " backward, (W, N, 2)",
+        "rad",
+        parts=LEGS,
+    )
+    lift_amplitude: torch.Tensor = measure(
+        "How far each foot lifts above its lift centre at the middle of its"
+        " swing, (W, N, 2)",
+        "rad",
+        parts=LEGS,
+    )
+    sweep_centre: torch.Tensor = measure(
+        "The sweep angle each leg swings around, (W, N, 2)", "rad", parts=LEGS
+    )
+    lift_centre: torch.Tensor = measure(
+        "The lift angle each leg holds in stance, (W, N, 2)", "rad", parts=LEGS
+    )
+    knee_centre: torch.Tensor = measure(
+        "The knee angle each leg holds, (W, N, 2)", "rad", parts=LEGS
+    )
+
+
 @dataclass(frozen=True)
 class EpisodeSummary:
     """How each episode went, written for the worlds whose episode just ended.
@@ -256,12 +306,12 @@ class EpisodeSummary:
 class EnvironmentDiagnostics:
     """Fills the environment's categories, and keeps per-episode totals.
 
-    ``step``, ``episode``, and in a run with clocks ``rhythm`` are the
-    categories the experiment reads (``rhythm`` is None without clocks), and
-    ``simulation`` is the physics simulation's, offered here because only the
-    environment can see the simulation; so are the environment's ``clocks``,
-    for recordings and the log's snapshots. ``reward_part_names`` labels the
-    last dimension of ``reward_parts``.
+    ``step``, ``episode``, in a run with clocks ``rhythm``, and in a run with
+    a clock per leg ``legs`` are the categories the experiment reads (each
+    None without its clocks), and ``simulation`` is the physics simulation's,
+    offered here because only the environment can see the simulation; so are
+    the environment's ``clocks``, for recordings and the log's snapshots.
+    ``reward_part_names`` labels the last dimension of ``reward_parts``.
     """
 
     def __init__(
@@ -272,11 +322,23 @@ class EnvironmentDiagnostics:
         device: torch.device | str,
         simulation_facts: SimulationFacts,
         clocks: Clocks | None = None,
+        leg_angle_range: tuple[torch.Tensor, torch.Tensor] | None = None,
     ) -> None:
-        """Allocate the categories and the running totals, all zero."""
+        """Allocate the categories and the running totals, all zero.
+
+        ``leg_angle_range``, given with a clock per leg, is the middle and half
+        the width of each leg joint's range, ``(N, 6)`` each in rad, which turn
+        the step shape's actions into angles.
+        """
         self.reward_part_names = list(reward_part_names)
         self.simulation = simulation_facts
         self.clocks = clocks
+        # Each leg's sweep, lift and knee, (N, 2, 3), as the actions order them.
+        self._leg_angle_range = (
+            None
+            if leg_angle_range is None
+            else tuple(part.unflatten(-1, (2, 3)) for part in leg_angle_range)
+        )
 
         def zeros(*trailing_shape: int, dtype=torch.float32) -> torch.Tensor:
             return torch.zeros(
@@ -311,6 +373,20 @@ class EnvironmentDiagnostics:
                 legs_compared=zeros(segment_count, dtype=torch.bool),
                 legs_on_tempo=zeros(segment_count),
                 foot_slip=zeros(segment_count),
+            )
+        )
+        self.legs = (
+            None
+            if leg_angle_range is None
+            else LegFacts(
+                tempo=zeros(segment_count, 2),
+                left_right_offset=zeros(segment_count),
+                right_neighbour_offset=zeros(segment_count - 1),
+                sweep_amplitude=zeros(segment_count, 2),
+                lift_amplitude=zeros(segment_count, 2),
+                sweep_centre=zeros(segment_count, 2),
+                lift_centre=zeros(segment_count, 2),
+                knee_centre=zeros(segment_count, 2),
             )
         )
         self.episode = EpisodeSummary(
@@ -400,6 +476,7 @@ class EnvironmentDiagnostics:
         truncated: torch.Tensor,
         left_range: torch.Tensor,
         clock_step: ClockStep | None = None,
+        leg_amplitudes: torch.Tensor | None = None,
     ) -> None:
         """Refresh the step facts, add to the totals, and publish ended episodes.
 
@@ -407,7 +484,8 @@ class EnvironmentDiagnostics:
         before any world is reset; the arguments are values the front file
         already has. ``left_range`` marks the cut episodes whose head left the
         range circle; ``clock_step`` is what the clocks read on the step, None
-        without clocks.
+        without clocks; ``leg_amplitudes`` ``(W, N, 2, 2)``, with a clock per
+        leg, is each leg's sweep and lift amplitude actions of the step.
         """
         step = self.step
         quaternion = physical_state.body_quaternion
@@ -455,6 +533,8 @@ class EnvironmentDiagnostics:
         step.neighbour_leg_similarity.copy_(_cosine(movement[:, :-1], movement[:, 1:]))
         if self.rhythm is not None:
             self._record_rhythm(step_rewards, clock_step)
+        if self.legs is not None:
+            self._record_legs(leg_amplitudes)
 
         self._steps += 1
         self._segment_return += step_rewards.rewards
@@ -519,6 +599,25 @@ class EnvironmentDiagnostics:
             rhythm.legs_compared.copy_(clock_step.leg_difference_known)
             rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
         rhythm.foot_slip.copy_(step_rewards.foot_slip)
+
+    def _record_legs(self, leg_amplitudes: torch.Tensor) -> None:
+        """Refresh the legs from their clocks and the step shape: the
+        amplitudes of the step's actions, and the centres the clocks keep."""
+        legs = self.legs
+        left, right = self.clocks.clock_phase.unbind(dim=-1)
+        legs.tempo.copy_(self.clocks.clock_tempo_hz)
+        legs.left_right_offset.copy_(_wrapped(left - right))
+        legs.right_neighbour_offset.copy_(_wrapped(right[:, :-1] - right[:, 1:]))
+        # An action a moves its joint to middle + a × half width, so an
+        # amplitude swings it by a × half width.
+        middle, half_width = self._leg_angle_range
+        amplitudes = leg_amplitudes * half_width[..., :2]
+        legs.sweep_amplitude.copy_(amplitudes[..., 0])
+        legs.lift_amplitude.copy_(amplitudes[..., 1])
+        centres = torch.addcmul(middle, self.clocks.centres, half_width)
+        legs.sweep_centre.copy_(centres[..., 0])
+        legs.lift_centre.copy_(centres[..., 1])
+        legs.knee_centre.copy_(centres[..., 2])
 
 
 def _wrapped(angle: torch.Tensor) -> torch.Tensor:

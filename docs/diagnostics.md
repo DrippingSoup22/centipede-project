@@ -30,6 +30,7 @@ no policy observes them and no reward depends on them.
 | --- | --- | --- |
 | Step facts | Environment | What happened in the last 20 ms step |
 | Rhythm | Environment | The segments' clocks, and how the legs keep time with them; only in a run with clocks |
+| Legs | Environment | Each leg's clock and the step shape it drives; only in a run with a clock per leg |
 | Episode summary | Environment | How each finished episode went |
 | Simulation facts | Physics simulation | Every world's positions, and how close the physics came to its limits |
 | Learning | Agents | How each segment agent's last update went |
@@ -101,6 +102,32 @@ consistency of the neighbours' offsets, averaged over the pairs. The legs on
 tempo count only the steps on which the clock compared the legs: the others
 cost nothing, and counting them would lift the value at the start of every
 episode.
+
+### Legs
+
+Refreshed on every step, for every world, in a run with a
+[clock per leg](environment.md#clocks), from the clocks as the step left them
+and the step shape the clocks drove. The rhythm reads each segment's left
+leg; this category adds the right legs and how a segment's two legs relate.
+The step shape is given in joint angles: an action `a` moves its joint to the
+middle of its range plus `a` times half the range's width, so an amplitude
+`a` swings the joint by `a` times the half-width, and a centre `c` holds it at
+the middle plus `c` times the half-width.
+
+| Value | Shape | Meaning | Summary |
+| --- | --- | --- | --- |
+| `tempo` | `(W, N, 2)` | Each leg's clock tempo, left then right, Hz | Mean |
+| `left_right_offset` | `(W, N)` | Phase offset between the segment's two legs, φ of the left leg minus φ of the right, rad: ±π when they alternate, 0 when they move together | Angle |
+| `right_neighbour_offset` | `(W, N − 1)` | Phase offset between neighbours' right legs, φ of the segment's right leg minus φ of the next one's, rad: positive when the rear one lags; the rhythm's `neighbour_offset` is the same for the left legs | Angle |
+| `sweep_amplitude` | `(W, N, 2)` | How far each leg sweeps either way of its sweep centre, rad: half its stroke; negative steps backward | Mean |
+| `lift_amplitude` | `(W, N, 2)` | How far each foot lifts above its lift centre at the middle of its swing, rad | Mean |
+| `sweep_centre`, `lift_centre`, `knee_centre` | `(W, N, 2)` | The angles each leg's joints are centred on, after the slow filter that follows the centre actions, rad | Mean |
+
+The report and the dashboard read the offset between a segment's two legs
+either way, from 0° to 180°: legs that alternate one way in some segments and
+the other way in others still average to 180°. Its consistency, like the
+wave's, needs a value clearly above √π / 2 ÷ √W to show that the segments
+settled on one way of moving their legs.
 
 ### Episode summary
 
@@ -200,7 +227,8 @@ times include the GPU's work.
 ## Window summaries
 
 The log has one line per window, so the environment's step facts, episode
-summaries, and rhythm are summarised over each window as they are refreshed.
+summaries, rhythm, and legs are summarised over each window as they are
+refreshed.
 The interaction loop adds every step to one window summary per category, and
 each starts empty when a window starts. A summary keeps running totals on the
 category's device, so it never waits for the GPU, and removes the worlds:

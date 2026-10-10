@@ -283,6 +283,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.world_count,
         curriculum is not None,
         clocks=environment.clocks is not None,
+        leg_clocks=configuration.environment.leg_clocks,
     )
     loop.diagnostics.progress = progress
     progress.header()
@@ -639,30 +640,35 @@ def _step_category(
 
 
 def _rhythm_categories(loop: InteractionLoop, note: str) -> list[LoggedCategory]:
-    """The rhythm over a window, in a run whose segments have clocks; none
-    without."""
-    rhythm_window = loop.diagnostics.rhythm_window
-    if rhythm_window is None:
-        return []
+    """The rhythm over a window, in a run with clocks, and the legs, in a run
+    with a clock per leg; none without."""
+    windows = (
+        ("rhythm", "Rhythm", loop.diagnostics.rhythm_window),
+        ("legs", "Legs", loop.diagnostics.legs_window),
+    )
     return [
-        LoggedCategory(
-            "rhythm", "Rhythm", note, rhythm_window.descriptions, rhythm_window.result
-        )
+        LoggedCategory(name, title, note, window.descriptions, window.result)
+        for name, title, window in windows
+        if window is not None
     ]
 
 
 def _clock_snapshot(environment: Environment) -> dict[str, list[list[float]]]:
     """The first SNAPSHOT_WORLDS worlds' clocks after a window, for a live view:
-    each segment's phase, in rad, and tempo."""
+    each segment's phase, in rad, and tempo; with a clock per leg, those are
+    its left leg's, and its right leg's phase follows."""
 
     def rounded(values: torch.Tensor) -> list[list[float]]:
         return [[round(value, 3) for value in row] for row in values.tolist()]
 
     clocks = environment.clocks
-    return {
+    snapshot = {
         "phase": rounded(clocks.phase[:SNAPSHOT_WORLDS]),
         "tempo_hz": rounded(clocks.tempo_hz[:SNAPSHOT_WORLDS]),
     }
+    if clocks.per_leg:
+        snapshot["right_phase"] = rounded(clocks.clock_phase[:SNAPSHOT_WORLDS, :, 1])
+    return snapshot
 
 
 def _timing_category(loop: InteractionLoop) -> LoggedCategory:
@@ -834,6 +840,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         passes_per_seed * len(evaluation.seeds),
         configuration.environment.max_episode_steps,
         clocks=environment.clocks is not None,
+        leg_clocks=configuration.environment.leg_clocks,
     )
     loop.diagnostics.progress = progress
     progress.header()

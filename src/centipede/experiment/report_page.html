@@ -300,6 +300,35 @@ const METRICS = {
     about: "1 minus the legs-off-tempo cost, on the steps the clock compared the legs (not in its first turn after a restart): how closely each segment's leg joints come back to their angles at the same point of its clock's last turn. Only a clock per segment compares the legs." },
   "rhythm.foot_slip": { label: "Foot slip", unit: "", better: "lower",
     about: "The foot-slip cost before its weight, from 0 to 1: how fast each segment's feet slide while they stay on the ground. A segment dragged by its neighbours slips." },
+  // A clock per leg: each leg's clock and the step shape it drives.
+  "legs.tempo": { label: "Leg clock tempo", unit: "Hz",
+    about: "Each leg's clock tempo, which one of its segment's actions sets for each leg. The left leg's is also the rhythm's clock tempo." },
+  "legs.left_right_offset": { label: "Left–right offset", unit: "°", range: [0, 180], uses: ["legs.left_right_offset"],
+    about: "How far apart each segment's two legs are in their step cycle: the angle between their clocks' hands, either way, from 0° (the legs move together, as in a hop) to 180° (they alternate, as in a walk). Per segment it is the circular mean over the worlds and steps, so it means something only where its consistency is well above the random level.",
+    compute: (record) => {
+      const offsets = raw(record, "legs.left_right_offset");
+      return offsets === null ? null : offsets.map((offset) => (offset === null ? null : Math.abs(offset) * RADIANS_TO_DEGREES));
+    } },
+  "legs.left_right_offset_consistency": { label: "Left–right consistency", unit: "", range: [0, 1], better: "higher",
+    about: "How alike the offset between each segment's two legs is across every world and step, from 0 (random) to 1 (the same everywhere). The worlds start from random phases, so it rises only as the segments settle on one way of moving their legs. Offsets that point every way give about 0.89 ÷ √(worlds)." },
+  "legs.left_right_offset_lock": { label: "Left–right lock", unit: "", range: [0, 1], better: "higher",
+    about: "How steady the offset between each segment's two legs stays within each world over the window, from 0 to 1: high whenever the two legs keep the same tempo, whatever the offset." },
+  "legs.right_neighbour_offset": { label: "Offset between neighbours, right legs", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
+    about: "Each pair's mean phase offset between the right legs: the segment's right leg's phase minus the next one's, positive when the rear one lags, as in a wave from head to tail. The rhythm's offset between neighbours is the same for the left legs. One value per pair, head first." },
+  "legs.right_neighbour_offset_consistency": { label: "Wave consistency, right legs", unit: "", range: [0, 1], better: "higher",
+    about: "How alike each pair's right-leg offset is across every world and step, from 0 (random) to 1 (the same everywhere): the wave along the right side, as the rhythm's wave consistency is along the left. Offsets that point every way give about 0.89 ÷ √(worlds)." },
+  "legs.right_neighbour_offset_lock": { label: "Offset lock, right legs", unit: "", range: [0, 1], better: "higher",
+    about: "How steady each pair's right-leg offset stays within each world over the window, from 0 to 1." },
+  "legs.sweep_amplitude": { label: "Sweep amplitude", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "How far each leg sweeps either way of its sweep centre over a step cycle: half its stroke, as a joint angle. The foot sweeps back while it is down and comes forward lifted; a negative amplitude steps backward." },
+  "legs.lift_amplitude": { label: "Lift height", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "How far each foot lifts above its stance angle at the middle of its swing, as a lift-joint angle. A negative value presses the foot down instead of lifting it." },
+  "legs.sweep_centre": { label: "Sweep centre", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "The sweep angle each leg swings around. Its action is followed slowly, so it sets the posture, and turning, rather than the rhythm." },
+  "legs.lift_centre": { label: "Lift centre", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "The lift angle each leg holds while its foot is down, followed slowly from its action: how high the leg holds the body." },
+  "legs.knee_centre": { label: "Knee angle", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "The knee angle each leg holds, followed slowly from its action." },
   "episodes.start_bearing": { label: "Target's start bearing", unit: "°", scale: RADIANS_TO_DEGREES,
     about: "The target's bearing from the head's forward direction at the start of the episode, either way: 0° ahead, 180° behind." },
   "episodes.arrived_by_bearing": { label: "Arrived, by start bearing", unit: "",
@@ -354,11 +383,16 @@ const SETTING_CHIPS = [
   { keys: ["environment.clocks", "environment.leg_clocks", "environment.clock", "environment.neighbour_clocks"], text: ({ environment: e }) => {
       if (!(e.clocks || e.leg_clocks) || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
-      // Load feedback holds a loaded foot's clock in stance; only leg clocks have it.
+      // Only leg clocks have load feedback, which holds a loaded foot's clock
+      // in stance, and centres that follow their actions slowly.
       const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` : "";
-      // Runs before neighbour_clocks existed saw only their own clock.
-      const seen = e.neighbour_clocks ? ", each seeing its neighbours' clocks" : ", each seeing only its own";
-      return `a clock per ${e.leg_clocks ? "leg" : "segment"}, ${number(low)}–${number(high)} Hz${feedback}${seen}`;
+      const centres = e.leg_clocks && e.clock.centre_time_constant_s ? `, centres following in ${number(e.clock.centre_time_constant_s)} s` : "";
+      // Runs before neighbour_clocks existed saw only their own clock, and
+      // runs before coupling existed were coupled both ways.
+      const ahead = e.clock.coupling === "ahead";
+      const seen = e.neighbour_clocks ? `, each seeing ${ahead ? "the clocks ahead of it" : "its neighbours' clocks"}` : ", each seeing only its own";
+      const coupled = ahead ? ", tempo matched to the clocks ahead" : "";
+      return `a clock per ${e.leg_clocks ? "leg" : "segment"}, ${number(low)}–${number(high)} Hz${feedback}${centres}${seen}${coupled}`;
     } },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
@@ -538,6 +572,16 @@ const TRAINING_LAYOUT = [
        { kind: "health", width: "auto", size: "small", key: "rhythm.foot_slip" },
        { kind: "health", width: "auto", size: "small", key: "learning.tempo_action_std" }],
     ] },
+  { title: "Legs", minor: true, onlyIf: (settings) => settings.environment.leg_clocks,
+    intro: "Each leg's clock and the step shape it drives, over training: how each segment's two legs relate, the wave along the right legs (the Rhythm above follows the left), and the size of the steps as joint angles. The line is the mean over the segments, or over the neighbour pairs, each segment's two legs averaged; the band is their range.",
+    rows: [
+      [{ kind: "health", width: "auto", size: "small", key: "legs.left_right_offset" },
+       { kind: "health", width: "auto", size: "small", key: "legs.left_right_offset_consistency" },
+       { kind: "health", width: "auto", size: "small", key: "legs.right_neighbour_offset_consistency" }],
+      [{ kind: "health", width: "auto", size: "small", key: "legs.sweep_amplitude" },
+       { kind: "health", width: "auto", size: "small", key: "legs.lift_amplitude" },
+       { kind: "health", width: "auto", size: "small", key: "legs.tempo" }],
+    ] },
   { title: "Run", minor: true,
     rows: [[{ kind: "run_stats", width: "w12" }]] },
 ];
@@ -569,6 +613,15 @@ const TRAINING_DETAILS = [
       "rhythm.legs_on_tempo", "rhythm.foot_slip", "step_facts.left_right_similarity", "step_facts.neighbour_leg_similarity"]
       .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key,
         onlyIf: key === "rhythm.legs_on_tempo" ? (settings) => settings.environment.clocks : undefined })) },
+  { title: "The legs, per segment", onlyIf: (settings) => settings.environment.leg_clocks,
+    intro: "One row per segment or neighbour pair and a column per window, head at the top: the offset between each segment's two legs and its consistency, the right legs' offset between neighbours and its consistency, and each leg's step size. Below, the steadiness of the offsets within each world and the legs' posture, as the mean over the segments with their range.",
+    cards: [
+      ...["legs.left_right_offset", "legs.left_right_offset_consistency", "legs.right_neighbour_offset", "legs.right_neighbour_offset_consistency"]
+        .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })),
+      ...["legs.sweep_amplitude", "legs.lift_amplitude"].flatMap((key) => [0, 1].map((part) => ({ kind: "heatmap", width: "w3", size: "small", key, part }))),
+      ...["legs.left_right_offset_lock", "legs.right_neighbour_offset_lock", "legs.sweep_centre", "legs.lift_centre", "legs.knee_centre"]
+        .map((key) => ({ kind: "health", width: "w4", size: "small", key })),
+    ] },
   { title: "Each window's episodes", intro: "How many episodes ended in each window, and how they spread: each column is one window's episodes, with bad bins in red, good ones in blue, and stronger colours holding more episodes. With few worlds a column holds only a few episodes.",
     cards: [
       { kind: "lines", width: "w4", size: "small", key: "episodes.episode_ended" },
@@ -1753,9 +1806,10 @@ function trainingReport(root) {
     details.push(html("div", { class: "row" }, ...cards.map((item) => trainingCard(item, context))));
   }
   // Values the run describes but never measured, such as legs on tempo with a
-  // clock per leg, are left out.
+  // clock per leg, are left out, and so is whether the legs were compared,
+  // which a clock per leg never does.
   const remaining = Object.keys(DESCRIPTIONS).filter((key) => !used.has(key) && !CLASSES.has(key) &&
-    log.some((record) => raw(record, key) !== null));
+    log.some((record) => raw(record, key) !== null) && !(settings.environment.leg_clocks && key === "rhythm.legs_compared"));
   if (remaining.length) {
     details.push(html("h3", { class: "group" }, "Other values"), html("p", { class: "note" }, "Everything else the run logged."));
     details.push(html("div", { class: "row" }, ...remaining.map((key) => genericCard(key, context))));
@@ -1952,12 +2006,12 @@ function trainingCard(item, context) {
     const perAgent = values.map((v) => (v === null ? null : v.map((segment) => (Array.isArray(segment) ? mean(segment) : segment))));
     const band = perAgent.map((v) => (v === null ? { low: null, high: null } : { low: Math.min(...v), high: Math.max(...v) }));
     const unitText = metric.unit === "%" ? "in percent; " : metric.unit ? `in ${metric.unit}; ` : "";
-    const members = item.key.startsWith("rhythm.neighbour_offset") ? "pairs'" : "segments'";
+    const members = item.key.includes("neighbour_offset") ? "pairs'" : "segments'";
     const floorText = item.floor !== undefined ? `; values below ${number(item.floor)} drawn at ${number(item.floor)}` : "";
     // Offsets that point every way, each world keeping its own, still give a
     // consistency of about √π / 2 ÷ √(worlds).
     const worlds = context.settings.environment.simulation.world_count;
-    const randomText = item.key === "rhythm.neighbour_offset_consistency" ? `; random offsets give about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(worlds))}` : "";
+    const randomText = item.key.endsWith("offset_consistency") ? `; random offsets give about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(worlds))}` : "";
     const subtitle = `${unitText}band: the ${members} range${floorText}${randomText}`;
     return card({ ...item, subtitle: subtitle[0].toUpperCase() + subtitle.slice(1) },
       lineChart(x, [{ name: metric.label, values: perAgent.map((v) => (v === null ? null : mean(v))), color: SERIES[0] }],
@@ -2147,14 +2201,20 @@ function evaluationReport(root) {
   }
 
   // The clocks' rhythm of each actor and of the walk, in a run with clocks.
-  // Legs on tempo only where measured: a clock per leg never compares the legs.
+  // Legs on tempo only where measured: a clock per leg never compares the
+  // legs; the legs' own values only with a clock per leg.
   const measured = (key) => groups.some(([, records]) => records.some((record) => raw(record, key) !== null));
-  const RHYTHM_KEYS = ["rhythm.tempo", "rhythm.neighbour_offset_consistency", "rhythm.neighbour_offset_lock", "rhythm.legs_on_tempo", "rhythm.foot_slip"].filter(measured);
+  const RHYTHM_KEYS = ["rhythm.tempo", "rhythm.neighbour_offset_consistency", "rhythm.neighbour_offset_lock", "rhythm.legs_on_tempo",
+    "legs.right_neighbour_offset_consistency", "legs.left_right_offset", "legs.left_right_offset_consistency",
+    "legs.sweep_amplitude", "legs.lift_amplitude", "rhythm.foot_slip"].filter(measured);
   if (measured("rhythm.tempo")) {
     const rows = groups.map(([name, records]) => [name, ...RHYTHM_KEYS.map((key) => withUnit(mean(records.map((record) => overall(shown(record, key)))), info(key).unit))]);
+    const legs = measured("legs.left_right_offset")
+      ? "the right legs' wave consistency, the offset between each segment's two legs (0° together, 180° alternating) and its consistency, the sweep and lift amplitudes, "
+      : "";
     root.append(html("section", {}, html("h2", {}, "The rhythm"),
       html("p", { class: "note" }, `The segments' clocks over the same steps${settings.environment.leg_clocks ? " (each segment's left leg's)" : ""}, mean over the segments (or neighbour pairs) and the seeds: ` +
-        `the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), ${measured("rhythm.legs_on_tempo") ? "the legs on tempo, " : ""}and the foot slip. ` +
+        `the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), ${measured("rhythm.legs_on_tempo") ? "the legs on tempo, " : ""}${legs}and the foot slip. ` +
         `With ${count(settings.environment.simulation.world_count)} worlds per seed, offsets that point every way still give a consistency of about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(settings.environment.simulation.world_count))}: only a clearly higher one shows a common wave. The details give every pair and segment.`),
       table(["Actor", ...RHYTHM_KEYS.map((key) => info(key).label)], rows, 1)));
   }

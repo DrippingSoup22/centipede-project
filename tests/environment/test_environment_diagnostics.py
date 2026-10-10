@@ -54,6 +54,7 @@ def record(
     left_range=NO,
     clock_step=None,
     target=TARGET,
+    leg_amplitudes=None,
 ):
     diagnostics.record_step(
         state,
@@ -65,6 +66,7 @@ def record(
         truncated,
         left_range,
         clock_step,
+        leg_amplitudes,
     )
 
 
@@ -176,6 +178,66 @@ def test_the_rhythm_follows_the_clocks_and_the_legs_costs():
     record(leg_diagnostics, state, state, no_legs, clock_step=leg_step)
     assert not leg_diagnostics.rhythm.legs_compared.any()
     assert torch.equal(leg_diagnostics.rhythm.tempo, clocks.tempo_hz)
+    assert leg_diagnostics.legs is None  # no leg angle ranges given
+
+
+def test_the_legs_follow_each_legs_clock_and_its_step_shape_in_angles():
+    # World 0: the head's legs alternate, the next segment's move together.
+    clock_phase = torch.tensor(
+        [[[0.1, 0.1 + math.pi], [0.5, 0.5]], [[0.0, 0.0], [0.3, 0.2]]]
+    )
+    centres = torch.zeros(2, 2, 2, 3)
+    centres[0, 0, 0] = torch.tensor([1.0, -1.0, 0.0])  # the head's left leg
+    clocks = SimpleNamespace(
+        clock_phase=clock_phase,
+        clock_tempo_hz=torch.full((2, 2, 2), 2.0),
+        phase=clock_phase[..., 0],
+        tempo_hz=torch.full((2, 2), 2.0),
+        centres=centres,
+    )
+    # Each leg's sweep, lift and knee: middle and half the width of its range.
+    middle = torch.tensor([0.0, 0.1, 0.2] * 2).expand(2, 6)
+    half_width = torch.tensor([0.5, 0.4, 0.3] * 2).expand(2, 6)
+    simulation = SimulationDiagnostics.allocate(2, 4, "cpu")
+    diagnostics = EnvironmentDiagnostics(
+        2,
+        2,
+        ["first", "second"],
+        "cpu",
+        simulation.facts,
+        clocks=clocks,
+        leg_angle_range=(middle, half_width),
+    )
+    state = upright_state()
+    rewards = replace(step_rewards(0.0), foot_slip=torch.zeros(2, 2))
+    leg_step = SimpleNamespace(leg_difference_known=None)
+    amplitudes = torch.tensor([0.5, 0.25]).expand(2, 2, 2, 2)  # sweep, lift
+
+    record(
+        diagnostics,
+        state,
+        state,
+        rewards,
+        clock_step=leg_step,
+        leg_amplitudes=amplitudes,
+    )
+    legs = diagnostics.legs
+
+    assert torch.equal(legs.tempo, clocks.clock_tempo_hz)
+    assert torch.allclose(
+        legs.left_right_offset.abs(), torch.tensor([[math.pi, 0.0], [0.0, 0.1]])
+    )
+    # The right legs: positive when the rear one lags.
+    assert torch.allclose(
+        legs.right_neighbour_offset, torch.tensor([[math.pi - 0.4], [-0.2]])
+    )
+    assert torch.allclose(legs.sweep_amplitude, torch.full((2, 2, 2), 0.25))
+    assert torch.allclose(legs.lift_amplitude, torch.full((2, 2, 2), 0.1))
+    # Centre 0 is mid-range; the head's left leg sits at its sweep's upper end
+    # and its lift's lower end.
+    assert legs.sweep_centre[0, 0].tolist() == pytest.approx([0.5, 0.0])
+    assert legs.lift_centre[0, 0].tolist() == pytest.approx([-0.3, 0.1])
+    assert torch.allclose(legs.knee_centre, torch.full((2, 2, 2), 0.2))
 
 
 def test_an_ended_episode_publishes_its_totals_and_a_new_one_starts_clean():

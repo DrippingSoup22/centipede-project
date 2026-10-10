@@ -471,7 +471,12 @@ a delay in steps; the lock and the consistency of the offsets, from 0 to 1;
 the legs on tempo, 1 minus the legs-off-tempo cost, on the steps the clock
 compared the legs; the foot slip, the cost from 0 to 1; and the reward per
 step of the head and of the mean follower, which in such a run earn in
-different ways.
+different ways. With a clock per leg, the clocks are the left legs', and the
+legs on tempo give way to the legs ([diagnostics.md](diagnostics.md#legs)):
+the offset between each segment's left and right legs, either way (180°
+alternating, 0° together), with its consistency; the right legs' mean offset
+between neighbours, with its consistency; and the mean sweep and lift
+amplitudes, in degrees.
 
 The last line gives the session's time and overall speed, or, for a run that
 stops at a plateau, the cycle of its last rise. In evaluation a pass
@@ -492,7 +497,8 @@ arrival share (`arrivals.share`) and the targets reached per world and minute
 `curriculum.level`, the level the window's new targets were drawn at; with
 clocks, also `clock_snapshot`, the clocks of the first four worlds as the
 window left them, each segment's `phase` (rad) and `tempo_hz`, for a live view
-of the rhythm. Each session in
+of the rhythm (with a clock per leg, the left leg's, and the right leg's
+`right_phase`). Each session in
 `run_info.json` also lists the settings its configuration file set itself
 (`settings_written`), so that a report can tell chosen values from defaults.
 
@@ -602,16 +608,26 @@ The report is ordered by priority, and the size of each part follows it.
   subtitle gives the level that offsets pointing every way reach with the
   run's number of worlds, about 0.89 ÷ √(worlds) (0.03 with 1,024 worlds):
   only a consistency clearly above it shows a common wave.
-- **4 · Run**, or 5 with clocks (small). Four numbers: the time per update
-  cycle (collecting and learning), the simulation speed, the training time,
-  and the episodes.
+- **5 · Legs** (smaller), in a run with a clock per leg
+  ([diagnostics.md](diagnostics.md#legs)). Charts over training of the offset
+  between each segment's two legs, either way from 0° (together) to 180°
+  (alternating), and its consistency; the right legs' wave consistency; the
+  sweep amplitude and lift height in degrees; and the legs' tempo, each as
+  the mean over the segments (each segment's two legs averaged) or the
+  neighbour pairs, with their range.
+- **4 · Run**, 5 with clocks or 6 with a clock per leg (small). Four
+  numbers: the time per update cycle (collecting and learning), the
+  simulation speed, the training time, and the episodes.
 - **Details,** behind a "Show details" button: the other learning values
   (entropy, clipped samples, critic loss, policy loss); the head's distance to
   its target as means over the worlds; each behaviour value per segment over
   training; with clocks, the rhythm and the gait per neighbour pair or
   segment over training (offsets and their consistency, tempo, lag behind
-  the head, legs on tempo, foot slip, and how alike the legs move); the
-  episodes that ended per window and the four histograms window
+  the head, legs on tempo, foot slip, and how alike the legs move); with a
+  clock per leg, the legs per segment or pair over training (the offset
+  between each segment's legs and its consistency, the right legs' offsets
+  and their consistency, each leg's sweep amplitude and lift height), then
+  the offsets' locks and the legs' centres; the episodes that ended per window and the four histograms window
   by window (readable only with many worlds); the speed and the time per
   window over training; the physics' contacts, constraint rows, and solver
   iterations; every other logged value; a table of every value at the start
@@ -693,7 +709,9 @@ where the target lay at the start, seen from the head (ahead, to the side,
 behind to the side, or behind, in 45° classes). In a run with clocks, last
 comes **the rhythm**: per actor and for the walk, the tempo, the wave's
 consistency and the offsets' lock, the legs on tempo (with a clock per
-segment), and the foot slip.
+segment), with a clock per leg the right legs' wave consistency, the offset
+between each segment's two legs with its consistency and the sweep and lift
+amplitudes, and the foot slip.
 
 - **1 · Results.** The same six tiles as in training, each holding the agents'
   value over every seed and the lowest and highest seed. When baselines are
