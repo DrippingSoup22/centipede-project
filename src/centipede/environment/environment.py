@@ -261,21 +261,19 @@ class Environment:
         self.previous_foot_planar_position.copy_(state.foot_planar_position)
         self.previous_foot_contact.copy_(_foot_contact(state))
 
-        # 2. Move the body. With leg clocks, the clocks first turn at the tempo
-        # chosen for each leg, with load feedback from the feet on the ground
-        # now, the step shape in use follows the shape actions, and each
-        # leg's joints get their targets from it at its clock's new phase.
+        # 2. Move the body. With leg clocks, each leg's clock in use, its
+        # tempo and step shape, first follows its actions, the clocks turn at
+        # their tempos in use, with load feedback from the feet on the ground
+        # now, and each leg's joints get their targets from its step shape at
+        # its clock's new phase.
         # With spine control, the spine column holds the command for the
         # spine joint behind each segment that commands one; without, the
         # spine is passive.
         clock_step = None
         leg_amplitudes = None
         if self.settings.leg_clocks:
-            leg_values = joint_action[..., :12].unflatten(-1, (2, 6))
-            clock_step = self.clocks.step(
-                leg_values[..., 0], foot_contact=self.previous_foot_contact
-            )
-            self.clocks.follow_step_shape(leg_values[..., 1:])
+            self.clocks.follow_actions(joint_action[..., :12].unflatten(-1, (2, 6)))
+            clock_step = self.clocks.step(foot_contact=self.previous_foot_contact)
             leg_amplitudes = self.clocks.amplitudes
             leg_actions = leg_targets(
                 self.clocks.clock_phase, leg_amplitudes, self.clocks.centres

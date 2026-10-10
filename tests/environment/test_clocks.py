@@ -17,16 +17,14 @@ def clocks(
     segment_count=3,
     per_leg=False,
     feedback=0.0,
-    centre_time_constant_s=0.0,
-    amplitude_time_constant_s=0.0,
+    clock_time_constant_s=0.0,
     coupling="both",
 ):
     settings = ClockSettings(
         middle_tempo_hz=middle_tempo_hz,
         tempo_range_octaves=1.0,
         load_feedback_rad_per_s=feedback,
-        centre_time_constant_s=centre_time_constant_s,
-        amplitude_time_constant_s=amplitude_time_constant_s,
+        clock_time_constant_s=clock_time_constant_s,
         coupling=coupling,
     )
     return Clocks(
@@ -159,8 +157,11 @@ def test_leg_clocks_turn_each_leg_and_compare_it_with_its_sibling_and_its_side()
     assert not torch.equal(clock.clock_phase[..., 0], clock.clock_phase[..., 1])
     start = clock.clock_phase.clone()
     tempo_action = torch.tensor([[[1.0, 0.0], [0.0, 0.0], [0.0, -1.0]]])
+    clock_actions = torch.zeros(1, 3, 2, 6)
+    clock_actions[..., 0] = tempo_action
 
-    result = clock.step(tempo_action)
+    clock.follow_actions(clock_actions)
+    result = clock.step()
 
     tempo = torch.tensor([[[4.0, 2.0], [2.0, 2.0], [2.0, 1.0]]])
     turned = (clock.clock_phase - start).remainder(2 * math.pi)
@@ -199,11 +200,10 @@ def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
         clock.reset(torch.ones(1, dtype=torch.bool), seed=3)
     start = held.clock_phase.clone()
     left_feet_down = torch.tensor([[[True, False]] * 3])
-    middle_tempo = torch.zeros(1, 3, 2)
 
     for _ in range(50):
-        held.step(middle_tempo, foot_contact=left_feet_down)
-        free.step(middle_tempo, foot_contact=left_feet_down)
+        held.step(foot_contact=left_feet_down)
+        free.step(foot_contact=left_feet_down)
 
     def angle_between(first, second):
         return ((first - second + math.pi).remainder(2 * math.pi) - math.pi).abs()
@@ -216,21 +216,28 @@ def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
     assert angle_between(free.clock_phase, start).max() < 1e-4
 
 
-def test_the_step_shape_starts_at_the_actions_then_follows_with_its_time_constants():
-    """The amplitudes follow with 0.5 s, the centres at once (τ = 0)."""
-    clock = clocks(world_count=1, per_leg=True, amplitude_time_constant_s=0.5)
+def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_constant():
+    """The tempo and the step shape alike follow with 0.5 s."""
+    clock = clocks(world_count=1, per_leg=True, clock_time_constant_s=0.5)
     every_world = torch.ones(1, dtype=torch.bool)
     clock.reset(every_world, seed=0)
-    clock.follow_step_shape(torch.full((1, 3, 2, 5), 0.2))
+    clock.follow_actions(torch.full((1, 3, 2, 6), 0.2))
     assert torch.allclose(clock.step_shape, torch.tensor(0.2))  # where it asks
+    assert torch.allclose(clock.clock_tempo_octaves, torch.tensor(0.2))
 
-    clock.follow_step_shape(torch.full((1, 3, 2, 5), 1.2))
+    clock.follow_actions(torch.full((1, 3, 2, 6), -0.8))
+    start = clock.clock_phase.clone()
+    clock.step()
 
-    # One 20 ms step covers 1 - e^(-0.02 / 0.5) of the way.
-    covered = 0.2 + 1 - math.exp(-0.02 / 0.5)
-    assert torch.allclose(clock.amplitudes, torch.tensor(covered))
-    assert torch.allclose(clock.centres, torch.tensor(1.2))
+    # One 20 ms step covers 1 - e^(-0.02 / 0.5) of the way, and the hand
+    # turns at the tempo in use.
+    covered = 0.2 - (1 - math.exp(-0.02 / 0.5))
+    assert torch.allclose(clock.step_shape, torch.tensor(covered))
+    assert torch.allclose(clock.clock_tempo_octaves, torch.tensor(covered))
+    turned = (clock.clock_phase - start).remainder(2 * math.pi)
+    assert torch.allclose(turned, torch.tensor(2 * math.pi * 2 * 2**covered * STEP_S))
     clock.reset(every_world)
     assert not clock.step_shape.any()  # a restart forgets the shape ...
-    clock.follow_step_shape(torch.full((1, 3, 2, 5), -0.5))
+    clock.follow_actions(torch.full((1, 3, 2, 6), -0.5))
     assert torch.allclose(clock.step_shape, torch.tensor(-0.5))  # ... and starts afresh
+    assert torch.allclose(clock.clock_tempo_octaves, torch.tensor(-0.5))

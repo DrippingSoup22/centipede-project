@@ -62,8 +62,9 @@ decides which worlds must be reset. **Coordination:** on every `step`, it runs t
 other parts in order:
 
 1. Keep the current body positions and joint angles as the "previous" ones.
-2. With leg clocks, every leg's clock turns and gives the leg's joints their
-   targets on the step shape ([Actions and timing](#actions-and-timing)). The
+2. With leg clocks, every leg's clock in use follows its actions, turns, and
+   gives the leg's joints their targets on the step shape
+   ([Actions and timing](#actions-and-timing)). The
    physics simulation applies the actions and advances 20 ms. With a clock
    per segment, every clock then turns at the tempo its segment chose. Every
    foot that touched the ground before and after the step is measured for
@@ -210,32 +211,40 @@ from −1 to 1, neither clipped nor mapped onto a positive range: a negative
 sweep amplitude steps backward, and the agents learn what each value does.
 
 The centres set the legs' posture and, differing between the two sides, can
-turn the body. They follow their actions slowly, as a first-order lag with
-the time constant `centre_time_constant_s` (τ, 0.5 s): each step covers
-`1 − e^(−0.02 s / τ)` of the way, so that a sudden change of a centre action
-is 63% covered after τ. Slow centres set posture and turning but cannot make
-a rhythm by themselves, which is the clocks' job.
+turn the body.
 
-The amplitudes follow their actions the same way, with their own time
-constant, `amplitude_time_constant_s` (0.5 s). In training, exploration adds
-noise to every action at every step (a spread of 0.5 at the start, on a range
-of ±1), so an amplitude that followed its action at once would make the foot
-twitch 50 times a second, and the twitching costs foot slip and legs
-touching. In three training runs whose amplitudes followed at once, the
-agents' cheapest answer was to shrink them: sweeps under 10°, and lifts that
-pressed the foot down instead of lifting it. The filter keeps the slow
-changes a policy means and damps the noise from step to step. With 0, the
-amplitudes follow their actions at once, for a run that smooths the
-policy's mean action instead ([agents.md](agents.md#settings),
-`temporal_smoothness_coefficient`).
+**The clock in use.** A leg's six actions set its clock: the tempo, the two
+amplitudes and the three centres. The clock the leg runs on, the **clock in
+use**, follows these actions slowly, all six alike, as a first-order lag with
+one time constant, `clock_time_constant_s` (τ, 0.5 s): each step covers
+`1 − e^(−0.02 s / τ)` of the way, so that a sudden change of an action is 63%
+covered after τ. The tempo follows in octaves, and the clock's hand turns at
+the tempo in use ([Clocks](#clocks)). With 0, the clock follows its actions
+at once.
 
-On the first step after a restart, the whole step shape starts at its
-actions, so that an episode starts in the posture and stride the agent asks
-for; it keeps running through an arrival when the body walks on. A filter on
-a policy's actions breaks the Markov property the policy learns under
-(Mysore et al., ICRA 2021): an action's effect then depends on the shape in
-use, which earlier actions set and the policy does not see. Each segment
-therefore observes its legs' step shape in use
+Why the clock follows slowly: in training, exploration adds noise to every
+action at every step (a spread of 0.5 at the start, on a range of ±1), so an
+amplitude that followed its action at once would make the foot twitch 50
+times a second, and the twitching costs foot slip and legs touching. In three
+training runs whose amplitudes followed at once, the agents' cheapest answer
+was to shrink them: sweeps under 10°, and lifts that pressed the foot down
+instead of lifting it. A tempo that followed at once would likewise make the
+hand's speed jump from step to step, and a neighbour reading the rhythm from
+the legs would read the noise. The filter keeps the slow changes a policy
+means and damps the noise from step to step. Slow centres set posture and
+turning but cannot make a rhythm by themselves, which is the clocks' job.
+One time constant for the whole clock keeps it one smooth thing, which
+changes as a whole. τ = 0 suits a run that smooths the policy's mean action
+instead ([agents.md](agents.md#settings), `temporal_smoothness_coefficient`).
+
+On the first step after a restart, the whole clock in use starts at its
+actions, so that an episode starts in the tempo, posture and stride the agent
+asks for; it keeps running through an arrival when the body walks on. A
+filter on a policy's actions breaks the Markov property the policy learns
+under (Mysore et al., ICRA 2021): an action's effect then depends on the
+clock in use, which earlier actions set and the policy does not see. Each
+segment therefore observes its legs' clocks in use: the tempo among its clock
+values, and the step shape after them
 ([What each segment sees](#what-each-segment-sees)).
 
 This arrangement is CPG-RL's (Bellegarda and Ijspeert, IEEE Robotics and
@@ -353,15 +362,15 @@ segments away (`k`, first value 1). Every observation has the same layout:
    the head; **sideways** is positive to its left;
 5. with spine control, the angle and speed of the spine joint behind it;
 6. with clocks, its own clock: `cos φ` and `sin φ` of its hand, and its tempo
-   action (see [Clocks](#clocks)); with leg clocks, these three values for
-   each leg's clock, the left leg's first;
+   in action units (see [Clocks](#clocks)); with leg clocks, these three
+   values for each leg's clock, the left leg's first, with the tempo in use;
 7. with neighbour clocks, the clocks of the neighbours it sees, relative to
    its own, three values each (six with leg clocks), in the order of the
    blocks: the `k` ahead, nearest first, then the `k` behind, which are
    zeros with `coupling = "ahead"`;
 8. with leg clocks, its own legs' step shape in use, the left leg's first:
    for each leg its sweep and lift amplitudes and its sweep, lift and knee
-   centres, in action units, after their filters
+   centres, in action units, as the clock in use has them
    ([Actions and timing](#actions-and-timing)).
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
@@ -531,8 +540,11 @@ Both kinds follow the same rules:
 
 - **Tempo.** A tempo action `a`, from −1 to 1, sets its clock's tempo to
   `middle_tempo_hz × 2^(a × tempo_range_octaves)` turns per second: 1 to 4
-  with the defaults, so that a turn takes 12.5 to 50 steps.
-- **Phase.** Every step, the hand `φ` moves on by `360° × tempo × 0.02 s`.
+  with the defaults, so that a turn takes 12.5 to 50 steps. A clock per
+  segment takes it at once; a leg's clock follows it slowly, in octaves, with
+  the rest of its clock in use ([Actions and timing](#actions-and-timing)).
+- **Phase.** Every step, the hand `φ` moves on by `360° × tempo × 0.02 s`, at
+  the tempo in use.
   Nothing else moves it but load feedback: a clock changes its phase against
   another's only by running faster or slower for a while, as coupled
   oscillators do (Kuramoto, 1984; for locomotion, Ijspeert, Neural Networks,
@@ -542,8 +554,9 @@ Both kinds follow the same rules:
   the clocks keep running through an arrival when the body walks on. Hands
   have their own random sequence, seeded with the starting poses' seed.
 - **What a segment sees.** Its own hand, as `cos φ` and `sin φ` so that the
-  end of a turn and the start of the next look alike, and its tempo action;
-  with leg clocks, these three values for each leg, the left leg's first.
+  end of a turn and the start of the next look alike, and its tempo in use,
+  in action units (its tempo action, for a clock per segment); with leg
+  clocks, these three values for each leg, the left leg's first.
   Without `neighbour_clocks`, it never sees another segment's clock: it can
   only read it from that segment's legs.
 - **What a segment sees of its neighbours.** With `neighbour_clocks = true`,
@@ -612,7 +625,7 @@ limit, and the settings refuse them.
 
 The environment's `clocks` holds every hand, `clock_phase` `(W, N, C)` in rad
 from 0 to 2π, with `C` one clock per segment or two, the left leg's then the
-right's, and the tempo of the last step, `clock_tempo_hz` and
+right's, and the tempo in use on the last step, `clock_tempo_hz` and
 `clock_tempo_octaves` (`log2(tempo ÷ middle tempo)`). `phase`, `tempo_hz` and
 `tempo_octaves` `(W, N)` are each segment's own clock, or with leg clocks its
 left leg's, which the [rhythm diagnostics](diagnostics.md#rhythm) read as the
@@ -994,8 +1007,7 @@ These are the keys of the environment sections of the configuration file (see
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
 | `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo, plus `σ / 2π` with load feedback, must stay below 12.5 Hz |
 | `load_feedback_rad_per_s` | 0 | With leg clocks, σ of the [load feedback](#clocks): a foot on the ground holds its clock in stance; 0 is off. Must stay below 2π times the slowest tempo, 6.28 rad/s with the defaults, or a clock could stop for good |
-| `centre_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each joint's centre follows its action ([Actions and timing](#actions-and-timing)); 0 follows at once |
-| `amplitude_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each leg's sweep and lift amplitudes follow their actions ([Actions and timing](#actions-and-timing)); 0 follows at once |
+| `clock_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each leg's clock in use, its tempo, amplitudes and centres, follows its actions ([Actions and timing](#actions-and-timing)); 0 follows at once |
 | `coupling` | `"both"` | Which neighbours' clocks a segment sees and is compared with: `"both"`, those ahead and behind; `"ahead"`, only those ahead, so that the rhythm passes from the head backward ([Clocks](#clocks)) |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |
