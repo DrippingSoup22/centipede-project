@@ -765,6 +765,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     progress = EvaluationProgress(
         passes_per_seed * len(evaluation.seeds),
         configuration.environment.max_episode_steps,
+        clocks=environment.clocks is not None,
     )
     loop.diagnostics.progress = progress
     progress.header()
@@ -875,6 +876,11 @@ def _evaluation_categories(
             loop,
             environment,
             "Means over the steps of each world's first episode, or of the walk.",
+        ),
+        *_rhythm_categories(
+            loop,
+            "Over the steps of each world's first episode, or of the walk; "
+            + RHYTHM_NOTE,
         ),
         _timing_category(loop),
         _physics_category(loop),
