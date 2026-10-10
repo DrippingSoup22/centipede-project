@@ -52,6 +52,7 @@ def record(
     terminated=NO,
     truncated=NO,
     left_range=NO,
+    clock_step=None,
 ):
     diagnostics.record_step(
         state,
@@ -62,6 +63,7 @@ def record(
         terminated,
         truncated,
         left_range,
+        clock_step,
     )
 
 
@@ -141,7 +143,11 @@ def test_the_rhythm_follows_the_clocks_and_the_legs_costs():
         foot_slip=torch.full((2, 2), 0.1),
     )
 
-    record(diagnostics, state, state, rewards)
+    clock_step = SimpleNamespace(
+        leg_difference_known=torch.tensor([[True, False], [True, True]])
+    )
+
+    record(diagnostics, state, state, rewards, clock_step=clock_step)
     rhythm = diagnostics.rhythm
 
     assert torch.equal(rhythm.tempo, clocks.tempo_hz)
@@ -149,6 +155,7 @@ def test_the_rhythm_follows_the_clocks_and_the_legs_costs():
     lags = torch.tensor([[0.0, 0.3], [0.0, 0.2]])
     assert torch.allclose(rhythm.neighbour_offset, lags[:, 1:], atol=1e-6)
     assert torch.allclose(rhythm.head_offset, lags, atol=1e-6)
+    assert torch.equal(rhythm.legs_compared, clock_step.leg_difference_known)
     assert rhythm.legs_on_tempo.tolist() == [[0.75, 1.0], [0.0, 0.5]]
     assert torch.equal(rhythm.foot_slip, rewards.foot_slip)
     assert make_diagnostics().rhythm is None  # without clocks

@@ -127,6 +127,11 @@ def test_a_run_with_clocks_shows_its_rhythm_under_each_window(capsys):
         "-0.00200",
     ]
 
+    # A window shorter than a turn after a restart compares no legs.
+    no_legs_compared = rhythm | {"legs_on_tempo": [None, None]}
+    progress.finish(window([1, 0, 0, 0, 0, 0]) | {"rhythm": no_legs_compared})
+    assert "legs on tempo -  slip" in capsys.readouterr().out
+
 
 def test_the_settings_header_names_the_six_training_settings_and_what_they_make():
     values = {

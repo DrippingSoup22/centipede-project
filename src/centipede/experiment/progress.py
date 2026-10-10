@@ -70,8 +70,9 @@ CLOCK_LEGEND = (
     " phase offset\nbetween neighbours, positive when the rear lags (a wave from"
     " head to tail), in degrees and\nin steps; lock: how steady each pair's offset"
     " stays within a world; consistency: how alike\nthe offsets are across every"
-    " world and step, both 0 to 1; legs on tempo: 1 - the legs-off-tempo\ncost;"
-    " slip: the foot-slip cost, 0 to 1; head, followers: the reward per step."
+    " world and step, both 0 to 1; legs on tempo: 1 - the legs-off-tempo\ncost,"
+    " on the steps the clock compared the legs; slip: the foot-slip cost, 0 to"
+    " 1; head,\nfollowers: the reward per step."
 )
 
 
@@ -280,14 +281,17 @@ def _clock_line(record: dict[str, Any], indent: int) -> str:
     delay_steps = offset / 360 / (mean_tempo * STEP_SECONDS)
     consistency = sum(length for _, length in pairs) / len(pairs)
     lock = sum(rhythm["neighbour_offset_lock"]) / len(pairs)
-    on_tempo = sum(rhythm["legs_on_tempo"]) / len(tempo)
+    # None for a segment whose clock compared no legs in the window, as in a
+    # window shorter than a turn after a restart.
+    compared = [share for share in rhythm["legs_on_tempo"] if share is not None]
+    on_tempo = f"{sum(compared) / len(compared):.0%}" if compared else "-"
     slip = sum(rhythm["foot_slip"]) / len(tempo)
     rewards = [sum(parts) for parts in record["step_facts"]["reward_parts"]]
     followers = sum(rewards[1:]) / len(rewards[1:])
     return (
         f"{' ' * indent}clocks {mean_tempo:.2f} Hz ({min(tempo):.2f}-{max(tempo):.2f})"
         f"  offset {offset:+.0f} deg = {delay_steps:+.1f} steps  lock {lock:.2f}"
-        f"  consistency {consistency:.2f}  legs on tempo {on_tempo:.0%}"
+        f"  consistency {consistency:.2f}  legs on tempo {on_tempo}"
         f"  slip {slip:.2f}  |  head {rewards[0]:+.5f}  followers {followers:+.5f}"
     )
 

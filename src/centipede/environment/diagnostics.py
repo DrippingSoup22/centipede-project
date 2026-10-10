@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import torch
 
 from centipede.diagnostics_category import measure
-from centipede.environment.clocks import Clocks
+from centipede.environment.clocks import Clocks, ClockStep
 from centipede.environment.observation_builder import head_forward_direction
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
@@ -148,10 +148,16 @@ class RhythmFacts:
         "rad",
         summary="angle",
     )
+    legs_compared: torch.Tensor = measure(
+        "Whether the clock compared the segment's legs with its last turn on the"
+        " step, which it cannot do in its first turn after a restart, (W, N)",
+        summary="share",
+    )
     legs_on_tempo: torch.Tensor = measure(
-        "1 minus the legs-off-tempo cost: how closely the segment's leg joints"
-        " came back to their angles at the same point of the clock's last turn,"
-        " (W, N)"
+        "1 minus the legs-off-tempo cost, where the clock compared the legs: how"
+        " closely the segment's leg joints came back to their angles at the same"
+        " point of the clock's last turn, (W, N)",
+        counted_where="legs_compared",
     )
     foot_slip: torch.Tensor = measure(
         "The foot-slip cost before its weight: how fast the segment's feet that"
@@ -293,6 +299,7 @@ class EnvironmentDiagnostics:
                 tempo=zeros(segment_count),
                 neighbour_offset=zeros(segment_count - 1),
                 head_offset=zeros(segment_count),
+                legs_compared=zeros(segment_count, dtype=torch.bool),
                 legs_on_tempo=zeros(segment_count),
                 foot_slip=zeros(segment_count),
             )
@@ -383,13 +390,15 @@ class EnvironmentDiagnostics:
         terminated: torch.Tensor,
         truncated: torch.Tensor,
         left_range: torch.Tensor,
+        clock_step: ClockStep | None = None,
     ) -> None:
         """Refresh the step facts, add to the totals, and publish ended episodes.
 
         Called once per step, after rewards and episode ends are known and
         before any world is reset; the arguments are values the front file
         already has. ``left_range`` marks the cut episodes whose head left the
-        range circle.
+        range circle; ``clock_step`` is what the clocks read on the step, None
+        without clocks.
         """
         step = self.step
         quaternion = physical_state.body_quaternion
@@ -434,7 +443,7 @@ class EnvironmentDiagnostics:
         step.left_right_similarity.copy_(_cosine(movement[..., :3], movement[..., 3:]))
         step.neighbour_leg_similarity.copy_(_cosine(movement[:, :-1], movement[:, 1:]))
         if self.rhythm is not None:
-            self._record_rhythm(step_rewards)
+            self._record_rhythm(step_rewards, clock_step)
 
         self._steps += 1
         self._segment_return += step_rewards.rewards
@@ -487,13 +496,14 @@ class EnvironmentDiagnostics:
         ):
             summary.copy_(torch.where(_per_world(ended, summary), value, summary))
 
-    def _record_rhythm(self, step_rewards: StepRewards) -> None:
+    def _record_rhythm(self, step_rewards: StepRewards, clock_step: ClockStep) -> None:
         """Refresh the rhythm from the clocks, which the step has advanced."""
         rhythm = self.rhythm
         phase = self.clocks.phase
         rhythm.tempo.copy_(self.clocks.tempo_hz)
         rhythm.neighbour_offset.copy_(_wrapped(phase[:, :-1] - phase[:, 1:]))
         rhythm.head_offset.copy_(_wrapped(phase[:, :1] - phase))
+        rhythm.legs_compared.copy_(clock_step.leg_difference_known)
         rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
         rhythm.foot_slip.copy_(step_rewards.foot_slip)
 

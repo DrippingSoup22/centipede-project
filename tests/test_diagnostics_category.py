@@ -101,6 +101,34 @@ def test_a_window_summary_follows_each_values_summary_and_mask():
 
 
 @dataclass(frozen=True)
+class ExampleComparisons:
+    compared: torch.Tensor = measure("Compared", summary="share")
+    closeness: torch.Tensor = measure(
+        "Closeness where compared", counted_where="compared"
+    )
+
+
+def test_a_mean_counted_where_a_flag_is_true_leaves_out_the_other_entries():
+    facts = ExampleComparisons(
+        compared=torch.zeros(2, 3, dtype=torch.bool), closeness=torch.zeros(2, 3)
+    )
+    window = WindowSummary(facts)
+    # Two steps; world 1 does not count on the second, and the last entry is
+    # never compared. No 9 may count.
+    for compared, closeness, counted_worlds in (
+        ([[1, 0, 0], [1, 1, 0]], [[0.2, 9, 9], [0.4, 0.6, 9]], [True, True]),
+        ([[1, 1, 0], [1, 1, 0]], [[0.6, 0.8, 9], [9, 9, 9]], [True, False]),
+    ):
+        facts.compared.copy_(torch.tensor(compared, dtype=torch.bool))
+        facts.closeness.copy_(torch.tensor(closeness))
+        window.add(torch.tensor(counted_worlds))
+
+    closeness = window.result()["closeness"]
+    assert torch.allclose(closeness[:2], torch.tensor([0.4, 0.7]))
+    assert closeness[2].isnan()
+
+
+@dataclass(frozen=True)
 class ExampleSpread:
     ended: torch.Tensor = measure("Episode ended", summary="count")
     length: torch.Tensor = measure("Episode length", histogram_edges=(0, 10, 20))

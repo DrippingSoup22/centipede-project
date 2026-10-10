@@ -42,7 +42,9 @@ class Description:
     contact flags, so that logs and reports can label them. ``histogram_edges``,
     in the value's unit, asks a window summary to also count the rows in each
     bin between consecutive edges; rows outside the edges count in the first or
-    the last bin.
+    the last bin. ``counted_where`` names a true/false value of the same
+    category and shape that picks the entries a mean counts: each entry is
+    averaged only over the worlds and steps where its flag is true.
     """
 
     meaning: str
@@ -50,6 +52,7 @@ class Description:
     summary: str
     parts: tuple[str, ...] = ()
     histogram_edges: tuple[float, ...] = ()
+    counted_where: str = ""
 
 
 def measure(
@@ -58,12 +61,15 @@ def measure(
     summary: str = "mean",
     parts: tuple[str, ...] = (),
     histogram_edges: tuple[float, ...] = (),
+    counted_where: str = "",
 ) -> Any:
     """Declare one field of a diagnostics category, with its description."""
     if summary not in SUMMARIES:
         raise ValueError(f"summary must be one of {SUMMARIES}, not {summary!r}")
     edges = tuple(float(edge) for edge in histogram_edges)
-    description = Description(meaning, unit, summary, tuple(parts), edges)
+    description = Description(
+        meaning, unit, summary, tuple(parts), edges, counted_where
+    )
     return field(metadata={"description": description})
 
 
@@ -90,7 +96,9 @@ class WindowSummary:
     rows in a window, means and shares are NaN and maxima are minus infinity.
     ``histograms`` gives the bin counts of the values that declare edges.
     Values declared ``recorded`` are not summarised and do not appear in
-    ``descriptions`` or ``result``.
+    ``descriptions`` or ``result``. A mean declared with ``counted_where``
+    counts each entry only where that flag is true, and is NaN for an entry
+    whose flag never was.
 
     An ``angle``, in rad, is summarised by the direction of the mean of its
     unit vectors (cos, sin), from -pi to pi, and by two lengths of such means,
@@ -121,6 +129,12 @@ class WindowSummary:
             name: torch.zeros(value.shape[1:], device=value.device)
             for name, value in values(category).items()
             if name in self.descriptions and self.descriptions[name].summary != "angle"
+        }
+        # Per mean counted where a flag is true, how often each entry counted.
+        self._entry_counts = {
+            name: torch.zeros(value.shape[1:], device=value.device)
+            for name, value in values(category).items()
+            if name in self.descriptions and self.descriptions[name].counted_where
         }
         # Per angle, each world's sums of its cosine and sine over the window,
         # with the angle's entries before them; and each world's counted rows.
@@ -159,6 +173,8 @@ class WindowSummary:
                 total.zero_()
         for _, counts, _ in self._histograms.values():
             counts.zero_()
+        for counts in self._entry_counts.values():
+            counts.zero_()
         for sums in self._angle_sums.values():
             sums.zero_()
         self._world_rows.zero_()
@@ -191,6 +207,12 @@ class WindowSummary:
                 if mask is not None:
                     value = torch.where(_rows(mask, value), value, -torch.inf)
                 torch.maximum(total, value.amax(dim=0), out=total)
+            elif name in self._entry_counts:
+                counted = category_values[self.descriptions[name].counted_where]
+                if mask is not None:
+                    counted = counted & _rows(mask, counted)
+                total += torch.where(counted, value, 0.0).sum(dim=0)
+                self._entry_counts[name] += counted.sum(dim=0)
             else:
                 if mask is not None:
                     value = torch.where(_rows(mask, value), value, 0.0)
@@ -225,7 +247,9 @@ class WindowSummary:
                 summaries |= self._angle_summary(name)
             elif name in self._totals:
                 total = self._totals[name]
-                if description.summary in ("mean", "share"):
+                if name in self._entry_counts:
+                    summaries[name] = total / self._entry_counts[name]
+                elif description.summary in ("mean", "share"):
                     summaries[name] = total / self._row_count
                 else:
                     summaries[name] = total.clone()

@@ -287,6 +287,7 @@ class Environment:
             terminated,
             truncated,
             left_range,
+            clock_step,
         )
 
         # 6. Start a new episode in the worlds whose episode ended: restart

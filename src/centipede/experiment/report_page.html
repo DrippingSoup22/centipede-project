@@ -295,7 +295,7 @@ const METRICS = {
   "rhythm.head_offset_lock": { label: "Lag lock", unit: "", range: [0, 1], better: "higher",
     about: "How steady each segment's lag behind the head stays within each world over the window, from 0 to 1." },
   "rhythm.legs_on_tempo": { label: "Legs on tempo", unit: "%", scale: 100, better: "higher",
-    about: "1 minus the legs-off-tempo cost: how closely each segment's leg joints come back to their angles at the same point of its clock's last turn." },
+    about: "1 minus the legs-off-tempo cost, on the steps the clock compared the legs (not in its first turn after a restart): how closely each segment's leg joints come back to their angles at the same point of its clock's last turn." },
   "rhythm.foot_slip": { label: "Foot slip", unit: "", better: "lower",
     about: "The foot-slip cost before its weight, from 0 to 1: how fast each segment's feet slide while they stay on the ground. A segment dragged by its neighbours slips." },
   "episodes.start_bearing": { label: "Target's start bearing", unit: "°", scale: RADIANS_TO_DEGREES,

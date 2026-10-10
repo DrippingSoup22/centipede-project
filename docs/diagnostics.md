@@ -79,7 +79,8 @@ hand.
 | `tempo` | `(W, N)` | Each segment's clock tempo, Hz | Mean |
 | `neighbour_offset` | `(W, N − 1)` | Phase offset between neighbours, φ of the segment minus φ of the next one, rad: positive, up to half a turn, when the rear one lags, as in a wave from head to tail | Angle |
 | `head_offset` | `(W, N)` | How far each segment's clock lags behind the head's, φ of the head minus φ of the segment, rad: the wave along the body; 0 for the head | Angle |
-| `legs_on_tempo` | `(W, N)` | 1 minus the legs-off-tempo cost: how closely the segment's leg joints came back to their angles at the same point of the clock's last turn | Mean |
+| `legs_compared` | `(W, N)` | Whether the clock compared the segment's legs with its last turn on the step, which it cannot do in its first turn after a restart | Share |
+| `legs_on_tempo` | `(W, N)` | 1 minus the legs-off-tempo cost: how closely the segment's leg joints came back to their angles at the same point of the clock's last turn | Mean where `legs_compared` |
 | `foot_slip` | `(W, N)` | The foot-slip cost before its weight, from 0 to 1: how fast the segment's feet that stayed on the ground slid | Mean |
 
 An offset in steps is its share of a turn times the steps of a turn: 36° at
@@ -90,7 +91,10 @@ so within each world the offsets stay where the random start put them, and
 the **lock** is high from the first window; the **consistency**, across the
 worlds, rises only once the segments steer their offsets toward the same wave.
 The [plateau stop](configuration.md#the-plateau-stop) watches the
-consistency of the neighbours' offsets, averaged over the pairs.
+consistency of the neighbours' offsets, averaged over the pairs. The legs on
+tempo count only the steps on which the clock compared the legs: the others
+cost nothing, and counting them would lift the value at the start of every
+episode.
 
 ### Episode summary
 
@@ -200,8 +204,11 @@ Each value follows its own summary: a **mean** or a **share** averages over
 the counted rows, a **count** adds up true flags, and a **maximum** keeps the
 largest value. A **recorded** value is never summarised: it is kept as it is
 for the recorder and left out of the window summary, the log, and the
-report. An **angle**, in rad, cannot be averaged as a number (359° and 1°
-would give 180°), so it is summarised through its unit vectors (cos, sin), as
+report. A mean may be **counted where** a true/false value of the same
+category and shape is true: each entry is then averaged only over the
+worlds and steps where its flag is, and is NaN where it never was. An
+**angle**, in rad, cannot be averaged as a number (359° and 1° would give
+180°), so it is summarised through its unit vectors (cos, sin), as
 circular statistics do: by the direction of their mean, from −π to π, and by
 two lengths of such means, from 0 to 1, logged after it under its name with
 `_consistency` and `_lock`. The **consistency** is the length of the mean over

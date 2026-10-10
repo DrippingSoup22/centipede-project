@@ -442,9 +442,10 @@ rhythm ([diagnostics.md](diagnostics.md#rhythm)): the clocks' mean tempo, with
 the lowest and highest segment's; the mean phase offset between neighbours,
 positive when the rear lags as in a wave from head to tail, in degrees and as
 a delay in steps; the lock and the consistency of the offsets, from 0 to 1;
-the legs on tempo, 1 minus the legs-off-tempo cost; the foot slip, the cost
-from 0 to 1; and the reward per step of the head and of the mean follower,
-which in such a run earn in different ways.
+the legs on tempo, 1 minus the legs-off-tempo cost, on the steps the clock
+compared the legs; the foot slip, the cost from 0 to 1; and the reward per
+step of the head and of the mean follower, which in such a run earn in
+different ways.
 
 The last line gives the session's time and overall speed, or, for a run that
 stops at a plateau, the cycle of its last rise. In evaluation a pass
