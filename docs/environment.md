@@ -633,8 +633,13 @@ budget. None prescribes a gait.
   squared, in units of `legs_off_tempo_unit_deg` (20°), at most 1. It asks the
   legs to repeat their movement with the clock, whatever the movement is, so
   that a neighbour can read the clock from them. A leg standing still repeats
-  too. The clock remembers the legs at 64 points of its turn; the first turn
-  after a restart costs nothing.
+  too. The clock remembers the legs at 64 points of its turn, the centres of
+  64 equal parts: at each point its hand passes during a step, it takes the
+  legs to be between where they were before and after the step, in
+  proportion to how far the hand had come, compares them with what it
+  remembered there one turn earlier, and remembers them in their place. The
+  hand passes every point once per turn, so each comparison is with the last
+  turn, and only the first turn after a restart costs nothing.
 - **Out of tempo** `D_i` (`out_of_tempo_cost_parts`, with clocks): the mean,
   over the neighbours the segment sees (its observation radius), of the tempo
   difference in octaves divided by the largest possible, 2 octaves. Both

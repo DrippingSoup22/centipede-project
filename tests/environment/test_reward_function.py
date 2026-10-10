@@ -190,14 +190,14 @@ def test_walking_costs_charge_slipping_feet_and_legs_and_tempo_off_the_clock():
     foot_slip_speed = torch.zeros(2, 3, 2)
     foot_slip_speed[1, 0, 0] = 0.020  # twice the unit: counts 1; the other foot 0
     foot_slip_speed[1, 1] = 0.005  # half the unit, both feet
-    leg_difference = torch.zeros(2, 3, 6)
-    leg_difference[1, 0] = math.radians(10)  # (10 / 20)² = 0.25
-    leg_difference[1, 1:] = math.radians(40)  # at most 1 ...
+    leg_squared_difference = torch.zeros(2, 3)
+    leg_squared_difference[1, 0] = math.radians(10) ** 2  # (10 / 20)² = 0.25
+    leg_squared_difference[1, 1:] = math.radians(40) ** 2  # at most 1 ...
     known = torch.ones(2, 3, dtype=torch.bool)
-    known[1, 2] = False  # ... and nothing before the clock passed that point
+    known[1, 2] = False  # ... and nothing in the clock's first turn
     mismatch = torch.zeros(2, 3)
     mismatch[1] = torch.tensor([0.4, 0.2, 0.1])
-    clock = ClockStep(leg_difference, known, mismatch)
+    clock = ClockStep(leg_squared_difference, known, mismatch)
 
     _, parts, weights = rewards_for(
         unchanged_state(),

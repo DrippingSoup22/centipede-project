@@ -199,16 +199,16 @@ def foot_slip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
 def legs_off_tempo(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−how far the legs are from where they were at this point of the last turn.
 
-    Each leg angle is compared with its angle when the segment's clock last
-    passed the same point of its turn: the mean, over the six leg angles, of
-    the difference squared in units of ``legs_off_tempo_unit_deg``, at most 1,
-    and 0 at a point the clock had not passed since the world restarted. It
-    asks the legs to repeat their movement with the clock, whatever the
-    movement is: a leg standing still repeats too.
+    Each leg angle is compared with its angle at the same point of the
+    segment's clock's last turn: the mean, over the six leg angles and the
+    points the hand passed in the step, of the difference squared in units of
+    ``legs_off_tempo_unit_deg``, at most 1, and 0 in the first turn after the
+    world restarted. It asks the legs to repeat their movement with the
+    clock, whatever the movement is: a leg standing still repeats too.
     """
     unit = math.radians(settings.legs_off_tempo_unit_deg)
     clock = context.clock
-    error = (clock.leg_difference / unit).square().mean(dim=-1).clamp(max=1.0)
+    error = (clock.leg_squared_difference / unit**2).clamp(max=1.0)
     return -error * clock.leg_difference_known
 
 

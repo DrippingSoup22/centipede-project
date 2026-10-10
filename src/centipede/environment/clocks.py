@@ -12,8 +12,10 @@ import torch
 
 from centipede.environment.settings import ClockSettings
 
-# How many points of a turn each clock remembers the legs' angles at.
+# How many points of a turn each clock remembers the legs' angles at, at
+# the centre of each of as many equal parts of the turn.
 REMEMBERED_POINTS = 64
+POINT_WIDTH = 2 * math.pi / REMEMBERED_POINTS
 # A segment observes its hand as (cos, sin) and its tempo action.
 CLOCK_VALUE_COUNT = 3
 
@@ -22,15 +24,18 @@ CLOCK_VALUE_COUNT = 3
 class ClockStep:
     """What the clock costs read after a step; created anew every step.
 
-    ``leg_difference`` is ``(W, N, 6)``: each leg angle now minus its angle
-    when the clock's hand last passed the same point of its turn, in rad;
-    ``leg_difference_known`` ``(W, N)`` is False where the hand had not passed
-    that point since the world restarted. ``tempo_mismatch`` ``(W, N)`` is the
-    mean, over the neighbours the segment sees, of the tempo difference in
-    octaves divided by the largest possible, from 0 to 1.
+    ``leg_squared_difference`` is ``(W, N)``: how far the legs were, at the
+    points of its turn the hand passed during the step, from where they were
+    at the same points one turn earlier: the difference of each leg angle
+    squared, in rad², averaged over the six angles and the points.
+    ``leg_difference_known`` ``(W, N)`` is False where the hand passed only
+    points it had not passed since the world restarted: in the first turn.
+    ``tempo_mismatch`` ``(W, N)`` is the mean, over the neighbours the segment
+    sees, of the tempo difference in octaves divided by the largest possible,
+    from 0 to 1.
     """
 
-    leg_difference: torch.Tensor
+    leg_squared_difference: torch.Tensor
     leg_difference_known: torch.Tensor
     tempo_mismatch: torch.Tensor
 
@@ -43,7 +48,9 @@ class Clocks:
     same in octaves from the middle tempo: the tempo action times the range.
     All three are overwritten in place by ``reset`` and ``step``. To compare
     the legs with the clock's last turn, each segment's six leg angles are
-    remembered at REMEMBERED_POINTS points of the turn, as the hand passes.
+    remembered at REMEMBERED_POINTS points of the turn, the centres of as many
+    equal parts; the hand passes each point once per turn, so every turn
+    replaces what the last one left.
     """
 
     def __init__(
@@ -58,6 +65,13 @@ class Clocks:
         """Allocate the clocks and count each segment's visible neighbours."""
         self.settings = settings
         self.step_duration_s = step_duration_s
+        # The hand passes at most this many points in one step, at the fastest
+        # tempo; one more for rounding.
+        fastest = settings.middle_tempo_hz * 2**settings.tempo_range_octaves
+        most_points = math.ceil(REMEMBERED_POINTS * fastest * step_duration_s) + 1
+        self.point_offsets = torch.arange(
+            most_points, dtype=torch.float32, device=device
+        )
         shape = (world_count, segment_count)
         self.phase = torch.zeros(shape, dtype=torch.float32, device=device)
         self.tempo_octaves = torch.zeros(shape, dtype=torch.float32, device=device)
@@ -105,27 +119,55 @@ class Clocks:
         self.tempo_hz.masked_fill_(restarted, self.settings.middle_tempo_hz)
         self.remembered.masked_fill_(restarted[..., None], False)
 
-    def step(self, tempo_action: torch.Tensor, leg_angles: torch.Tensor) -> ClockStep:
+    def step(
+        self,
+        tempo_action: torch.Tensor,
+        leg_angles_before: torch.Tensor,
+        leg_angles: torch.Tensor,
+    ) -> ClockStep:
         """Turn every hand for one step and compare the legs with the last turn.
 
         ``tempo_action`` ``(W, N)`` is each segment's tempo action, from −1 to
-        1; ``leg_angles`` ``(W, N, 6)`` the leg angles after the step, which
-        are remembered where the hand now is, for the next turn.
+        1; ``leg_angles_before`` and ``leg_angles`` ``(W, N, 6)`` are the leg
+        angles before and after the step. At each point the hand passes, the
+        legs are taken to be between the two, in proportion to how far the
+        hand had come; they are compared with the angles remembered there one
+        turn earlier, then remembered in their place.
         """
         self.tempo_octaves.copy_(tempo_action * self.settings.tempo_range_octaves)
         self.tempo_hz.copy_(
             self.settings.middle_tempo_hz * torch.exp2(self.tempo_octaves)
         )
         turned = 2 * math.pi * self.tempo_hz * self.step_duration_s
-        self.phase.add_(turned).remainder_(2 * math.pi)
+        start = self.phase.clone()
 
-        point = (self.phase * (REMEMBERED_POINTS / (2 * math.pi))).long()
-        point.clamp_(max=REMEMBERED_POINTS - 1)
-        angle_index = point[..., None, None].expand(*point.shape, 1, 6)
-        remembered_angles = self.remembered_angles.gather(2, angle_index).squeeze(2)
-        known = self.remembered.gather(2, point[..., None]).squeeze(2)
-        self.remembered_angles.scatter_(2, angle_index, leg_angles[:, :, None, :])
-        self.remembered.scatter_(2, point[..., None], torch.ones_like(known[..., None]))
+        # The points the hand may pass in the step, (W, N, P): the points'
+        # centres are at (k + 1/2) point widths, and the first is the first
+        # after the hand's start. At each point passed, the legs have made the
+        # share ``way`` of the step's movement.
+        first_point = torch.floor(start / POINT_WIDTH - 0.5) + 1
+        point = first_point[..., None] + self.point_offsets
+        centre = (point + 0.5) * POINT_WIDTH
+        passed = centre <= (start + turned)[..., None]
+        way = (centre - start[..., None]) / turned[..., None]
+        movement = leg_angles - leg_angles_before
+        angles = leg_angles_before[:, :, None] + way[..., None] * movement[:, :, None]
+
+        # Compare the legs with what was remembered at the points passed, then
+        # remember them in its place.
+        index = point.long().remainder(REMEMBERED_POINTS)
+        angle_index = index[..., None].expand(*index.shape, 6)
+        remembered_angles = self.remembered_angles.gather(2, angle_index)
+        remembered = self.remembered.gather(2, index)
+        known = passed & remembered
+        point_difference = (angles - remembered_angles).square().mean(dim=-1)
+        compared = known.sum(dim=-1)
+        squared_difference = (point_difference * known).sum(dim=-1)
+        self.remembered_angles.scatter_(
+            2, angle_index, torch.where(passed[..., None], angles, remembered_angles)
+        )
+        self.remembered.scatter_(2, index, remembered | passed)
+        self.phase.copy_((start + turned).remainder(2 * math.pi))
 
         # A tempo difference of two octaves, the largest, counts 1.
         largest = 2 * self.settings.tempo_range_octaves
@@ -137,8 +179,8 @@ class Clocks:
             mismatch[:, :-offset] += difference
             mismatch[:, offset:] += difference
         return ClockStep(
-            leg_difference=leg_angles - remembered_angles,
-            leg_difference_known=known,
+            leg_squared_difference=squared_difference / compared.clamp(min=1),
+            leg_difference_known=compared > 0,
             tempo_mismatch=mismatch / self.neighbour_counts,
         )
 

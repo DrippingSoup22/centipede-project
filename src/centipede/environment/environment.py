@@ -241,7 +241,9 @@ class Environment:
             tempo_columns = self.tempo_columns.expand(self.world_count, -1)
             tempo_action = joint_action.gather(2, tempo_columns[..., None])
             clock_step = self.clocks.step(
-                tempo_action.squeeze(-1), state.leg_joint_position
+                tempo_action.squeeze(-1),
+                self.previous_joint_position[..., :6],
+                state.leg_joint_position,
             )
         planted = self.previous_foot_contact & _foot_contact(state)
         foot_slip_speed = (

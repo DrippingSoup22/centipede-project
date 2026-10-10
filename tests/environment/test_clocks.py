@@ -22,7 +22,8 @@ def test_hands_turn_at_the_chosen_tempo_and_restart_at_random():
     clock.reset(every_world, seed=1)
     start = clock.phase.clone()
 
-    clock.step(torch.tensor([[1.0, 0.0, -1.0]] * 2), torch.zeros(2, 3, 6))
+    still = torch.zeros(2, 3, 6)
+    clock.step(torch.tensor([[1.0, 0.0, -1.0]] * 2), still, still)
 
     assert clock.tempo_hz[0].tolist() == pytest.approx([4.0, 2.0, 1.0])
     turned = (clock.phase - start).remainder(2 * math.pi)
@@ -43,24 +44,31 @@ def test_hands_turn_at_the_chosen_tempo_and_restart_at_random():
 
 
 def test_legs_are_compared_with_the_last_turn_and_tempos_with_the_neighbours():
-    """At 1.5625 turns per second a turn takes exactly 32 steps, each moving
-    the hand two of the 64 remembered points; it starts mid-point, so that
-    rounding never moves it to a neighbouring point."""
+    """At 1.5625 turns per second a turn takes exactly 32 steps, in which the
+    hand passes two of the 64 remembered points; it starts a quarter of a point
+    in, so that no point lies exactly where a step starts or ends. The legs
+    turn steadily, 0.01 rad per step, so the angles between two steps are
+    exact."""
     clock = clocks(middle_tempo_hz=1.5625, world_count=1)
     clock.reset(torch.ones(1, dtype=torch.bool), seed=0)
-    clock.phase.fill_(math.pi / 64)
+    clock.phase.fill_(2 * math.pi / 64 / 4)
     middle_tempo = torch.zeros(1, 3)
 
-    for step in range(1, 33):
-        result = clock.step(middle_tempo, torch.full((1, 3, 6), 0.01 * step))
-        assert not result.leg_difference_known.any()  # the first turn
-    result = clock.step(middle_tempo, torch.full((1, 3, 6), 0.33))
+    def legs(step):
+        return torch.full((1, 3, 6), 0.01 * step)
 
-    # Step 33 is where step 1 was: its angles are compared with step 1's.
-    assert result.leg_difference_known.all()
-    assert torch.allclose(result.leg_difference, torch.full((1, 3, 6), 0.32))
+    for step in range(1, 33):
+        result = clock.step(middle_tempo, legs(step - 1), legs(step))
+        assert not result.leg_difference_known.any()  # the first turn
+    for step in range(33, 36):
+        result = clock.step(middle_tempo, legs(step - 1), legs(step))
+        # Every point is compared with the last turn, 32 steps earlier.
+        assert result.leg_difference_known.all()
+        assert torch.allclose(
+            result.leg_squared_difference, torch.full((1, 3), 0.32**2)
+        )
 
     # The tempo is compared with the neighbours each segment sees, in octaves
     # over the largest difference: the head and segment 1 differ by one octave.
-    result = clock.step(torch.tensor([[1.0, 0.0, 0.0]]), torch.zeros(1, 3, 6))
+    result = clock.step(torch.tensor([[1.0, 0.0, 0.0]]), legs(35), legs(35))
     assert result.tempo_mismatch[0].tolist() == pytest.approx([0.5, 0.25, 0.0])
