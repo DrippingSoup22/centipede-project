@@ -241,6 +241,14 @@ share the curriculum holds, then while the level rises, and at the top level
 while the arrivals rise again; without a curriculum it is the arrival share
 alone, which stops a run once it has solved its task.
 
+With a curriculum, the stop also watches the **level** alone. Harder targets
+lower the arrival share, so while the level rises the share can fall by as
+much, and their sum stalls while the run still climbs the curriculum. The
+oscillators' run 16 stopped this way at cycle 463: from cycle 401 its level
+rose from 0.33 to 0.39 while its share fell from 0.58 to 0.52, so the
+progress, averaged over three episode lengths, last rose at cycle 405, while
+the level's average was still rising at cycle 456.
+
 The stop also watches the agents' **return**: each segment's mean return over
 the episodes that ended in a window, averaged over the segments, read in the
 windows in which episodes ended. The return is what the agents optimise, so
@@ -257,7 +265,7 @@ its level does not measure progress.
 
 In a run whose segments or legs have clocks (`[environment] clocks` or
 `leg_clocks`), the stop also
-watches a third signal, the **wave**: how alike the phase offsets between
+watches one more signal, the **wave**: how alike the phase offsets between
 neighbours are across every world and step of a window (their consistency, in
 [diagnostics.md](diagnostics.md#rhythm)), averaged over the pairs. Every clock
 starts at the same tempo, so within each world the offsets hold from the

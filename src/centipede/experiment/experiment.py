@@ -421,6 +421,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         elif stopping and cycle < total_cycles:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
             task = plateau.signals["task"]
+            level = plateau.signals.get("level")
             wave = plateau.signals.get("wave")
             agents_return = plateau.signals.get("return")
             stop_message = (
@@ -428,6 +429,12 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 f" progress ({measure}, averaged over {plateau.average_cycles}"
                 f" cycles) last rose by {plateau.min_progress:g} at cycle"
                 f" {task.best_cycle}, to {task.best:.3f}"
+                + (
+                    ""
+                    if level is None
+                    else f"; the curriculum's level, averaged alike, at cycle"
+                    f" {level.best_cycle}, to {level.best:.3f}"
+                )
                 + (
                     ""
                     if wave is None
@@ -473,16 +480,19 @@ def _plateau_readings(
     record: dict[str, Any], arrival_share: ArrivalShare, curriculum: Curriculum | None
 ) -> dict[str, float]:
     """The signals the plateau stop watches, once measured: the task (the
-    arrival share, plus the curriculum's level), the return (the mean over
-    the segments of their mean episode return in the window, when episodes
-    ended in it), in a run with clocks the wave (how alike the neighbours'
-    offsets are across every world and step, averaged over the pairs), and
-    for the solved stop the speed (the logarithm of the targets per world
-    and minute, once there are any)."""
+    arrival share, plus the curriculum's level), with a curriculum its level
+    alone, which keeps rising while harder targets lower the share, the
+    return (the mean over the segments of their mean episode return in the
+    window, when episodes ended in it), in a run with clocks the wave (how
+    alike the neighbours' offsets are across every world and step, averaged
+    over the pairs), and for the solved stop the speed (the logarithm of the
+    targets per world and minute, once there are any)."""
     readings = {}
     if arrival_share.value is not None:
         level = 0.0 if curriculum is None else curriculum.level
         readings["task"] = arrival_share.value + level
+    if curriculum is not None:
+        readings["level"] = curriculum.level
     if record["episodes"]["episode_ended"]:
         segment_return = record["episodes"]["segment_return"]
         readings["return"] = sum(segment_return) / len(segment_return)

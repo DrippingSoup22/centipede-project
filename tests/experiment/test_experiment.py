@@ -8,13 +8,15 @@ see and command, and evaluating without changing anything.
 """
 
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 import torch
 from mujoco_replay.recording import read_recording
 
-from centipede.experiment.experiment import recorded_blocks, run
+from centipede.experiment.experiment import _plateau_readings, recorded_blocks, run
+from centipede.experiment.plateau import Plateau
 from centipede.settings_section import SettingsError
 
 TRAINING_FILE = """
@@ -256,6 +258,25 @@ def test_a_run_whose_task_is_solved_stops_once_it_gets_no_faster(tmp_path):
     assert logged_cycles(folder) == list(range(1, 12))
     report = (folder / "report.html").read_text(encoding="utf-8")
     assert "Stopped after cycle 11 of 20: the task is solved." in report
+
+
+def test_a_run_still_climbing_the_curriculum_does_not_plateau():
+    """As in the oscillators' run 16, harder targets lower the arrival share
+    as fast as the level rises, so the task, their sum, stays flat; the level
+    alone shows the run still climbing."""
+    no_episode_ended = {"episodes": {"episode_ended": False}}
+
+    def plateau(watched):
+        result = Plateau(cycles=48, min_progress=0.02, episode_windows=8)
+        for cycle in range(1, 201):
+            curriculum = SimpleNamespace(level=0.002 * cycle)
+            share = SimpleNamespace(value=0.9 - 0.002 * cycle, targets_per_minute=0)
+            readings = _plateau_readings(no_episode_ended, share, curriculum)
+            result.update(cycle, {name: readings[name] for name in watched})
+        return result
+
+    assert plateau(("task",)).reached(200)
+    assert not plateau(("task", "level")).reached(200)
 
 
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
