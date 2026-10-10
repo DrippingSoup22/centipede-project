@@ -15,7 +15,7 @@ STEP_FACTS = {
     "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
     "contact_flags": [[1, 1, 0.5, 0.2], [1, 1, 0.0, 0.4]],
     "segment_moved": [0.0004, 0.0002],
-    "segment_progress": [0.0003, 0.0001],
+    "head_progress": 0.0003,
 }
 
 

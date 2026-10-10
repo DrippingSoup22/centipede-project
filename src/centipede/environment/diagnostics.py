@@ -70,8 +70,8 @@ class StepFacts:
         summary="share",
         parts=("left foot", "right foot", "body", "legs touching"),
     )
-    segment_progress: torch.Tensor = measure(
-        "Distance gained toward the segment's goal, (W, N)", "m"
+    head_progress: torch.Tensor = measure(
+        "Distance the head's tip gained toward its target, (W,)", "m"
     )
     segment_moved: torch.Tensor = measure(
         "Flat distance the segment's centre moved, (W, N)", "m"
@@ -200,9 +200,6 @@ class EpisodeSummary:
     head_path_length: torch.Tensor = measure(
         "Total distance the head's tip travelled, (W,)", "m"
     )
-    segment_total_progress: torch.Tensor = measure(
-        "Sum of each segment's progress over the episode, (W, N)", "m"
-    )
     body_contact_share: torch.Tensor = measure(
         "Share of steps with the body on the ground, (W, N)"
     )
@@ -251,7 +248,7 @@ class EnvironmentDiagnostics:
         self.step = StepFacts(
             reward_parts=zeros(segment_count, len(reward_part_names)),
             contact_flags=zeros(segment_count, 4, dtype=torch.bool),
-            segment_progress=zeros(segment_count),
+            head_progress=zeros(),
             segment_moved=zeros(segment_count),
             joint_movement=zeros(segment_count),
             spine_bend=zeros(segment_count),
@@ -287,7 +284,6 @@ class EnvironmentDiagnostics:
             final_distance=zeros(),
             distance_closed=zeros(),
             head_path_length=zeros(),
-            segment_total_progress=zeros(segment_count),
             body_contact_share=zeros(segment_count),
             leg_contact_share=zeros(segment_count),
             foot_contact_share=zeros(segment_count, 2),
@@ -297,7 +293,6 @@ class EnvironmentDiagnostics:
         self._steps = zeros()
         self._segment_return = zeros(segment_count)
         self._head_path_length = zeros()
-        self._segment_progress = zeros(segment_count)
         self._contact_steps = zeros(
             segment_count, 4
         )  # left foot, right foot, body, legs
@@ -325,7 +320,6 @@ class EnvironmentDiagnostics:
             self._steps,
             self._segment_return,
             self._head_path_length,
-            self._segment_progress,
             self._contact_steps,
             self._upside_down_steps,
         ):
@@ -383,7 +377,7 @@ class EnvironmentDiagnostics:
 
         step.reward_parts.copy_(step_rewards.reward_parts)
         step.contact_flags.copy_(contact_flags)
-        step.segment_progress.copy_(step_rewards.segment_progress)
+        step.head_progress.copy_(step_rewards.segment_progress[:, 0])
         step.segment_moved.copy_(
             (physical_state.body_planar_position - previous_body_planar_position).norm(
                 dim=-1
@@ -420,7 +414,6 @@ class EnvironmentDiagnostics:
         self._steps += 1
         self._segment_return += step_rewards.rewards
         self._head_path_length += (head_tip - previous_head_tip_position).norm(dim=-1)
-        self._segment_progress += step_rewards.segment_progress
         self._contact_steps += contact_flags.float()
         self._upside_down_steps += (step.uprightness[:, 0] < 0).float()
 
@@ -449,7 +442,6 @@ class EnvironmentDiagnostics:
             (episode.final_distance, step.head_distance),
             (episode.distance_closed, 1 - step.head_distance / self._start_distance),
             (episode.head_path_length, self._head_path_length),
-            (episode.segment_total_progress, self._segment_progress),
             (episode.body_contact_share, self._contact_steps[..., 2] / steps),
             (episode.leg_contact_share, self._contact_steps[..., 3] / steps),
             (

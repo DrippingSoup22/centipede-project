@@ -230,8 +230,8 @@ const METRICS = {
     about: "How upright each segment is: 1 standing upright, 0 on its side, −1 upside down." },
   "step_facts.segment_moved": { label: "Speed", unit: "mm/s", scale: SPEED,
     about: "How fast each segment's centre moved along the ground, in any direction." },
-  "step_facts.segment_progress": { label: "Speed toward goal", unit: "mm/s", scale: SPEED, better: "higher",
-    about: "The part of each segment's movement that brought it closer to its goal: the target for the head, and for every other segment the spot where the segment ahead of it was. Compared with the speed, it shows how much of the movement is useful; part of a follower's progress can come from being pulled along." },
+  "step_facts.head_progress": { label: "Speed toward the target", unit: "mm/s", scale: SPEED, better: "higher",
+    about: "How fast the head's tip closed on its target. Compared with the head's speed, it shows how much of its movement brought it closer." },
   "step_facts.joint_movement": { label: "Joint movement", unit: "°", scale: RADIANS_TO_DEGREES, better: "lower",
     about: "How far the joints each segment commands move in one step: the root of their mean squared movement. Random commands move a joint about 25° per step; calm, smooth movement only a few degrees. The movement cost charges its square." },
   "step_facts.spine_bend": { label: "Spine bend", unit: "°", scale: RADIANS_TO_DEGREES,
@@ -246,8 +246,6 @@ const METRICS = {
     about: "The length of the path the head's tip travelled during an episode. Compared with the distance closed, it shows how direct the path was." },
   "episodes.episode_ended": { label: "Episodes ended per window", unit: "",
     about: "How many episodes ended in each window, by arriving or by reaching the time limit. Worlds that start together also time out together, so this can be zero for many windows and then the number of worlds." },
-  "episodes.segment_total_progress": { label: "Progress per episode", unit: "mm", scale: 1000,
-    about: "Each segment's total progress toward its goal over an episode." },
   "episodes.body_contact_share": { label: "Body on the ground, per episode", unit: "%", scale: 100,
     about: "The share of each episode's steps in which each segment's body touched the ground. The behaviour section shows the same per window." },
   "episodes.leg_contact_share": { label: "Legs touching, per episode", unit: "%", scale: 100,
@@ -403,9 +401,9 @@ const RESULT_TILES = [
   { title: "Legs touching", unit: "%", better: "lower", keys: ["step_facts.contact_flags"],
     about: () => "The share of steps in which a segment's legs touched another leg, averaged over the segments.",
     value: (sample) => overall(sample.stepMean("step_facts.contact_flags"), 3), note: () => "share of steps" },
-  { title: "Speed toward goal", unit: "mm/s", better: "higher", keys: ["step_facts.segment_progress"],
-    about: () => "How fast the segments move toward their goals, averaged over the segments: the head toward its target, every other segment toward the spot where the segment ahead of it was. It rises when the centipede walks forward, even before it steers.",
-    value: (sample) => overall(sample.stepMean("step_facts.segment_progress")), note: () => "mean over segments" },
+  { title: "Speed toward the target", unit: "mm/s", better: "higher", keys: ["step_facts.head_progress"],
+    about: () => "How fast the head's tip closes on its target. It rises when the centipede walks toward the target, even before it steers well.",
+    value: (sample) => sample.stepMean("step_facts.head_progress"), note: () => "the head" },
 ];
 
 // The numbers under the body table of both reports.
@@ -423,7 +421,6 @@ const PROFILE_COLUMNS = [
   { key: "step_facts.body_height", short: "Height" },
   { key: "step_facts.uprightness", short: "Upright" },
   { key: "step_facts.segment_moved", short: "Speed" },
-  { key: "step_facts.segment_progress", short: "Toward goal" },
   { key: "step_facts.joint_movement", short: "Joint movement" },
   { key: "step_facts.spine_bend", short: "Spine bend" },
 ];
@@ -488,7 +485,7 @@ const TRAINING_DETAILS = [
       { kind: "heatmap", width: "w3", size: "small", key: "episodes.segment_return" },
       ...[0, 1, 2, 3].map((part) => ({ kind: "heatmap", width: "w3", size: "small", key: "step_facts.contact_flags", part,
         title: ["Left foot on the ground", "Right foot on the ground", "Body on the ground", "Legs touching"][part] })),
-      ...["step_facts.body_height", "step_facts.uprightness", "step_facts.segment_moved", "step_facts.segment_progress",
+      ...["step_facts.body_height", "step_facts.uprightness", "step_facts.segment_moved",
         "step_facts.joint_movement", "step_facts.spine_bend"]
         .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })),
     ] },
@@ -1975,7 +1972,7 @@ function evaluationReport(root) {
   if ((data.walk || []).length) {
     const legs = (record) => mean(record.step_facts.contact_flags.map((flags) => flags[3]));
     const share = (counts) => counts[0] / counts.reduce((a, b) => a + b, 0);
-    const toward = (record) => record.step_facts.segment_progress[0] * 1000 / data.step_seconds;
+    const toward = (record) => record.step_facts.head_progress * 1000 / data.step_seconds;
     const rows = data.walk.map((record) => [String(record.seed), number(record.targets_per_minute),
       `${number(100 * share(record.episode_distributions.ending))}%`, `${number(100 * legs(record))}%`, number(toward(record))]);
     root.append(html("section", {}, html("h2", {}, "The agents' walk"),

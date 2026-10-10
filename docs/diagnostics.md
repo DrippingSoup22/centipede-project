@@ -46,7 +46,7 @@ Refreshed on every step, for every world.
 | --- | --- | --- | --- |
 | `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact, and the [optional costs](environment.md#optional-costs) when they are on (with the efficiency reward: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
 | `contact_flags` | `(W, N, 4)` | Left foot, right foot, and body on the ground; legs touching | Share of steps |
-| `segment_progress` | `(W, N)` | Metres gained toward the segment's goal: the target for the head, the spot where the segment ahead was for the others | Mean |
+| `head_progress` | `(W,)` | Metres the head's tip gained toward its target | Mean |
 | `segment_moved` | `(W, N)` | Metres the segment's centre moved, measured flat on the ground | Mean |
 | `joint_movement` | `(W, N)` | How far the joints the segment commands moved on the step, rad: the root of their mean squared movement, which the movement cost charges | Mean |
 | `spine_bend` | `(W, N)` | Angle of the spine joint behind the segment, either way, rad; 0 for the rear | Mean |
@@ -60,8 +60,8 @@ Refreshed on every step, for every world.
 | `left_right_similarity` | `(W, N)` | How alike the segment's two legs moved on the step: the cosine between the movements of the left leg's three joints and the right leg's, which mirror each other, so that 1 is together, −1 alternating, and 0 in between | Mean |
 | `neighbour_leg_similarity` | `(W, N − 1)` | How alike the segment's legs moved on the step to the next segment's: the cosine between their six joints' movements; 1 the same, −1 opposite, 0 unrelated | Mean |
 
-Comparing `segment_progress` with `segment_moved` shows how much of a segment's
-movement brings it closer to its goal. The two similarities compare the
+Comparing `head_progress` with the head's `segment_moved` shows how much of its
+movement brings it closer to its target. The two similarities compare the
 directions of joint movements over the step, so they describe the gait whatever
 its speed; legs that barely move (below 1 mrad a step) count as 0, in between.
 Other gait measures, such as how long each foot stays on the ground, are worked
@@ -109,7 +109,6 @@ ended, and every other value as a mean over those episodes.
 | `start_distance`, `final_distance` | `(W,)` | Head's distance to the target at the start and at the end, m |
 | `distance_closed` | `(W,)` | Share of the start distance closed by the end: 1 − final ÷ start; 1 at the target, below 0 when the head moved away |
 | `head_path_length` | `(W,)` | Total distance the head's tip travelled, m; with the net progress it shows how direct the path was |
-| `segment_total_progress` | `(W, N)` | Sum of `segment_progress`: what each segment contributed |
 | `body_contact_share`, `leg_contact_share` | `(W, N)` | Share of steps with the body on the ground, or legs touching |
 | `foot_contact_share` | `(W, N, 2)` | Share of steps each foot was on the ground |
 | `upside_down_share` | `(W,)` | Share of steps with the head upside down |

@@ -241,7 +241,7 @@ def _behaviour(step: dict[str, Any]) -> dict[str, str]:
     legs = sum(segment[LEGS_TOUCHING] for segment in flags) / len(flags)
     return {
         "speed": _speed(step["segment_moved"][0]),
-        "toward": _speed(step["segment_progress"][0]),
+        "toward": _speed(step["head_progress"]),
         "body_down": f"{body_down:.0%}",
         "legs": f"{legs:.0%}",
     }

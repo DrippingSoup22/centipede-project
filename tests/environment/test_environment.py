@@ -165,7 +165,7 @@ def test_progress_is_measured_from_the_positions_before_the_step():
     moved = (state.body_planar_position - centres_before).norm(dim=-1)
     facts = env.diagnostics.step
     assert torch.all(moved > 0)
-    assert torch.allclose(facts.segment_progress[:, 0], head_progress, atol=1e-9)
+    assert torch.allclose(facts.head_progress, head_progress, atol=1e-9)
     assert torch.allclose(facts.segment_moved, moved, atol=1e-9)
 
 
