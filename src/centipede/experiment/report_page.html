@@ -384,15 +384,17 @@ const SETTING_CHIPS = [
       if (!(e.clocks || e.leg_clocks) || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
       // Only leg clocks have load feedback, which holds a loaded foot's clock
-      // in stance, and centres that follow their actions slowly.
+      // in stance, and a step shape whose centres and amplitudes follow their
+      // actions slowly.
       const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` : "";
-      const centres = e.leg_clocks && e.clock.centre_time_constant_s ? `, centres following in ${number(e.clock.centre_time_constant_s)} s` : "";
+      const following = e.leg_clocks ? [["centres", e.clock.centre_time_constant_s], ["amplitudes", e.clock.amplitude_time_constant_s]]
+        .filter(([, seconds]) => seconds).map(([name, seconds]) => `, ${name} following in ${number(seconds)} s`).join("") : "";
       // Runs before neighbour_clocks existed saw only their own clock, and
       // runs before coupling existed were coupled both ways.
       const ahead = e.clock.coupling === "ahead";
       const seen = e.neighbour_clocks ? `, each seeing ${ahead ? "the clocks ahead of it" : "its neighbours' clocks"}` : ", each seeing only its own";
       const coupled = ahead ? ", tempo matched to the clocks ahead" : "";
-      return `a clock per ${e.leg_clocks ? "leg" : "segment"}, ${number(low)}–${number(high)} Hz${feedback}${centres}${seen}${coupled}`;
+      return `a clock per ${e.leg_clocks ? "leg" : "segment"}, ${number(low)}–${number(high)} Hz${feedback}${following}${seen}${coupled}`;
     } },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
@@ -401,7 +403,8 @@ const SETTING_CHIPS = [
       // The first three costs are always named; the others only when used.
       const costs = [["body", r.body_contact_cost_parts], ["step", r.step_cost_parts], ["legs", r.leg_contact_cost_parts],
         ["movement", r.movement_cost_parts], ["slip", r.foot_slip_cost_parts], ["off tempo", r.legs_off_tempo_cost_parts],
-        ["out of tempo", r.out_of_tempo_cost_parts], ["no support", r.no_support_cost_parts]].filter(([, parts], index) => index < 3 || parts);
+        ["out of tempo", r.out_of_tempo_cost_parts], ["no support", r.no_support_cost_parts],
+        ["both feet down", r.both_feet_down_cost_parts]].filter(([, parts], index) => index < 3 || parts);
       const used = costs.reduce((sum, [, parts]) => sum + (parts || 0), 0);
       // The first runs of the rules paid the followers for their own goals.
       const followers = r.follower_progress_ratio !== undefined
@@ -909,7 +912,7 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
-  no_support: "#c2569b" };
+  no_support: "#c2569b", both_feet_down: "#2a9d8f" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }
