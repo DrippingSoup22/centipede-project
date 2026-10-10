@@ -2110,10 +2110,11 @@ function evaluationReport(root) {
       }
       if (!episodes) return "–";
       const time = arrivals ? ` in ${withUnit((steps / arrivals) * STEP_SECONDS, "s")}` : "";
-      return html("span", { title: `${count(arrivals)} of ${count(episodes)} episodes arrived` }, `${number((100 * arrivals) / episodes)}%${time}`);
+      // The episodes counted, so that a share of few episodes reads as such.
+      return html("span", { title: `${count(arrivals)} of ${count(episodes)} episodes arrived` }, `${number((100 * arrivals) / episodes)}% of ${count(episodes)}${time}`);
     };
     root.append(html("section", {}, html("h2", {}, "Arrivals by the target's start bearing"),
-      html("p", { class: "note" }, "The share of episodes that arrived, and how long they took on average, by where the target lay when the episode started, seen from the head: ahead (within 45° of its forward direction), to the side (45° to 90°), behind to the side (90° to 135°), or behind; every seed together. The walk counts every episode it started, with targets drawn around the head wherever it then pointed."),
+      html("p", { class: "note" }, "The share of episodes that arrived, and how long they took on average, by where the target lay when the episode started, seen from the head: ahead (within 45° of its forward direction), to the side (45° to 90°), behind to the side (90° to 135°), or behind; every seed together. Each cell gives the share, of how many episodes, and the mean time of their arrivals. The walk counts every episode it started, with targets drawn around the head wherever it then pointed."),
       table(["Actor", ...classes.map((name) => name[0].toUpperCase() + name.slice(1))], groups.map(([name, records]) => [name, ...classes.map((_, k) => cell(records, k))]), 1)));
   }
 
