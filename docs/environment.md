@@ -657,8 +657,8 @@ With the flag, in four training runs with the clean reward ([Walking
 costs](#walking-costs)), three with load feedback, the phases between
 neighbours lined up across the worlds only where load feedback was on, and
 weakly: in two runs that differed only by it, the neighbours' offsets had a
-consistency of 0.19 with it and 0.03, the level of chance for 1,024 worlds,
-without it ([diagnostics.md](diagnostics.md#rhythm)). The measured force
+consistency of 0.19 with it and 0.04 without it, about the level of chance
+for 1,024 worlds, 0.03 ([diagnostics.md](diagnostics.md#rhythm)). The measured force
 tells a leg how much of the body it bears, not only that it touches, which
 is what Owaki and Ishiguro's feedback reads.
 
