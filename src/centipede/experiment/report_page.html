@@ -349,10 +349,12 @@ const SETTING_CHIPS = [
   // Runs before the spine could be commanded have no such setting.
   { keys: ["environment.spine_control", "environment.passive_follower_spine"], text: (s) => !s.environment.spine_control ? "passive spine"
       : s.environment.passive_follower_spine ? "the head bends its neck, the rest of the spine is passive" : "each segment bends the spine joint behind it" },
-  { keys: ["environment.clocks", "environment.clock"], text: ({ environment: e }) => {
+  { keys: ["environment.clocks", "environment.clock", "environment.neighbour_clocks"], text: ({ environment: e }) => {
       if (!e.clocks || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
-      return `a clock per segment, ${number(low)}–${number(high)} Hz`;
+      // Runs before neighbour_clocks existed saw only their own clock.
+      const seen = e.neighbour_clocks ? ", each seeing its neighbours' clocks" : ", each seeing only its own";
+      return `a clock per segment, ${number(low)}–${number(high)} Hz${seen}`;
     } },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
