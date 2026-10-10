@@ -258,13 +258,17 @@ segments away (`k`, first value 1). Every observation has the same layout:
    the head; **sideways** is positive to its left;
 5. with spine control, the angle and speed of the spine joint behind it;
 6. with clocks, its own clock: `cos φ` and `sin φ` of its hand, and its tempo
-   action (see [Clocks](#clocks)).
+   action (see [Clocks](#clocks));
+7. with neighbour clocks, the clocks of the neighbours it sees, relative to
+   its own, three values each, in the order of the blocks: the `k` ahead,
+   nearest first, then the `k` behind.
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
 every segment and any number of segments, two more with spine control
-(**85** at radius 1), and three more with clocks (**88** at radius 1). A
-segment's clock is in its own observation only, never in the blocks its
-neighbours see. The spine's values come last so that a run with spine
+(**85** at radius 1), three more with clocks (**88** at radius 1), and
+`6k` more with neighbour clocks (**94** at radius 1). A segment's clock is
+never in the blocks its neighbours see; they see it only through the
+neighbour clocks. The spine's values come last so that a run with spine
 control can start from agents trained without it: their inputs keep their
 places, and the new ones are added at the end (see
 [agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
@@ -416,8 +420,20 @@ rhythm must remember, where the segment is in its cycle.
   random sequence, seeded with the starting poses' seed.
 - **What a segment sees.** Its own hand, as `cos φ` and `sin φ` so that the
   end of a turn and the start of the next look alike, and its tempo action.
-  It never sees another segment's clock: it can only read it from that
-  segment's legs, if they move with it.
+  Without `neighbour_clocks`, it never sees another segment's clock: it can
+  only read it from that segment's legs, if they move with it.
+- **What a segment sees of its neighbours.** With `neighbour_clocks = true`,
+  it also sees the clock of each neighbour within its observation radius,
+  relative to its own: for neighbour `n` of segment `i`, `cos(φ_n − φ_i)`,
+  `sin(φ_n − φ_i)`, and the tempo difference in octaves over the largest
+  possible, `(tempo_octaves_n − tempo_octaves_i) ÷ (2 × tempo_range_octaves)`,
+  from −1 to 1. A neighbour that does not exist gives three zeros, like its
+  block. A segment can keep an offset to a neighbour's phase only if it can
+  tell where that phase is. The policy of CPG-RL observes the phase of every
+  oscillator it coordinates (Bellegarda and Ijspeert, IEEE Robotics and
+  Automation Letters, 2022), and decentralised leg controllers that learn to
+  walk together observe their neighbouring legs (Schilling et al., 2020,
+  arXiv:2005.11164).
 
 Nothing about the movement itself is fixed: the clock only gives a segment a
 rhythm to keep. Two costs judge the rhythm (see [Walking
@@ -742,6 +758,7 @@ These are the keys of the environment sections of the configuration file (see
 | `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; when false, the spine motors receive zero |
 | `passive_follower_spine` | false | With spine control, only the head commands a spine joint, its neck; the followers' joints are passive. Every segment still observes the joint behind it |
 | `clocks` | false | Every segment has a [clock](#clocks): one more action, its tempo, and three more observed values |
+| `neighbour_clocks` | false | Every segment also observes the clocks of the neighbours it sees, relative to its own: three more values per neighbour, `6 × observation_radius` in all; needs clocks |
 | **`[environment.clock]`** | | |
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
 | `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo must stay below 12.5 Hz |

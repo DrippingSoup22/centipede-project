@@ -450,7 +450,9 @@ class EnvironmentSettings:
     head commands a spine joint, its neck; the followers' joints bend
     passively against their springs, and every segment still observes the
     joint behind it. With ``clocks`` every segment has a clock, whose tempo it
-    sets with one more action and whose hand it observes.
+    sets with one more action and whose hand it observes; with
+    ``neighbour_clocks`` as well, it also observes the clocks of the
+    neighbours it sees, relative to its own.
     """
 
     max_episode_steps: int
@@ -458,6 +460,7 @@ class EnvironmentSettings:
     spine_control: bool
     passive_follower_spine: bool
     clocks: bool
+    neighbour_clocks: bool
     simulation: SimulationSettings
     target: TargetSettings
     rewards: RewardSettings
@@ -483,6 +486,7 @@ class EnvironmentSettings:
                 "passive_follower_spine", default=False
             ),
             clocks=section.boolean("clocks", default=False),
+            neighbour_clocks=section.boolean("neighbour_clocks", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
             rewards=RewardSettings.from_section(section.table("rewards")),
@@ -493,6 +497,11 @@ class EnvironmentSettings:
             raise SettingsError(
                 "[environment] passive_follower_spine leaves the head its neck, which"
                 " needs spine_control = true"
+            )
+        if settings.neighbour_clocks and not settings.clocks:
+            raise SettingsError(
+                "[environment] neighbour_clocks shows each segment its neighbours'"
+                " clocks, which need the segments' clocks: set clocks = true"
             )
         rewards = settings.rewards
         clock_costs = [key for key in CLOCK_COST_KEYS if getattr(rewards, key)]

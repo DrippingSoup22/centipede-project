@@ -121,6 +121,29 @@ def test_with_the_spine_each_segment_sees_its_own_joint_last():
     assert torch.equal(observations[..., -1], state.spine_yaw_velocity)
 
 
+def test_with_neighbour_clocks_each_segment_sees_them_after_its_own_clock():
+    plain = ObservationBuilder(SEGMENT_COUNT, 2, WORLD_COUNT, "cpu")
+    builder = ObservationBuilder(
+        SEGMENT_COUNT,
+        2,
+        WORLD_COUNT,
+        "cpu",
+        clock_observed=True,
+        neighbour_clock_observed=True,
+    )
+    state = distinct_state("cpu")
+    targets = torch.zeros(WORLD_COUNT, 2)
+    own_clock = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 3)
+    neighbour_clocks = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 4, 3)
+
+    observations = builder.build(state, targets, own_clock, neighbour_clocks)
+
+    assert builder.observation_size == plain.observation_size + 3 + 4 * 3
+    assert torch.equal(observations[..., :-15], plain.build(state, targets))
+    assert torch.equal(observations[..., -15:-12], own_clock)
+    assert torch.equal(observations[..., -12:], neighbour_clocks.flatten(start_dim=2))
+
+
 def test_forward_direction_survives_a_head_pointing_straight_up():
     nose_up = torch.tensor([[math.cos(-math.pi / 4), 0.0, math.sin(-math.pi / 4), 0.0]])
 

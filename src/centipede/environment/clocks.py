@@ -2,7 +2,8 @@
 
 The clocks are part of the environment's state, like the targets: a segment
 sets its clock's tempo with one action and observes where its hand is, and
-only its own. See docs/environment.md, "Clocks".
+with ``neighbour_clocks`` also its neighbours' clocks, relative to its own.
+See docs/environment.md, "Clocks".
 """
 
 import math
@@ -88,7 +89,7 @@ class Clocks:
         # the starting poses or the targets.
         self.generator = torch.Generator(device=device)
 
-        # The neighbours whose tempo a segment is compared with: those it sees.
+        # The neighbours a segment sees, whose tempo its own is compared with.
         self.neighbour_offsets = range(
             1, min(observation_radius, segment_count - 1) + 1
         )
@@ -198,3 +199,42 @@ class Clocks:
             ),
             dim=-1,
         )
+
+    def neighbour_values(self) -> torch.Tensor:
+        """Each neighbour's clock as a segment sees it, ``(W, N, 2k, 3)``.
+
+        The ``k`` segments ahead, nearest first, then the ``k`` behind, for
+        the observation radius ``k``. Each relative to the segment's own
+        clock: ``cos`` and ``sin`` of the neighbour's hand minus its own, and
+        the neighbour's tempo minus its own in octaves, over the largest
+        difference, from −1 to 1. A neighbour that does not exist gives zeros.
+        """
+        largest = 2 * self.settings.tempo_range_octaves
+        world_count, segment_count = self.phase.shape
+        k = len(self.neighbour_offsets)
+        values = self.phase.new_zeros((world_count, segment_count, 2 * k, 3))
+
+        def relative(neighbours: slice, segments: slice) -> torch.Tensor:
+            """The neighbours' clocks relative to the segments', ``(W, n, 3)``."""
+            phase_difference = self.phase[:, neighbours] - self.phase[:, segments]
+            tempo_difference = (
+                self.tempo_octaves[:, neighbours] - self.tempo_octaves[:, segments]
+            )
+            return torch.stack(
+                (
+                    torch.cos(phase_difference),
+                    torch.sin(phase_difference),
+                    tempo_difference / largest,
+                ),
+                dim=-1,
+            )
+
+        for column, offset in enumerate(self.neighbour_offsets):
+            # Segment i's neighbour ahead is i − offset, behind it i + offset.
+            values[:, offset:, column] = relative(
+                slice(None, -offset), slice(offset, None)
+            )
+            values[:, :-offset, k + column] = relative(
+                slice(offset, None), slice(None, -offset)
+            )
+        return values

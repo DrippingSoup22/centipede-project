@@ -72,3 +72,28 @@ def test_legs_are_compared_with_the_last_turn_and_tempos_with_the_neighbours():
     # over the largest difference: the head and segment 1 differ by one octave.
     result = clock.step(torch.tensor([[1.0, 0.0, 0.0]]), legs(35), legs(35))
     assert result.tempo_mismatch[0].tolist() == pytest.approx([0.5, 0.25, 0.0])
+
+
+def test_each_segment_sees_its_neighbours_clocks_relative_to_its_own():
+    clock = clocks(world_count=1)
+    clock.phase.copy_(torch.tensor([[0.1, 0.5, 1.7]]))
+    clock.tempo_octaves.copy_(torch.tensor([[1.0, 0.0, -0.5]]))
+
+    values = clock.neighbour_values()
+
+    def seen(phase_difference, tempo_difference):
+        return [
+            math.cos(phase_difference),
+            math.sin(phase_difference),
+            tempo_difference,
+        ]
+
+    # The segment ahead, then the one behind; tempo differences over 2 octaves.
+    missing = [0.0, 0.0, 0.0]
+    expected = [
+        [missing, seen(0.4, -0.5)],
+        [seen(-0.4, 0.5), seen(1.2, -0.25)],
+        [seen(-1.2, 0.25), missing],
+    ]
+    assert values.shape == (1, 3, 2, 3)
+    assert torch.allclose(values[0], torch.tensor(expected), atol=1e-6)

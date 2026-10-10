@@ -47,6 +47,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         None,
     )
     assert not settings.passive_follower_spine and not settings.clocks
+    assert not settings.neighbour_clocks
     assert settings.clock == ClockSettings(middle_tempo_hz=2.0, tempo_range_octaves=1.0)
     assert settings.rewards == RewardSettings(
         arrival_reward=1.0,
@@ -120,6 +121,7 @@ def test_nested_sections_are_read_by_their_own_classes():
         ),
         ({"passive_follower_spine": True}, "needs spine_control"),
         ({"rewards": {"out_of_tempo_cost_parts": 1}}, "need the segments' clocks"),
+        ({"neighbour_clocks": True}, "neighbour_clocks .* set clocks = true"),
         ({"clock": {"middle_tempo_hz": 8}}, "below 12.5 turns per second"),
         ({"target": {"range_circle_ratio": 0.8}}, "must be 0 .no circle. or above 1"),
         (

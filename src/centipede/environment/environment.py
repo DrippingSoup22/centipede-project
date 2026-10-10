@@ -61,6 +61,7 @@ class Environment:
             self.device,
             spine_observed=settings.spine_control,
             clock_observed=settings.clocks,
+            neighbour_clock_observed=settings.neighbour_clocks,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -323,10 +324,12 @@ class Environment:
 
     def _observations(self) -> torch.Tensor:
         """Every segment's observation of the current state."""
+        clocks = self.clocks
         return self.observation_builder.build(
             self.simulation.physical_state,
             self.target_position,
-            None if self.clocks is None else self.clocks.observation_values(),
+            None if clocks is None else clocks.observation_values(),
+            clocks.neighbour_values() if self.settings.neighbour_clocks else None,
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:

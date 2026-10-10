@@ -31,7 +31,9 @@ class ObservationBuilder:
     to ``observation_radius`` ahead and behind (nearest first), and two target
     values that are real only for the head; with ``spine_observed``, the
     angle and speed of the spine joint behind it (zero for the rear segment);
-    with ``clock_observed``, last, its own clock's three values.
+    with ``clock_observed``, its own clock's three values; and with
+    ``neighbour_clock_observed``, last, three values for the clock of each
+    neighbour it sees, in the blocks' order.
     A missing neighbour is a block of zeros. The layout is fixed in
     docs/environment.md.
     """
@@ -44,6 +46,7 @@ class ObservationBuilder:
         device: torch.device | str,
         spine_observed: bool = False,
         clock_observed: bool = False,
+        neighbour_clock_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -56,6 +59,7 @@ class ObservationBuilder:
         self.segment_count = segment_count
         self.spine_observed = spine_observed
         self.clock_observed = clock_observed
+        self.neighbour_clock_observed = neighbour_clock_observed
         missing_neighbour = segment_count
 
         neighbour_rows = []
@@ -88,6 +92,11 @@ class ObservationBuilder:
             + TARGET_VALUE_COUNT
             + (SPINE_VALUE_COUNT if spine_observed else 0)
             + (CLOCK_VALUE_COUNT if clock_observed else 0)
+            + (
+                2 * observation_radius * CLOCK_VALUE_COUNT
+                if neighbour_clock_observed
+                else 0
+            )
         )
 
     def build(
@@ -95,12 +104,15 @@ class ObservationBuilder:
         physical_state: PhysicalState,
         target_position: torch.Tensor,
         clock_values: torch.Tensor | None = None,
+        neighbour_clock_values: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
         ``target_position`` is each world's target as a flat ``(W, 2)`` point;
         ``clock_values`` ``(W, N, 3)`` each segment's own clock, needed only
-        with ``clock_observed``.
+        with ``clock_observed``; ``neighbour_clock_values`` ``(W, N, 2k, 3)``
+        its neighbours' clocks relative to its own, needed only with
+        ``neighbour_clock_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -146,4 +158,6 @@ class ObservationBuilder:
             )
         if self.clock_observed:
             parts.append(clock_values)
+        if self.neighbour_clock_observed:
+            parts.append(neighbour_clock_values.flatten(start_dim=2))
         return torch.cat(parts, dim=-1)

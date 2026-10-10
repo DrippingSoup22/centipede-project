@@ -204,10 +204,11 @@ def test_with_clocks_every_segment_sets_its_tempo_and_only_the_head_bends_its_ne
         spine_control=True,
         passive_follower_spine=True,
         clocks=True,
+        neighbour_clocks=True,
         rewards={"legs_off_tempo_cost_parts": 1.5, "out_of_tempo_cost_parts": 1},
     )
     assert env.segment_action_sizes == [8] + [7] * 7 and env.action_size == 8
-    assert env.observation_size == environment().observation_size + 2 + 3
+    assert env.observation_size == environment().observation_size + 2 + 3 + 6
     env.reset(seed=2)
     start = env.clocks.phase.clone()
     action = torch.zeros(2, env.segment_count, 8)
@@ -225,9 +226,12 @@ def test_with_clocks_every_segment_sets_its_tempo_and_only_the_head_bends_its_ne
     turned = (env.clocks.phase - start).remainder(2 * math.pi)
     tempo = torch.tensor([1.0] + [4.0] * 7)
     assert torch.allclose(turned, (2 * math.pi * 0.02 * tempo).expand(2, -1), rtol=1e-5)
-    # Each segment sees its own clock, last: its hand and its tempo action.
-    assert torch.allclose(observations[..., -3], torch.cos(env.clocks.phase))
-    assert observations[0, :, -1].tolist() == [-1.0] + [1.0] * 7
+    # Each segment sees its own clock, its hand and its tempo action, then,
+    # last, its two neighbours' clocks.
+    assert torch.allclose(observations[..., -9], torch.cos(env.clocks.phase))
+    assert observations[0, :, -7].tolist() == [-1.0] + [1.0] * 7
+    neighbour_clocks = env.clocks.neighbour_values().flatten(start_dim=2)
+    assert torch.equal(observations[..., -6:], neighbour_clocks)
 
     # The third step reaches the time limit: the worlds' clocks start afresh.
     env.step(action)
