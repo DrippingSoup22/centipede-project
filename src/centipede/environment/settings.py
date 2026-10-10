@@ -89,8 +89,11 @@ class ClockSettings:
     ``middle_tempo_hz × 2^(a × tempo_range_octaves)`` turns per second: 1 to 4
     with the defaults. With leg clocks, ``load_feedback_rad_per_s`` (σ) holds a
     loaded foot's clock in stance: its hand turns at ``ω + σ N cos φ`` rad/s,
-    ``ω`` the tempo's and ``N`` 1 while the foot touches the ground; 0 is off.
-    σ must stay below the slowest tempo's ω, so that no hand can ever stop.
+    ``ω`` the tempo's and ``N`` the foot's load, from 0 to 1; 0 is off.
+    ``load_feedback_source`` says what the load is: ``"contact"``, 1 while
+    the foot touches the ground, else 0; ``"force"``, the foot's normal force
+    over the weight one segment carries, at most 1. σ must stay below the
+    slowest tempo's ω, so that no hand can ever stop.
     With leg clocks too, each leg's clock in use, its tempo, sweep and lift
     amplitudes and joints' centres, follows its actions with the time constant
     ``clock_time_constant_s`` (0.5 by default with leg clocks, else 0); 0
@@ -103,6 +106,7 @@ class ClockSettings:
     middle_tempo_hz: float
     tempo_range_octaves: float
     load_feedback_rad_per_s: float
+    load_feedback_source: str
     clock_time_constant_s: float
     coupling: str
 
@@ -122,6 +126,9 @@ class ClockSettings:
             load_feedback_rad_per_s=section.number(
                 "load_feedback_rad_per_s", default=0.0, minimum=0.0
             ),
+            load_feedback_source=section.choice(
+                "load_feedback_source", ("contact", "force"), default="contact"
+            ),
             clock_time_constant_s=section.number(
                 "clock_time_constant_s",
                 default=0.5 if leg_clocks else 0.0,
@@ -129,9 +136,18 @@ class ClockSettings:
             ),
             coupling=section.choice("coupling", ("both", "ahead"), default="both"),
         )
-        # A loaded hand turns at ω + σ cos φ: at least ω − σ, which must stay
-        # above zero at the slowest tempo. A stopped hand would never move on,
-        # since the foot leaves the ground only in swing.
+        if (
+            settings.load_feedback_source == "force"
+            and settings.load_feedback_rad_per_s == 0
+        ):
+            raise SettingsError(
+                '[environment.clock] load_feedback_source = "force" measures the'
+                " load that load feedback uses, which is off: set"
+                " load_feedback_rad_per_s above 0"
+            )
+        # A loaded hand turns at ω + σ N cos φ, N at most 1: at least ω − σ,
+        # which must stay above zero at the slowest tempo. A stopped hand
+        # would never move on, since the foot leaves the ground only in swing.
         slowest = settings.middle_tempo_hz / 2**settings.tempo_range_octaves
         if settings.load_feedback_rad_per_s >= 2 * math.pi * slowest:
             raise SettingsError(

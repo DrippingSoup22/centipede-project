@@ -298,6 +298,29 @@ def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
         environment(world_count=1, leg_clocks=True)
 
 
+def test_a_force_load_is_each_foots_force_over_a_segments_weight_before_the_step():
+    """The body lands on its feet within the first step; the clocks then take
+    each foot's force from before the next step, as a share of the weight
+    one segment carries, at most 1."""
+    env = environment(
+        world_count=1,
+        model_path="models/assembly_v4.xml",
+        leg_clocks=True,
+        clock={"load_feedback_rad_per_s": 6.0, "load_feedback_source": "force"},
+    )
+    env.reset(seed=1)
+    action = torch.zeros(1, 8, 12)
+    env.step(action)
+    force = env.simulation.physical_state.foot_normal_force.clone()
+
+    env.step(action)
+
+    segment_weight = env.simulation.body_weight_n / 8
+    expected = (force / segment_weight).clamp(max=1.0)
+    assert torch.allclose(env.previous_foot_load, expected)
+    assert 0 < expected.max() <= 1
+
+
 def test_an_observation_radius_reaching_past_the_body_is_rejected():
     with pytest.raises(SettingsError, match=r"observation_radius .* 8 segments"):
         environment(observation_radius=8)

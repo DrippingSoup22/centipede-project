@@ -1,6 +1,7 @@
 import math
 
 import mujoco
+import numpy as np
 import torch
 
 from centipede.environment.simulation.constants import ACTION_DURATION_S
@@ -37,6 +38,7 @@ class PhysicsSimulation:
     mapped onto its joint's range before the backend applies it.
     ``physical_state`` is refreshed in place by every ``reset`` and ``step``,
     and so is ``diagnostics.facts``, the simulation's diagnostics category.
+    ``body_weight_n`` is the whole body's weight, the unit of the feet's loads.
     """
 
     def __init__(self, settings: SimulationSettings) -> None:
@@ -73,6 +75,12 @@ class PhysicsSimulation:
         self.segment_count = mapping.segment_count
         self.legs_take_angles = mapping.legs_take_angles
         self.head_outline = mapping.head_outline
+        # The whole body's weight, in newtons: the mass of the tree under the
+        # head, the root, times the model's gravity (9.81 m/s²).
+        self.body_weight_n = float(
+            model.body_subtreemass[mapping.body_ids[0]]
+            * np.linalg.norm(model.opt.gravity)
+        )
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
         self.physical_state = self._backend.physical_state

@@ -193,6 +193,15 @@ class Environment:
             dtype=torch.bool,
             device=self.device,
         )
+        # Each foot's load before the step, from 0 to 1, for the legs' clocks'
+        # load feedback: its contact flag, or its normal force over the
+        # weight one segment carries (docs/environment.md, Clocks).
+        self.previous_foot_load = torch.zeros(
+            (self.world_count, self.segment_count, 2),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.segment_weight_n = self.simulation.body_weight_n / self.segment_count
         self.previous_leg_joint_velocity = torch.zeros(
             (self.world_count, self.segment_count, 6),
             dtype=torch.float32,
@@ -275,12 +284,20 @@ class Environment:
         self.previous_joint_position.copy_(joint_angles(state))
         self.previous_foot_planar_position.copy_(state.foot_planar_position)
         self.previous_foot_contact.copy_(_foot_contact(state))
+        if self.settings.clock.load_feedback_source == "force":
+            torch.div(
+                state.foot_normal_force,
+                self.segment_weight_n,
+                out=self.previous_foot_load,
+            ).clamp_(max=1.0)
+        else:
+            self.previous_foot_load.copy_(self.previous_foot_contact)
         self.previous_leg_joint_velocity.copy_(state.leg_joint_velocity)
 
         # 2. Move the body. With leg clocks, each leg's clock in use, its
         # tempo and step shape, first follows its actions, the clocks turn at
-        # their tempos in use, with load feedback from the feet on the ground
-        # now, and each leg's joints get their targets from its step shape at
+        # their tempos in use, with load feedback from the feet's loads before
+        # the step, and each leg's joints get their targets from its step shape at
         # its clock's new phase.
         # With spine control, the spine column holds the command for the
         # spine joint behind each segment that commands one; without, the
@@ -289,7 +306,7 @@ class Environment:
         leg_amplitudes = None
         if self.settings.leg_clocks:
             self.clocks.follow_actions(joint_action[..., :12].unflatten(-1, (2, 6)))
-            clock_step = self.clocks.step(foot_contact=self.previous_foot_contact)
+            clock_step = self.clocks.step(foot_load=self.previous_foot_load)
             leg_amplitudes = self.clocks.amplitudes
             leg_actions = leg_targets(
                 self.clocks.clock_phase, leg_amplitudes, self.clocks.centres

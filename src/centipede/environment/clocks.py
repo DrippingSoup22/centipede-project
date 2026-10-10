@@ -237,7 +237,7 @@ class Clocks:
         tempo_action: torch.Tensor | None = None,
         leg_angles_before: torch.Tensor | None = None,
         leg_angles: torch.Tensor | None = None,
-        foot_contact: torch.Tensor | None = None,
+        foot_load: torch.Tensor | None = None,
     ) -> ClockStep:
         """Turn every hand for one step at its clock's tempo in use.
 
@@ -247,13 +247,14 @@ class Clocks:
         with its last turn, from ``leg_angles_before`` and ``leg_angles``
         ``(W, N, 6)``, the leg angles before and after the step (see
         ``_compare_legs``). With load
-        feedback σ, a leg's clock whose foot touches the ground, as
-        ``foot_contact`` ``(W, N, 2)`` says, turns at ``ω + σ cos φ`` rad/s
+        feedback σ, a leg's clock whose foot bears the load ``N``, from 0 to 1
+        in ``foot_load`` ``(W, N, 2)``, turns at ``ω + σ N cos φ`` rad/s
         instead of its tempo's ``ω``: before mid-stance (φ = π/2) the hand
         hurries toward it, after it the hand is held back (Owaki and Ishiguro,
-        2017, with stance on the first half of the turn). With σ ≥ ω it would
-        stop where ``cos φ = −ω / σ``, for good, since the foot leaves the
-        ground only in swing; the settings keep σ below the slowest tempo's ω.
+        2017, with stance on the first half of the turn). With σ N ≥ ω it
+        would stop where ``cos φ = −ω / (σ N)`` until its load fell, for good
+        with a contact flag, since the foot leaves the ground only in swing;
+        the settings keep σ below the slowest tempo's ω, and N is at most 1.
         """
         if not self.per_leg:
             self.clock_tempo_octaves.copy_(
@@ -265,7 +266,7 @@ class Clocks:
         speed = 2 * math.pi * self.clock_tempo_hz
         load_feedback = self.settings.load_feedback_rad_per_s
         if load_feedback:
-            speed = speed + load_feedback * foot_contact * torch.cos(self.clock_phase)
+            speed = speed + load_feedback * foot_load * torch.cos(self.clock_phase)
         turned = speed * self.step_duration_s
         leg_squared_difference = leg_difference_known = None
         if not self.per_leg:

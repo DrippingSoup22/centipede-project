@@ -24,6 +24,7 @@ def clocks(
         middle_tempo_hz=middle_tempo_hz,
         tempo_range_octaves=1.0,
         load_feedback_rad_per_s=feedback,
+        load_feedback_source="contact",
         clock_time_constant_s=clock_time_constant_s,
         coupling=coupling,
     )
@@ -203,11 +204,11 @@ def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
     for clock in (held, free):
         clock.reset(torch.ones(1, dtype=torch.bool), seed=3)
     start = held.clock_phase.clone()
-    left_feet_down = torch.tensor([[[True, False]] * 3])
+    left_feet_down = torch.tensor([[[1.0, 0.0]] * 3])
 
     for _ in range(50):
-        held.step(foot_contact=left_feet_down)
-        free.step(foot_contact=left_feet_down)
+        held.step(foot_load=left_feet_down)
+        free.step(foot_load=left_feet_down)
 
     def angle_between(first, second):
         return ((first - second + math.pi).remainder(2 * math.pi) - math.pi).abs()
@@ -218,6 +219,20 @@ def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
     # load feedback, is back where it started.
     assert angle_between(held.clock_phase[..., 1], start[..., 1]).max() < 1e-4
     assert angle_between(free.clock_phase, start).max() < 1e-4
+
+
+def test_a_half_load_pushes_a_hand_half_as_hard():
+    """A foot that shares its segment's weight with the other bears 0.5:
+    its hand turns by (omega + sigma / 2 cos phi) times the step."""
+    clock = clocks(world_count=1, per_leg=True, feedback=6.0)
+    clock.reset(torch.ones(1, dtype=torch.bool), seed=4)
+    start = clock.clock_phase.clone()
+
+    clock.step(foot_load=torch.full((1, 3, 2), 0.5))
+
+    speed = 4 * math.pi + 6.0 / 2 * torch.cos(start)
+    expected = (start + speed * STEP_S).remainder(2 * math.pi)
+    assert torch.allclose(clock.clock_phase, expected, atol=1e-5)
 
 
 def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_constant():

@@ -53,6 +53,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         middle_tempo_hz=2.0,
         tempo_range_octaves=1.0,
         load_feedback_rad_per_s=0.0,
+        load_feedback_source="contact",
         clock_time_constant_s=0.0,
         coupling="both",
     )
@@ -142,6 +143,24 @@ def test_nested_sections_are_read_by_their_own_classes():
         ({"clocks": True, "leg_clocks": True}, "set only one"),
         (
             {"clocks": True, "clock": {"load_feedback_rad_per_s": 6.0}},
+            "holds a loaded foot's clock in stance, which needs a clock per leg",
+        ),
+        (
+            {"clocks": True, "clock": {"load_feedback_source": "force"}},
+            "measures the load that load feedback uses, which is off",
+        ),
+        (
+            {"leg_clocks": True, "clock": {"load_feedback_source": "force"}},
+            "measures the load that load feedback uses, which is off",
+        ),
+        (
+            {
+                "clocks": True,
+                "clock": {
+                    "load_feedback_rad_per_s": 6.0,
+                    "load_feedback_source": "force",
+                },
+            },
             "holds a loaded foot's clock in stance, which needs a clock per leg",
         ),
         (

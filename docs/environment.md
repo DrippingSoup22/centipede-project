@@ -628,23 +628,49 @@ at `dφ/dt = ω − σ N cos φ`, with `N` the leg's load, which pulls a loaded
 leg's phase toward the middle of its stance, at 3π/2 in their convention.
 Here stance is the first half of the turn, centred at π/2, so the rule
 becomes `dφ/dt = ω + σ N cos φ`, applied once per step as
-`φ ← φ + (ω + σ N cos φ) × 0.02 s`, with `ω` the tempo's, in rad/s, and `N` 1
-when the leg's foot touched the ground at the end of the last physics step,
-else 0. Before mid-stance a loaded leg's hand hurries toward it; after it,
+`φ ← φ + (ω + σ N cos φ) × 0.02 s`, with `ω` the tempo's, in rad/s, and `N`
+the load the leg's foot bore at the end of the last step, from 0 to 1.
+Before mid-stance a loaded leg's hand hurries toward it; after it,
 the hand is held back, so a leg that bears the body stays longer in stance
 while the others take their turn. Owaki and Ishiguro's quadruped, whose
 oscillators interact only through its body, changed by itself from walking
 to trotting to galloping as its speed rose.
 
+`load_feedback_source` says what the load is:
+
+- `"contact"` (the default): 1 when the foot touches the ground, else 0. A
+  foot that touches lightly and one that carries half the body count alike.
+- `"force"`: the foot's normal force ([The feet's normal
+  forces](#the-physical-state)) over the weight one segment carries,
+  the body's mass × 9.81 ÷ the number of segments (0.79 mN for model v4),
+  clipped to 0 to 1. A foot
+  that carries its whole segment bears 1, each of two feet sharing it about
+  0.5, as the standing body's do, and a foot in the air 0. Owaki and
+  Ishiguro drive their oscillators with the load each leg measures, and the
+  segment's weight is the natural unit of a foot's load: it is what the
+  foot would carry if every segment stood on its own legs. A foot that
+  carries more, because its neighbours lift theirs, counts as fully loaded:
+  the clip keeps `N` at most 1, so the bound on σ below holds as with the
+  flag.
+
+With the flag, in four training runs with the clean reward ([Walking
+costs](#walking-costs)), three with load feedback, the phases between
+neighbours lined up across the worlds only where load feedback was on, and
+weakly: in two runs that differed only by it, the neighbours' offsets had a
+consistency of 0.19 with it and 0.03, the level of chance for 1,024 worlds,
+without it ([diagnostics.md](diagnostics.md#rhythm)). The measured force
+tells a leg how much of the body it bears, not only that it touches, which
+is what Owaki and Ishiguro's feedback reads.
+
 σ must stay below `ω` at the slowest tempo,
 `2π × middle_tempo_hz ÷ 2^tempo_range_octaves` (6.28 rad/s with the
 defaults), and the settings refuse more. With `σ N ≥ ω`, a loaded hand stops
 where `cos φ = −ω / (σ N)`, near the end of stance, until the load leaves.
-But `N` here says whether the foot touches the ground, and the foot leaves
-the ground only in swing, which a stopped hand never reaches: the leg would
-stay in stance for good. Model v4's open-loop wave
-([model.md](model.md#model-v4), Walking), run through the step shape at 2 Hz
-(`ω` = 12.57 rad/s) for 5 s, measured:
+But the foot leaves the ground only in swing, which a stopped hand never
+reaches, so with the flag the leg would stay in stance for good, and with the
+force it would wait until the other legs took its load. Model v4's open-loop
+wave ([model.md](model.md#model-v4), Walking), run through the step shape at
+2 Hz (`ω` = 12.57 rad/s) for 5 s with the contact flag, measured:
 
 | σ (rad/s) | Forward speed (mm/s) | Feet on the ground (of 16) | Planted foot-steps sliding faster than 10 mm/s |
 | ---: | ---: | ---: | ---: |
@@ -681,10 +707,10 @@ not apply; the second does, and two more judge the legs' whole clocks in
 use: whether each follower's match the segment ahead's, and how fast the
 head's change.
 
-**Open questions.** `N` is a contact flag, where Owaki and Ishiguro's is the
-load the leg bears: a measured load would let the clock of a lightly loaded
-foot move on, and would allow σ above the slowest tempo's `ω`; whether that
-is worth having is not settled. With `coupling = "ahead"` the head sees no
+**Open questions.** With the measured force, a σ above the slowest tempo's
+`ω` would stop only the hands of feet loaded above `ω ÷ σ`, and only until
+the other legs took their load; whether such a σ is worth allowing is not
+settled. With `coupling = "ahead"` the head sees no
 other clock; a head that also sees the clocks behind it, without paying for
 them, is a possible later study.
 
@@ -1111,6 +1137,7 @@ These are the keys of the environment sections of the configuration file (see
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
 | `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo, plus `σ / 2π` with load feedback, must stay below 12.5 Hz |
 | `load_feedback_rad_per_s` | 0 | With leg clocks, σ of the [load feedback](#clocks): a foot on the ground holds its clock in stance; 0 is off. Must stay below 2π times the slowest tempo, 6.28 rad/s with the defaults, or a clock could stop for good |
+| `load_feedback_source` | `"contact"` | What a foot's load is, for load feedback: `"contact"`, 1 on the ground and 0 in the air; `"force"`, its normal force over the weight one segment carries, at most 1. `"force"` needs load feedback on |
 | `clock_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each leg's clock in use, its tempo, amplitudes and centres, follows its actions ([Actions and timing](#actions-and-timing)); 0 follows at once |
 | `coupling` | `"both"` | Which neighbours' clocks a segment sees and is compared with: `"both"`, those ahead and behind; `"ahead"`, only those ahead, so that the rhythm passes from the head backward ([Clocks](#clocks)) |
 | **`[environment.simulation]`** | | |

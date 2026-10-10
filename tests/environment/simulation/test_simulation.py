@@ -27,6 +27,8 @@ def test_builds_from_settings_and_forwards_reset_and_step():
     assert simulation.segment_count == 8
     assert simulation.world_count == 2
     assert simulation.step_duration_s == pytest.approx(0.02)
+    # 0.6434 g (docs/model.md) under 9.81 m/s².
+    assert simulation.body_weight_n == pytest.approx(0.6434e-3 * 9.81)
 
     simulation.reset(seed=1)
     simulation.step(torch.full((2, 8, 6), 0.5))
