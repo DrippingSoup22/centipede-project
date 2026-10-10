@@ -53,12 +53,13 @@ def record(
     truncated=NO,
     left_range=NO,
     clock_step=None,
+    target=TARGET,
 ):
     diagnostics.record_step(
         state,
         previous_state.body_planar_position.clone(),
         previous_state.head_tip_position[:, :2].clone(),
-        TARGET,
+        target,
         rewards,
         terminated,
         truncated,
@@ -94,7 +95,13 @@ def test_step_facts_describe_the_last_step():
     assert facts.heading_error.tolist() == pytest.approx(
         [0.0, math.atan2(0.010, -0.005)]
     )
+    assert facts.on_course.tolist() == [True, False]  # world 1's target is behind
     assert set(descriptions(facts)) == set(vars(facts))
+
+    # Ahead, 3 mm to the left and 5 mm to the right: in and out of the 8 mm strip.
+    beside = torch.tensor([[0.020, 0.003], [0.020, -0.005]])
+    record(diagnostics, after, after, step_rewards(-0.2), target=beside)
+    assert facts.on_course.tolist() == [True, False]
 
 
 def test_step_facts_compare_the_legs_movements_and_see_the_support():

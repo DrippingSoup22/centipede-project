@@ -238,6 +238,8 @@ const METRICS = {
     about: "How far the spine joint behind each segment is bent, either way, up to its 15° limit; the rear segment has no joint behind it. Without spine control the spine bends only passively." },
   "step_facts.heading_error": { label: "Heading error", unit: "°", scale: RADIANS_TO_DEGREES, range: [0, 180],
     about: "The angle between the direction the head points and the direction of its target: 0° means pointing straight at it, 180° straight away from it." },
+  "step_facts.on_course": { label: "On course", unit: "%", scale: 100, better: "higher",
+    about: "The share of steps on which the target lay straight ahead of the head, at most half the body's width (4 mm) to either side of its forward line: walking straight on, the body would pass over it. Unlike the heading error it accounts for the distance, since a far target needs a smaller angle to be on course." },
   "step_facts.head_distance": { label: "Head distance to target", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target, averaged over every world and step of the window." },
   "episodes.upside_down_share": { label: "Head upside down", unit: "%", scale: 100,
@@ -463,9 +465,10 @@ const RESULT_TILES = [
 
 // The numbers under the body table of both reports.
 const BEHAVIOUR_STATS = [
-  { kind: "stat", width: "w4", key: "step_facts.heading_error", better: "lower", note: "0° points at the target, 180° straight away from it" },
-  { kind: "stat", width: "w4", key: "episodes.head_path_length", note: "length of the head's path per episode" },
-  { kind: "stat", width: "w4", key: "episodes.upside_down_share", better: "lower", note: "share of an episode's steps" },
+  { kind: "stat", width: "w3", key: "step_facts.heading_error", better: "lower", note: "0° points at the target, 180° straight away from it" },
+  { kind: "stat", width: "w3", key: "step_facts.on_course", better: "higher", note: "of the steps, the target straight ahead within the body's width" },
+  { kind: "stat", width: "w3", key: "episodes.head_path_length", note: "length of the head's path per episode" },
+  { kind: "stat", width: "w3", key: "episodes.upside_down_share", better: "lower", note: "share of an episode's steps" },
 ];
 
 const PROFILE_COLUMNS = [

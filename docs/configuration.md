@@ -581,8 +581,10 @@ The report is ordered by priority, and the size of each part follows it.
 - **3 · Behaviour** (smaller). A table of the body, one row per segment (feet,
   body, and legs touching, height, uprightness, speed),
   averaged over the last block, with a switch to the first; both views share
-  their colours. Then three numbers: the heading error, the length of the
-  head's path per episode, and the share of time the head is upside down.
+  their colours. Then four numbers: the heading error, the share of time on
+  course (the target straight ahead, within the body's width), the length
+  of the head's path per episode, and the share of time the head is upside
+  down.
 - **4 · Rhythm** (smaller), in a run with clocks, one per segment or one per
   leg; with a clock per leg, the charts follow each segment's left leg's
   clock. Charts over training of the wave's consistency and the offsets'
@@ -698,9 +700,10 @@ segment), and the foot slip.
   and the three costs to the left, with their sum, the reward per step, marked
   across the bar; and the return per episode as a number.
 - **2 · Behaviour** (smaller). The body table, with a switch between the
-  actors that keeps each column's colours, then the heading error, the length
-  of the head's path per episode, and the share of time the head is upside
-  down, as numbers with the baselines below.
+  actors that keeps each column's colours, then the heading error, the share
+  of time on course, the length of the head's path per episode, and the
+  share of time the head is upside down, as numbers with the baselines
+  below.
 - **Details,** behind a "Show details" button: the four episode histograms
   with the actors side by side, each segment's return per actor, every value
   per actor (the mean over seeds, with the lowest to highest seed), the

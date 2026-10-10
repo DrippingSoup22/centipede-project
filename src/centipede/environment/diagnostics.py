@@ -60,6 +60,9 @@ BEARING_EDGES_RAD = tuple(index * math.pi / 4 for index in range(len(BEARINGS) +
 # Joint movements below this, in rad per step, barely count when comparing the
 # directions of two legs' movements: their cosine stays near 0.
 STILL_MOVEMENT_RAD = 1e-3
+# Half the body's width, 8 mm (docs/model.md): a target at most this far to
+# either side of the head's forward line lies on its course.
+ON_COURSE_HALF_WIDTH_M = 0.004
 
 
 @dataclass(frozen=True)
@@ -100,6 +103,11 @@ class StepFacts:
     )
     heading_error: torch.Tensor = measure(
         "Angle between the head's forward direction and the target, (W,)", "rad"
+    )
+    on_course: torch.Tensor = measure(
+        "The target lies ahead of the head's tip, at most half the body's width"
+        " (4 mm) to either side of its forward line, (W,)",
+        summary="share",
     )
     target_position: torch.Tensor = measure(
         "Each world's target, world x and y, (W, 2); kept for recordings",
@@ -286,6 +294,7 @@ class EnvironmentDiagnostics:
             uprightness=zeros(segment_count),
             head_distance=zeros(),
             heading_error=zeros(),
+            on_course=zeros(dtype=torch.bool),
             target_position=zeros(2),
             range_radius=zeros(),
             support=zeros(dtype=torch.bool),
@@ -431,7 +440,9 @@ class EnvironmentDiagnostics:
         )
         step.head_distance.copy_(to_target.norm(dim=-1))
         step.target_position.copy_(target_position)
-        step.heading_error.copy_(_angle_to_target(physical_state, target_position))
+        ahead, aside = _target_in_head_frame(physical_state, target_position)
+        step.heading_error.copy_(torch.atan2(aside, ahead).abs())
+        step.on_course.copy_((ahead > 0) & (aside.abs() <= ON_COURSE_HALF_WIDTH_M))
         step.support.copy_(
             physical_state.left_foot_ground_contact.any(dim=1)
             & physical_state.right_foot_ground_contact.any(dim=1)
@@ -525,17 +536,26 @@ def _per_world(world_mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
     return world_mask.reshape(world_mask.shape + (1,) * (like.dim() - 1))
 
 
+def _target_in_head_frame(
+    physical_state: PhysicalState, target_position: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Where each target lies from the head's tip, in m, ``(W,)`` each: how
+    far ahead along the head's forward direction, and how far to its left
+    (negative to its right)."""
+    forward = head_forward_direction(physical_state.body_quaternion[:, 0])
+    to_target = target_position - physical_state.head_tip_position[:, :2]
+    ahead = (forward * to_target).sum(dim=-1)
+    aside = forward[:, 0] * to_target[:, 1] - forward[:, 1] * to_target[:, 0]
+    return ahead, aside
+
+
 def _angle_to_target(
     physical_state: PhysicalState, target_position: torch.Tensor
 ) -> torch.Tensor:
     """The angle between the head's forward direction and its target, seen
     from the head's tip, either way, from 0 to pi, ``(W,)``."""
-    forward = head_forward_direction(physical_state.body_quaternion[:, 0])
-    to_target = target_position - physical_state.head_tip_position[:, :2]
-    return torch.atan2(
-        forward[:, 0] * to_target[:, 1] - forward[:, 1] * to_target[:, 0],
-        (forward * to_target).sum(dim=-1),
-    ).abs()
+    ahead, aside = _target_in_head_frame(physical_state, target_position)
+    return torch.atan2(aside, ahead).abs()
 
 
 def _head_distance(physical_state: PhysicalState, target_position: torch.Tensor):

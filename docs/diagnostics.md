@@ -54,6 +54,7 @@ Refreshed on every step, for every world.
 | `uprightness` | `(W, N)` | How upright the segment is: 1 upright, 0 on its side, −1 upside down | Mean |
 | `head_distance` | `(W,)` | Flat distance from the head's tip to the target, m | Mean |
 | `heading_error` | `(W,)` | Angle between the head's forward direction and the target, rad, from 0 to π | Mean |
+| `on_course` | `(W,)` | The target lies ahead of the head's tip, at most half the body's width (4 mm of its 8 mm, [model.md](model.md)) to either side of the head's forward line: walking straight on, the body would pass over it. Unlike the heading error, it shrinks with the distance: a far target needs a smaller angle | Share of steps |
 | `target_position` | `(W, 2)` | Each world's target, world x and y, m; refreshed again for the worlds whose episode a step ended, so it always matches the pose | Recorded |
 | `range_radius` | `(W,)` | Radius of each world's range circle around its target, m (infinite without one); refreshed like the target | Recorded |
 | `support` | `(W,)` | At least one left foot and one right foot on the ground, anywhere along the body | Share of steps |
