@@ -269,11 +269,11 @@ const METRICS = {
   "learning.learning_rate": { label: "Learning rate", unit: "",
     about: "The optimizers' learning rate in each update: constant, or falling from the starting rate to the final one along the schedule the settings name." },
   "learning.action_std": { label: "Action spread", unit: "",
-    about: "The learned spread of each leg motor's action, averaged over the six motors. It shrinks as the policy becomes more certain." },
+    about: "The learned spread of each leg motor's action, averaged over the six motors; with a clock per leg, of the actions that set the leg joints' centres. It shrinks as the policy becomes more certain." },
   "learning.spine_action_std": { label: "Spine command spread", unit: "",
     about: "The learned spread of each segment's command for the spine joint behind it; 0 for a segment without one: the rear segment, every segment when the spine is not controlled, and the followers when only the head bends its neck." },
   "learning.tempo_action_std": { label: "Tempo command spread", unit: "",
-    about: "The learned spread of each segment's tempo action, the last of its actions in a run with clocks; 0 without clocks." },
+    about: "The learned spread of each segment's tempo action, with a clock per segment, or of its two legs' tempo actions, averaged, with a clock per leg; 0 without clocks." },
   "step_facts.support": { label: "Support on both sides", unit: "%", scale: 100, better: "higher",
     about: "The share of steps with at least one left foot and one right foot on the ground, anywhere along the body." },
   "step_facts.left_right_similarity": { label: "Left vs right legs", unit: "", range: [-1, 1],
@@ -281,9 +281,9 @@ const METRICS = {
   "step_facts.neighbour_leg_similarity": { label: "Neighbours' legs alike", unit: "", range: [-1, 1],
     about: "How alike each segment's legs move to the next segment's: the cosine between their six joints' movements over a step. 1 the same, −1 opposite, 0 unrelated or still. One value per pair, head first." },
   "rhythm.tempo": { label: "Clock tempo", unit: "Hz",
-    about: "Each segment's clock tempo, which its last action sets. Segments that agree on a tempo have a narrow band." },
+    about: "Each segment's clock tempo, which one of its actions sets; with a clock per leg, its left leg's. Segments that agree on a tempo have a narrow band." },
   "rhythm.neighbour_offset": { label: "Offset between neighbours", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
-    about: "Each pair's mean phase offset, the segment's phase minus the next one's: positive when the rear one lags, as in a wave from head to tail. One value per pair, head first; it means something only where the pair's consistency is well above 0." },
+    about: "Each pair's mean phase offset, the segment's phase minus the next one's (with a clock per leg, their left legs'): positive when the rear one lags, as in a wave from head to tail. One value per pair, head first; it means something only where the pair's consistency is well above 0." },
   "rhythm.neighbour_offset_consistency": { label: "Wave consistency", unit: "", range: [0, 1], better: "higher",
     about: "How alike each pair's offset is across every world and step, from 0 (random) to 1 (the same everywhere). The worlds start from random phases, so it rises only as the segments steer their offsets toward the same wave; the plateau stop watches its mean over the pairs. Even offsets that point every way give about 0.89 ÷ √(worlds): 0.03 with 1,024 worlds, 0.11 with 64. Only values clearly above that show a common wave." },
   "rhythm.neighbour_offset_lock": { label: "Offset lock", unit: "", range: [0, 1], better: "higher",
@@ -295,7 +295,7 @@ const METRICS = {
   "rhythm.head_offset_lock": { label: "Lag lock", unit: "", range: [0, 1], better: "higher",
     about: "How steady each segment's lag behind the head stays within each world over the window, from 0 to 1." },
   "rhythm.legs_on_tempo": { label: "Legs on tempo", unit: "%", scale: 100, better: "higher",
-    about: "1 minus the legs-off-tempo cost, on the steps the clock compared the legs (not in its first turn after a restart): how closely each segment's leg joints come back to their angles at the same point of its clock's last turn." },
+    about: "1 minus the legs-off-tempo cost, on the steps the clock compared the legs (not in its first turn after a restart): how closely each segment's leg joints come back to their angles at the same point of its clock's last turn. Only a clock per segment compares the legs." },
   "rhythm.foot_slip": { label: "Foot slip", unit: "", better: "lower",
     about: "The foot-slip cost before its weight, from 0 to 1: how fast each segment's feet slide while they stay on the ground. A segment dragged by its neighbours slips." },
   "episodes.start_bearing": { label: "Target's start bearing", unit: "°", scale: RADIANS_TO_DEGREES,
@@ -349,12 +349,14 @@ const SETTING_CHIPS = [
   // Runs before the spine could be commanded have no such setting.
   { keys: ["environment.spine_control", "environment.passive_follower_spine"], text: (s) => !s.environment.spine_control ? "passive spine"
       : s.environment.passive_follower_spine ? "the head bends its neck, the rest of the spine is passive" : "each segment bends the spine joint behind it" },
-  { keys: ["environment.clocks", "environment.clock", "environment.neighbour_clocks"], text: ({ environment: e }) => {
-      if (!e.clocks || !e.clock) return null;
+  { keys: ["environment.clocks", "environment.leg_clocks", "environment.clock", "environment.neighbour_clocks"], text: ({ environment: e }) => {
+      if (!(e.clocks || e.leg_clocks) || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
+      // Load feedback holds a loaded foot's clock in stance; only leg clocks have it.
+      const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` : "";
       // Runs before neighbour_clocks existed saw only their own clock.
       const seen = e.neighbour_clocks ? ", each seeing its neighbours' clocks" : ", each seeing only its own";
-      return `a clock per segment, ${number(low)}–${number(high)} Hz${seen}`;
+      return `a clock per ${e.leg_clocks ? "leg" : "segment"}, ${number(low)}–${number(high)} Hz${feedback}${seen}`;
     } },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
@@ -363,7 +365,7 @@ const SETTING_CHIPS = [
       // The first three costs are always named; the others only when used.
       const costs = [["body", r.body_contact_cost_parts], ["step", r.step_cost_parts], ["legs", r.leg_contact_cost_parts],
         ["movement", r.movement_cost_parts], ["slip", r.foot_slip_cost_parts], ["off tempo", r.legs_off_tempo_cost_parts],
-        ["out of tempo", r.out_of_tempo_cost_parts]].filter(([, parts], index) => index < 3 || parts);
+        ["out of tempo", r.out_of_tempo_cost_parts], ["no support", r.no_support_cost_parts]].filter(([, parts], index) => index < 3 || parts);
       const used = costs.reduce((sum, [, parts]) => sum + (parts || 0), 0);
       // The first runs of the rules paid the followers for their own goals.
       const followers = r.follower_progress_ratio !== undefined
@@ -522,13 +524,14 @@ const TRAINING_LAYOUT = [
       [{ kind: "body_table", width: "w12", size: "small" }],
       BEHAVIOUR_STATS,
     ] },
-  { title: "Rhythm", minor: true, onlyIf: (settings) => settings.environment.clocks,
-    intro: "The segments' clocks over training: the line is the mean over the segments, or over the neighbour pairs, and the band their range.",
+  { title: "Rhythm", minor: true, onlyIf: hasClocks,
+    intro: (settings) => `The segments' clocks over training${settings.environment.leg_clocks ? ", each segment's left leg's" : ""}: the line is the mean over the segments, or over the neighbour pairs, and the band their range.`,
     rows: [
       [{ kind: "health", width: "auto", size: "small", key: "rhythm.neighbour_offset_consistency" },
        { kind: "health", width: "auto", size: "small", key: "rhythm.neighbour_offset_lock" },
        { kind: "health", width: "auto", size: "small", key: "rhythm.tempo" }],
-      [{ kind: "health", width: "auto", size: "small", key: "rhythm.legs_on_tempo" },
+      // Only a clock per segment compares the legs with its last turn.
+      [{ kind: "health", width: "auto", size: "small", key: "rhythm.legs_on_tempo", onlyIf: (settings) => settings.environment.clocks },
        { kind: "health", width: "auto", size: "small", key: "rhythm.foot_slip" },
        { kind: "health", width: "auto", size: "small", key: "learning.tempo_action_std" }],
     ] },
@@ -555,11 +558,14 @@ const TRAINING_DETAILS = [
         "step_facts.joint_movement", "step_facts.spine_bend"]
         .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })),
     ] },
-  { title: "The rhythm and the gait, per segment", onlyIf: (settings) => settings.environment.clocks,
-    intro: "One row per neighbour pair or segment and a column per window, head at the top: each pair's offset and its consistency, each segment's tempo, lag behind the head, legs on tempo and foot slip, and how alike its legs move, left against right and against the next segment's.",
+  { title: "The rhythm and the gait, per segment", onlyIf: hasClocks,
+    intro: (settings) => "One row per neighbour pair or segment and a column per window, head at the top: each pair's offset and its consistency, " +
+      `each segment's tempo, lag behind the head${settings.environment.clocks ? ", legs on tempo" : ""} and foot slip, ` +
+      `and how alike its legs move, left against right and against the next segment's.${settings.environment.leg_clocks ? " The clocks are each segment's left leg's." : ""}`,
     cards: ["rhythm.neighbour_offset", "rhythm.neighbour_offset_consistency", "rhythm.tempo", "rhythm.head_offset",
       "rhythm.legs_on_tempo", "rhythm.foot_slip", "step_facts.left_right_similarity", "step_facts.neighbour_leg_similarity"]
-      .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })) },
+      .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key,
+        onlyIf: key === "rhythm.legs_on_tempo" ? (settings) => settings.environment.clocks : undefined })) },
   { title: "Each window's episodes", intro: "How many episodes ended in each window, and how they spread: each column is one window's episodes, with bad bins in red, good ones in blue, and stronger colours holding more episodes. With few worlds a column holds only a few episodes.",
     cards: [
       { kind: "lines", width: "w4", size: "small", key: "episodes.episode_ended" },
@@ -625,7 +631,8 @@ for (const category of data.categories) {
 function raw(record, key) {
   const [category, name] = key.split(".");
   const value = record[category] ? record[category][name] : undefined;
-  return value === undefined ? null : value;
+  // A per-segment value that holds no number was not measured in that window.
+  return value === undefined || (Array.isArray(value) && value.every((item) => item === null)) ? null : value;
 }
 
 // Everything known about a value: its name, unit, scale, parts, and explanation.
@@ -845,7 +852,8 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 // cost and progress together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
-  movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c" };
+  movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
+  no_support: "#c2569b" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }
@@ -1617,6 +1625,11 @@ function settingChips(settings, setKeys, note) {
   return [html("div", { class: "chips" }, ...chips), setKeys.size ? html("p", { class: "chips-note" }, note) : html("p", { class: "chips-note" }, "")];
 }
 
+// A section's or group's introduction, which may depend on the settings.
+function introOf(spec, settings) {
+  return typeof spec.intro === "function" ? spec.intro(settings) : spec.intro;
+}
+
 function section(number, spec, ...content) {
   return html("section", spec.minor ? { class: "minor" } : {},
     html("h2", {}, html("span", { class: "number" }, String(number)), spec.title),
@@ -1718,7 +1731,7 @@ function trainingReport(root) {
 
   // Results, learning, behaviour, and the run, as the layout says.
   TRAINING_LAYOUT.filter((layout) => !layout.onlyIf || layout.onlyIf(settings)).forEach((layout, index) => {
-    const spec = layout.tiles ? { ...layout, intro: RESULTS_INTRO(span, span * windowSteps) } : layout;
+    const spec = layout.tiles ? { ...layout, intro: RESULTS_INTRO(span, span * windowSteps) } : { ...layout, intro: introOf(layout, settings) };
     const content = spec.tiles ? [trainingTiles(context)] : [];
     for (const row of spec.rows) {
       const items = row.filter((item) => !item.onlyIf || item.onlyIf(settings));
@@ -1731,10 +1744,15 @@ function trainingReport(root) {
   // Details: physics, per-segment heatmaps, everything else, tables, settings.
   const details = [];
   for (const group of TRAINING_DETAILS.filter((group) => !group.onlyIf || group.onlyIf(settings))) {
-    details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);
-    details.push(html("div", { class: "row" }, ...group.cards.map((item) => trainingCard(item, context))));
+    const intro = introOf(group, settings);
+    details.push(html("h3", { class: "group" }, group.title), intro ? html("p", { class: "note" }, intro) : null);
+    const cards = group.cards.filter((item) => !item.onlyIf || item.onlyIf(settings));
+    details.push(html("div", { class: "row" }, ...cards.map((item) => trainingCard(item, context))));
   }
-  const remaining = Object.keys(DESCRIPTIONS).filter((key) => !used.has(key) && !CLASSES.has(key));
+  // Values the run describes but never measured, such as legs on tempo with a
+  // clock per leg, are left out.
+  const remaining = Object.keys(DESCRIPTIONS).filter((key) => !used.has(key) && !CLASSES.has(key) &&
+    log.some((record) => raw(record, key) !== null));
   if (remaining.length) {
     details.push(html("h3", { class: "group" }, "Other values"), html("p", { class: "note" }, "Everything else the run logged."));
     details.push(html("div", { class: "row" }, ...remaining.map((key) => genericCard(key, context))));
@@ -2017,6 +2035,11 @@ function levelSubtitle(context) {
   return `0: the targets of [environment.target]; 1: the curriculum's final ones. At the end ${number(level)}: targets ${curriculumTargets(context.settings, level)}`;
 }
 
+// Whether a run has clocks: one per segment, or one per leg.
+function hasClocks(settings) {
+  return !!(settings.environment.clocks || settings.environment.leg_clocks);
+}
+
 function transpose(values) {
   const sample = sampleOf(values);
   if (!sample) return [];
@@ -2121,11 +2144,14 @@ function evaluationReport(root) {
   }
 
   // The clocks' rhythm of each actor and of the walk, in a run with clocks.
-  const RHYTHM_KEYS = ["rhythm.tempo", "rhythm.neighbour_offset_consistency", "rhythm.neighbour_offset_lock", "rhythm.legs_on_tempo", "rhythm.foot_slip"];
-  if (groups.some(([, records]) => records.some((record) => raw(record, "rhythm.tempo") !== null))) {
+  // Legs on tempo only where measured: a clock per leg never compares the legs.
+  const measured = (key) => groups.some(([, records]) => records.some((record) => raw(record, key) !== null));
+  const RHYTHM_KEYS = ["rhythm.tempo", "rhythm.neighbour_offset_consistency", "rhythm.neighbour_offset_lock", "rhythm.legs_on_tempo", "rhythm.foot_slip"].filter(measured);
+  if (measured("rhythm.tempo")) {
     const rows = groups.map(([name, records]) => [name, ...RHYTHM_KEYS.map((key) => withUnit(mean(records.map((record) => overall(shown(record, key)))), info(key).unit))]);
     root.append(html("section", {}, html("h2", {}, "The rhythm"),
-      html("p", { class: "note" }, "The segments' clocks over the same steps, mean over the segments (or neighbour pairs) and the seeds: the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), the legs on tempo, and the foot slip. " +
+      html("p", { class: "note" }, `The segments' clocks over the same steps${settings.environment.leg_clocks ? " (each segment's left leg's)" : ""}, mean over the segments (or neighbour pairs) and the seeds: ` +
+        `the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), ${measured("rhythm.legs_on_tempo") ? "the legs on tempo, " : ""}and the foot slip. ` +
         `With ${count(settings.environment.simulation.world_count)} worlds per seed, offsets that point every way still give a consistency of about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(settings.environment.simulation.world_count))}: only a clearly higher one shows a common wave. The details give every pair and segment.`),
       table(["Actor", ...RHYTHM_KEYS.map((key) => info(key).label)], rows, 1)));
   }

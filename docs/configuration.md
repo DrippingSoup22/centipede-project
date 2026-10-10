@@ -583,11 +583,13 @@ The report is ordered by priority, and the size of each part follows it.
   averaged over the last block, with a switch to the first; both views share
   their colours. Then three numbers: the heading error, the length of the
   head's path per episode, and the share of time the head is upside down.
-- **4 · Rhythm** (smaller), in a run whose segments have clocks. Charts over
-  training of the wave's consistency and the offsets' lock, the clocks'
-  tempo, the legs on tempo, the foot slip, and the tempo command's spread,
-  each as the mean over the segments (or the neighbour pairs) with their
-  range ([diagnostics.md](diagnostics.md#rhythm)). The consistency's
+- **4 · Rhythm** (smaller), in a run with clocks, one per segment or one per
+  leg; with a clock per leg, the charts follow each segment's left leg's
+  clock. Charts over training of the wave's consistency and the offsets'
+  lock, the clocks' tempo, the legs on tempo (only with a clock per segment,
+  the only kind that compares the legs), the foot slip, and the tempo
+  command's spread, each as the mean over the segments (or the neighbour
+  pairs) with their range ([diagnostics.md](diagnostics.md#rhythm)). The consistency's
   subtitle gives the level that offsets pointing every way reach with the
   run's number of worlds, about 0.89 ÷ √(worlds) (0.03 with 1,024 worlds):
   only a consistency clearly above it shows a common wave.
@@ -681,7 +683,8 @@ the walk, the share of episodes that arrived and how long they took, by
 where the target lay at the start, seen from the head (ahead, to the side,
 behind to the side, or behind, in 45° classes). In a run with clocks, last
 comes **the rhythm**: per actor and for the walk, the tempo, the wave's
-consistency and the offsets' lock, the legs on tempo, and the foot slip.
+consistency and the offsets' lock, the legs on tempo (with a clock per
+segment), and the foot slip.
 
 - **1 · Results.** The same six tiles as in training, each holding the agents'
   value over every seed and the lowest and highest seed. When baselines are
