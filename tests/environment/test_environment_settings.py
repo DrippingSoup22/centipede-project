@@ -48,6 +48,7 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
     )
     assert not settings.passive_follower_spine and not settings.clocks
     assert not settings.leg_clocks and not settings.neighbour_clocks
+    assert not settings.leg_accelerations
     assert settings.clock == ClockSettings(
         middle_tempo_hz=2.0,
         tempo_range_octaves=1.0,

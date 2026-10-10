@@ -3,6 +3,8 @@ import torch
 from centipede.environment.simulation import PhysicalState
 
 BLOCK_SIZE = 27
+# With leg accelerations: the block's six leg joints' accelerations, at its end.
+LEG_ACCELERATION_VALUE_COUNT = 6
 TARGET_VALUE_COUNT = 2
 # With spine control: the angle and speed of the spine joint behind the segment.
 SPINE_VALUE_COUNT = 2
@@ -29,8 +31,10 @@ def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
 class ObservationBuilder:
     """Builds every segment's observation from the physical state and targets.
 
-    Each segment sees its own block of 27 values, the blocks of the segments up
-    to ``observation_radius`` ahead and behind (nearest first), and two target
+    Each segment sees its own block of 27 values (33 with
+    ``leg_acceleration_observed``, which ends every block with its segment's
+    six leg joints' accelerations), the blocks of the segments up to
+    ``observation_radius`` ahead and behind (nearest first), and two target
     values that are real only for the head; with ``spine_observed``, the
     angle and speed of the spine joint behind it (zero for the rear segment);
     with clocks, the ``clock_value_count`` values of its own clocks (three for
@@ -52,6 +56,7 @@ class ObservationBuilder:
         clock_value_count: int = 0,
         neighbour_clock_observed: bool = False,
         step_shape_observed: bool = False,
+        leg_acceleration_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -66,6 +71,10 @@ class ObservationBuilder:
         self.clock_value_count = clock_value_count
         self.neighbour_clock_observed = neighbour_clock_observed
         self.step_shape_observed = step_shape_observed
+        self.leg_acceleration_observed = leg_acceleration_observed
+        block_size = BLOCK_SIZE + (
+            LEG_ACCELERATION_VALUE_COUNT if leg_acceleration_observed else 0
+        )
         missing_neighbour = segment_count
 
         neighbour_rows = []
@@ -89,12 +98,12 @@ class ObservationBuilder:
 
         # One block per segment plus the zero block; refilled in place by build.
         self.blocks = torch.zeros(
-            (world_count, segment_count + 1, BLOCK_SIZE),
+            (world_count, segment_count + 1, block_size),
             dtype=torch.float32,
             device=device,
         )
         self.observation_size = (
-            (2 * observation_radius + 1) * BLOCK_SIZE
+            (2 * observation_radius + 1) * block_size
             + TARGET_VALUE_COUNT
             + (SPINE_VALUE_COUNT if spine_observed else 0)
             + clock_value_count
@@ -113,6 +122,7 @@ class ObservationBuilder:
         clock_values: torch.Tensor | None = None,
         neighbour_clock_values: torch.Tensor | None = None,
         step_shape: torch.Tensor | None = None,
+        leg_acceleration: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
@@ -122,7 +132,9 @@ class ObservationBuilder:
         ``neighbour_clock_values`` ``(W, N, 2k, c)`` its neighbours' clocks
         relative to its own, needed only with ``neighbour_clock_observed``;
         ``step_shape`` ``(W, N, 2, 5)`` its legs' step shape in use, needed
-        only with ``step_shape_observed``.
+        only with ``step_shape_observed``; ``leg_acceleration`` ``(W, N, 6)``
+        each segment's leg joints' accelerations, needed only with
+        ``leg_acceleration_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -139,9 +151,12 @@ class ObservationBuilder:
         blocks[:, :segment_count, 24] = physical_state.right_foot_ground_contact.float()
         blocks[:, :segment_count, 25] = physical_state.body_ground_contact.float()
         blocks[:, :segment_count, 26] = physical_state.leg_leg_contact.float()
+        if self.leg_acceleration_observed:
+            blocks[:, :segment_count, 27:] = leg_acceleration
 
-        # (W, N + 1, 27) gathered by the (N, 2k + 1) table gives
-        # (W, N, 2k + 1, 27); its blocks are then laid end to end per segment.
+        # (W, N + 1, B) gathered by the (N, 2k + 1) table gives
+        # (W, N, 2k + 1, B), with B the block size; its blocks are then laid
+        # end to end per segment.
         neighbour_blocks = blocks[:, self.neighbour_table].flatten(start_dim=2)
 
         # The target as seen from the head: along its forward direction, and

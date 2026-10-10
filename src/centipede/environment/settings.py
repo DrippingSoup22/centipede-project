@@ -543,7 +543,9 @@ class EnvironmentSettings:
     shape; it needs a model whose legs take angles, which only the
     environment can check, once the model is loaded. With
     ``neighbour_clocks`` as well as either, a segment also observes the
-    clocks of the neighbours it sees, relative to its own.
+    clocks of the neighbours it sees, relative to its own. With
+    ``leg_accelerations``, every observation block ends with its six leg
+    joints' accelerations.
     """
 
     max_episode_steps: int
@@ -553,6 +555,7 @@ class EnvironmentSettings:
     clocks: bool
     leg_clocks: bool
     neighbour_clocks: bool
+    leg_accelerations: bool
     simulation: SimulationSettings
     target: TargetSettings
     rewards: RewardSettings
@@ -582,6 +585,7 @@ class EnvironmentSettings:
             clocks=section.boolean("clocks", default=False),
             leg_clocks=leg_clocks,
             neighbour_clocks=section.boolean("neighbour_clocks", default=False),
+            leg_accelerations=section.boolean("leg_accelerations", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
             rewards=RewardSettings.from_section(

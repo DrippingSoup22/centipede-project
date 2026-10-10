@@ -114,16 +114,18 @@ class RunFolder:
         agents_state: dict,
         curriculum_level: float | None = None,
         leg_clocks: bool = False,
+        leg_accelerations: bool = False,
     ) -> Path:
         """Save the agents after ``completed_cycles`` cycles, whether leg clocks
-        drove their legs, and the curriculum's level when the run has one;
-        returns the file."""
+        drove their legs and whether they observed their legs' accelerations,
+        and the curriculum's level when the run has one; returns the file."""
         self.checkpoints.mkdir(exist_ok=True)
         path = self.checkpoints / f"cycle_{completed_cycles:04d}.pt"
         checkpoint = {
             "completed_cycles": completed_cycles,
             "agents": agents_state,
             "leg_clocks": leg_clocks,
+            "leg_accelerations": leg_accelerations,
         }
         if curriculum_level is not None:
             checkpoint["curriculum_level"] = curriculum_level
@@ -155,6 +157,7 @@ class RunFolder:
         if not isinstance(checkpoint, dict) or set(checkpoint) - {
             "curriculum_level",
             "leg_clocks",
+            "leg_accelerations",
         } != {"completed_cycles", "agents"}:
             raise SettingsError(f"{path} is not a checkpoint of this project")
         return checkpoint

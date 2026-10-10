@@ -314,6 +314,12 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     )
     with pytest.raises(SettingsError, match="leg_clocks must match"):
         run_file(tmp_path, leg_clocks, NAME="leg_clocks")
+    # Leg accelerations move every observation block after a segment's own.
+    accelerations = harder_file.replace(
+        "spine_control = true", "spine_control = true\nleg_accelerations = true"
+    )
+    with pytest.raises(SettingsError, match="leg_accelerations must match"):
+        run_file(tmp_path, accelerations, NAME="accelerations")
     assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
 
 

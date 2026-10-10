@@ -61,14 +61,16 @@ target, the step count, and the previous positions that rewards need, and it
 decides which worlds must be reset. **Coordination:** on every `step`, it runs the
 other parts in order:
 
-1. Keep the current body positions and joint angles as the "previous" ones.
+1. Keep the current body positions, joint angles and leg speeds as the
+   "previous" ones.
 2. With leg clocks, every leg's clock in use follows its actions, turns, and
    gives the leg's joints their targets on the step shape
    ([Actions and timing](#actions-and-timing)). The
    physics simulation applies the actions and advances 20 ms. With a clock
    per segment, every clock then turns at the tempo its segment chose. Every
    foot that touched the ground before and after the step is measured for
-   slip.
+   slip, and with leg accelerations every leg joint's change of speed gives
+   its acceleration over the step.
 3. Each world is checked for arrival or the time limit.
 4. The reward function computes each segment's reward; the arrival reward
    needs the result of step 3.
@@ -314,7 +316,8 @@ world. It is a set of tensors overwritten in place; a reader that needs a value
 later copies it. Numbers are 32-bit floats and contact flags are booleans.
 
 Most fields also form a segment's **observation block**: 27 values describing one
-segment, in the order given by the last column.
+segment, in the order given by the last column; with leg accelerations, six
+more end it (below).
 
 | Field | Shape | Meaning | In the block |
 | --- | --- | --- | --- |
@@ -335,7 +338,21 @@ segment, in the order given by the last column.
 | `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values |
 
 In the block, contact flags become 0 or 1. A segment never observes its position
-in the world. Without spine control the spine is not observed; with it, each
+in the world.
+
+**Leg accelerations.** With `leg_accelerations = true`, every block ends with
+its segment's six leg joints' accelerations over the last step, in action
+order (block values 27 to 32): each joint's change of speed over the step
+divided by its 20 ms, in rad/s². The environment computes them from the
+speeds before and after the step, the same way for both backends, and they
+are 0 after a restart, which has no step behind it. Like the speeds, they
+are observed unscaled: normalising them is the agents' job. They let a
+segment read from its neighbours' blocks how their legs are driven, not only
+where they are and how fast they move. MuJoCo's own accelerations (`qacc`)
+are not used: at the end of a step they are instantaneous and carry the
+contacts' response, which in a walk of model v4 made them about a hundred
+times larger than the step's average (a median of 263 against 13 rad/s²)
+and heavy-tailed (99th percentile 42,000 against 430 rad/s²). Without spine control the spine is not observed; with it, each
 segment sees its own spine joint, the one it commands, but not its neighbours',
 which it can read from their orientations.
 
@@ -379,14 +396,19 @@ every segment and any number of segments, two more with spine control
 (**85** at radius 1), three more with clocks (**88** at radius 1), and
 `6k` more with neighbour clocks (**94** at radius 1). Leg clocks add six,
 `12k` with neighbour clocks, and ten for the step shape: at radius 2 with
-spine control and neighbour clocks, 137 + 2 + 6 + 24 + 10 = **179**. A
+spine control and neighbour clocks, 137 + 2 + 6 + 24 + 10 = **179**. Leg
+accelerations add six to every block, `6 × (2k + 1)` in all: at radius 2
+with spine control, leg clocks and leg accelerations, without neighbour
+clocks, 5 × 33 + 2 + 2 + 6 + 10 = **185**. A
 segment's clocks and step shape are never in the blocks its neighbours see;
 they see its clocks only through the neighbour clocks, and its step shape
 not at all. The spine's values, and the step shape's, come after the values
 older runs had, so that a run can start from agents trained without them:
 their inputs keep their places, and the new ones are added at the end (see
 [agents.md](agents.md#checkpoints)); for the spine, this holds for a run
-without clocks. A neighbour that does not exist is filled with zeros, and
+without clocks. The leg accelerations end every block instead, so that a
+layout without them stays as it was; with them, every block after the first
+moves, so a run can start only from agents that observed them too. A neighbour that does not exist is filled with zeros, and
 only the head receives real target values:
 
 | Segment | Ahead | Behind | Target values |
@@ -972,7 +994,7 @@ and set this principle instead:
 - a follower's only job is to track the clock of the segment ahead of it
   (clock tracking), so that the head's clock passes down the body;
 - a follower reads the clock ahead from the body, from the leading segment's
-  leg angles and speeds in its observation
+  leg angles, speeds and accelerations in its observation
   ([What each segment sees](#what-each-segment-sees)), not from a clock value
   handed to it, so such a run observes no neighbour clocks;
 - the legs are attached to the clocks, so the tempo, the amplitudes and the
@@ -1069,6 +1091,7 @@ These are the keys of the environment sections of the configuration file (see
 | `passive_follower_spine` | false | With spine control, only the head commands a spine joint, its neck; the followers' joints are passive. Every segment still observes the joint behind it |
 | `clocks` | false | Every segment has a [clock](#clocks): one more action, its tempo, and three more observed values |
 | `leg_clocks` | false | Every leg has a [clock](#clocks) that drives it through a [step shape](#actions-and-timing): twelve leg actions per segment instead of six, six observed clock values, and ten for the step shape in use; needs a model whose legs take angles (v4); excludes `clocks` |
+| `leg_accelerations` | false | Every observation block ends with its segment's six leg joints' accelerations over the last step, rad/s²: six more values per block, `6 × (2 × observation_radius + 1)` in all. A run that starts from, continues or evaluates a checkpoint must keep the checkpoint's setting |
 | `neighbour_clocks` | false | Every segment also observes the clocks of the neighbours it sees, relative to its own: three more values per neighbour (six with leg clocks), `6 × observation_radius` in all (`12 ×` with leg clocks); needs clocks of either kind |
 | **`[environment.clock]`** | | |
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |

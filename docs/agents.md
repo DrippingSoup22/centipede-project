@@ -95,7 +95,8 @@ per step, so it is not worth the added complexity.
 
 Every segment agent has the same input size, `observation_size`: 83 with the
 first observation radius of 1, and more with spine control, clocks of either
-kind (with leg clocks, also the step shape in use), or neighbour clocks (see
+kind (with leg clocks, also the step shape in use), neighbour clocks, or leg
+accelerations (see
 [environment.md](environment.md#what-each-segment-sees)). Inputs that are always
 zero for a segment, such as the head's missing neighbour ahead, never affect its
 network.

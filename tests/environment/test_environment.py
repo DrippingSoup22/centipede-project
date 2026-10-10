@@ -252,13 +252,18 @@ def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
         passive_follower_spine=True,
         leg_clocks=True,
         neighbour_clocks=True,
+        leg_accelerations=True,
         rewards={"out_of_tempo_cost_parts": 1, "no_support_cost_parts": 1.5},
     )
     assert env.segment_action_sizes == [13] + [12] * 7 and env.action_size == 13
     assert env.tempo_columns == [[0, 6]] * 8
     assert env.motor_columns == [[3, 4, 5, 9, 10, 11, 12]] + [[3, 4, 5, 9, 10, 11]] * 7
-    assert env.observation_size == environment().observation_size + 2 + 6 + 2 * 6 + 10
-    env.reset(seed=2)
+    # Three blocks of six more values, the spine, the clocks, the step shape.
+    more = 3 * 6 + 2 + 6 + 2 * 6 + 10
+    assert env.observation_size == environment().observation_size + more
+    first = env.reset(seed=2)
+    assert not first[..., 27:33].any()  # no step behind a restart
+    speeds_before = env.simulation.physical_state.leg_joint_velocity.clone()
     turns = 2 * math.pi * 0.02 * torch.tensor([2.0, 4.0])
     env.clocks.clock_phase.copy_(
         (torch.tensor([0.0, 1.5 * math.pi]) - turns).remainder(2 * math.pi)
@@ -283,6 +288,10 @@ def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
     own = torch.tensor([1.0, 0.0, 0.0, 0.0, -1.0, 1.0])
     assert torch.allclose(observations[0, :, -28:-22], own, atol=1e-6)
     assert torch.allclose(observations[0, :, -10:], torch.tensor(shape * 2))
+    # Each segment's own block ends with its legs' accelerations over the step.
+    speeds = env.simulation.physical_state.leg_joint_velocity
+    accelerations = (speeds - speeds_before) / 0.02
+    assert torch.allclose(observations[..., 27:33], accelerations, rtol=1e-5)
 
     # Leg clocks drive the legs with target angles, which v3's legs do not take.
     with pytest.raises(SettingsError, match="leg_clocks .* legs take torques"):

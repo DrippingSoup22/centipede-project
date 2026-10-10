@@ -341,7 +341,13 @@ same weights would mean other things. Every checkpoint records whether leg
 clocks drove its agents' legs; checkpoints from before leg clocks count as
 without. Runs with leg clocks trained before each segment observed its step
 shape have smaller observations, so they can be continued or evaluated only
-with the code they were trained with.
+with the code they were trained with. `[environment] leg_accelerations` must
+match too, here as when continuing or evaluating a run: it adds six values at
+the end of every observation block, so with it every block after a segment's
+own moves, and widening, which adds new inputs at the end, would give the
+saved weights the wrong inputs. Every checkpoint records whether its agents
+observed the legs' accelerations; checkpoints from before they could count as
+without.
 
 ### Continuing a run
 

@@ -44,6 +44,7 @@ from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBase
 from centipede.agents.settings import AgentSettings
 from centipede.diagnostics_category import descriptions, values
 from centipede.environment.environment import Environment
+from centipede.environment.settings import EnvironmentSettings
 from centipede.experiment.arrivals import ArrivalShare, targets_per_minute
 from centipede.experiment.configuration import (
     Configuration,
@@ -148,9 +149,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         checkpoint = RunFolder.load_checkpoint(
             checkpoint_path, configuration.agents.device
         )
-        _check_leg_clocks_match(
-            checkpoint, configuration.environment.leg_clocks, checkpoint_path
-        )
+        _check_legs_match(checkpoint, configuration.environment, checkpoint_path)
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
             saved_level = checkpoint.get("curriculum_level", 0.0)
@@ -453,6 +452,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 agents.state_dict(),
                 None if curriculum is None else curriculum.level,
                 configuration.environment.leg_clocks,
+                configuration.environment.leg_accelerations,
             )
             if run_settings.report:
                 _write_training_report(folder, configuration, categories, stop_message)
@@ -525,22 +525,33 @@ def _check_recording_fits(environment: Environment, frames: int) -> None:
         )
 
 
-def _check_leg_clocks_match(
-    checkpoint: dict[str, Any], leg_clocks: bool, path: Path
+def _check_legs_match(
+    checkpoint: dict[str, Any], environment: EnvironmentSettings, path: Path
 ) -> None:
-    """Fail clearly where a checkpoint's agents drove their legs otherwise.
+    """Fail clearly where a checkpoint's agents drove or saw their legs otherwise.
 
     With leg clocks, a segment's leg actions set its legs' clocks and step
     shapes; without, they command the leg motors: the same actions mean other
-    things, so starting from, continuing or evaluating a checkpoint needs the
-    same kind of legs. Checkpoints saved before leg clocks existed had none.
+    things. Leg accelerations end every observation block, so with them every
+    block after a segment's own moves, and widening, which adds inputs at the
+    end, would give the saved weights the wrong inputs. Starting from,
+    continuing or evaluating a checkpoint therefore needs both the same.
+    Checkpoints saved before either existed had neither.
     """
     saved = checkpoint.get("leg_clocks", False)
-    if saved != leg_clocks:
+    if saved != environment.leg_clocks:
         driven = "drove their legs with leg clocks" if saved else "commanded the motors"
         raise SettingsError(
             f"[environment] leg_clocks must match the checkpoint {path}, whose"
             f" agents {driven}: set leg_clocks = {str(saved).lower()}"
+        )
+    saved = checkpoint.get("leg_accelerations", False)
+    if saved != environment.leg_accelerations:
+        seen = "observed" if saved else "did not observe"
+        raise SettingsError(
+            f"[environment] leg_accelerations must match the checkpoint {path},"
+            f" whose agents {seen} their legs' accelerations, which move every"
+            f" observation block: set leg_accelerations = {str(saved).lower()}"
         )
 
 
@@ -823,9 +834,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         environment.motor_columns,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
-    _check_leg_clocks_match(
-        checkpoint, configuration.environment.leg_clocks, checkpoint_path
-    )
+    _check_legs_match(checkpoint, configuration.environment, checkpoint_path)
     agents.load_state_dict(checkpoint["agents"])
     loop = InteractionLoop(environment, agents, configuration.interaction_loop)
     categories = _evaluation_categories(loop, environment)

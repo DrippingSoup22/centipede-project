@@ -83,6 +83,25 @@ def test_each_segment_sees_itself_then_ahead_then_behind(radius, device):
     assert torch.equal(observations, kept)  # a later build leaves it unchanged
 
 
+def test_with_leg_accelerations_every_block_ends_with_its_six_accelerations():
+    plain = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu")
+    builder = ObservationBuilder(
+        SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", leg_acceleration_observed=True
+    )
+    state = distinct_state("cpu")
+    targets = torch.zeros(WORLD_COUNT, 2)
+    accelerations = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 6)
+
+    observations = builder.build(state, targets, leg_acceleration=accelerations)
+
+    assert builder.observation_size == plain.observation_size + 3 * 6
+    # Segment 1 sees itself, the head ahead and segment 2 behind.
+    blocks = observations[0, 1, :-2].unflatten(-1, (3, 33))
+    plain_blocks = plain.build(state, targets)[0, 1, :-2].unflatten(-1, (3, 27))
+    assert torch.equal(blocks[..., :27], plain_blocks)
+    assert torch.equal(blocks[:, 27:], accelerations[0, [1, 0, 2]])
+
+
 @pytest.mark.parametrize("heading_deg", [0.0, 90.0, -135.0])
 def test_target_values_are_in_the_heads_frame_and_only_for_the_head(heading_deg):
     builder = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu")

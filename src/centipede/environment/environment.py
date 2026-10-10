@@ -87,6 +87,7 @@ class Environment:
             clock_value_count=0 if self.clocks is None else self.clocks.value_count,
             neighbour_clock_observed=settings.neighbour_clocks,
             step_shape_observed=settings.leg_clocks,
+            leg_acceleration_observed=settings.leg_accelerations,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -192,6 +193,19 @@ class Environment:
             dtype=torch.bool,
             device=self.device,
         )
+        self.previous_leg_joint_velocity = torch.zeros(
+            (self.world_count, self.segment_count, 6),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        # Each leg joint's acceleration over the last step, rad/s²: the change
+        # of its speed divided by the step's duration; zero after a restart,
+        # which has no step behind it.
+        self.leg_joint_acceleration = torch.zeros(
+            (self.world_count, self.segment_count, 6),
+            dtype=torch.float32,
+            device=self.device,
+        )
         # The radius of each world's range circle, around its target; infinite
         # when there is no circle.
         self.range_radius = torch.full(
@@ -234,6 +248,7 @@ class Environment:
             self.clocks.reset(every_world, seed)
         self._place_targets(every_world)
         self.episode_steps.zero_()
+        self.leg_joint_acceleration.zero_()
         state = self.simulation.physical_state
         self.diagnostics.start_episodes(
             every_world, state, self.target_position, self.range_radius
@@ -260,6 +275,7 @@ class Environment:
         self.previous_joint_position.copy_(joint_angles(state))
         self.previous_foot_planar_position.copy_(state.foot_planar_position)
         self.previous_foot_contact.copy_(_foot_contact(state))
+        self.previous_leg_joint_velocity.copy_(state.leg_joint_velocity)
 
         # 2. Move the body. With leg clocks, each leg's clock in use, its
         # tempo and step shape, first follows its actions, the clocks turn at
@@ -287,6 +303,11 @@ class Environment:
             )
         self.simulation.step(leg_actions, spine_actions)
         self.episode_steps += 1
+        torch.sub(
+            state.leg_joint_velocity,
+            self.previous_leg_joint_velocity,
+            out=self.leg_joint_acceleration,
+        ).div_(self.simulation.step_duration_s)
 
         # A clock per segment turns at the tempo its segment chose, and the
         # feet that touched the ground before and after the step are measured
@@ -362,6 +383,7 @@ class Environment:
             self.simulation.reset(restarted)
             if self.clocks is not None:
                 self.clocks.reset(restarted)
+            self.leg_joint_acceleration.masked_fill_(restarted[:, None, None], 0.0)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
             self.diagnostics.start_episodes(
@@ -386,6 +408,7 @@ class Environment:
             None if clocks is None else clocks.observation_values(),
             clocks.neighbour_values() if self.settings.neighbour_clocks else None,
             clocks.step_shape if self.settings.leg_clocks else None,
+            self.leg_joint_acceleration,
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:
