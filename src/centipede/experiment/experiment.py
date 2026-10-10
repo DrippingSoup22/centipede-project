@@ -423,6 +423,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
             task = plateau.signals["task"]
             wave = plateau.signals.get("wave")
+            agents_return = plateau.signals.get("return")
             stop_message = (
                 f"Stopped after cycle {cycle} of {total_cycles}: a plateau. The"
                 f" progress ({measure}, averaged over {plateau.average_cycles}"
@@ -433,6 +434,12 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                     if wave is None
                     else f"; the wave consistency, averaged alike, at cycle"
                     f" {wave.best_cycle}, to {wave.best:.3f}"
+                )
+                + (
+                    ""
+                    if agents_return is None
+                    else f"; the agents' mean return, averaged alike, at cycle"
+                    f" {agents_return.best_cycle}, to {agents_return.best:.3f}"
                 )
                 + "."
             )
@@ -466,14 +473,19 @@ def _plateau_readings(
     record: dict[str, Any], arrival_share: ArrivalShare, curriculum: Curriculum | None
 ) -> dict[str, float]:
     """The signals the plateau stop watches, once measured: the task (the
-    arrival share, plus the curriculum's level), in a run with clocks the
-    wave (how alike the neighbours' offsets are across every world and step,
-    averaged over the pairs), and for the solved stop the speed (the
-    logarithm of the targets per world and minute, once there are any)."""
+    arrival share, plus the curriculum's level), the return (the mean over
+    the segments of their mean episode return in the window, when episodes
+    ended in it), in a run with clocks the wave (how alike the neighbours'
+    offsets are across every world and step, averaged over the pairs), and
+    for the solved stop the speed (the logarithm of the targets per world
+    and minute, once there are any)."""
     readings = {}
     if arrival_share.value is not None:
         level = 0.0 if curriculum is None else curriculum.level
         readings["task"] = arrival_share.value + level
+    if record["episodes"]["episode_ended"]:
+        segment_return = record["episodes"]["segment_return"]
+        readings["return"] = sum(segment_return) / len(segment_return)
     if arrival_share.targets_per_minute:
         readings["speed"] = math.log(arrival_share.targets_per_minute)
     if "rhythm" in record:

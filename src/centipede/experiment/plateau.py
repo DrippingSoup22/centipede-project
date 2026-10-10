@@ -1,11 +1,15 @@
 """The plateau stop: ending a run that has stopped improving.
 
-A run's progress is watched through one or two signals. The task is its
+A run's progress is watched through two or three signals. The task is its
 arrival share (arrivals.py), plus the curriculum's level when it has one: it
 rises while the arrivals rise toward the share the curriculum holds, then
 while the level rises, and at the top level while the arrivals rise again;
-without a curriculum it is the arrival share alone. In a run whose segments
-have clocks, the wave is the second: how alike the phase offsets between
+without a curriculum it is the arrival share alone. The return is what the
+agents optimise: the mean over the segments of their mean episode return in
+a window, read in the windows in which episodes ended. It rises while the
+agents still learn, before any arrival moves the task: the head closing more
+of its distance, or the costs shrinking. In a run whose segments have
+clocks, the wave is the third: how alike the phase offsets between
 neighbours are across every world and step of a window, averaged over the
 pairs. Every clock starts at the same tempo, so within each world the offsets
 hold from the start; across the worlds, which start from random phases, they
@@ -15,9 +19,9 @@ The arrival share swings with the rhythm of the episode length: the worlds
 that run out of time started together and end together, one wave per episode
 length. So each signal is watched through the average of its last
 AVERAGED_EPISODE_LENGTHS episode lengths of readings, in which the swings
-cancel, and keeps its own best. A run reaches a plateau when neither the
-task's nor the wave's average has risen by ``min_progress`` above its best
-for ``cycles`` cycles, and never before ``minimum_cycles``. The experiment
+cancel, and keeps its own best. A run reaches a plateau when none of these
+averages has risen by ``min_progress`` above its best for ``cycles`` cycles,
+and never before ``minimum_cycles``. The experiment
 then stops the run cleanly, with a checkpoint, so that money is not spent on
 cycles that teach nothing, whether the agents have learned all they can or
 their learning has failed.
@@ -93,9 +97,9 @@ class Plateau:
                 signal.best, signal.best_cycle = signal.average, cycle
 
     def reached(self, cycle: int) -> bool:
-        """Whether ``cycles`` cycles have passed without new progress in the
-        task or the wave, each counted from its first average, and the run has
-        trained its ``minimum_cycles``."""
+        """Whether ``cycles`` cycles have passed without new progress in any
+        signal but the speed, each counted from its first average, and the
+        run has trained its ``minimum_cycles``."""
         progress = [signal for name, signal in self.signals.items() if name != SPEED]
         return (
             cycle >= self.minimum_cycles

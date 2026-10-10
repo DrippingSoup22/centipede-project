@@ -26,16 +26,24 @@ def test_a_plateau_is_too_many_cycles_without_a_large_enough_rise_of_the_average
 
 
 def test_a_plateau_needs_every_signal_stalled_and_the_minimum_cycles():
+    """The task is flat; the wave rises until cycle 6, the agents' return until 8."""
     plateau = Plateau(cycles=2, min_progress=0.02, episode_windows=1, minimum_cycles=9)
     for cycle in range(1, 4):
-        plateau.update(cycle, {"task": 0.9, "wave": 0.1 * cycle})
-    for cycle in range(4, 7):
-        plateau.update(cycle, {"task": 0.9, "wave": 0.4})  # the wave still rises
+        plateau.update(cycle, {"task": 0.9, "wave": 0.1 * cycle, "return": -0.5})
+    for cycle in range(4, 9):
+        rising = -0.5 + 0.1 * min(cycle - 3, 3)
+        plateau.update(cycle, {"task": 0.9, "wave": 0.4, "return": rising})
     assert plateau.signals["task"].best_cycle == 3
     assert plateau.signals["wave"].best_cycle == 6
-    assert not plateau.reached(7)  # the task stalled, the wave not yet
-    assert not plateau.reached(8)  # both stalled, before the minimum
-    assert plateau.reached(9)
+    assert plateau.signals["return"].best_cycle == 8
+    assert not plateau.reached(8)  # the task and the wave stalled, not the return
+    assert not plateau.reached(9)
+    assert plateau.reached(10)  # all three stalled, and the minimum is past
+    late = Plateau(cycles=2, min_progress=0.02, episode_windows=1, minimum_cycles=9)
+    for cycle in range(1, 4):
+        late.update(cycle, {"task": 0.9, "wave": 0.4, "return": -0.5})
+    assert not late.reached(8)  # all three stalled, before the minimum
+    assert late.reached(9)
 
 
 def test_a_solved_task_stops_a_run_once_it_gets_no_faster():

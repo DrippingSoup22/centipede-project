@@ -215,21 +215,23 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     # Three steps never reach a target 30 mm away: the arrival share stays 0.
     # An episode length is two windows, so it is first measured at cycle 2,
     # and its first average over three episode lengths (six cycles) comes at
-    # cycle 7; cycle 9 is then a plateau of two cycles. Cycles 10 and 11 are
-    # recorded, the run's first recording being cycles 1 and 2.
+    # cycle 7. The return is read only in the windows in which episodes end,
+    # two of every three, so its first average comes at cycle 9, and it never
+    # rises after; cycle 11 is then a plateau of two cycles for both. Cycles
+    # 12 and 13 are recorded, the run's first recording being cycles 1 and 2.
     plateau_file = TRAINING_FILE.replace(
         'runs_folder = "RUNS"',
         'runs_folder = "RUNS"\nrecordings = 1\nplateau_cycles = 2',
     ).replace("update_cycles = 3", "update_cycles = 20")
     folder = run_file(tmp_path, plateau_file, NAME="plateau")
 
-    assert logged_cycles(folder) == list(range(1, 12))
-    assert (folder / "checkpoints" / "cycle_0011.pt").exists()
+    assert logged_cycles(folder) == list(range(1, 14))
+    assert (folder / "checkpoints" / "cycle_0013.pt").exists()
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycles_0001-0002.npz", "cycles_0010-0011.npz"]
+    assert recordings == ["cycles_0001-0002.npz", "cycles_0012-0013.npz"]
     # The report says why the run stopped early.
     report = (folder / "report.html").read_text(encoding="utf-8")
-    assert "Stopped after cycle 11 of 20: a plateau." in report
+    assert "Stopped after cycle 13 of 20: a plateau." in report
 
 
 def test_a_run_whose_task_is_solved_stops_once_it_gets_no_faster(tmp_path):

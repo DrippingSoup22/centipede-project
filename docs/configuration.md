@@ -241,15 +241,29 @@ share the curriculum holds, then while the level rises, and at the top level
 while the arrivals rise again; without a curriculum it is the arrival share
 alone, which stops a run once it has solved its task.
 
+The stop also watches the agents' **return**: each segment's mean return over
+the episodes that ended in a window, averaged over the segments, read in the
+windows in which episodes ended. The return is what the agents optimise, so
+it rises while they learn, before arrivals move the task. Three runs with leg
+clocks (one seed each) stopped at cycles 200, 136 and 136 while watching only
+the task and the wave, though the head's reward per step, the share of its
+start distance it closed (0.23 at cycle 48 and 0.50 at cycle 200 in the
+first) and its steps on course still rose in a straight line, and arrivals
+were only beginning (0.5% at cycle 200); the user added the return on
+2026-10-10. `plateau_progress` applies to it too, in units of the arrival
+reward per episode. The agents' losses are not watched: PPO computes its loss
+afresh on each window's data, with advantages normalised in every update, so
+its level does not measure progress.
+
 In a run whose segments or legs have clocks (`[environment] clocks` or
 `leg_clocks`), the stop also
-watches a second signal, the **wave**: how alike the phase offsets between
+watches a third signal, the **wave**: how alike the phase offsets between
 neighbours are across every world and step of a window (their consistency, in
 [diagnostics.md](diagnostics.md#rhythm)), averaged over the pairs. Every clock
 starts at the same tempo, so within each world the offsets hold from the
 first step; across the worlds, which start from random phases, they grow
 alike only as the segments steer them toward the same wave. Each signal keeps
-its own best, and the run stops only when neither has risen for
+its own best, and the run stops only when none has risen for
 `plateau_cycles` cycles, never before `plateau_minimum_cycles`.
 
 The arrival share swings with the rhythm of the episode length. All worlds
@@ -269,7 +283,7 @@ first average.
 When `plateau_cycles` cycles pass without a rise, the run records one more
 episode length, unless one is being recorded, so that its last recording shows
 its final behaviour; then it saves a checkpoint and its report, prints the
-cycle of its last rise, and ends normally, so an evaluation that follows it
+cycle of each signal's last rise, and ends normally, so an evaluation that follows it
 still runs. The rule was checked on the first runs of the story: with 48
 cycles and 0.02 it would have stopped two runs about 50 to 60 cycles after
 they had solved their task (at cycles 150 and 126), and none that was still
