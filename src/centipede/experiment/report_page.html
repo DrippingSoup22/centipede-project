@@ -191,7 +191,7 @@ const METRICS = {
     about: "The total reward a segment collected over an episode, averaged over the segments. Every step costs a little, so it starts negative; it rises as the costs shrink and as arrivals add their reward. Each segment's agent learns to make its own return as large as possible. Like every episode value, it exists only for windows in which episodes ended.",
     compute: (record) => mean(raw(record, "episodes.segment_return") || []) },
   "report.reward_per_step": { label: "Reward per step", unit: "",
-    about: "The reward a segment received per step, averaged over the segments, the worlds, and the steps of each window: the sum of the four reward terms. Unlike the return, it has a value in every window, so it shows learning progress even while episodes are long and rarely end.",
+    about: "The reward a segment received per step, averaged over the segments, the worlds, and the steps of each window: the sum of its terms. Unlike the return, it has a value in every window, so it shows learning progress even while episodes are long and rarely end.",
     compute: (record) => {
       const parts = raw(record, "step_facts.reward_parts");
       return parts === null ? null : mean(parts.map((segment) => segment.reduce((a, b) => a + b, 0)));
@@ -205,7 +205,7 @@ const METRICS = {
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
-    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs (step cost, body contact, leg contact, and progress while it moves away) below it. The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
+    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs below it (body contact, legs touching, and, as the reward settings switch them on, the step cost, foot slip, legs off tempo, out of tempo, and progress while the head moves away). The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
 
   // -- How the episodes spread -------------------------------------------------
   "episode_distributions.distance_closed": { label: "Distance closed, every episode", source: "episodes.distance_closed", better: "higher",
@@ -265,13 +265,13 @@ const METRICS = {
   "learning.clip_fraction": { label: "Clipped samples", unit: "%", scale: 100,
     about: "The share of samples whose probability ratio reached PPO's clip limit in the last update. Some clipping is normal; a large share means the updates are too aggressive." },
   "learning.explained_variance": { label: "Critic accuracy", unit: "",
-    about: "How well the critic predicted the returns before the update (explained variance): 1 is perfect, 0 no better than a constant, below 0 worse than that." },
+    about: "How well the critic predicted the returns before the update (explained variance): 1 is perfect, 0 no better than a constant, below 0 worse than that. Its chart starts at −1: lower values, common in the first cycles, are drawn at −1." },
   "learning.learning_rate": { label: "Learning rate", unit: "",
     about: "The optimizers' learning rate in each update: constant, or falling from the starting rate to the final one along the schedule the settings name." },
   "learning.action_std": { label: "Action spread", unit: "",
     about: "The learned spread of each leg motor's action, averaged over the six motors. It shrinks as the policy becomes more certain." },
   "learning.spine_action_std": { label: "Spine command spread", unit: "",
-    about: "The learned spread of each segment's command for the spine joint behind it; 0 for a segment without one, or when the spine is not controlled." },
+    about: "The learned spread of each segment's command for the spine joint behind it; 0 for a segment without one: the rear segment, every segment when the spine is not controlled, and the followers when only the head bends its neck." },
   "learning.tempo_action_std": { label: "Tempo command spread", unit: "",
     about: "The learned spread of each segment's tempo action, the last of its actions in a run with clocks; 0 without clocks." },
   "step_facts.support": { label: "Support on both sides", unit: "%", scale: 100, better: "higher",
@@ -285,7 +285,7 @@ const METRICS = {
   "rhythm.neighbour_offset": { label: "Offset between neighbours", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
     about: "Each pair's mean phase offset, the segment's phase minus the next one's: positive when the rear one lags, as in a wave from head to tail. One value per pair, head first; it means something only where the pair's consistency is well above 0." },
   "rhythm.neighbour_offset_consistency": { label: "Wave consistency", unit: "", range: [0, 1], better: "higher",
-    about: "How alike each pair's offset is across every world and step, from 0 (random) to 1 (the same everywhere). The worlds start from random phases, so it rises only as the segments steer their offsets toward the same wave; the plateau stop watches its mean over the pairs." },
+    about: "How alike each pair's offset is across every world and step, from 0 (random) to 1 (the same everywhere). The worlds start from random phases, so it rises only as the segments steer their offsets toward the same wave; the plateau stop watches its mean over the pairs. Even offsets that point every way give about 0.89 ÷ √(worlds): 0.03 with 1,024 worlds, 0.11 with 64. Only values clearly above that show a common wave." },
   "rhythm.neighbour_offset_lock": { label: "Offset lock", unit: "", range: [0, 1], better: "higher",
     about: "How steady each pair's offset stays within each world over the window, from 0 to 1. Every clock starts at the same tempo, so it is high from the start; it falls when neighbours change tempo apart." },
   "rhythm.head_offset": { label: "Lag behind the head", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
@@ -304,6 +304,10 @@ const METRICS = {
     about: "Each episode's arrival, in the column of its start bearing's class: ahead, side, behind side, or behind." },
   "episodes.arrival_steps_by_bearing": { label: "Time to arrive, by start bearing", unit: "steps",
     about: "Each arrival's length in steps, in the column of its start bearing's class." },
+  "curriculum.level": { label: "Target level", unit: "", range: [0, 1],
+    about: "The curriculum's target difficulty after each update cycle: at 0 the targets are drawn from [environment.target]'s ranges, at 1 from [curriculum]'s final ranges, and in between each end of the ranges lies that far along. The level rises while more episodes arrive than the curriculum's arrival share and falls while fewer do, so the arrivals stay near that share and the level shows how hard a task the agents manage. The arrival share and every episode value are measured on the targets of their time." },
+  "arrivals.targets_per_minute": { label: "Targets per minute", unit: "/min",
+    about: "The targets reached per world and minute over the last episode length of windows: every arrival counts, however many a world makes. When the body walks on to a new target after each arrival, this says how many targets a centipede collects. Farther targets take longer to reach, so it falls as the curriculum's level rises." },
   "timing.transitions_per_second": { label: "Simulation speed", unit: "steps/s",
     about: "World steps collected per second while collecting: how fast the simulation and the agents' acting run together. The first window of every session also includes start-up, such as compiling the GPU kernels, so it is drawn apart and left out of the median." },
   "timing.collecting_seconds": { label: "Collecting", unit: "s",
@@ -338,6 +342,9 @@ const SETTING_CHIPS = [
       (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` +
         (t.range_circle_margin_m ? ` + ${number(t.range_circle_margin_m * 1000)} mm` : "") : "") +
       (t.after_arrival === "new_target" ? ", walks on to a new target after arriving" : "") },
+  // Only training moves the targets with the curriculum; an evaluation sets its own.
+  { keys: ["curriculum"], text: (s) => (s.curriculum && data.kind === "training"
+    ? `curriculum: targets up to ${curriculumTargets(s, 1)}, keeping ${number(100 * s.curriculum.arrival_share)}% of episodes arriving` : null) },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   // Runs before the spine could be commanded have no such setting.
   { keys: ["environment.spine_control", "environment.passive_follower_spine"], text: (s) => !s.environment.spine_control ? "passive spine"
@@ -363,10 +370,11 @@ const SETTING_CHIPS = [
         : r.follower_progress_share === 0 ? "none for the followers" : `followers ${number(r.follower_progress_share)} of it`;
       const payout = r.arrival_payout !== undefined && r.arrival_payout !== 1 ? `, paid ${number(r.arrival_payout)}` : "";
       const followerArrival = r.follower_arrival_share === 0 ? ", none for the followers" : "";
-      const progress = r.progress_parts ? `progress ${number(r.progress_parts)} parts a halving` : `progress: head ${number(r.head_progress_ratio)} × step cost`;
-      return `rewards: arrival ${r.arrival_reward}${payout}${followerArrival} · costs ${costs.map(([name, parts]) => `${name} ${number(parts)}`).join(" : ")}` +
-        `${r.cost_budget_parts !== used ? ` of ${number(r.cost_budget_parts)} parts` : ""}` +
-        (r.cost_horizon_steps ? `, over ${count(r.cost_horizon_steps)} steps` : "") + ` · ${progress}, ${followers}`;
+      const progress = r.progress_parts ? `progress ${number(r.progress_parts)} parts per halving of the distance` : `progress: head ${number(r.head_progress_ratio)} × step cost`;
+      const budget = r.cost_budget_parts !== undefined && r.cost_budget_parts !== used ? ` of a ${number(r.cost_budget_parts)}-part budget` : "";
+      const horizon = r.cost_horizon_steps ? ` over ${count(r.cost_horizon_steps)} steps` : "";
+      return `rewards: arrival ${r.arrival_reward}${payout}${followerArrival} · costs in parts${budget}${horizon}: ` +
+        `${costs.filter(([, parts]) => parts).map(([name, parts]) => `${name} ${number(parts)}`).join(", ")} · ${progress}, ${followers}`;
     } },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
@@ -468,7 +476,7 @@ const PROFILE_COLUMNS = [
   { key: "step_facts.spine_bend", short: "Spine bend" },
 ];
 
-const PROFILE_ABOUT = "Exact values of how each segment behaves, one row per segment with the head at the top. Each column is coloured on its own scale, darker meaning more. Left foot, right foot, body: share of steps touching the ground. Legs touching: share of steps its legs touch another leg. Height: of the segment's centre. Upright: 1 upright, 0 on its side, −1 upside down. Speed: how fast the segment's centre moves. Toward goal: the part of that speed that brings it closer to its goal. Joint movement: how far the joints it commands move per step. Spine bend: of the joint behind it.";
+const PROFILE_ABOUT = "Exact values of how each segment behaves, one row per segment with the head at the top. Each column has its own colour scale: where less or more is better, from red (worse) to blue (better), otherwise from light to dark blue. Left foot, right foot, body: share of steps touching the ground. Legs touching: share of steps its legs touch another leg. Height: of the segment's centre. Upright: 1 upright, 0 on its side, −1 upside down. Speed: how fast the segment's centre moves along the ground. Joint movement: how far the joints it commands move per step. Spine bend: of the joint behind it.";
 
 // Where episodes ended, in classes made of the distance histogram's bins: an
 // arrival, then how far from its target an episode that ran out of time ended.
@@ -495,10 +503,13 @@ const TRAINING_LAYOUT = [
       [{ kind: "stack", width: "w7", size: "small", key: "step_facts.reward_parts", title: "Where the reward comes from", totalName: "reward per step",
          subtitle: "Per step, mean over segments; the line is their sum. The scale depends on the run's reward settings" },
        { kind: "arrival_times", width: "w5", size: "small" }],
+      [{ kind: "lines", width: "auto", size: "small", key: "curriculum.level", onlyIf: (settings) => !!settings.curriculum, subtitle: levelSubtitle },
+       { kind: "lines", width: "auto", size: "small", key: "arrivals.targets_per_minute",
+         subtitle: "Per world and minute, over the last episode length of windows" }],
     ] },
   { title: "Learning", minor: true, intro: "How each segment agent's update went, over training: the line is the segments' mean, the band their range.",
     rows: [[
-      { kind: "health", width: "auto", size: "small", key: "learning.explained_variance" },
+      { kind: "health", width: "auto", size: "small", key: "learning.explained_variance", floor: -1 },
       { kind: "health", width: "auto", size: "small", key: "learning.action_std" },
       { kind: "health", width: "auto", size: "small", key: "learning.approximate_kl" },
       { kind: "lines", width: "auto", size: "small", key: "learning.learning_rate",
@@ -598,6 +609,8 @@ const EVALUATION_DETAILS = [
 // =============================================================================
 
 const DESCRIPTIONS = {};    // values summarised as numbers, by "category.value"
+// Values that number classes, whose mean means nothing; their histograms show them.
+const CLASSES = new Set(["episodes.ending"]);
 const DISTRIBUTIONS = {};   // values counted in bins, with their edges
 for (const category of data.categories) {
   for (const value of category.values) {
@@ -823,13 +836,14 @@ const BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", 
 const RED = ["#9a2525", "#c13433", "#e34948", "#ec7c7b", "#f4a9a8"];
 const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
-// Reward terms by name: arrival green, progress blue, the step cost grey, and
-// the posture costs warm, the movement cost its own; efficiency is the term
-// of the earlier efficiency reward, which held the step cost and progress
-// together.
+// Reward terms by name: arrival green, progress blue, the step cost grey, the
+// posture costs warm, the movement cost its own, and the walking costs amber,
+// violet and brown, so that no two terms of one reward share a colour;
+// efficiency is the term of the earlier efficiency reward, which held the step
+// cost and progress together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
-  movement: "var(--series-6)" };
+  movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }
@@ -996,13 +1010,14 @@ function lineChart(x, series, options) {
   if (!all.length) return empty();
   let low = Math.min(...all), high = Math.max(...all);
   if (options.range) [low, high] = options.range;
+  if (options.floor !== undefined) low = Math.max(low, options.floor);
   if (unit === "%" && low >= 0) { low = 0; if (high === 0) high = 1; }
   // Angles are marked in steps of 45° so that a 0–180° range ends on a tick.
   const ticks = unit === "°" && options.range ? niceTicks(low / 45, high / 45, 4).map((t) => t * 45) : niceTicks(low, high, 4);
   const yLow = ticks[0], yHigh = ticks[ticks.length - 1];
   const xLow = Math.min(...x), xHigh = Math.max(Math.max(...x), xLow + 1);
   const px = (c) => left + ((c - xLow) / (xHigh - xLow)) * (width - left - right);
-  const py = (v) => top + (1 - (v - yLow) / (yHigh - yLow || 1)) * (height - top - bottom);
+  const py = (v) => top + (1 - (Math.min(yHigh, Math.max(yLow, v)) - yLow) / (yHigh - yLow || 1)) * (height - top - bottom);
   const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
   for (const tick of ticks) {
     chart.append(svg("line", { x1: left, x2: width - right, y1: py(tick), y2: py(tick), style: "stroke:var(--grid)" }));
@@ -1428,8 +1443,8 @@ function endingClasses(settings, edges) {
 // distance.
 const RELATIVE_ENDING_CLASSES = [
   { name: "arrived", quality: 1 },
-  { name: "within a quarter of the start distance", quality: 0.8 },
-  { name: "within half", quality: 0.64 },
+  { name: "< 1/4 left", quality: 0.8 },
+  { name: "< 1/2 left", quality: 0.64 },
   { name: "closer", quality: 0.5 },
   { name: "not closer", quality: 0.2 },
   { name: "left the circle", quality: 0.06 },
@@ -1689,6 +1704,7 @@ function trainingReport(root) {
       `${count(episodes)} episodes · ${duration(trainingSeconds)} of training` +
       (sessions.length > 1 ? ` in ${sessions.length} sessions` : "")
     : "Training run · nothing logged yet"));
+  if (data.run_facts.stopped) root.append(html("p", { class: "note" }, data.run_facts.stopped));
   const written = new Set(sessions.flatMap((session) => session.settings_written || []));
   root.append(...settingChips(settings, written, "Highlighted: set in the run's configuration files; the others are defaults."));
   if (!log.length) return;
@@ -1716,7 +1732,7 @@ function trainingReport(root) {
     details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);
     details.push(html("div", { class: "row" }, ...group.cards.map((item) => trainingCard(item, context))));
   }
-  const remaining = Object.keys(DESCRIPTIONS).filter((key) => !used.has(key));
+  const remaining = Object.keys(DESCRIPTIONS).filter((key) => !used.has(key) && !CLASSES.has(key));
   if (remaining.length) {
     details.push(html("h3", { class: "group" }, "Other values"), html("p", { class: "note" }, "Everything else the run logged."));
     details.push(html("div", { class: "row" }, ...remaining.map((key) => genericCard(key, context))));
@@ -1765,7 +1781,8 @@ function trainingCard(item, context) {
     const values = series(item.key);
     if (!metric.compute && !log.some((record) => raw(record, item.key) !== null)) return card(item, empty("Not logged by this run"));
     if (values.every((v) => v === null)) return card(item, empty(`Needs one full episode length of windows (${context.span})`));
-    return card(item, lineChart(x, [{ name: metric.label, values, color: SERIES[0], smooth: smoothFor(item.key) }], { ...common, unit: metric.unit, range: metric.range }));
+    const subtitle = typeof item.subtitle === "function" ? item.subtitle(context) : item.subtitle;
+    return card({ ...item, subtitle }, lineChart(x, [{ name: metric.label, values, color: SERIES[0], smooth: smoothFor(item.key) }], { ...common, unit: metric.unit, range: metric.range }));
   }
 
   if (item.kind === "stack") {
@@ -1820,8 +1837,8 @@ function trainingCard(item, context) {
     context.used.add(key);
     const spec = { ...item, title: "Where episodes ended", keys: [key],
       subtitle: relative
-        ? `Every episode of each episode length: arrived, ran out of time (by how much of its start distance was left), or left the range circle. Targets start ${targetRange(context.settings)} away`
-        : `Every episode of each episode length: arrived, or how far from its target it ran out of time. Targets start ${targetRange(context.settings)} away`,
+        ? `Every episode of each episode length: arrived, ran out of time (by how much of its start distance was left), or left the range circle. ${trainingTargets(context.settings)}`
+        : `Every episode of each episode length: arrived, or how far from its target it ran out of time. ${trainingTargets(context.settings)}`,
       about: relative
         ? "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by the share of their start distance left at the end (within a quarter, within half, closer than at the start, not closer), then the episodes whose head left the range circle. Blue is good, red bad. A bar that fills with blue from the bottom means the centipedes get to their targets."
         : "One bar per episode length of windows, holding every episode that ended in it: the share that arrived (bottom), then the episodes that ran out of time, by how far from the target their head ended. Blue is good, red bad; the grey band is about as far as targets start. A bar that fills with blue from the bottom means the centipedes get to their targets." };
@@ -1911,9 +1928,17 @@ function trainingCard(item, context) {
     const values = series(item.key);
     const perAgent = values.map((v) => (v === null ? null : v.map((segment) => (Array.isArray(segment) ? mean(segment) : segment))));
     const band = perAgent.map((v) => (v === null ? { low: null, high: null } : { low: Math.min(...v), high: Math.max(...v) }));
-    return card({ ...item, subtitle: metric.unit === "%" ? "in percent; band: the segments' range" : "Band: the segments' range" },
+    const unitText = metric.unit === "%" ? "in percent; " : metric.unit ? `in ${metric.unit}; ` : "";
+    const members = item.key.startsWith("rhythm.neighbour_offset") ? "pairs'" : "segments'";
+    const floorText = item.floor !== undefined ? `; values below ${number(item.floor)} drawn at ${number(item.floor)}` : "";
+    // Offsets that point every way, each world keeping its own, still give a
+    // consistency of about √π / 2 ÷ √(worlds).
+    const worlds = context.settings.environment.simulation.world_count;
+    const randomText = item.key === "rhythm.neighbour_offset_consistency" ? `; random offsets give about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(worlds))}` : "";
+    const subtitle = `${unitText}band: the ${members} range${floorText}${randomText}`;
+    return card({ ...item, subtitle: subtitle[0].toUpperCase() + subtitle.slice(1) },
       lineChart(x, [{ name: metric.label, values: perAgent.map((v) => (v === null ? null : mean(v))), color: SERIES[0] }],
-        { ...common, unit: metric.unit, band }));
+        { ...common, unit: metric.unit, band, floor: item.floor }));
   }
 
   if (item.kind === "speed") {
@@ -1962,6 +1987,34 @@ function targetRange(settings) {
   return `${number(near * 1000)}–${number(far * 1000)} mm`;
 }
 
+// The targets of a curriculum level, as the curriculum draws them: each end of
+// [environment.target]'s ranges moved that far toward [curriculum]'s final one.
+function curriculumTargets(settings, level) {
+  const target = settings.environment.target, final = settings.curriculum;
+  const at = (start, end) => start + level * (end - start);
+  const near = at(target.distance_range_m[0], final.final_distance_range_m[0]);
+  const far = at(target.distance_range_m[1], final.final_distance_range_m[1]);
+  const left = Math.round(at(target.bearing_range_deg[0], final.final_bearing_range_deg[0]));
+  const right = Math.round(at(target.bearing_range_deg[1], final.final_bearing_range_deg[1]));
+  const bearing = left === -right ? `±${right}°` : `${left}° to ${right}°`;
+  return `${number(Math.round(near * 1000))}–${number(Math.round(far * 1000))} mm, ${bearing}`;
+}
+
+// Where a training run's targets lay: from the start, and with a curriculum
+// as far as its level went.
+function trainingTargets(settings) {
+  const start = `Targets start ${targetRange(settings)} away`;
+  return settings.curriculum ? `${start}, and lie farther and wider as the curriculum's level rises` : start;
+}
+
+// The level chart's subtitle: the targets at the level the run ended on.
+function levelSubtitle(context) {
+  const levels = context.log.map((record) => raw(record, "curriculum.level")).filter((level) => level !== null);
+  if (!levels.length) return "";
+  const level = levels[levels.length - 1];
+  return `0: the targets of [environment.target]; 1: the curriculum's final ones. At the end ${number(level)}: targets ${curriculumTargets(context.settings, level)}`;
+}
+
 function transpose(values) {
   const sample = sampleOf(values);
   if (!sample) return [];
@@ -1971,7 +2024,7 @@ function transpose(values) {
 // Every value's first and last means, one row per value (and part).
 function valuesTable(log, series) {
   const rows = [];
-  const keys = [...Object.keys(DESCRIPTIONS), "report.reward_per_step", "report.mean_return"];
+  const keys = [...Object.keys(DESCRIPTIONS).filter((key) => !CLASSES.has(key)), "report.reward_per_step", "report.mean_return"];
   for (const key of keys) {
     const metric = info(key), values = series(key), sample = sampleOf(values);
     if (sample === undefined) continue;
@@ -2069,7 +2122,8 @@ function evaluationReport(root) {
   if (groups.some(([, records]) => records.some((record) => raw(record, "rhythm.tempo") !== null))) {
     const rows = groups.map(([name, records]) => [name, ...RHYTHM_KEYS.map((key) => withUnit(mean(records.map((record) => overall(shown(record, key)))), info(key).unit))]);
     root.append(html("section", {}, html("h2", {}, "The rhythm"),
-      html("p", { class: "note" }, "The segments' clocks over the same steps, mean over the segments (or neighbour pairs) and the seeds: the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), the legs on tempo, and the foot slip. The details give every pair and segment."),
+      html("p", { class: "note" }, "The segments' clocks over the same steps, mean over the segments (or neighbour pairs) and the seeds: the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), the legs on tempo, and the foot slip. " +
+        `With ${count(settings.environment.simulation.world_count)} worlds per seed, offsets that point every way still give a consistency of about ${number(Math.sqrt(Math.PI) / 2 / Math.sqrt(settings.environment.simulation.world_count))}: only a clearly higher one shows a common wave. The details give every pair and segment.`),
       table(["Actor", ...RHYTHM_KEYS.map((key) => info(key).label)], rows, 1)));
   }
 
@@ -2081,7 +2135,7 @@ function evaluationReport(root) {
     details.push(html("div", { class: "row" }, ...group.cards.map((item) => evaluationCard(item, context))));
   }
   const rows = [];
-  const keys = [...Object.keys(DESCRIPTIONS), "report.reward_per_step", "report.mean_return"];
+  const keys = [...Object.keys(DESCRIPTIONS).filter((key) => !CLASSES.has(key)), "report.reward_per_step", "report.mean_return"];
   for (const key of keys) {
     const metric = info(key);
     const sample = sampleOf(actors.flatMap((actor) => perSeed(actor, key)));

@@ -377,31 +377,20 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         if next_recording and stop_cycle is None:
             recorder.arm(recording_frames)
             recording_first_cycle = cycle + 1
-        if (
-            cycle % run_settings.checkpoint_every_cycles == 0
-            or cycle == total_cycles
-            or stopping
-        ):
-            folder.save_checkpoint(
-                cycle,
-                agents.state_dict(),
-                None if curriculum is None else curriculum.level,
-            )
-            if run_settings.report:
-                _write_training_report(folder, configuration, categories)
+        # Why the run stops early, for the console and the report.
+        stop_message = None
         if out_of_time:
-            print(
+            stop_message = (
                 f"Stopped after cycle {cycle} of {total_cycles}: another cycle"
                 f" (about {duration(seconds_per_cycle)}) would pass the time"
                 f" limit of {run_settings.time_limit_hours:g} h. Continue it with"
                 f' continue_from = "{folder.path.as_posix()}".'
             )
-            return folder.path
-        if stopping and cycle < total_cycles:
+        elif stopping and cycle < total_cycles:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
             task = plateau.signals["task"]
             wave = plateau.signals.get("wave")
-            print(
+            stop_message = (
                 f"Stopped after cycle {cycle} of {total_cycles}: a plateau. The"
                 f" progress ({measure}, averaged over {plateau.average_cycles}"
                 f" cycles) last rose by {plateau.min_progress:g} at cycle"
@@ -414,6 +403,20 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 )
                 + "."
             )
+        if (
+            cycle % run_settings.checkpoint_every_cycles == 0
+            or cycle == total_cycles
+            or stopping
+        ):
+            folder.save_checkpoint(
+                cycle,
+                agents.state_dict(),
+                None if curriculum is None else curriculum.level,
+            )
+            if run_settings.report:
+                _write_training_report(folder, configuration, categories, stop_message)
+        if stop_message is not None:
+            print(stop_message)
             return folder.path
     session_cycles = total_cycles - completed_cycles
     session_seconds = time.monotonic() - session_start
@@ -635,9 +638,13 @@ def _physics_category(loop: InteractionLoop) -> LoggedCategory:
 
 
 def _write_training_report(
-    folder: RunFolder, configuration: Configuration, categories: list[LoggedCategory]
+    folder: RunFolder,
+    configuration: Configuration,
+    categories: list[LoggedCategory],
+    stop_message: str | None = None,
 ) -> None:
-    """Refresh the run's report from its whole log."""
+    """Refresh the run's report from its whole log; ``stop_message`` says why
+    the run stopped before its last cycle."""
     sessions = folder.read_run_info()["sessions"]
     run_facts = {
         "run_folder": str(folder.path),
@@ -648,6 +655,8 @@ def _write_training_report(
     }
     if configuration.run.start_from is not None:
         run_facts["agents_started_from"] = sessions[0]["checkpoint"]
+    if stop_message is not None:
+        run_facts["stopped"] = stop_message
     write_training_report(
         folder.report_path,
         folder.path.name,

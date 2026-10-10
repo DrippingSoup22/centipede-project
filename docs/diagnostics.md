@@ -90,6 +90,11 @@ tell a wave apart from mere agreement: every clock starts at the same tempo,
 so within each world the offsets stay where the random start put them, and
 the **lock** is high from the first window; the **consistency**, across the
 worlds, rises only once the segments steer their offsets toward the same wave.
+Even offsets that point every way leave some consistency: with each world
+keeping its own, the mean of W random unit vectors has a length of about
+√π / 2 ÷ √W (Mardia and Jupp, *Directional Statistics*, 2000, on the
+Rayleigh test), 0.03 with 1,024 worlds and 0.11 with 64, so only a
+consistency clearly above that shows a wave.
 The [plateau stop](configuration.md#the-plateau-stop) watches the
 consistency of the neighbours' offsets, averaged over the pairs. The legs on
 tempo count only the steps on which the clock compared the legs: the others

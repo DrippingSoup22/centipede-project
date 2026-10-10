@@ -518,11 +518,14 @@ the number of windows, not of worlds.
 The report is ordered by priority, and the size of each part follows it.
 
 - **Header.** The run's name; one line with the cycles done, world steps,
-  episodes, training time, and sessions; and one chip per group of settings
-  (backend and worlds, model, episode limit, targets, observation radius,
-  spine, clocks, rewards, window and cycles, network, PPO, seed). Chips that include a setting
-  the configuration file set itself are highlighted; the others show defaults.
-  Every setting is listed in the details.
+  episodes, training time, and sessions; for a run that stopped before its
+  last cycle, why, as the console said it (a plateau, with the cycles at
+  which its signals last rose, or the time limit); and one chip per group of
+  settings (backend and worlds, model, episode limit, targets, curriculum,
+  observation radius, spine, clocks, rewards, window and cycles, network,
+  PPO, seed). Chips that include a setting the configuration file set itself
+  are highlighted; the others show defaults. Every setting is listed in the
+  details.
 - **1 · Results.** Numbers first, then the charts that show progress. Episode
   values are taken over whole episode lengths of windows
   (`max_episode_steps / rollout_window_steps` windows: 4 for 256-step episodes
@@ -539,17 +542,23 @@ The report is ordered by priority, and the size of each part follows it.
   in the first block, with an arrow coloured blue when the change is for the
   better and orange when it is for the worse. Below them, the largest chart,
   **where episodes ended**: one bar per block, stacked to 100%, holding the
-  share that arrived (at the bottom) and the episodes that ran out of time by
-  how far from their target they ended (within 5 mm, 5–10, 10–20, 20–50, and
-  50 mm or more), blue for good and red for bad. Next to it the same episodes
-  of the first and the last block as counts per distance bin. Then the reward
-  per step split into its terms, whose scale depends on the reward settings,
-  next to how long the arrivals of the first and the last block took. These
-  count episodes rather than average distances, so that a few centipedes
-  that wander far away do not hide what the others did.
-- **2 · Learning** (smaller). Charts over training: critic accuracy, action
-  spread, and policy change (KL), each as the segments' mean with their range,
-  and the learning rate when a schedule changes it.
+  share that arrived (at the bottom), the episodes that ran out of time by
+  how much of their start distance was left (less than a quarter, less than
+  half, closer than at the start, not closer), and those whose head left the
+  range circle, blue for good and red for bad; runs logged before the
+  endings were counted show how far from their target the episodes ended
+  instead. Next to it the same episodes of the first and the last block as
+  counts per class. Then the reward per step split into its terms, whose
+  scale depends on the reward settings, next to how long the arrivals of the
+  first and the last block took. These count episodes rather than average
+  distances, so that a few centipedes that wander far away do not hide what
+  the others did. Last, with a curriculum, the target level over training,
+  whose subtitle gives the targets at the level the run ended on, next to the
+  targets reached per world and minute.
+- **2 · Learning** (smaller). Charts over training: critic accuracy, drawn
+  from −1 up so that the first cycles' much lower values do not flatten the
+  rest, action spread, and policy change (KL), each as the segments' mean
+  with their range, and the learning rate when a schedule changes it.
 - **3 · Behaviour** (smaller). A table of the body, one row per segment (feet,
   body, and legs touching, height, uprightness, speed),
   averaged over the last block, with a switch to the first; both views share
@@ -559,7 +568,10 @@ The report is ordered by priority, and the size of each part follows it.
   training of the wave's consistency and the offsets' lock, the clocks'
   tempo, the legs on tempo, the foot slip, and the tempo command's spread,
   each as the mean over the segments (or the neighbour pairs) with their
-  range ([diagnostics.md](diagnostics.md#rhythm)).
+  range ([diagnostics.md](diagnostics.md#rhythm)). The consistency's
+  subtitle gives the level that offsets pointing every way reach with the
+  run's number of worlds, about 0.89 ÷ √(worlds) (0.03 with 1,024 worlds):
+  only a consistency clearly above it shows a common wave.
 - **4 · Run**, or 5 with clocks (small). Four numbers: the time per update
   cycle (collecting and learning), the simulation speed, the training time,
   and the episodes.

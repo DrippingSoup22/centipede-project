@@ -227,6 +227,9 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     assert (folder / "checkpoints" / "cycle_0011.pt").exists()
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
     assert recordings == ["cycles_0001-0002.npz", "cycles_0010-0011.npz"]
+    # The report says why the run stopped early.
+    report = (folder / "report.html").read_text(encoding="utf-8")
+    assert "Stopped after cycle 11 of 20: a plateau." in report
 
 
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
