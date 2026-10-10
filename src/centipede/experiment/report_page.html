@@ -205,7 +205,7 @@ const METRICS = {
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
-    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs below it (body contact, legs touching, and, as the reward settings switch them on, the step cost, foot slip, legs off tempo, out of tempo, and progress while the head moves away). The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
+    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs below it (body contact, legs touching, and, as the reward settings switch them on, the step cost, foot slip, legs off tempo, out of tempo, no support, both feet down, the followers' clock tracking, the head's clock change, and progress while the head moves away). The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
 
   // -- How the episodes spread -------------------------------------------------
   "episode_distributions.distance_closed": { label: "Distance closed, every episode", source: "episodes.distance_closed", better: "higher",
@@ -283,7 +283,7 @@ const METRICS = {
   "step_facts.neighbour_leg_similarity": { label: "Neighbours' legs alike", unit: "", range: [-1, 1],
     about: "How alike each segment's legs move to the next segment's: the cosine between their six joints' movements over a step. 1 the same, −1 opposite, 0 unrelated or still. One value per pair, head first." },
   "rhythm.tempo": { label: "Clock tempo", unit: "Hz",
-    about: "Each segment's clock tempo, which one of its actions sets; with a clock per leg, its left leg's. Segments that agree on a tempo have a narrow band." },
+    about: "Each segment's clock tempo, which one of its actions sets; with a clock per leg, its left leg's tempo in use. Segments that agree on a tempo have a narrow band." },
   "rhythm.neighbour_offset": { label: "Offset between neighbours", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
     about: "Each pair's mean phase offset, the segment's phase minus the next one's (with a clock per leg, their left legs'): positive when the rear one lags, as in a wave from head to tail. One value per pair, head first; it means something only where the pair's consistency is well above 0." },
   "rhythm.neighbour_offset_consistency": { label: "Wave consistency", unit: "", range: [0, 1], better: "higher",
@@ -299,10 +299,10 @@ const METRICS = {
   "rhythm.legs_on_tempo": { label: "Legs on tempo", unit: "%", scale: 100, better: "higher",
     about: "1 minus the legs-off-tempo cost, on the steps the clock compared the legs (not in its first turn after a restart): how closely each segment's leg joints come back to their angles at the same point of its clock's last turn. Only a clock per segment compares the legs." },
   "rhythm.foot_slip": { label: "Foot slip", unit: "", better: "lower",
-    about: "The foot-slip cost before its weight, from 0 to 1: how fast each segment's feet slide while they stay on the ground. A segment dragged by its neighbours slips." },
+    about: "How fast each segment's feet slide while they stay on the ground, from 0 to 1: the foot-slip cost before its weight, measured whether or not the reward charges it. A segment dragged by its neighbours slips." },
   // A clock per leg: each leg's clock and the step shape it drives.
   "legs.tempo": { label: "Leg clock tempo", unit: "Hz",
-    about: "Each leg's clock tempo, which one of its segment's actions sets for each leg. The left leg's is also the rhythm's clock tempo." },
+    about: "Each leg's clock tempo in use, which one of its segment's actions sets for each leg; with the clock's time constant, the tempo follows its action slowly. The left leg's is also the rhythm's clock tempo." },
   "legs.left_right_offset": { label: "Left–right offset", unit: "°", range: [0, 180], uses: ["legs.left_right_offset"],
     about: "How far apart each segment's two legs are in their step cycle: the angle between their clocks' hands, either way, from 0° (the legs move together, as in a hop) to 180° (they alternate, as in a walk). Per segment it is the circular mean over the worlds and steps, so it means something only where its consistency is well above the random level.",
     compute: (record) => {
@@ -376,7 +376,8 @@ const SETTING_CHIPS = [
   // Only training moves the targets with the curriculum; an evaluation sets its own.
   { keys: ["curriculum"], text: (s) => (s.curriculum && data.kind === "training"
     ? `curriculum: targets up to ${curriculumTargets(s, 1)}, keeping ${number(100 * s.curriculum.arrival_share)}% of episodes arriving` : null) },
-  { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
+  { keys: ["environment.observation_radius", "environment.leg_accelerations"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` +
+      (s.environment.leg_accelerations ? ", leg accelerations included" : "") },
   // Runs before the spine could be commanded have no such setting.
   { keys: ["environment.spine_control", "environment.passive_follower_spine"], text: (s) => !s.environment.spine_control ? "passive spine"
       : s.environment.passive_follower_spine ? "the head bends its neck, the rest of the spine is passive" : "each segment bends the spine joint behind it" },
@@ -384,11 +385,13 @@ const SETTING_CHIPS = [
       if (!(e.clocks || e.leg_clocks) || !e.clock) return null;
       const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
       // Only leg clocks have load feedback, which holds a loaded foot's clock
-      // in stance, and a step shape whose centres and amplitudes follow their
-      // actions slowly.
+      // in stance, and a clock in use that follows its actions slowly: the
+      // whole clock, or in earlier runs only the centres and amplitudes.
       const feedback = e.clock.load_feedback_rad_per_s ? `, load feedback ${number(e.clock.load_feedback_rad_per_s)} rad/s` : "";
-      const following = e.leg_clocks ? [["centres", e.clock.centre_time_constant_s], ["amplitudes", e.clock.amplitude_time_constant_s]]
-        .filter(([, seconds]) => seconds).map(([name, seconds]) => `, ${name} following in ${number(seconds)} s`).join("") : "";
+      const lags = e.clock.clock_time_constant_s !== undefined ? [["clocks", e.clock.clock_time_constant_s]]
+        : [["centres", e.clock.centre_time_constant_s], ["amplitudes", e.clock.amplitude_time_constant_s]];
+      const following = e.leg_clocks ? lags.filter(([, seconds]) => seconds)
+        .map(([name, seconds]) => `, ${name} following in ${number(seconds)} s`).join("") : "";
       // Runs before neighbour_clocks existed saw only their own clock, and
       // runs before coupling existed were coupled both ways.
       const ahead = e.clock.coupling === "ahead";
@@ -404,7 +407,8 @@ const SETTING_CHIPS = [
       const costs = [["body", r.body_contact_cost_parts], ["step", r.step_cost_parts], ["legs", r.leg_contact_cost_parts],
         ["movement", r.movement_cost_parts], ["slip", r.foot_slip_cost_parts], ["off tempo", r.legs_off_tempo_cost_parts],
         ["out of tempo", r.out_of_tempo_cost_parts], ["no support", r.no_support_cost_parts],
-        ["both feet down", r.both_feet_down_cost_parts]].filter(([, parts], index) => index < 3 || parts);
+        ["both feet down", r.both_feet_down_cost_parts], ["clock tracking", r.clock_tracking_cost_parts],
+        ["head clock change", r.head_clock_change_cost_parts]].filter(([, parts], index) => index < 3 || parts);
       const used = costs.reduce((sum, [, parts]) => sum + (parts || 0), 0);
       // The first runs of the rules paid the followers for their own goals.
       const followers = r.follower_progress_ratio !== undefined
@@ -905,14 +909,14 @@ const RED = ["#9a2525", "#c13433", "#e34948", "#ec7c7b", "#f4a9a8"];
 const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
 // Reward terms by name: arrival green, progress blue, the step cost grey, the
-// posture costs warm, the movement cost its own, and the walking costs amber,
-// violet and brown, so that no two terms of one reward share a colour;
-// efficiency is the term of the earlier efficiency reward, which held the step
-// cost and progress together.
+// posture costs warm, the movement cost its own, the walking costs amber,
+// violet, brown, magenta and teal, and the clock costs slate and cyan, so that
+// no two terms of one reward share a colour; efficiency is the term of the
+// earlier efficiency reward, which held the step cost and progress together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
-  no_support: "#c2569b", both_feet_down: "#2a9d8f" };
+  no_support: "#c2569b", both_feet_down: "#2a9d8f", clock_tracking: "#5b6fa8", clock_change: "#17a2c4" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }

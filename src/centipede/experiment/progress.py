@@ -85,9 +85,9 @@ LEG_CLOCK_LEGEND = (
     " across every world and step, both 0 to 1;\nleft-right: the offset between"
     " each segment's left and right legs, either way (180\nalternating, 0"
     " together), with its consistency; right side: the right legs' offset\nbetween"
-    " neighbours, with"
-    " its consistency; sweep, lift: the mean step amplitudes; slip: the foot-slip"
-    " cost, 0 to 1;\nhead, followers: the reward per step."
+    " neighbours, with its consistency; sweep, lift: the mean step amplitudes;\nslip:"
+    " how fast the feet slid, 0 to 1, charged or not; head, followers: the reward"
+    " per step."
 )
 
 
