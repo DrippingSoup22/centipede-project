@@ -229,18 +229,25 @@ def test_walking_costs_charge_slipping_feet_and_legs_and_tempo_off_the_clock():
     )
 
 
-def test_no_support_charges_a_segment_with_neither_foot_on_the_ground():
-    settings = RewardSettings.from_section({"no_support_cost_parts": 1.5})
+def test_one_foot_down_is_free_both_down_and_none_down_each_pay_their_cost():
+    settings = RewardSettings.from_section(
+        {"no_support_cost_parts": 1.5, "both_feet_down_cost_parts": 0.5}
+    )
     state = unchanged_state()
     state.left_foot_ground_contact[:, 0] = True  # the head stands on its left foot
-    state.right_foot_ground_contact[:, 1] = True  # segment 1 on its right foot
+    state.left_foot_ground_contact[:, 1] = True  # segment 1 on both feet
+    state.right_foot_ground_contact[:, 1] = True
 
     _, parts, weights = rewards_for(state, settings=settings)
 
     shares = settings.weights(EPISODE_STEPS).episode_shares
     assert shares["no_support"] == pytest.approx(1.5 * shares["leg_contact"])
+    assert shares["both_feet_down"] == pytest.approx(0.5 * shares["leg_contact"])
     assert parts["no_support"][1].tolist() == pytest.approx(
         [0.0, 0.0, -weights["no_support"]]  # the rear is carried
+    )
+    assert parts["both_feet_down"][1].tolist() == pytest.approx(
+        [0.0, -weights["both_feet_down"], 0.0]
     )
 
 

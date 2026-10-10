@@ -795,9 +795,10 @@ keeps the step cost and progress of the full reward with
 
 ### Walking costs
 
-Four more costs judge how a segment walks, each from 0 to 1 per step, paid by
+Five more costs judge how a segment walks, each from 0 to 1 per step, paid by
 every segment for its own legs, and each switched on by giving it parts of the
-budget. None prescribes a gait.
+budget. None prescribes a gait, though both feet down favours standing on
+one foot at a time.
 
 - **Foot slip** `S_i` (`foot_slip_cost_parts`): each foot that touches the
   ground at both ends of a step pays how fast it slid along it, in units of
@@ -845,6 +846,26 @@ budget. None prescribes a gait.
   carry the whole body, three with model v4
   ([model.md](model.md#model-v4), Carrying), so without this cost a segment
   can rest its legs while its neighbours carry it.
+- **Both feet down** `F_i` (`both_feet_down_cost_parts`): 1 on a step after
+  which both of the segment's feet touch the ground, else 0: the counterpart
+  of no support. Together they set a rule for a segment's support: one foot
+  down is free, both down cost a little, and none down cost more. Both feet
+  down is a normal part of slow walking, which is why its cost is kept small:
+  model v4's hand-set wave ([model.md](model.md#model-v4), Walking) has 8.8 of
+  its 16 feet down on average, so each foot is down 55% of a turn, and with
+  the two sides half a turn apart both are down 10% of the time.
+
+**Why support costs on both sides.** No support alone made hanging the
+cheaper choice for a segment that cannot step yet. In three training runs
+with leg clocks and no support at 1.5 parts (one seed each, model v4), it was
+the largest cost: the head's feet were down on only 20 to 27% of steps, the
+head hanging from its neck, and segments 3 and 4 paid it on half their steps.
+Hanging cost at most 0.00070 per step, while standing on feet that the moving
+body drags cost up to 0.00093 of foot slip (2 parts), plus legs touching. A
+run can give no support more parts than foot slip, so that hanging is never
+cheaper than standing on dragged feet, and both feet down a small share, so
+that a segment standing on both feet gains by lifting one; the user chose
+this pair of costs on 2026-10-10.
 
 **The head's task alone.** A reward may also give the task to the head alone:
 `follower_arrival_share = 0` and `follower_progress_share = 0` leave the
@@ -975,6 +996,7 @@ These are the keys of the environment sections of the configuration file (see
 | `legs_off_tempo_cost_parts` | 0 | [Legs off tempo](#walking-costs)'s parts; needs a clock per segment, and is refused with leg clocks |
 | `out_of_tempo_cost_parts` | 0 | [Out of tempo](#walking-costs)'s parts; needs clocks of either kind |
 | `no_support_cost_parts` | 0 | [No support](#walking-costs)'s parts; 0 is off |
+| `both_feet_down_cost_parts` | 0 | [Both feet down](#walking-costs)'s parts, the counterpart of no support; 0 is off |
 | `foot_slip_unit_m_per_s` | 0.010 | Foot slip's unit: the sliding speed that costs 1 |
 | `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |
 | `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays; with `coupling = "ahead"` the head pays nothing for its neighbours, and a file that sets it is refused |

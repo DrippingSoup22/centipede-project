@@ -243,6 +243,18 @@ def no_support(context: RewardContext, settings: RewardSettings) -> torch.Tensor
     return -carried.float()
 
 
+def both_feet_down(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−1 for each segment with both feet on the ground after the step.
+
+    The counterpart of ``no_support``: one foot down is free, both down cost
+    a little, none down more. Both feet down is part of slow walking, so its
+    weight is kept small.
+    """
+    state = context.physical_state
+    standing = state.left_foot_ground_contact & state.right_foot_ground_contact
+    return -standing.float()
+
+
 def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−(how far the segment's joints moved on the step)², in random-command units.
 
@@ -303,6 +315,7 @@ TERMS = {
     "legs_off_tempo": legs_off_tempo,
     "out_of_tempo": out_of_tempo,
     "no_support": no_support,
+    "both_feet_down": both_feet_down,
     "movement": movement,
     "command": command,
 }

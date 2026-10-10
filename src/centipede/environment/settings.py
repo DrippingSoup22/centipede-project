@@ -164,6 +164,7 @@ PROPORTION_KEYS = (
     "legs_off_tempo_cost_parts",
     "out_of_tempo_cost_parts",
     "no_support_cost_parts",
+    "both_feet_down_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
     "foot_slip_unit_m_per_s",
@@ -225,10 +226,11 @@ class RewardSettings:
     split into fewer parts than the costs take makes them overspend it: the
     worst arrival then ends below zero.
 
-    Four costs judge how a segment walks. Foot slip charges each foot that
+    Five costs judge how a segment walks. Foot slip charges each foot that
     touches the ground at both ends of a step for how fast it slid along it,
     in units of ``foot_slip_unit_m_per_s``, and no support each step on which
-    neither of the segment's feet touches the ground. Legs off tempo and out
+    neither of the segment's feet touches the ground; both feet down, its
+    counterpart, each step on which both do. Legs off tempo and out
     of tempo need clocks: the first, only with a clock per segment, charges
     how far the legs are from where they were when the clock last passed the
     same point of its turn, in units of ``legs_off_tempo_unit_deg``, and the
@@ -262,6 +264,7 @@ class RewardSettings:
     legs_off_tempo_cost_parts: float | None
     out_of_tempo_cost_parts: float | None
     no_support_cost_parts: float | None
+    both_feet_down_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
     foot_slip_unit_m_per_s: float | None
@@ -320,6 +323,7 @@ class RewardSettings:
                 legs_off_tempo_cost_parts=None,
                 out_of_tempo_cost_parts=None,
                 no_support_cost_parts=None,
+                both_feet_down_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
                 foot_slip_unit_m_per_s=None,
@@ -354,6 +358,7 @@ class RewardSettings:
                     ("legs_off_tempo_cost_parts", 0.0),
                     ("out_of_tempo_cost_parts", 0.0),
                     ("no_support_cost_parts", 0.0),
+                    ("both_feet_down_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
                 )
             ]
@@ -382,7 +387,8 @@ class RewardSettings:
                 legs_off_tempo_cost_parts=parts[4],
                 out_of_tempo_cost_parts=parts[5],
                 no_support_cost_parts=parts[6],
-                movement_cost_parts=parts[7],
+                both_feet_down_cost_parts=parts[7],
+                movement_cost_parts=parts[8],
                 random_command_movement_deg=section.positive_number(
                     "random_command_movement_deg", default=25.0
                 ),
@@ -476,6 +482,7 @@ class RewardSettings:
                 ("legs_off_tempo", self.legs_off_tempo_cost_parts),
                 ("out_of_tempo", self.out_of_tempo_cost_parts),
                 ("no_support", self.no_support_cost_parts),
+                ("both_feet_down", self.both_feet_down_cost_parts),
                 ("movement", self.movement_cost_parts),
             )
             if parts
