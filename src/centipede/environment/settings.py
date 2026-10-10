@@ -92,8 +92,10 @@ class ClockSettings:
     ``ω`` the tempo's and ``N`` 1 while the foot touches the ground; 0 is off.
     σ must stay below the slowest tempo's ω, so that no hand can ever stop.
     With leg clocks too, each leg joint's centre follows its centre action
-    with the time constant ``centre_time_constant_s`` (0.5 by default with leg
-    clocks, else 0); 0 follows the actions at once. ``coupling`` says which
+    with the time constant ``centre_time_constant_s``, and each leg's sweep
+    and lift amplitudes their actions with ``amplitude_time_constant_s`` (each
+    0.5 by default with leg clocks, else 0); 0 follows the actions at once.
+    ``coupling`` says which
     neighbours' clocks a segment sees and is compared with: ``"both"``, those
     ahead and behind, or ``"ahead"``, only those ahead, so that the rhythm
     passes from the head backward.
@@ -103,13 +105,15 @@ class ClockSettings:
     tempo_range_octaves: float
     load_feedback_rad_per_s: float
     centre_time_constant_s: float
+    amplitude_time_constant_s: float
     coupling: str
 
     @classmethod
     def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
         """Check the section's values and fill in the defaults.
 
-        ``leg_clocks`` is [environment]'s, which sets the centres' default.
+        ``leg_clocks`` is [environment]'s, which sets the time constants'
+        defaults.
         """
         section = SettingsSection(values, "environment.clock")
         settings = cls(
@@ -122,6 +126,11 @@ class ClockSettings:
             ),
             centre_time_constant_s=section.number(
                 "centre_time_constant_s",
+                default=0.5 if leg_clocks else 0.0,
+                minimum=0.0,
+            ),
+            amplitude_time_constant_s=section.number(
+                "amplitude_time_constant_s",
                 default=0.5 if leg_clocks else 0.0,
                 minimum=0.0,
             ),
@@ -601,11 +610,16 @@ class EnvironmentSettings:
                 " clock in stance, which needs a clock per leg: set leg_clocks = true"
                 " in [environment]"
             )
-        if settings.clock.centre_time_constant_s and not settings.leg_clocks:
+        clock_filters = [
+            key
+            for key in ("centre_time_constant_s", "amplitude_time_constant_s")
+            if getattr(settings.clock, key)
+        ]
+        if clock_filters and not settings.leg_clocks:
             raise SettingsError(
-                "[environment.clock] centre_time_constant_s slows the centres of the"
-                " legs' step shape, which needs a clock per leg: set leg_clocks ="
-                " true in [environment]"
+                f"[environment.clock] {', '.join(clock_filters)} slow the legs' step"
+                " shape, which needs a clock per leg: set leg_clocks = true in"
+                " [environment]"
             )
         if settings.leg_clocks and rewards.legs_off_tempo_cost_parts:
             raise SettingsError(

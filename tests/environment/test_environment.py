@@ -257,7 +257,7 @@ def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
     assert env.segment_action_sizes == [13] + [12] * 7 and env.action_size == 13
     assert env.tempo_columns == [[0, 6]] * 8
     assert env.motor_columns == [[3, 4, 5, 9, 10, 11, 12]] + [[3, 4, 5, 9, 10, 11]] * 7
-    assert env.observation_size == environment().observation_size + 2 + 6 + 2 * 6
+    assert env.observation_size == environment().observation_size + 2 + 6 + 2 * 6 + 10
     env.reset(seed=2)
     turns = 2 * math.pi * 0.02 * torch.tensor([2.0, 4.0])
     env.clocks.clock_phase.copy_(
@@ -278,9 +278,11 @@ def test_with_leg_clocks_each_leg_follows_the_step_shape_at_its_clocks_phase():
     angles = (lower + upper) / 2 + (upper - lower) / 2 * target
     assert data.ctrl[mapping.leg_actuator_ids] == pytest.approx(angles, abs=1e-6)
     assert data.ctrl[mapping.spine_actuator_ids].tolist() == [1.0] + [0.0] * 6
-    # Each segment sees its legs' clocks, then its two neighbours' legs'.
+    # Each segment sees its legs' clocks, then its two neighbours' legs', then
+    # its legs' step shape in use: on the first step, the shape it asks for.
     own = torch.tensor([1.0, 0.0, 0.0, 0.0, -1.0, 1.0])
-    assert torch.allclose(observations[0, :, -18:-12], own, atol=1e-6)
+    assert torch.allclose(observations[0, :, -28:-22], own, atol=1e-6)
+    assert torch.allclose(observations[0, :, -10:], torch.tensor(shape * 2))
 
     # Leg clocks drive the legs with target angles, which v3's legs do not take.
     with pytest.raises(SettingsError, match="leg_clocks .* legs take torques"):

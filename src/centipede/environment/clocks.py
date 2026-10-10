@@ -5,9 +5,9 @@ The clocks are part of the environment's state, like the targets. With
 and observes where its hand is. With ``leg_clocks``, every leg has one, whose
 hand drives the leg through a fixed step shape (``leg_targets``): the segment
 sets each leg's tempo, the size of its steps, and its joints' centres, which
-the clocks let follow slowly. With ``neighbour_clocks``, a segment also
-observes its neighbours' clocks, relative to its own. See
-docs/environment.md, "Clocks".
+the clocks let follow slowly, and observes the step shape in use. With
+``neighbour_clocks``, a segment also observes its neighbours' clocks,
+relative to its own. See docs/environment.md, "Clocks".
 """
 
 import math
@@ -76,6 +76,14 @@ def leg_targets(
     return torch.stack((sweep, lift, knee_centre), dim=-1).flatten(start_dim=2)
 
 
+def lag_rate(time_constant_s: float, step_duration_s: float) -> float:
+    """The share of the way a first-order lag covers in one step: ``1 −
+    e^(−Δt/τ)``, its exact step for any τ; 1, the whole way, for τ = 0."""
+    if not time_constant_s:
+        return 1.0
+    return 1 - math.exp(-step_duration_s / time_constant_s)
+
+
 class Clocks:
     """Every world's clocks: one per segment, or with ``per_leg`` one per leg.
 
@@ -88,14 +96,17 @@ class Clocks:
     and ``tempo_octaves`` ``(W, N)`` are views of each segment's first clock,
     its own or its left leg's, which the rhythm diagnostics and the log read
     as the segment's clock. ``value_count`` is how many values describe a
-    segment's own clocks in its observation.
+    segment's own clocks in its observation, and each neighbour's.
 
     A clock per segment also compares the legs with its last turn: it
     remembers each segment's six leg angles at REMEMBERED_POINTS points of
     the turn, the centres of as many equal parts; the hand passes each point
     once per turn, so every turn replaces what the last one left. Clocks per
-    leg also keep ``centres`` ``(W, N, 2, 3)``, the centres of each leg's
-    step shape, which follow the centre actions slowly (``follow_centres``).
+    leg also keep ``step_shape`` ``(W, N, 2, 5)``, each leg's step shape in
+    use, which follows the shape actions slowly (``follow_step_shape``):
+    ``amplitudes`` ``(W, N, 2, 2)``, the sweep and lift amplitudes, and
+    ``centres`` ``(W, N, 2, 3)``, the sweep, lift and knee centres, are views
+    of it.
     """
 
     def __init__(
@@ -125,18 +136,24 @@ class Clocks:
         self.tempo_hz = self.clock_tempo_hz[..., 0]
         self.value_count = VALUES_PER_CLOCK * shape[2]
         if per_leg:
-            self.centres = torch.zeros(
-                (world_count, segment_count, 2, 3), dtype=torch.float32, device=device
+            self.step_shape = torch.zeros(
+                (world_count, segment_count, 2, 5), dtype=torch.float32, device=device
             )
-            # The worlds whose next step starts the centres at the actions.
-            self.centres_restarted = torch.ones(
+            self.amplitudes = self.step_shape[..., :2]
+            self.centres = self.step_shape[..., 2:]
+            # The worlds whose next step starts the step shape at the actions.
+            self.shape_restarted = torch.ones(
                 world_count, dtype=torch.bool, device=device
             )
-            # The share of the way to the actions the centres cover in a
-            # step: a first-order lag with the time constant, sampled exactly.
-            time_constant = settings.centre_time_constant_s
-            self.centre_rate = (
-                1 - math.exp(-step_duration_s / time_constant) if time_constant else 1.0
+
+            # The share of the way to its action each value of the step shape
+            # covers in a step: the two amplitudes, then the three centres.
+            amplitude_rate = lag_rate(
+                settings.amplitude_time_constant_s, step_duration_s
+            )
+            centre_rate = lag_rate(settings.centre_time_constant_s, step_duration_s)
+            self.shape_rate = torch.tensor(
+                [amplitude_rate] * 2 + [centre_rate] * 3, device=device
             )
         else:
             # The hand passes at most this many points in one step, at the
@@ -179,8 +196,8 @@ class Clocks:
 
         A ``seed`` restarts the hands' random sequence. The legs' remembered
         angles are forgotten, so the first turn after a restart costs nothing,
-        and the centres of the legs' step shapes start at the next step's
-        actions.
+        and the legs' step shapes are zero until the next step starts them at
+        its actions.
         """
         if seed is not None:
             self.generator.manual_seed(seed)
@@ -198,7 +215,8 @@ class Clocks:
         self.clock_tempo_octaves.masked_fill_(restarted, 0.0)
         self.clock_tempo_hz.masked_fill_(restarted, self.settings.middle_tempo_hz)
         if self.per_leg:
-            self.centres_restarted.logical_or_(world_mask)
+            self.step_shape.masked_fill_(restarted[..., None], 0.0)
+            self.shape_restarted.logical_or_(world_mask)
         else:
             self.remembered.masked_fill_(restarted, False)
 
@@ -242,22 +260,23 @@ class Clocks:
             leg_squared_difference, leg_difference_known, self._tempo_mismatch()
         )
 
-    def follow_centres(self, centre_actions: torch.Tensor) -> torch.Tensor:
-        """Move the legs' step-shape centres toward the actions; return them.
+    def follow_step_shape(self, shape_actions: torch.Tensor) -> None:
+        """Move the legs' step shapes toward the actions.
 
-        ``centre_actions`` and the returned ``centres`` are ``(W, N, 2, 3)``:
-        each leg's sweep, lift and knee centres, in action units. Each step
-        covers ``1 − e^(−Δt/τ)`` of the way, for the step's duration Δt and
-        the time constant τ (``centre_time_constant_s``): the exact step of a
-        first-order lag, for any τ, which covers 1 − e^(−1), 63%, of a sudden
-        change in τ; with τ = 0 the centres are the actions. On the first
-        step after a restart, the centres start at the actions.
+        ``shape_actions`` is ``(W, N, 2, 5)`` like ``step_shape``: each leg's
+        sweep and lift amplitudes and its sweep, lift and knee centres, in
+        action units. Each value follows its action as a first-order lag
+        (``lag_rate``), with ``amplitude_time_constant_s`` for the amplitudes
+        and ``centre_time_constant_s`` for the centres; a lag covers 1 −
+        e^(−1), 63%, of a sudden change in its time constant. On the first
+        step after a restart, the shape starts at the actions.
         """
-        following = self.centres + self.centre_rate * (centre_actions - self.centres)
-        restarted = self.centres_restarted[:, None, None, None]
-        self.centres.copy_(torch.where(restarted, centre_actions, following))
-        self.centres_restarted.fill_(False)
-        return self.centres
+        following = self.step_shape + self.shape_rate * (
+            shape_actions - self.step_shape
+        )
+        restarted = self.shape_restarted[:, None, None, None]
+        self.step_shape.copy_(torch.where(restarted, shape_actions, following))
+        self.shape_restarted.fill_(False)
 
     def _compare_legs(
         self,

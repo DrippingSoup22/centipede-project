@@ -214,10 +214,29 @@ turn the body. They follow their actions slowly, as a first-order lag with
 the time constant `centre_time_constant_s` (τ, 0.5 s): each step covers
 `1 − e^(−0.02 s / τ)` of the way, so that a sudden change of a centre action
 is 63% covered after τ. Slow centres set posture and turning but cannot make
-a rhythm by themselves, which is the clocks' job. On the first step after a
-restart, the centres start at their actions, so that an episode starts in
-the posture the agent asks for; they keep running through an arrival when
-the body walks on.
+a rhythm by themselves, which is the clocks' job.
+
+The amplitudes follow their actions the same way, with their own time
+constant, `amplitude_time_constant_s` (0.5 s). In training, exploration adds
+noise to every action at every step (a spread of 0.5 at the start, on a range
+of ±1), so an amplitude that followed its action at once would make the foot
+twitch 50 times a second, and the twitching costs foot slip and legs
+touching. In three training runs whose amplitudes followed at once, the
+agents' cheapest answer was to shrink them: sweeps under 10°, and lifts that
+pressed the foot down instead of lifting it. The filter keeps the slow
+changes a policy means and damps the noise from step to step. With 0, the
+amplitudes follow their actions at once, for a run that smooths the
+policy's mean action instead ([agents.md](agents.md#settings),
+`temporal_smoothness_coefficient`).
+
+On the first step after a restart, the whole step shape starts at its
+actions, so that an episode starts in the posture and stride the agent asks
+for; it keeps running through an arrival when the body walks on. A filter on
+a policy's actions breaks the Markov property the policy learns under
+(Mysore et al., ICRA 2021): an action's effect then depends on the shape in
+use, which earlier actions set and the policy does not see. Each segment
+therefore observes its legs' step shape in use
+([What each segment sees](#what-each-segment-sees)).
 
 This arrangement is CPG-RL's (Bellegarda and Ijspeert, IEEE Robotics and
 Automation Letters, 2022): oscillators drive the legs through a fixed foot
@@ -339,19 +358,25 @@ segments away (`k`, first value 1). Every observation has the same layout:
 7. with neighbour clocks, the clocks of the neighbours it sees, relative to
    its own, three values each (six with leg clocks), in the order of the
    blocks: the `k` ahead, nearest first, then the `k` behind, which are
-   zeros with `coupling = "ahead"`.
+   zeros with `coupling = "ahead"`;
+8. with leg clocks, its own legs' step shape in use, the left leg's first:
+   for each leg its sweep and lift amplitudes and its sweep, lift and knee
+   centres, in action units, after their filters
+   ([Actions and timing](#actions-and-timing)).
 
 That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
 every segment and any number of segments, two more with spine control
 (**85** at radius 1), three more with clocks (**88** at radius 1), and
-`6k` more with neighbour clocks (**94** at radius 1). Leg clocks add six and
-`12k`: at radius 2 with spine control and neighbour clocks, 137 + 2 + 6 + 24 =
-**169**. A segment's clocks are never in the blocks its neighbours see; they
-see them only through the neighbour clocks. The spine's values come last so
-that a run with spine control can start from agents trained without it: their
-inputs keep their
-places, and the new ones are added at the end (see
-[agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
+`6k` more with neighbour clocks (**94** at radius 1). Leg clocks add six,
+`12k` with neighbour clocks, and ten for the step shape: at radius 2 with
+spine control and neighbour clocks, 137 + 2 + 6 + 24 + 10 = **179**. A
+segment's clocks and step shape are never in the blocks its neighbours see;
+they see its clocks only through the neighbour clocks, and its step shape
+not at all. The spine's values, and the step shape's, come after the values
+older runs had, so that a run can start from agents trained without them:
+their inputs keep their places, and the new ones are added at the end (see
+[agents.md](agents.md#checkpoints)); for the spine, this holds for a run
+without clocks. A neighbour that does not exist is filled with zeros, and
 only the head receives real target values:
 
 | Segment | Ahead | Behind | Target values |
@@ -591,7 +616,9 @@ right's, and the tempo of the last step, `clock_tempo_hz` and
 `clock_tempo_octaves` (`log2(tempo ÷ middle tempo)`). `phase`, `tempo_hz` and
 `tempo_octaves` `(W, N)` are each segment's own clock, or with leg clocks its
 left leg's, which the [rhythm diagnostics](diagnostics.md#rhythm) read as the
-segment's. Like the physical state, they are overwritten in place by every
+segment's. With leg clocks, `step_shape` `(W, N, 2, 5)` is each leg's step
+shape in use, in action units: `amplitudes` `(W, N, 2, 2)` and `centres`
+`(W, N, 2, 3)` are its parts. Like the physical state, they are overwritten in place by every
 `reset` and `step`.
 
 A clock per segment fixes nothing about the movement itself: it only gives a
@@ -961,13 +988,14 @@ These are the keys of the environment sections of the configuration file (see
 | `spine_control` | false | Every segment but the rear commands the spine joint behind it and observes its angle and speed; when false, the spine motors receive zero |
 | `passive_follower_spine` | false | With spine control, only the head commands a spine joint, its neck; the followers' joints are passive. Every segment still observes the joint behind it |
 | `clocks` | false | Every segment has a [clock](#clocks): one more action, its tempo, and three more observed values |
-| `leg_clocks` | false | Every leg has a [clock](#clocks) that drives it through a [step shape](#actions-and-timing): twelve leg actions per segment instead of six, and six observed clock values; needs a model whose legs take angles (v4); excludes `clocks` |
+| `leg_clocks` | false | Every leg has a [clock](#clocks) that drives it through a [step shape](#actions-and-timing): twelve leg actions per segment instead of six, six observed clock values, and ten for the step shape in use; needs a model whose legs take angles (v4); excludes `clocks` |
 | `neighbour_clocks` | false | Every segment also observes the clocks of the neighbours it sees, relative to its own: three more values per neighbour (six with leg clocks), `6 × observation_radius` in all (`12 ×` with leg clocks); needs clocks of either kind |
 | **`[environment.clock]`** | | |
 | `middle_tempo_hz` | 2 | The tempo at a tempo action of 0, in turns per second |
 | `tempo_range_octaves` | 1 | How far a tempo action of ±1 moves the tempo, in octaves; the fastest tempo, plus `σ / 2π` with load feedback, must stay below 12.5 Hz |
 | `load_feedback_rad_per_s` | 0 | With leg clocks, σ of the [load feedback](#clocks): a foot on the ground holds its clock in stance; 0 is off. Must stay below 2π times the slowest tempo, 6.28 rad/s with the defaults, or a clock could stop for good |
 | `centre_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each joint's centre follows its action ([Actions and timing](#actions-and-timing)); 0 follows at once |
+| `amplitude_time_constant_s` | 0.5 with leg clocks, else 0 | With leg clocks, the time constant with which each leg's sweep and lift amplitudes follow their actions ([Actions and timing](#actions-and-timing)); 0 follows at once |
 | `coupling` | `"both"` | Which neighbours' clocks a segment sees and is compared with: `"both"`, those ahead and behind; `"ahead"`, only those ahead, so that the rhythm passes from the head backward ([Clocks](#clocks)) |
 | **`[environment.simulation]`** | | |
 | `model_path` | Required | Model file to load |

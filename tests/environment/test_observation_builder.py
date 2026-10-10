@@ -122,9 +122,11 @@ def test_with_the_spine_each_segment_sees_its_own_joint_last():
 
 
 @pytest.mark.parametrize("clock_values", [3, 6])  # a clock per segment, or per leg
-def test_with_neighbour_clocks_each_segment_sees_them_after_its_own_clocks(
+def test_each_segment_sees_its_clocks_then_its_neighbours_then_its_step_shape(
     clock_values,
 ):
+    """With a clock per leg, the segment's own step shape in use comes last."""
+    leg_clocks = clock_values == 6
     plain = ObservationBuilder(SEGMENT_COUNT, 2, WORLD_COUNT, "cpu")
     builder = ObservationBuilder(
         SEGMENT_COUNT,
@@ -133,22 +135,35 @@ def test_with_neighbour_clocks_each_segment_sees_them_after_its_own_clocks(
         "cpu",
         clock_value_count=clock_values,
         neighbour_clock_observed=True,
+        step_shape_observed=leg_clocks,
     )
     state = distinct_state("cpu")
     targets = torch.zeros(WORLD_COUNT, 2)
     own_clocks = torch.rand(WORLD_COUNT, SEGMENT_COUNT, clock_values)
     neighbour_clocks = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 4, clock_values)
+    step_shape = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 2, 5) if leg_clocks else None
 
-    observations = builder.build(state, targets, own_clocks, neighbour_clocks)
-
-    neighbour_count = 4 * clock_values
-    clock_count = clock_values + neighbour_count
-    assert builder.observation_size == plain.observation_size + clock_count
-    assert torch.equal(observations[..., :-clock_count], plain.build(state, targets))
-    assert torch.equal(observations[..., -clock_count:-neighbour_count], own_clocks)
-    assert torch.equal(
-        observations[..., -neighbour_count:], neighbour_clocks.flatten(start_dim=2)
+    observations = builder.build(
+        state, targets, own_clocks, neighbour_clocks, step_shape
     )
+
+    shape_count = 10 if leg_clocks else 0
+    neighbour_end = observations.shape[-1] - shape_count
+    neighbour_start = neighbour_end - 4 * clock_values
+    clock_start = neighbour_start - clock_values
+    assert builder.observation_size == plain.observation_size + 5 * clock_values + (
+        shape_count
+    )
+    assert torch.equal(observations[..., :clock_start], plain.build(state, targets))
+    assert torch.equal(observations[..., clock_start:neighbour_start], own_clocks)
+    assert torch.equal(
+        observations[..., neighbour_start:neighbour_end],
+        neighbour_clocks.flatten(start_dim=2),
+    )
+    if leg_clocks:
+        assert torch.equal(
+            observations[..., neighbour_end:], step_shape.flatten(start_dim=2)
+        )
 
 
 def test_forward_direction_survives_a_head_pointing_straight_up():

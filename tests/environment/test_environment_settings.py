@@ -53,10 +53,14 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         tempo_range_octaves=1.0,
         load_feedback_rad_per_s=0.0,
         centre_time_constant_s=0.0,
+        amplitude_time_constant_s=0.0,
         coupling="both",
     )
-    # Leg clocks' centres follow the actions with a time constant of 0.5 s.
-    assert read(leg_clocks=True).clock.centre_time_constant_s == 0.5
+    # Leg clocks' centres and amplitudes follow the actions with a time
+    # constant of 0.5 s.
+    leg_clock = read(leg_clocks=True).clock
+    assert leg_clock.centre_time_constant_s == leg_clock.amplitude_time_constant_s
+    assert leg_clock.amplitude_time_constant_s == 0.5
     assert settings.rewards == RewardSettings(
         arrival_reward=1.0,
         arrival_payout=1.0,
@@ -138,8 +142,9 @@ def test_nested_sections_are_read_by_their_own_classes():
             "holds a loaded foot's clock in stance, which needs a clock per leg",
         ),
         (
-            {"clocks": True, "clock": {"centre_time_constant_s": 0.5}},
-            "slows the centres .* which needs a clock per leg",
+            {"clocks": True, "clock": {"amplitude_time_constant_s": 0.5}},
+            "amplitude_time_constant_s slow the legs' step shape, which needs a"
+            " clock per leg",
         ),
         (
             {"clock": {"coupling": "ahead"}, "rewards": {"head_tempo_share": 0.25}},

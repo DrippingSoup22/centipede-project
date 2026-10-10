@@ -485,7 +485,8 @@ class EnvironmentDiagnostics:
         already has. ``left_range`` marks the cut episodes whose head left the
         range circle; ``clock_step`` is what the clocks read on the step, None
         without clocks; ``leg_amplitudes`` ``(W, N, 2, 2)``, with a clock per
-        leg, is each leg's sweep and lift amplitude actions of the step.
+        leg, is each leg's sweep and lift amplitudes in use on the step, after
+        the clocks' filter.
         """
         step = self.step
         quaternion = physical_state.body_quaternion
@@ -601,8 +602,8 @@ class EnvironmentDiagnostics:
         rhythm.foot_slip.copy_(step_rewards.foot_slip)
 
     def _record_legs(self, leg_amplitudes: torch.Tensor) -> None:
-        """Refresh the legs from their clocks and the step shape: the
-        amplitudes of the step's actions, and the centres the clocks keep."""
+        """Refresh the legs from their clocks and the step shape in use: the
+        amplitudes and the centres the clocks keep."""
         legs = self.legs
         left, right = self.clocks.clock_phase.unbind(dim=-1)
         legs.tempo.copy_(self.clocks.clock_tempo_hz)

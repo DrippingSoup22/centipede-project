@@ -86,6 +86,7 @@ class Environment:
             spine_observed=settings.spine_control,
             clock_value_count=0 if self.clocks is None else self.clocks.value_count,
             neighbour_clock_observed=settings.neighbour_clocks,
+            step_shape_observed=settings.leg_clocks,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -262,8 +263,8 @@ class Environment:
 
         # 2. Move the body. With leg clocks, the clocks first turn at the tempo
         # chosen for each leg, with load feedback from the feet on the ground
-        # now, the centres follow the centre actions, and each leg's joints
-        # get their targets from the step shape at its clock's new phase.
+        # now, the step shape in use follows the shape actions, and each
+        # leg's joints get their targets from it at its clock's new phase.
         # With spine control, the spine column holds the command for the
         # spine joint behind each segment that commands one; without, the
         # spine is passive.
@@ -271,12 +272,14 @@ class Environment:
         leg_amplitudes = None
         if self.settings.leg_clocks:
             leg_values = joint_action[..., :12].unflatten(-1, (2, 6))
-            leg_amplitudes = leg_values[..., 1:3]
             clock_step = self.clocks.step(
                 leg_values[..., 0], foot_contact=self.previous_foot_contact
             )
-            centres = self.clocks.follow_centres(leg_values[..., 3:])
-            leg_actions = leg_targets(self.clocks.clock_phase, leg_amplitudes, centres)
+            self.clocks.follow_step_shape(leg_values[..., 1:])
+            leg_amplitudes = self.clocks.amplitudes
+            leg_actions = leg_targets(
+                self.clocks.clock_phase, leg_amplitudes, self.clocks.centres
+            )
         else:
             leg_actions = joint_action[..., :6]
         spine_actions = None
@@ -384,6 +387,7 @@ class Environment:
             self.target_position,
             None if clocks is None else clocks.observation_values(),
             clocks.neighbour_values() if self.settings.neighbour_clocks else None,
+            clocks.step_shape if self.settings.leg_clocks else None,
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:

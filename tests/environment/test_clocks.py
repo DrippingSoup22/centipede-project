@@ -18,6 +18,7 @@ def clocks(
     per_leg=False,
     feedback=0.0,
     centre_time_constant_s=0.0,
+    amplitude_time_constant_s=0.0,
     coupling="both",
 ):
     settings = ClockSettings(
@@ -25,6 +26,7 @@ def clocks(
         tempo_range_octaves=1.0,
         load_feedback_rad_per_s=feedback,
         centre_time_constant_s=centre_time_constant_s,
+        amplitude_time_constant_s=amplitude_time_constant_s,
         coupling=coupling,
     )
     return Clocks(
@@ -214,19 +216,21 @@ def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
     assert angle_between(free.clock_phase, start).max() < 1e-4
 
 
-def test_the_centres_start_at_the_actions_and_follow_them_with_their_time_constant():
-    """At 0.5 s, 25 steps of 20 ms: a sudden change of the actions is covered
-    to 1 - 1/e after 25 steps."""
-    clock = clocks(world_count=1, per_leg=True, centre_time_constant_s=0.5)
+def test_the_step_shape_starts_at_the_actions_then_follows_with_its_time_constants():
+    """The amplitudes follow with 0.5 s, the centres at once (τ = 0)."""
+    clock = clocks(world_count=1, per_leg=True, amplitude_time_constant_s=0.5)
     every_world = torch.ones(1, dtype=torch.bool)
     clock.reset(every_world, seed=0)
-    centres = clock.follow_centres(torch.full((1, 3, 2, 3), 0.2))
-    assert torch.allclose(centres, torch.tensor(0.2))  # where the agent asks
+    clock.follow_step_shape(torch.full((1, 3, 2, 5), 0.2))
+    assert torch.allclose(clock.step_shape, torch.tensor(0.2))  # where it asks
 
-    for _ in range(25):
-        centres = clock.follow_centres(torch.full((1, 3, 2, 3), 1.2))
+    clock.follow_step_shape(torch.full((1, 3, 2, 5), 1.2))
 
-    assert torch.allclose(centres, torch.tensor(0.2 + 1 - math.exp(-1)), atol=1e-5)
+    # One 20 ms step covers 1 - e^(-0.02 / 0.5) of the way.
+    covered = 0.2 + 1 - math.exp(-0.02 / 0.5)
+    assert torch.allclose(clock.amplitudes, torch.tensor(covered))
+    assert torch.allclose(clock.centres, torch.tensor(1.2))
     clock.reset(every_world)
-    centres = clock.follow_centres(torch.full((1, 3, 2, 3), -0.5))
-    assert torch.allclose(centres, torch.tensor(-0.5))  # a restart starts afresh
+    assert not clock.step_shape.any()  # a restart forgets the shape ...
+    clock.follow_step_shape(torch.full((1, 3, 2, 5), -0.5))
+    assert torch.allclose(clock.step_shape, torch.tensor(-0.5))  # ... and starts afresh

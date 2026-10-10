@@ -119,8 +119,8 @@ the middle plus `c` times the half-width.
 | `tempo` | `(W, N, 2)` | Each leg's clock tempo, left then right, Hz | Mean |
 | `left_right_offset` | `(W, N)` | Phase offset between the segment's two legs, φ of the left leg minus φ of the right, rad: ±π when they alternate, 0 when they move together | Angle |
 | `right_neighbour_offset` | `(W, N − 1)` | Phase offset between neighbours' right legs, φ of the segment's right leg minus φ of the next one's, rad: positive when the rear one lags; the rhythm's `neighbour_offset` is the same for the left legs | Angle |
-| `sweep_amplitude` | `(W, N, 2)` | How far each leg sweeps either way of its sweep centre, rad: half its stroke; negative steps backward | Mean |
-| `lift_amplitude` | `(W, N, 2)` | How far each foot lifts above its lift centre at the middle of its swing, rad | Mean |
+| `sweep_amplitude` | `(W, N, 2)` | How far each leg sweeps either way of its sweep centre, rad: half its stroke; negative steps backward; after the slow filter that follows the amplitude actions | Mean |
+| `lift_amplitude` | `(W, N, 2)` | How far each foot lifts above its lift centre at the middle of its swing, rad; after the same filter | Mean |
 | `sweep_centre`, `lift_centre`, `knee_centre` | `(W, N, 2)` | The angles each leg's joints are centred on, after the slow filter that follows the centre actions, rad | Mean |
 
 The report and the dashboard read the offset between a segment's two legs

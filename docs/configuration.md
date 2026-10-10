@@ -325,7 +325,9 @@ evaluating a run: with leg clocks, a segment's leg actions set its legs'
 clocks and step shapes, and without them they command the motors, so the
 same weights would mean other things. Every checkpoint records whether leg
 clocks drove its agents' legs; checkpoints from before leg clocks count as
-without.
+without. Runs with leg clocks trained before each segment observed its step
+shape have smaller observations, so they can be continued or evaluated only
+with the code they were trained with.
 
 ### Continuing a run
 

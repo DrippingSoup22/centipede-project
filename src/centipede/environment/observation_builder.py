@@ -6,6 +6,9 @@ BLOCK_SIZE = 27
 TARGET_VALUE_COUNT = 2
 # With spine control: the angle and speed of the spine joint behind the segment.
 SPINE_VALUE_COUNT = 2
+# With leg clocks: each leg's step shape in use, its sweep and lift amplitudes
+# and its sweep, lift and knee centres.
+STEP_SHAPE_VALUE_COUNT = 10
 
 
 def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
@@ -31,9 +34,10 @@ class ObservationBuilder:
     values that are real only for the head; with ``spine_observed``, the
     angle and speed of the spine joint behind it (zero for the rear segment);
     with clocks, the ``clock_value_count`` values of its own clocks (three for
-    a clock per segment, six for one per leg); and with
-    ``neighbour_clock_observed``, last, as many values for the clocks of each
-    neighbour it sees, in the blocks' order.
+    a clock per segment, six for one per leg); with
+    ``neighbour_clock_observed``, as many values for the clocks of each
+    neighbour it sees, in the blocks' order; and with ``step_shape_observed``,
+    last, its own legs' step shape in use.
     A missing neighbour is a block of zeros. The layout is fixed in
     docs/environment.md.
     """
@@ -47,6 +51,7 @@ class ObservationBuilder:
         spine_observed: bool = False,
         clock_value_count: int = 0,
         neighbour_clock_observed: bool = False,
+        step_shape_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -60,6 +65,7 @@ class ObservationBuilder:
         self.spine_observed = spine_observed
         self.clock_value_count = clock_value_count
         self.neighbour_clock_observed = neighbour_clock_observed
+        self.step_shape_observed = step_shape_observed
         missing_neighbour = segment_count
 
         neighbour_rows = []
@@ -97,6 +103,7 @@ class ObservationBuilder:
                 if neighbour_clock_observed
                 else 0
             )
+            + (STEP_SHAPE_VALUE_COUNT if step_shape_observed else 0)
         )
 
     def build(
@@ -105,6 +112,7 @@ class ObservationBuilder:
         target_position: torch.Tensor,
         clock_values: torch.Tensor | None = None,
         neighbour_clock_values: torch.Tensor | None = None,
+        step_shape: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
@@ -112,7 +120,9 @@ class ObservationBuilder:
         ``clock_values`` ``(W, N, c)`` each segment's own clocks, needed only
         with clocks, for ``c`` = ``clock_value_count``;
         ``neighbour_clock_values`` ``(W, N, 2k, c)`` its neighbours' clocks
-        relative to its own, needed only with ``neighbour_clock_observed``.
+        relative to its own, needed only with ``neighbour_clock_observed``;
+        ``step_shape`` ``(W, N, 2, 5)`` its legs' step shape in use, needed
+        only with ``step_shape_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -160,4 +170,6 @@ class ObservationBuilder:
             parts.append(clock_values)
         if self.neighbour_clock_observed:
             parts.append(neighbour_clock_values.flatten(start_dim=2))
+        if self.step_shape_observed:
+            parts.append(step_shape.flatten(start_dim=2))
         return torch.cat(parts, dim=-1)
