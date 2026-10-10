@@ -251,6 +251,39 @@ def test_one_foot_down_is_free_both_down_and_none_down_each_pay_their_cost():
     )
 
 
+def test_clock_tracking_charges_each_follower_for_its_distance_to_the_clock_ahead():
+    settings = RewardSettings.from_section({"clock_tracking_cost_parts": 2})
+    tracking_mismatch = torch.zeros(2, 3)
+    tracking_mismatch[1] = torch.tensor([0.0, 0.25, 1.0])  # the head has none
+    clock = ClockStep(None, None, torch.zeros(2, 3), tracking_mismatch)
+
+    _, parts, weights = rewards_for(unchanged_state(), settings=settings, clock=clock)
+
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares["clock_tracking"] == pytest.approx(2 * shares["leg_contact"])
+    tracking = weights["clock_tracking"]
+    assert parts["clock_tracking"][1].tolist() == pytest.approx(
+        [0.0, -tracking * 0.25, -tracking]
+    )
+    assert not parts["clock_tracking"][0].any()
+
+
+def test_clock_change_charges_the_head_alone_for_changing_its_clock_fast():
+    settings = RewardSettings.from_section({"head_clock_change_cost_parts": 1})
+    change_size = torch.zeros(2, 3)
+    change_size[1] = torch.tensor([0.5, 1.0, 1.0])
+    clock = ClockStep(None, None, torch.zeros(2, 3), change_size=change_size)
+
+    _, parts, weights = rewards_for(unchanged_state(), settings=settings, clock=clock)
+
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares["clock_change"] == pytest.approx(shares["leg_contact"])
+    assert parts["clock_change"][1].tolist() == pytest.approx(
+        [-weights["clock_change"] * 0.5, 0.0, 0.0]
+    )
+    assert not parts["clock_change"][0].any()
+
+
 def test_movement_costs_the_square_of_how_far_the_commanded_joints_moved():
     settings = RewardSettings.from_section({"movement_cost_parts": 1})
     state = unchanged_state()

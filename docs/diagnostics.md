@@ -45,7 +45,7 @@ Refreshed on every step, for every world.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |
-| `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact, and the [optional costs](environment.md#optional-costs) when they are on (with the efficiency reward: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
+| `reward_parts` | `(W, N, T)` | Each reward term, weighted: arrival, progress, step cost, body contact, leg contact, and the [walking costs](environment.md#walking-costs) and [optional costs](environment.md#optional-costs) that are on, in that order (with the efficiency reward: arrival, efficiency, body contact, leg contact); they add up to the reward | Mean |
 | `contact_flags` | `(W, N, 4)` | Left foot, right foot, and body on the ground; legs touching | Share of steps |
 | `head_progress` | `(W,)` | Metres the head's tip gained toward its target | Mean |
 | `segment_moved` | `(W, N)` | Metres the segment's centre moved, measured flat on the ground | Mean |

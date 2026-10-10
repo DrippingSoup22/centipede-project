@@ -162,6 +162,7 @@ def test_leg_clocks_turn_each_leg_and_compare_it_with_its_sibling_and_its_side()
 
     clock.follow_actions(clock_actions)
     result = clock.step()
+    assert not result.change_size.any()  # the first step after a restart
 
     tempo = torch.tensor([[[4.0, 2.0], [2.0, 2.0], [2.0, 1.0]]])
     turned = (clock.clock_phase - start).remainder(2 * math.pi)
@@ -175,6 +176,9 @@ def test_leg_clocks_turn_each_leg_and_compare_it_with_its_sibling_and_its_side()
     assert result.tempo_mismatch[0].tolist() == pytest.approx(
         [(0.5 + 0.25) / 2, 1 / 6, (0.25 + 0.5) / 2]
     )
+    # Each follower's clocks in use against the same side's of the segment
+    # ahead: one tempo of the twelve values differs by 1, (1 / 2)² / 12.
+    assert result.tracking_mismatch[0].tolist() == pytest.approx([0.0, 1 / 48, 1 / 48])
 
     # Each segment sees its legs' clocks, the left's first, and its
     # neighbours' clocks leg by leg, each relative to its own side.
@@ -227,13 +231,16 @@ def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_const
 
     clock.follow_actions(torch.full((1, 3, 2, 6), -0.8))
     start = clock.clock_phase.clone()
-    clock.step()
+    result = clock.step()
 
     # One 20 ms step covers 1 - e^(-0.02 / 0.5) of the way, and the hand
     # turns at the tempo in use.
     covered = 0.2 - (1 - math.exp(-0.02 / 0.5))
     assert torch.allclose(clock.step_shape, torch.tensor(covered))
     assert torch.allclose(clock.clock_tempo_octaves, torch.tensor(covered))
+    # A change of half the range, of which one step covers its share: half
+    # the largest change the lag allows, (1 / 2)².
+    assert torch.allclose(result.change_size, torch.tensor(0.25))
     turned = (clock.clock_phase - start).remainder(2 * math.pi)
     assert torch.allclose(turned, torch.tensor(2 * math.pi * 2 * 2**covered * STEP_S))
     clock.reset(every_world)

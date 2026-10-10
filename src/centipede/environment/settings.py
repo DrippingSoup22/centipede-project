@@ -167,6 +167,8 @@ PROPORTION_KEYS = (
     "out_of_tempo_cost_parts",
     "no_support_cost_parts",
     "both_feet_down_cost_parts",
+    "clock_tracking_cost_parts",
+    "head_clock_change_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
     "foot_slip_unit_m_per_s",
@@ -179,8 +181,10 @@ PROPORTION_KEYS = (
     "follower_progress_share",
     "follower_progress_ratio",
 )
-# The costs that need clocks; legs off tempo needs a clock per segment.
+# The costs that need clocks; legs off tempo needs a clock per segment, and
+# the two that compare the legs' clocks in use need clocks per leg.
 CLOCK_COST_KEYS = ("legs_off_tempo_cost_parts", "out_of_tempo_cost_parts")
+LEG_CLOCK_COST_KEYS = ("clock_tracking_cost_parts", "head_clock_change_cost_parts")
 
 
 @dataclass(frozen=True)
@@ -228,7 +232,7 @@ class RewardSettings:
     split into fewer parts than the costs take makes them overspend it: the
     worst arrival then ends below zero.
 
-    Five costs judge how a segment walks. Foot slip charges each foot that
+    Seven costs judge how a segment walks. Foot slip charges each foot that
     touches the ground at both ends of a step for how fast it slid along it,
     in units of ``foot_slip_unit_m_per_s``, and no support each step on which
     neither of the segment's feet touches the ground; both feet down, its
@@ -240,7 +244,10 @@ class RewardSettings:
     with, of which the head pays ``head_tempo_share``. With the clocks'
     ``coupling = "ahead"``, a segment is compared only with the clocks ahead
     of it, so the head pays nothing for its neighbours, and
-    ``head_tempo_share`` is None.
+    ``head_tempo_share`` is None. The last two need clocks per leg: clock
+    tracking charges every follower for how far its legs' clocks in use are
+    from those of the segment ahead, and head clock change charges the head
+    for how fast its own legs' clocks in use change.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -267,6 +274,8 @@ class RewardSettings:
     out_of_tempo_cost_parts: float | None
     no_support_cost_parts: float | None
     both_feet_down_cost_parts: float | None
+    clock_tracking_cost_parts: float | None
+    head_clock_change_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
     foot_slip_unit_m_per_s: float | None
@@ -326,6 +335,8 @@ class RewardSettings:
                 out_of_tempo_cost_parts=None,
                 no_support_cost_parts=None,
                 both_feet_down_cost_parts=None,
+                clock_tracking_cost_parts=None,
+                head_clock_change_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
                 foot_slip_unit_m_per_s=None,
@@ -361,6 +372,8 @@ class RewardSettings:
                     ("out_of_tempo_cost_parts", 0.0),
                     ("no_support_cost_parts", 0.0),
                     ("both_feet_down_cost_parts", 0.0),
+                    ("clock_tracking_cost_parts", 0.0),
+                    ("head_clock_change_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
                 )
             ]
@@ -390,7 +403,9 @@ class RewardSettings:
                 out_of_tempo_cost_parts=parts[5],
                 no_support_cost_parts=parts[6],
                 both_feet_down_cost_parts=parts[7],
-                movement_cost_parts=parts[8],
+                clock_tracking_cost_parts=parts[8],
+                head_clock_change_cost_parts=parts[9],
+                movement_cost_parts=parts[10],
                 random_command_movement_deg=section.positive_number(
                     "random_command_movement_deg", default=25.0
                 ),
@@ -485,6 +500,8 @@ class RewardSettings:
                 ("out_of_tempo", self.out_of_tempo_cost_parts),
                 ("no_support", self.no_support_cost_parts),
                 ("both_feet_down", self.both_feet_down_cost_parts),
+                ("clock_tracking", self.clock_tracking_cost_parts),
+                ("clock_change", self.head_clock_change_cost_parts),
                 ("movement", self.movement_cost_parts),
             )
             if parts
@@ -596,6 +613,13 @@ class EnvironmentSettings:
             raise SettingsError(
                 f"[environment.rewards] {', '.join(clock_costs)} need the segments'"
                 " clocks: set clocks = true in [environment]"
+            )
+        leg_clock_costs = [key for key in LEG_CLOCK_COST_KEYS if getattr(rewards, key)]
+        if leg_clock_costs and not settings.leg_clocks:
+            raise SettingsError(
+                f"[environment.rewards] {', '.join(leg_clock_costs)} compare the"
+                " legs' clocks in use, which needs a clock per leg: set"
+                " leg_clocks = true in [environment]"
             )
         if settings.clock.load_feedback_rad_per_s and not settings.leg_clocks:
             raise SettingsError(

@@ -69,6 +69,8 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         out_of_tempo_cost_parts=0.0,
         no_support_cost_parts=0.0,
         both_feet_down_cost_parts=0.0,
+        clock_tracking_cost_parts=0.0,
+        head_clock_change_cost_parts=0.0,
         movement_cost_parts=0.0,
         random_command_movement_deg=25.0,
         foot_slip_unit_m_per_s=0.010,
@@ -132,6 +134,10 @@ def test_nested_sections_are_read_by_their_own_classes():
         ({"passive_follower_spine": True}, "needs spine_control"),
         ({"rewards": {"out_of_tempo_cost_parts": 1}}, "need the segments' clocks"),
         ({"neighbour_clocks": True}, "neighbour_clocks .* set clocks = true"),
+        (
+            {"clocks": True, "rewards": {"clock_tracking_cost_parts": 2}},
+            "clock_tracking_cost_parts compare the legs' clocks in use",
+        ),
         ({"clocks": True, "leg_clocks": True}, "set only one"),
         (
             {"clocks": True, "clock": {"load_feedback_rad_per_s": 6.0}},

@@ -255,6 +255,33 @@ def both_feet_down(context: RewardContext, settings: RewardSettings) -> torch.Te
     return -standing.float()
 
 
+def clock_tracking(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how far the segment's legs' clocks are from the segment ahead's, 0 to 1.
+
+    With leg clocks, each leg's clock in use, its tempo and step shape, is
+    compared with the same side's leg of the segment ahead: the mean, over
+    the two legs and the six values, of (difference ÷ 2)². The phase is not
+    compared, so the offset between neighbours stays free. The head, with
+    nothing ahead, pays nothing: a follower's job is to track the clock
+    ahead, so that the head's clock passes down the body.
+    """
+    return -context.clock.tracking_mismatch
+
+
+def clock_change(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how fast the head's legs' clocks change, 0 to 1; the followers pay 0.
+
+    The mean, over the head's two legs and the six values of their clocks in
+    use, of the change on the step squared, in units of the largest change
+    the clocks' lag allows in one step, each at most 1: a head that swings
+    its clock from one extreme to the other pays 1, one that holds it pays 0.
+    The head may change its clock, but not too fast.
+    """
+    head_change = torch.zeros_like(context.clock.change_size)
+    head_change[:, 0] = context.clock.change_size[:, 0]
+    return -head_change
+
+
 def movement(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−(how far the segment's joints moved on the step)², in random-command units.
 
@@ -316,6 +343,8 @@ TERMS = {
     "out_of_tempo": out_of_tempo,
     "no_support": no_support,
     "both_feet_down": both_feet_down,
+    "clock_tracking": clock_tracking,
+    "clock_change": clock_change,
     "movement": movement,
     "command": command,
 }

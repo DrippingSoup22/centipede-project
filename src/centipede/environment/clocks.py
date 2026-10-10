@@ -45,11 +45,24 @@ class ClockStep:
     segment sees; a leg's clock with its sibling leg's and with the same
     side's legs of those neighbours. With ``coupling = "ahead"``, only the
     neighbours ahead of the segment count.
+
+    With clocks per leg, two values compare the legs' clocks in use
+    (``Clocks.clock_in_use``, six values per leg, each from −1 to 1); both
+    are None with a clock per segment. ``tracking_mismatch`` ``(W, N)`` is how
+    far each segment's legs' clocks in use are from the same side's legs of
+    the segment ahead: the mean, over the two legs and the six values, of
+    (difference ÷ 2)², from 0 to 1; 0 for the head, with nothing ahead. The
+    phase is not compared. ``change_size`` ``(W, N)`` is how fast each
+    segment's legs' clocks in use changed on the step: the mean, over the two
+    legs and the six values, of (change ÷ the largest change the lag allows
+    in one step)², each at most 1; 0 on the first step after a restart.
     """
 
     leg_squared_difference: torch.Tensor | None
     leg_difference_known: torch.Tensor | None
     tempo_mismatch: torch.Tensor
+    tracking_mismatch: torch.Tensor | None = None
+    change_size: torch.Tensor | None = None
 
 
 def leg_targets(
@@ -108,7 +121,8 @@ class Clocks:
     use, which follows the shape actions slowly, as the tempo does
     (``follow_actions``): ``amplitudes`` ``(W, N, 2, 2)``, the sweep and lift
     amplitudes, and ``centres`` ``(W, N, 2, 3)``, the sweep, lift and knee
-    centres, are views of it.
+    centres, are views of it. ``clock_change`` ``(W, N, 2, 6)`` is how far
+    each leg's clock in use (``clock_in_use``) moved on the last step.
     """
 
     def __init__(
@@ -148,6 +162,11 @@ class Clocks:
             # The share of the way to its action the clock in use covers in a
             # step: tempo, amplitudes and centres alike.
             self.lag_rate = lag_rate(settings.clock_time_constant_s, step_duration_s)
+            # How far each leg's clock in use moved on the last step, in the
+            # units of ``clock_in_use``.
+            self.clock_change = torch.zeros(
+                (world_count, segment_count, 2, 6), dtype=torch.float32, device=device
+            )
         else:
             # The hand passes at most this many points in one step, at the
             # fastest tempo; one more for rounding.
@@ -254,9 +273,26 @@ class Clocks:
                 turned[..., 0], leg_angles_before, leg_angles
             )
         self.clock_phase.copy_((self.clock_phase + turned).remainder(2 * math.pi))
+        tracking_mismatch = change_size = None
+        if self.per_leg:
+            tracking_mismatch, change_size = self._compare_clocks_in_use()
         return ClockStep(
-            leg_squared_difference, leg_difference_known, self._tempo_mismatch()
+            leg_squared_difference,
+            leg_difference_known,
+            self._tempo_mismatch(),
+            tracking_mismatch,
+            change_size,
         )
+
+    def clock_in_use(self) -> torch.Tensor:
+        """Every leg's clock in use, ``(W, N, 2, 6)``, each value from −1 to 1.
+
+        For each leg, the left leg's first: its tempo in use in octaves over
+        ``tempo_range_octaves``, the tempo action it follows, then its step
+        shape in use, in action units.
+        """
+        tempo = self.clock_tempo_octaves / self.settings.tempo_range_octaves
+        return torch.cat((tempo[..., None], self.step_shape), dim=-1)
 
     def follow_actions(self, leg_clock_actions: torch.Tensor) -> None:
         """Move every leg's clock in use toward its actions, before ``step``.
@@ -267,8 +303,9 @@ class Clocks:
         follow their actions as a first-order lag (``lag_rate``) with
         ``clock_time_constant_s``, which covers 1 − e^(−1), 63%, of a sudden
         change in one time constant. On the first step after a restart, the
-        clock in use starts at the actions.
+        clock in use starts at the actions, and its change counts zero.
         """
+        before = self.clock_in_use()
         restarted = self.restarted[:, None, None]
         tempo_octaves = leg_clock_actions[..., 0] * self.settings.tempo_range_octaves
         self.clock_tempo_octaves.copy_(
@@ -286,7 +323,30 @@ class Clocks:
                 self.step_shape.lerp(shape_actions, self.lag_rate),
             )
         )
+        self.clock_change.copy_(self.clock_in_use() - before)
+        self.clock_change.masked_fill_(restarted[..., None], 0.0)
         self.restarted.fill_(False)
+
+    def _compare_clocks_in_use(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """``ClockStep.tracking_mismatch`` and ``change_size``, ``(W, N)`` each.
+
+        Every value of a clock in use lies from −1 to 1, so a difference of 2
+        is the largest. In one step the lag moves a value by at most its rate
+        times that range, the unit of the change.
+        """
+        clock = self.clock_in_use()
+        tracking_mismatch = clock.new_zeros(clock.shape[:2])
+        tracking_mismatch[:, 1:] = (
+            ((clock[:, 1:] - clock[:, :-1]) / 2).square().mean(dim=(-2, -1))
+        )
+        largest_change = 2 * self.lag_rate
+        change_size = (
+            (self.clock_change / largest_change)
+            .square()
+            .clamp(max=1.0)
+            .mean(dim=(-2, -1))
+        )
+        return tracking_mismatch, change_size
 
     def _compare_legs(
         self,

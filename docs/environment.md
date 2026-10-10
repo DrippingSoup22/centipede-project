@@ -234,7 +234,8 @@ the legs would read the noise. The filter keeps the slow changes a policy
 means and damps the noise from step to step. Slow centres set posture and
 turning but cannot make a rhythm by themselves, which is the clocks' job.
 One time constant for the whole clock keeps it one smooth thing, which
-changes as a whole. τ = 0 suits a run that smooths the policy's mean action
+changes as a whole, and the costs that judge a leg's clock compare its clock
+in use, all six values at once ([Walking costs](#walking-costs)). τ = 0 suits a run that smooths the policy's mean action
 instead ([agents.md](agents.md#settings), `temporal_smoothness_coefficient`).
 
 On the first step after a restart, the whole clock in use starts at its
@@ -639,8 +640,10 @@ segment a rhythm to keep, and two costs judge the rhythm ([Walking
 costs](#walking-costs)): whether the legs repeat their movement with the
 clock, and whether the clocks agree on a tempo. With leg clocks, only the
 shape of a step is fixed; the tempos, the size of the steps, the posture,
-and how the legs keep time with one another are learnt, and only the second
-cost applies.
+and how the legs keep time with one another are learnt. The first cost does
+not apply; the second does, and two more judge the legs' whole clocks in
+use: whether each follower's match the segment ahead's, and how fast the
+head's change.
 
 **Open questions.** `N` is a contact flag, where Owaki and Ishiguro's is the
 load the leg bears: a measured load would let the clock of a lightly loaded
@@ -835,10 +838,12 @@ keeps the step cost and progress of the full reward with
 
 ### Walking costs
 
-Five more costs judge how a segment walks, each from 0 to 1 per step, paid by
-every segment for its own legs, and each switched on by giving it parts of the
-budget. None prescribes a gait, though both feet down favours standing on
-one foot at a time.
+Seven more costs judge how a segment walks, each from 0 to 1 per step, and
+each switched on by giving it parts of the budget. The first five are paid by
+every segment for its own legs; the last two judge the legs' clocks: clock
+tracking is paid by every follower, head clock change by the head alone.
+None prescribes a gait, though both feet down favours standing on one foot
+at a time.
 
 - **Foot slip** `S_i` (`foot_slip_cost_parts`): each foot that touches the
   ground at both ends of a step pays how fast it slid along it, in units of
@@ -894,6 +899,33 @@ one foot at a time.
   model v4's hand-set wave ([model.md](model.md#model-v4), Walking) has 8.8 of
   its 16 feet down on average, so each foot is down 55% of a turn, and with
   the two sides half a turn apart both are down 10% of the time.
+- **Clock tracking** `K_i` (`clock_tracking_cost_parts`, with leg clocks):
+  each of the segment's legs' clock in use
+  ([Actions and timing](#actions-and-timing)) against the same side's leg of
+  the segment ahead, six values per leg, each from −1 to 1: the tempo in use
+  in octaves divided by `tempo_range_octaves`, and the five values of the
+  step shape. The mean, over the two legs and the six values, of
+  (difference ÷ 2)², from 0 to 1. The head, with nothing ahead, pays
+  nothing. It generalises out of tempo from the tempo to the whole clock,
+  the size of the steps and the posture as well, and compares a segment only
+  with the one ahead, as `coupling = "ahead"` does, so that the head's clock
+  passes down the body one segment at a time. The phase is not compared: the
+  offset between neighbours is left free.
+- **Head clock change** `G_0` (`head_clock_change_cost_parts`, with leg
+  clocks): how fast the head's clocks in use change on the step: the mean,
+  over its two legs and the same six values, of (change ÷ the largest change
+  the lag allows in one step)², each at most 1. The largest change is the
+  lag's share of a step times the whole range,
+  `2 × (1 − e^(−0.02 s / τ))`, 0.078 at τ = 0.5 s, or 2 when the clock
+  follows its actions at once (τ = 0). A head that keeps swinging its
+  actions from one extreme to the other pays 1 per step, one that holds its
+  clock pays 0; the first step after a restart, when the clock starts at its
+  actions, costs nothing, and the followers pay nothing. Exploration noise
+  alone costs something: with a noise spread of 0.5 around a held action,
+  each value moves by the lag's share of the noise, about (0.5 ÷ 2)² = 0.06
+  of the unit on average (an estimate, before the actions' squashing into
+  −1 to 1, which lowers it). The head may change its clock, but not so fast
+  that its followers cannot track it.
 
 **Why support costs on both sides.** No support alone made hanging the
 cheaper choice for a segment that cannot step yet. In three training runs
@@ -926,6 +958,41 @@ still loses a little, a careful one gains, and standing still gains nothing.
 Body contact weighs most (2.5), then legs touching and foot slip (2), legs off
 tempo (1.5), and out of tempo least (1). With leg clocks, no support takes
 the 1.5 parts of legs off tempo, so that every other cost keeps its weight.
+
+**The clean reward.** In eleven training runs with leg clocks (model v4) no
+gait formed. Three successive sets of costs about the feet, foot slip with
+the feet otherwise free, then a cost for no support, then both feet down so
+that one foot down was free, each met its own way of not stepping: riding on
+the neighbours, hanging from them, standing on one foot. The user concluded
+on 2026-10-10 that rules about how the legs should walk were the mistake,
+and set this principle instead:
+
+- the head learns the task and sets its own clock, which may change, but not
+  too fast (head clock change);
+- a follower's only job is to track the clock of the segment ahead of it
+  (clock tracking), so that the head's clock passes down the body;
+- a follower reads the clock ahead from the body, from the leading segment's
+  leg angles and speeds in its observation
+  ([What each segment sees](#what-each-segment-sees)), not from a clock value
+  handed to it, so such a run observes no neighbour clocks;
+- the legs are attached to the clocks, so the tempo, the amplitudes and the
+  centres all belong to the clock, and are judged together;
+- besides these, the only costs are of posture: the body on the ground and
+  legs touching.
+
+A run with the clean reward therefore sets arrival, progress, body contact,
+leg contact, clock tracking and head clock change, with the task the head's
+alone as above, and every other cost at 0: the step cost, foot slip, no
+support, both feet down, out of tempo, legs off tempo and movement. Load
+feedback ([Clocks](#clocks)) stays available as the one way in which the
+physics, rather than a reward, can settle the phases, as in Owaki and
+Ishiguro's quadruped.
+
+**Open question.** The delay between neighbours, their phase offset, is no
+term's to prescribe: clock tracking leaves it free, and nothing else judges
+it. Whether a steady offset, and so a wave along the body, emerges from the
+body's mechanics and load feedback, or does not, is the question a run with
+the clean reward asks.
 
 ### Optional costs
 
@@ -1037,6 +1104,8 @@ These are the keys of the environment sections of the configuration file (see
 | `out_of_tempo_cost_parts` | 0 | [Out of tempo](#walking-costs)'s parts; needs clocks of either kind |
 | `no_support_cost_parts` | 0 | [No support](#walking-costs)'s parts; 0 is off |
 | `both_feet_down_cost_parts` | 0 | [Both feet down](#walking-costs)'s parts, the counterpart of no support; 0 is off |
+| `clock_tracking_cost_parts` | 0 | [Clock tracking](#walking-costs)'s parts: each follower's legs' clocks in use against the segment ahead's; needs leg clocks |
+| `head_clock_change_cost_parts` | 0 | [Head clock change](#walking-costs)'s parts: how fast the head's legs' clocks in use change; needs leg clocks |
 | `foot_slip_unit_m_per_s` | 0.010 | Foot slip's unit: the sliding speed that costs 1 |
 | `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |
 | `head_tempo_share` | 0.25 | The share of its out-of-tempo cost the head pays; with `coupling = "ahead"` the head pays nothing for its neighbours, and a file that sets it is refused |
