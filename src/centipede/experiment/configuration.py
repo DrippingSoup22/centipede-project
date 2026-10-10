@@ -57,8 +57,10 @@ class RunSettings:
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
     with a checkpoint, before a cycle that would end after it. With
     ``plateau_cycles`` the run also stops cleanly once its progress has not
-    risen by ``plateau_progress`` for that many cycles, never before
-    ``plateau_minimum_cycles`` (plateau.py). See docs/configuration.md.
+    risen by ``plateau_progress`` for that many cycles, or once its arrival
+    share at the curriculum's final level is ``solved_arrival_share`` and
+    its speed has stopped rising, never before ``plateau_minimum_cycles``
+    (plateau.py). See docs/configuration.md.
     """
 
     name: str
@@ -75,6 +77,7 @@ class RunSettings:
     plateau_cycles: int
     plateau_progress: float
     plateau_minimum_cycles: int
+    solved_arrival_share: float
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
@@ -114,6 +117,9 @@ class RunSettings:
             plateau_progress=section.positive_number("plateau_progress", default=0.02),
             plateau_minimum_cycles=section.integer(
                 "plateau_minimum_cycles", default=0, minimum=0
+            ),
+            solved_arrival_share=section.number(
+                "solved_arrival_share", default=0.95, minimum=0.0, maximum=1.0
             ),
         )
         section.reject_unknown_keys()

@@ -11,7 +11,8 @@
   ``[curriculum]``, after each cycle it moves the target's difficulty level
   from the arrivals and gives the environment that level's target ranges.
   With ``plateau_cycles`` it stops cleanly, after recording one more episode
-  length and saving a checkpoint, once the run has stopped improving.
+  length and saving a checkpoint, once the run has stopped improving or has
+  solved its task and stopped getting faster.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
@@ -307,11 +308,15 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             run_settings.plateau_progress,
             episode_windows=recording_windows,
             minimum_cycles=run_settings.plateau_minimum_cycles,
+            # The task is solved at the curriculum's final level, 1.
+            solved_task=(0.0 if curriculum is None else 1.0)
+            + run_settings.solved_arrival_share,
         )
         if run_settings.plateau_cycles
         else None
     )
     stop_cycle = None
+    solved = False
     cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
@@ -343,7 +348,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         )
         if plateau is not None and stop_cycle is None:
             plateau.update(cycle, _plateau_readings(record, arrival_share, curriculum))
-            if plateau.reached(cycle):
+            solved = plateau.solved(cycle)
+            if solved or plateau.reached(cycle):
                 if recorder.recording:  # its end shows the final behaviour
                     stop_cycle = recording_first_cycle + recording_windows - 1
                 elif run_settings.recordings:
@@ -385,6 +391,19 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 f" (about {duration(seconds_per_cycle)}) would pass the time"
                 f" limit of {run_settings.time_limit_hours:g} h. Continue it with"
                 f' continue_from = "{folder.path.as_posix()}".'
+            )
+        elif stopping and cycle < total_cycles and solved:
+            task, speed = plateau.signals["task"], plateau.signals["speed"]
+            share = task.average - (0.0 if curriculum is None else 1.0)
+            stop_message = (
+                f"Stopped after cycle {cycle} of {total_cycles}: the task is solved."
+                f" The arrival share"
+                + ("" if curriculum is None else " at the curriculum's final level")
+                + f", averaged over {plateau.average_cycles} cycles, is"
+                f" {share:.3f} (at least {run_settings.solved_arrival_share:g}),"
+                f" and the targets per world and minute last rose by"
+                f" {plateau.min_progress:.0%} at cycle {speed.best_cycle}, to"
+                f" {math.exp(speed.best):.2f}."
             )
         elif stopping and cycle < total_cycles:
             measure = "arrival share" + (" + level" if curriculum is not None else "")
@@ -432,13 +451,16 @@ def _plateau_readings(
     record: dict[str, Any], arrival_share: ArrivalShare, curriculum: Curriculum | None
 ) -> dict[str, float]:
     """The signals the plateau stop watches, once measured: the task (the
-    arrival share, plus the curriculum's level), and in a run with clocks the
+    arrival share, plus the curriculum's level), in a run with clocks the
     wave (how alike the neighbours' offsets are across every world and step,
-    averaged over the pairs)."""
+    averaged over the pairs), and for the solved stop the speed (the
+    logarithm of the targets per world and minute, once there are any)."""
     readings = {}
     if arrival_share.value is not None:
         level = 0.0 if curriculum is None else curriculum.level
         readings["task"] = arrival_share.value + level
+    if arrival_share.targets_per_minute:
+        readings["speed"] = math.log(arrival_share.targets_per_minute)
     if "rhythm" in record:
         consistency = record["rhythm"]["neighbour_offset_consistency"]
         readings["wave"] = sum(consistency) / len(consistency)

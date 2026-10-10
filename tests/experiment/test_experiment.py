@@ -232,6 +232,30 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     assert "Stopped after cycle 11 of 20: a plateau." in report
 
 
+def test_a_run_whose_task_is_solved_stops_once_it_gets_no_faster(tmp_path):
+    # A target 2 mm behind the head's tip lies under the head, so every episode
+    # arrives on its first step: all arrive, and the speed never rises. Its
+    # averages start at cycle 7, it has not got faster for two cycles at cycle
+    # 9, and one more episode length is recorded, cycles 10 and 11.
+    solved_file = (
+        TRAINING_FILE.replace(
+            'runs_folder = "RUNS"',
+            'runs_folder = "RUNS"\nrecordings = 1\nplateau_cycles = 2',
+        )
+        .replace("update_cycles = 3", "update_cycles = 20")
+        .replace(
+            "[agents]",
+            "[environment.target]\ndistance_range_m = [0.002, 0.002]\n"
+            'bearing_range_deg = [180, 180]\narrival = "head"\n\n[agents]',
+        )
+    )
+    folder = run_file(tmp_path, solved_file, NAME="solved")
+
+    assert logged_cycles(folder) == list(range(1, 12))
+    report = (folder / "report.html").read_text(encoding="utf-8")
+    assert "Stopped after cycle 11 of 20: the task is solved." in report
+
+
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
     harder_file = (

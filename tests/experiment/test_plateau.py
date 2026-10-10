@@ -3,6 +3,8 @@
 How the experiment stops a run at a plateau is tested with the experiment.
 """
 
+import math
+
 from centipede.experiment.plateau import Plateau
 
 
@@ -34,3 +36,20 @@ def test_a_plateau_needs_every_signal_stalled_and_the_minimum_cycles():
     assert not plateau.reached(7)  # the task stalled, the wave not yet
     assert not plateau.reached(8)  # both stalled, before the minimum
     assert plateau.reached(9)
+
+
+def test_a_solved_task_stops_a_run_once_it_gets_no_faster():
+    # Solved at a task average of 1.95: the final level, 1, plus 95% arrivals.
+    def plateau():
+        return Plateau(cycles=1, min_progress=0.02, episode_windows=1, solved_task=1.95)
+
+    steady, faster = plateau(), plateau()
+    for cycle, task in enumerate([1.9, 1.9, 1.9, 2.0], start=1):
+        steady.update(cycle, {"task": task, "speed": math.log(7)})
+        faster.update(cycle, {"task": task, "speed": math.log(4 + cycle)})
+    assert not steady.solved(4)  # no faster since cycle 3, but the task is 1.93
+    steady.update(5, {"task": 2.0, "speed": math.log(7)})
+    faster.update(5, {"task": 2.0, "speed": math.log(9)})
+    assert steady.solved(5)  # the task is 1.97
+    assert not faster.solved(5)  # it still gets faster
+    assert not steady.reached(5)  # a plateau needs the task itself stalled
