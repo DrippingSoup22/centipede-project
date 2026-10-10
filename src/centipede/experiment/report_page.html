@@ -272,6 +272,38 @@ const METRICS = {
     about: "The learned spread of each leg motor's action, averaged over the six motors. It shrinks as the policy becomes more certain." },
   "learning.spine_action_std": { label: "Spine command spread", unit: "",
     about: "The learned spread of each segment's command for the spine joint behind it; 0 for a segment without one, or when the spine is not controlled." },
+  "learning.tempo_action_std": { label: "Tempo command spread", unit: "",
+    about: "The learned spread of each segment's tempo action, the last of its actions in a run with clocks; 0 without clocks." },
+  "step_facts.support": { label: "Support on both sides", unit: "%", scale: 100, better: "higher",
+    about: "The share of steps with at least one left foot and one right foot on the ground, anywhere along the body." },
+  "step_facts.left_right_similarity": { label: "Left vs right legs", unit: "", range: [-1, 1],
+    about: "How alike each segment's left and right legs move: the cosine between their joint movements over a step, averaged over the steps. 1 together, −1 alternating, 0 in between or still." },
+  "step_facts.neighbour_leg_similarity": { label: "Neighbours' legs alike", unit: "", range: [-1, 1],
+    about: "How alike each segment's legs move to the next segment's: the cosine between their six joints' movements over a step. 1 the same, −1 opposite, 0 unrelated or still. One value per pair, head first." },
+  "rhythm.tempo": { label: "Clock tempo", unit: "Hz",
+    about: "Each segment's clock tempo, which its last action sets. Segments that agree on a tempo have a narrow band." },
+  "rhythm.neighbour_offset": { label: "Offset between neighbours", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
+    about: "Each pair's mean phase offset, the segment's phase minus the next one's: positive when the rear one lags, as in a wave from head to tail. One value per pair, head first; it means something only where the pair's consistency is well above 0." },
+  "rhythm.neighbour_offset_consistency": { label: "Wave consistency", unit: "", range: [0, 1], better: "higher",
+    about: "How alike each pair's offset is across every world and step, from 0 (random) to 1 (the same everywhere). The worlds start from random phases, so it rises only as the segments steer their offsets toward the same wave; the plateau stop watches its mean over the pairs." },
+  "rhythm.neighbour_offset_lock": { label: "Offset lock", unit: "", range: [0, 1], better: "higher",
+    about: "How steady each pair's offset stays within each world over the window, from 0 to 1. Every clock starts at the same tempo, so it is high from the start; it falls when neighbours change tempo apart." },
+  "rhythm.head_offset": { label: "Lag behind the head", unit: "°", scale: RADIANS_TO_DEGREES, range: [-180, 180],
+    about: "How far each segment's clock lags behind the head's: the wave along the body, head first (0 for the head)." },
+  "rhythm.head_offset_consistency": { label: "Lag consistency", unit: "", range: [0, 1], better: "higher",
+    about: "How alike each segment's lag behind the head is across every world and step, from 0 to 1." },
+  "rhythm.head_offset_lock": { label: "Lag lock", unit: "", range: [0, 1], better: "higher",
+    about: "How steady each segment's lag behind the head stays within each world over the window, from 0 to 1." },
+  "rhythm.legs_on_tempo": { label: "Legs on tempo", unit: "%", scale: 100, better: "higher",
+    about: "1 minus the legs-off-tempo cost: how closely each segment's leg joints come back to their angles at the same point of its clock's last turn." },
+  "rhythm.foot_slip": { label: "Foot slip", unit: "", better: "lower",
+    about: "The foot-slip cost before its weight, from 0 to 1: how fast each segment's feet slide while they stay on the ground. A segment dragged by its neighbours slips." },
+  "episodes.start_bearing": { label: "Target's start bearing", unit: "°", scale: RADIANS_TO_DEGREES,
+    about: "The target's bearing from the head's forward direction at the start of the episode, either way: 0° ahead, 180° behind." },
+  "episodes.arrived_by_bearing": { label: "Arrived, by start bearing", unit: "",
+    about: "Each episode's arrival, in the column of its start bearing's class: ahead, side, behind side, or behind." },
+  "episodes.arrival_steps_by_bearing": { label: "Time to arrive, by start bearing", unit: "steps",
+    about: "Each arrival's length in steps, in the column of its start bearing's class." },
   "timing.transitions_per_second": { label: "Simulation speed", unit: "steps/s",
     about: "World steps collected per second while collecting: how fast the simulation and the agents' acting run together. The first window of every session also includes start-up, such as compiling the GPU kernels, so it is drawn apart and left out of the median." },
   "timing.collecting_seconds": { label: "Collecting", unit: "s",
@@ -308,22 +340,33 @@ const SETTING_CHIPS = [
       (t.after_arrival === "new_target" ? ", walks on to a new target after arriving" : "") },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   // Runs before the spine could be commanded have no such setting.
-  { keys: ["environment.spine_control"], text: (s) => s.environment.spine_control ? "each segment bends the spine joint behind it" : "passive spine" },
+  { keys: ["environment.spine_control", "environment.passive_follower_spine"], text: (s) => !s.environment.spine_control ? "passive spine"
+      : s.environment.passive_follower_spine ? "the head bends its neck, the rest of the spine is passive" : "each segment bends the spine joint behind it" },
+  { keys: ["environment.clocks", "environment.clock"], text: ({ environment: e }) => {
+      if (!e.clocks || !e.clock) return null;
+      const low = e.clock.middle_tempo_hz / 2 ** e.clock.tempo_range_octaves, high = e.clock.middle_tempo_hz * 2 ** e.clock.tempo_range_octaves;
+      return `a clock per segment, ${number(low)}–${number(high)} Hz`;
+    } },
   { keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
       // The earlier efficiency reward sets per-step weights instead of proportions.
       if (r.step_cost_parts === undefined) return `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}`;
-      const movement = r.movement_cost_parts || 0;
-      const used = r.body_contact_cost_parts + r.step_cost_parts + r.leg_contact_cost_parts + movement;
+      // The first three costs are always named; the others only when used.
+      const costs = [["body", r.body_contact_cost_parts], ["step", r.step_cost_parts], ["legs", r.leg_contact_cost_parts],
+        ["movement", r.movement_cost_parts], ["slip", r.foot_slip_cost_parts], ["off tempo", r.legs_off_tempo_cost_parts],
+        ["out of tempo", r.out_of_tempo_cost_parts]].filter(([, parts], index) => index < 3 || parts);
+      const used = costs.reduce((sum, [, parts]) => sum + (parts || 0), 0);
       // The first runs of the rules paid the followers for their own goals.
       const followers = r.follower_progress_ratio !== undefined
         ? `followers ${number(r.follower_progress_ratio)} × head, toward the segment ahead`
         : r.follower_progress_share === 1 ? "shared by the followers"
         : r.follower_progress_share === 0 ? "none for the followers" : `followers ${number(r.follower_progress_share)} of it`;
-      return `rewards: arrival ${r.arrival_reward} · costs body ${number(r.body_contact_cost_parts)} : step ${number(r.step_cost_parts)} : legs ${number(r.leg_contact_cost_parts)}` +
-        (movement ? ` : movement ${number(movement)}` : "") +
+      const payout = r.arrival_payout !== undefined && r.arrival_payout !== 1 ? `, paid ${number(r.arrival_payout)}` : "";
+      const followerArrival = r.follower_arrival_share === 0 ? ", none for the followers" : "";
+      const progress = r.progress_parts ? `progress ${number(r.progress_parts)} parts a halving` : `progress: head ${number(r.head_progress_ratio)} × step cost`;
+      return `rewards: arrival ${r.arrival_reward}${payout}${followerArrival} · costs ${costs.map(([name, parts]) => `${name} ${number(parts)}`).join(" : ")}` +
         `${r.cost_budget_parts !== used ? ` of ${number(r.cost_budget_parts)} parts` : ""}` +
-        (r.cost_horizon_steps ? `, over ${count(r.cost_horizon_steps)} steps` : "") + ` · progress: head ${number(r.head_progress_ratio)} × step cost, ${followers}`;
+        (r.cost_horizon_steps ? `, over ${count(r.cost_horizon_steps)} steps` : "") + ` · ${progress}, ${followers}`;
     } },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
@@ -466,6 +509,16 @@ const TRAINING_LAYOUT = [
       [{ kind: "body_table", width: "w12", size: "small" }],
       BEHAVIOUR_STATS,
     ] },
+  { title: "Rhythm", minor: true, onlyIf: (settings) => settings.environment.clocks,
+    intro: "The segments' clocks over training: the line is the mean over the segments, or over the neighbour pairs, and the band their range.",
+    rows: [
+      [{ kind: "health", width: "auto", size: "small", key: "rhythm.neighbour_offset_consistency" },
+       { kind: "health", width: "auto", size: "small", key: "rhythm.neighbour_offset_lock" },
+       { kind: "health", width: "auto", size: "small", key: "rhythm.tempo" }],
+      [{ kind: "health", width: "auto", size: "small", key: "rhythm.legs_on_tempo" },
+       { kind: "health", width: "auto", size: "small", key: "rhythm.foot_slip" },
+       { kind: "health", width: "auto", size: "small", key: "learning.tempo_action_std" }],
+    ] },
   { title: "Run", minor: true,
     rows: [[{ kind: "run_stats", width: "w12" }]] },
 ];
@@ -489,6 +542,11 @@ const TRAINING_DETAILS = [
         "step_facts.joint_movement", "step_facts.spine_bend"]
         .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })),
     ] },
+  { title: "The rhythm and the gait, per segment", onlyIf: (settings) => settings.environment.clocks,
+    intro: "One row per neighbour pair or segment and a column per window, head at the top: each pair's offset and its consistency, each segment's tempo, lag behind the head, legs on tempo and foot slip, and how alike its legs move, left against right and against the next segment's.",
+    cards: ["rhythm.neighbour_offset", "rhythm.neighbour_offset_consistency", "rhythm.tempo", "rhythm.head_offset",
+      "rhythm.legs_on_tempo", "rhythm.foot_slip", "step_facts.left_right_similarity", "step_facts.neighbour_leg_similarity"]
+      .map((key) => ({ kind: "heatmap", width: "w3", size: "small", key })) },
   { title: "Each window's episodes", intro: "How many episodes ended in each window, and how they spread: each column is one window's episodes, with bad bins in red, good ones in blue, and stronger colours holding more episodes. With few worlds a column holds only a few episodes.",
     cards: [
       { kind: "lines", width: "w4", size: "small", key: "episodes.episode_ended" },
@@ -1641,7 +1699,7 @@ function trainingReport(root) {
   series("learning.learning_rate");  // charted only when it changes; the chips give it otherwise
 
   // Results, learning, behaviour, and the run, as the layout says.
-  TRAINING_LAYOUT.forEach((layout, index) => {
+  TRAINING_LAYOUT.filter((layout) => !layout.onlyIf || layout.onlyIf(settings)).forEach((layout, index) => {
     const spec = layout.tiles ? { ...layout, intro: RESULTS_INTRO(span, span * windowSteps) } : layout;
     const content = spec.tiles ? [trainingTiles(context)] : [];
     for (const row of spec.rows) {
@@ -1654,7 +1712,7 @@ function trainingReport(root) {
 
   // Details: physics, per-segment heatmaps, everything else, tables, settings.
   const details = [];
-  for (const group of TRAINING_DETAILS) {
+  for (const group of TRAINING_DETAILS.filter((group) => !group.onlyIf || group.onlyIf(settings))) {
     details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);
     details.push(html("div", { class: "row" }, ...group.cards.map((item) => trainingCard(item, context))));
   }
@@ -1978,6 +2036,41 @@ function evaluationReport(root) {
     root.append(html("section", {}, html("h2", {}, "The agents' walk"),
       html("p", { class: "note" }, `Every world walks ${count(facts.walk_steps)} steps with the mean action, starting a new episode after each one ends, and every episode counts: targets reached per world and minute, the share of the walk's episodes that arrived, the share of steps with legs touching (over the segments), and the head's speed toward its target in mm/s.`),
       table(["Seed", "Targets/min", "Arrived", "Legs", "Toward"], rows, 1)));
+  }
+
+  // Arrivals by where the target started: each seed's means over its
+  // episodes, back to counts, added over the seeds.
+  const walkGroup = (data.walk || []).length ? [["agents walking", data.walk]] : [];
+  const groups = [...actors.map((actor) => [actor, data.results[actor]]), ...walkGroup];
+  if (groups.some(([, records]) => records.some((record) => raw(record, "episodes.arrived_by_bearing") !== null))) {
+    const classes = info("episodes.arrived_by_bearing").parts;
+    const cell = (records, k) => {
+      let episodes = 0, arrivals = 0, steps = 0;
+      for (const record of records) {
+        const counts = raw(record, "episode_distributions.start_bearing");
+        const arrived = raw(record, "episodes.arrived_by_bearing"), length = raw(record, "episodes.arrival_steps_by_bearing");
+        if (!counts || !arrived || !length) continue;
+        const total = counts.reduce((a, b) => a + b, 0);
+        episodes += counts[k];
+        arrivals += arrived[k] * total;
+        steps += length[k] * total;
+      }
+      if (!episodes) return "–";
+      const time = arrivals ? ` in ${withUnit((steps / arrivals) * STEP_SECONDS, "s")}` : "";
+      return html("span", { title: `${count(arrivals)} of ${count(episodes)} episodes arrived` }, `${number((100 * arrivals) / episodes)}%${time}`);
+    };
+    root.append(html("section", {}, html("h2", {}, "Arrivals by the target's start bearing"),
+      html("p", { class: "note" }, "The share of episodes that arrived, and how long they took on average, by where the target lay when the episode started, seen from the head: ahead (within 45° of its forward direction), to the side (45° to 90°), behind to the side (90° to 135°), or behind; every seed together. The walk counts every episode it started, with targets drawn around the head wherever it then pointed."),
+      table(["Actor", ...classes.map((name) => name[0].toUpperCase() + name.slice(1))], groups.map(([name, records]) => [name, ...classes.map((_, k) => cell(records, k))]), 1)));
+  }
+
+  // The clocks' rhythm of each actor and of the walk, in a run with clocks.
+  const RHYTHM_KEYS = ["rhythm.tempo", "rhythm.neighbour_offset_consistency", "rhythm.neighbour_offset_lock", "rhythm.legs_on_tempo", "rhythm.foot_slip"];
+  if (groups.some(([, records]) => records.some((record) => raw(record, "rhythm.tempo") !== null))) {
+    const rows = groups.map(([name, records]) => [name, ...RHYTHM_KEYS.map((key) => withUnit(mean(records.map((record) => overall(shown(record, key)))), info(key).unit))]);
+    root.append(html("section", {}, html("h2", {}, "The rhythm"),
+      html("p", { class: "note" }, "The segments' clocks over the same steps, mean over the segments (or neighbour pairs) and the seeds: the tempo, how alike the neighbours' offsets are across the worlds (consistency) and how steady within each world (lock), the legs on tempo, and the foot slip. The details give every pair and segment."),
+      table(["Actor", ...RHYTHM_KEYS.map((key) => info(key).label)], rows, 1)));
   }
 
   // Details: the episodes in bins, each segment's return, every value per

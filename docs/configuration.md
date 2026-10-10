@@ -519,7 +519,7 @@ The report is ordered by priority, and the size of each part follows it.
 - **Header.** The run's name; one line with the cycles done, world steps,
   episodes, training time, and sessions; and one chip per group of settings
   (backend and worlds, model, episode limit, targets, observation radius,
-  rewards, window and cycles, network, PPO, seed). Chips that include a setting
+  spine, clocks, rewards, window and cycles, network, PPO, seed). Chips that include a setting
   the configuration file set itself are highlighted; the others show defaults.
   Every setting is listed in the details.
 - **1 · Results.** Numbers first, then the charts that show progress. Episode
@@ -533,8 +533,8 @@ The report is ordered by priority, and the size of each part follows it.
   arrivals took, exact because every episode that runs out of time lasts the
   time limit; the share of episodes that ended closer than they started,
   arrivals included; the share of steps with a body on the ground and with
-  legs touching; and the segments' speed toward their goals, which rises when
-  the centipede walks forward even before it steers. Each tile shows its value
+  legs touching; and the head's speed toward its target, which rises when
+  the centipede walks toward it even before it steers well. Each tile shows its value
   in the first block, with an arrow coloured blue when the change is for the
   better and orange when it is for the worse. Below them, the largest chart,
   **where episodes ended**: one bar per block, stacked to 100%, holding the
@@ -550,16 +550,25 @@ The report is ordered by priority, and the size of each part follows it.
   spread, and policy change (KL), each as the segments' mean with their range,
   and the learning rate when a schedule changes it.
 - **3 · Behaviour** (smaller). A table of the body, one row per segment (feet,
-  body, and legs touching, height, uprightness, speed, speed toward the goal),
+  body, and legs touching, height, uprightness, speed),
   averaged over the last block, with a switch to the first; both views share
   their colours. Then three numbers: the heading error, the length of the
   head's path per episode, and the share of time the head is upside down.
-- **4 · Run** (small). Four numbers: the time per update cycle (collecting
-  and learning), the simulation speed, the training time, and the episodes.
+- **4 · Rhythm** (smaller), in a run whose segments have clocks. Charts over
+  training of the wave's consistency and the offsets' lock, the clocks'
+  tempo, the legs on tempo, the foot slip, and the tempo command's spread,
+  each as the mean over the segments (or the neighbour pairs) with their
+  range ([diagnostics.md](diagnostics.md#rhythm)).
+- **4 · Run**, or 5 with clocks (small). Four numbers: the time per update
+  cycle (collecting and learning), the simulation speed, the training time,
+  and the episodes.
 - **Details,** behind a "Show details" button: the other learning values
   (entropy, clipped samples, critic loss, policy loss); the head's distance to
   its target as means over the worlds; each behaviour value per segment over
-  training; the episodes that ended per window and the four histograms window
+  training; with clocks, the rhythm and the gait per neighbour pair or
+  segment over training (offsets and their consistency, tempo, lag behind
+  the head, legs on tempo, foot slip, and how alike the legs move); the
+  episodes that ended per window and the four histograms window
   by window (readable only with many worlds); the speed and the time per
   window over training; the physics' contacts, constraint rows, and solver
   iterations; every other logged value; a table of every value at the start
@@ -635,7 +644,12 @@ poses and targets, which the seeds decide. An evaluation with a walk adds a
 section after the numbered ones, **the agents' walk**: per seed, the targets
 reached per world and minute, the share of the walk's episodes that arrived,
 the share of steps with legs touching, and the head's speed toward its
-target.
+target. Then **arrivals by the target's start bearing**: per actor, and for
+the walk, the share of episodes that arrived and how long they took, by
+where the target lay at the start, seen from the head (ahead, to the side,
+behind to the side, or behind, in 45° classes). In a run with clocks, last
+comes **the rhythm**: per actor and for the walk, the tempo, the wave's
+consistency and the offsets' lock, the legs on tempo, and the foot slip.
 
 - **1 · Results.** The same six tiles as in training, each holding the agents'
   value over every seed and the lowest and highest seed. When baselines are
