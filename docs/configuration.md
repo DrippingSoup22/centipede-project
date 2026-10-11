@@ -97,7 +97,7 @@ The `[run]` settings of a training file:
 | `report` | `true` | Whether to write the run's report; the smoke test turns it off |
 | `runs_folder` | `"runs"` | Where run folders are created; created if missing |
 | `start_from` | none | A run folder (its latest checkpoint) or a checkpoint file: the new run's agents begin from it |
-| `recordings` | 5 | How many episode lengths of windows the run records for replay, one file each: the first, the last, and the others spread evenly between, so that the files show the whole run's progress. An episode length of windows is cycles 1 to 4, or 5 to 8, ... for 256-step episodes and 64-step windows; all worlds start together, so each file holds every world's whole episode from its first step, or several episodes for the worlds that arrived early. `"all"` records every episode length, `0` none |
+| `recordings` | 5 | How many episode lengths of windows the run records for replay, one file each: with 1, the last, which shows what the run learned; with more, the first, the last, and the others spread evenly between, so that the files show the whole run's progress. An episode length of windows is cycles 1 to 4, or 5 to 8, ... for 256-step episodes and 64-step windows; all worlds start together, so each file holds every world's whole episode from its first step, or several episodes for the worlds that arrived early. `"all"` records every episode length, `0` none |
 | `record_worlds` | 64 | How many worlds each recording keeps: a whole number, or `"all"`, every world whatever `world_count` is; a number at least `world_count` also keeps every world. MujocoReplay draws at most 128 worlds at once, so more only make the files larger |
 | `record_selection` | `"ranked"` | Which worlds a number keeps: `"ranked"` splits the worlds by the rank of their summed reward into as many bands as it keeps, from the best to the worst, and keeps the best world of each, the rule MujocoReplay's viewer uses; `"first"` keeps the first worlds, so that consecutive recordings show the same worlds |
 | `record_levels` | 4 | The recorded worlds' ranks are sorted into this many levels, which the viewer shows (for example "level 2 of 4") |
@@ -118,7 +118,7 @@ checkpoint_every_cycles = 16
 report = true
 # runs_folder = "runs"
 # start_from = "runs/2026-10-07_1432_easy"
-# recordings = 5                     # episode lengths, first to last; or "all"
+# recordings = 5                     # episode lengths, first to last (1: the last); or "all"
 # record_worlds = 64                 # or "all"
 # record_selection = "ranked"
 # record_levels = 4

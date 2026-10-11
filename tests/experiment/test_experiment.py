@@ -63,7 +63,7 @@ def logged_cycles(folder):
 
 def test_recordings_spread_from_the_first_episode_length_to_the_last():
     assert recorded_blocks(64, 5) == {0, 16, 32, 47, 63}
-    assert recorded_blocks(64, 1) == {0}
+    assert recorded_blocks(64, 1) == {63}
     assert recorded_blocks(3, 5) == recorded_blocks(3, "all") == {0, 1, 2}
     assert recorded_blocks(64, 0) == set()
 
@@ -220,7 +220,8 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     # cycle 7. The return is read only in the windows in which episodes end,
     # two of every three, so its first average comes at cycle 9, and it never
     # rises after; cycle 11 is then a plateau of two cycles for both. Cycles
-    # 12 and 13 are recorded, the run's first recording being cycles 1 and 2.
+    # 12 and 13 are recorded, the run's only recording: its one scheduled
+    # recording, the last episode length (cycles 19 and 20), never comes.
     plateau_file = TRAINING_FILE.replace(
         'runs_folder = "RUNS"',
         'runs_folder = "RUNS"\nrecordings = 1\nplateau_cycles = 2',
@@ -230,7 +231,7 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     assert logged_cycles(folder) == list(range(1, 14))
     assert (folder / "checkpoints" / "cycle_0013.pt").exists()
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycles_0001-0002.npz", "cycles_0012-0013.npz"]
+    assert recordings == ["cycles_0012-0013.npz"]
     # The report says why the run stopped early.
     report = (folder / "report.html").read_text(encoding="utf-8")
     assert "Stopped after cycle 13 of 20: a plateau." in report

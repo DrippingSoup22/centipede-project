@@ -6,8 +6,9 @@
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
   cycles, and after the last, it saves a checkpoint and refreshes the report;
-  it records ``recordings`` episode lengths of windows for replay, the first,
-  the last, and the others spread evenly between, one file each. With a
+  it records ``recordings`` episode lengths of windows for replay, one file
+  each: with one, the last; with more, the first, the last, and the others
+  spread evenly between. With a
   ``[curriculum]``, after each cycle it moves the target's difficulty level
   from the arrivals and gives the environment that level's target ranges.
   With ``plateau_cycles`` it stops cleanly, after recording one more episode
@@ -507,14 +508,15 @@ def _plateau_readings(
 def recorded_blocks(block_count: int, recordings: int | str) -> set[int]:
     """Which of a run's episode lengths are recorded, numbered from 0.
 
-    The first and the last, and the others spread as evenly as the whole
-    numbers allow; every one with ``"all"`` or when there are no more than
+    With one, the last, which shows what the run learned; with more, the
+    first and the last, and the others spread as evenly as the whole numbers
+    allow; every one with ``"all"`` or when there are no more than
     ``recordings``; none with 0.
     """
     if recordings == "all" or recordings >= block_count:
         return set(range(block_count))
     if recordings == 1:
-        return {0}
+        return {block_count - 1}
     return {
         round(index * (block_count - 1) / (recordings - 1))
         for index in range(recordings)
