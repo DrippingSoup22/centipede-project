@@ -11,6 +11,12 @@ Warp, on the GPU. The learning algorithms come from the sibling `../RL_lib`
 library, and recorded runs are watched with the sibling `../MujocoReplay`
 viewer.
 
+> **This branch, `oscillators`, is the experiment workspace.** It holds
+> everything tried while training, such as a clock per leg and the reward
+> terms built around it ([`docs/environment.md`](docs/environment.md),
+> "Clocks"). It is never merged into `main` as it is: `main` holds the clean
+> program, and a clean version of what works will join it.
+
 ## Goals
 
 1. Learn to walk and to steer the head toward targets on flat ground.
