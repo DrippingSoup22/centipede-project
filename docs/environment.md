@@ -967,12 +967,28 @@ at a time.
   the segment ahead, six values per leg, each from −1 to 1: the tempo in use
   in octaves divided by `tempo_range_octaves`, and the five values of the
   step shape. The mean, over the two legs and the six values, of
-  (difference ÷ 2)², from 0 to 1. The head, with nothing ahead, pays
+  |difference| ÷ 2, from 0 to 1. The head, with nothing ahead, pays
   nothing. It generalises out of tempo from the tempo to the whole clock,
   the size of the steps and the posture as well, and compares a segment only
   with the one ahead, as `coupling = "ahead"` does, so that the head's clock
   passes down the body one segment at a time. The phase is not compared: the
   offset between neighbours is left free.
+
+  The differences count as they are, not squared, so that a mismatch costs
+  in proportion to its size. The cost first squared them, and that made the
+  mismatches that matter cost almost nothing: a follower whose two legs ran
+  0.26 octaves (about 0.3 Hz) slower than the segment ahead paid
+  (0.26 ÷ 2)² × 2 ÷ 12 = 0.003 of the cost's maximum, about 1.3 × 10⁻⁵ per
+  step at 10 parts, and a sweep amplitude half the one ahead cost as
+  little. In training runs with the clean reward and the squared cost at 5
+  and 10 parts, the tempo fell from the head to the tail (2.19 Hz at the
+  head, 1.94, 1.95, 1.86, 1.80, 1.80, 1.78 and 1.75 at the tail in one run at
+  10 parts, 2.55 to 1.73 in one at 5), and the wave formed only
+  on the rear pairs, whose tempos matched: two neighbours at different
+  tempos hold no phase offset. The user chose the absolute form on
+  2026-10-11. It charges small mismatches far more: at a typical mismatch
+  of 0.05 per value, 0.025 of the maximum against 0.000625, 40 times as
+  much, so its weights are not comparable with those of runs made before.
 - **Head clock change** `G_0` (`head_clock_change_cost_parts`, with leg
   clocks): how fast the head's clocks in use change on the step: the mean,
   over its two legs and the same six values, of (change ÷ the largest change

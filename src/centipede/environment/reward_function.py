@@ -260,7 +260,8 @@ def clock_tracking(context: RewardContext, settings: RewardSettings) -> torch.Te
 
     With leg clocks, each leg's clock in use, its tempo and step shape, is
     compared with the same side's leg of the segment ahead: the mean, over
-    the two legs and the six values, of (difference ÷ 2)². The phase is not
+    the two legs and the six values, of |difference| ÷ 2, so that a mismatch
+    costs in proportion to its size. The phase is not
     compared, so the offset between neighbours stays free. The head, with
     nothing ahead, pays nothing: a follower's job is to track the clock
     ahead, so that the head's clock passes down the body.

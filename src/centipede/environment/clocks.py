@@ -51,7 +51,7 @@ class ClockStep:
     are None with a clock per segment. ``tracking_mismatch`` ``(W, N)`` is how
     far each segment's legs' clocks in use are from the same side's legs of
     the segment ahead: the mean, over the two legs and the six values, of
-    (difference ÷ 2)², from 0 to 1; 0 for the head, with nothing ahead. The
+    |difference| ÷ 2, from 0 to 1; 0 for the head, with nothing ahead. The
     phase is not compared. ``change_size`` ``(W, N)`` is how fast each
     segment's legs' clocks in use changed on the step: the mean, over the two
     legs and the six values, of (change ÷ the largest change the lag allows
@@ -338,7 +338,7 @@ class Clocks:
         clock = self.clock_in_use()
         tracking_mismatch = clock.new_zeros(clock.shape[:2])
         tracking_mismatch[:, 1:] = (
-            ((clock[:, 1:] - clock[:, :-1]) / 2).square().mean(dim=(-2, -1))
+            ((clock[:, 1:] - clock[:, :-1]) / 2).abs().mean(dim=(-2, -1))
         )
         largest_change = 2 * self.lag_rate
         change_size = (

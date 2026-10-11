@@ -178,8 +178,8 @@ def test_leg_clocks_turn_each_leg_and_compare_it_with_its_sibling_and_its_side()
         [(0.5 + 0.25) / 2, 1 / 6, (0.25 + 0.5) / 2]
     )
     # Each follower's clocks in use against the same side's of the segment
-    # ahead: one tempo of the twelve values differs by 1, (1 / 2)² / 12.
-    assert result.tracking_mismatch[0].tolist() == pytest.approx([0.0, 1 / 48, 1 / 48])
+    # ahead: one tempo of the twelve values differs by 1, (1 / 2) / 12.
+    assert result.tracking_mismatch[0].tolist() == pytest.approx([0.0, 1 / 24, 1 / 24])
 
     # Each segment sees its legs' clocks, the left's first, and its
     # neighbours' clocks leg by leg, each relative to its own side.
