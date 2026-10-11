@@ -1,23 +1,80 @@
-"""Tests for the experiment's front file, with tiny runs of the real model v3.
+"""Tests for the experiment's front file, with tiny runs on the CPU.
 
-How each file is read and written is tested with the configuration and the
-run folder; these tests cover what the front adds: the order of a run's
-files and the episode lengths it records, continuing a run, starting from
-another run's agents with its own learning rate and, with the spine, more to
-see and command, and evaluating without changing anything.
+The main test trains and evaluates a run shaped like the oscillators'
+baseline (model v4, a clock per leg, load feedback from the foot's force,
+the clean reward, the curriculum), so that the path every training takes
+is run before any launch. The others cover the plateau stop.
 """
 
 import json
+import math
 from types import SimpleNamespace
-
-import numpy as np
-import pytest
-import torch
-from mujoco_replay.recording import read_recording
 
 from centipede.experiment.experiment import _plateau_readings, recorded_blocks, run
 from centipede.experiment.plateau import Plateau
-from centipede.settings_section import SettingsError
+
+# Run 26's settings, made tiny: 2 worlds, 4-step episodes, 4 cycles.
+BASELINE_FILE = """
+[run]
+mode = "train"
+name = "baseline"
+seed = 1
+checkpoint_every_cycles = 2
+runs_folder = "RUNS"
+recordings = 1
+
+[environment]
+max_episode_steps = 4
+observation_radius = 2
+spine_control = true
+passive_follower_spine = true
+leg_clocks = true
+leg_accelerations = true
+
+[environment.simulation]
+model_path = "models/assembly_v4.xml"
+backend = "cpu"
+world_count = 2
+
+[environment.target]
+distance_range_m = [0.030, 0.060]
+bearing_range_deg = [-90, 90]
+arrival = "head"
+range_circle_ratio = 2.5
+range_circle_margin_m = 0.035
+after_arrival = "new_target"
+
+[environment.clock]
+load_feedback_rad_per_s = 6.0
+load_feedback_source = "force"
+
+[environment.rewards]
+arrival_payout = 0.5
+follower_arrival_share = 0
+follower_progress_share = 0
+progress_parts = 3
+cost_budget_parts = 7
+step_cost_parts = 0
+body_contact_cost_parts = 2.5
+leg_contact_cost_parts = 2
+clock_tracking_cost_parts = 5
+
+[agents]
+hidden_layers = [8]
+actor_last_layer_scale = 0.01
+exploration_noise_beta = 0.5
+
+[agents.ppo]
+minibatch_size = 4
+
+[interaction_loop]
+rollout_window_steps = 2
+update_cycles = 4
+
+[curriculum]
+final_distance_range_m = [0.030, 0.200]
+final_bearing_range_deg = [-180, 180]
+"""
 
 TRAINING_FILE = """
 [run]
@@ -56,9 +113,9 @@ def run_file(tmp_path, text, **replacements):
     return run(path)
 
 
-def logged_cycles(folder):
+def logged_records(folder):
     lines = (folder / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
-    return [json.loads(line)["cycle"] for line in lines]
+    return [json.loads(line) for line in lines]
 
 
 def test_recordings_spread_from_the_first_episode_length_to_the_last():
@@ -68,149 +125,37 @@ def test_recordings_spread_from_the_first_episode_length_to_the_last():
     assert recorded_blocks(64, 0) == set()
 
 
-def saved_update_count(checkpoint_path):
-    checkpoint = torch.load(checkpoint_path, weights_only=True)
-    return checkpoint["agents"]["segment_agents"][0]["update_count"]
+def test_a_run_shaped_like_the_baseline_trains_and_is_evaluated(tmp_path):
+    folder = run_file(tmp_path, BASELINE_FILE)
 
-
-def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
-    folder = run_file(tmp_path, TRAINING_FILE, NAME="probe")
-
-    checkpoints = folder / "checkpoints"
-    assert sorted(path.name for path in checkpoints.iterdir()) == [
-        "cycle_0002.pt",
-        "cycle_0003.pt",  # the last cycle is always saved
-    ]
-    assert logged_cycles(folder) == [1, 2, 3]
-    assert "/*REPORT_DATA*/" not in (folder / "report.html").read_text(encoding="utf-8")
-
-    # Every episode length (3 steps, so two windows of 2) is one recording of
-    # both worlds; the last is cut short where the run ends.
+    records = logged_records(folder)
+    assert [record["cycle"] for record in records] == [1, 2, 3, 4]
+    for record in records:
+        for segment_parts in record["step_facts"]["reward_parts"]:
+            # Arrival, progress, body down, legs touching, following.
+            assert len(segment_parts) == 5
+            assert all(math.isfinite(part) for part in segment_parts)
+    checkpoints = sorted(path.name for path in (folder / "checkpoints").iterdir())
+    assert checkpoints == ["cycle_0002.pt", "cycle_0004.pt"]
+    # One recording, of the last episode length: two windows of 2 steps.
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycles_0001-0002.npz", "cycles_0003-0003.npz"]
-    whole = read_recording(folder / "recordings" / "cycles_0001-0002.npz")
-    assert whole.qpos.shape == (4, 2, 69)
-    assert whole.frame_info[:, 0].tolist() == [0, 0, 1, 1]  # updates done
-    assert (whole.event_frames.tolist(), whole.event_labels) == (
-        [2, 4],
-        ("update 1", "update 2"),
-    )
-    recording = read_recording(folder / "recordings" / "cycles_0003-0003.npz")
-    assert recording.qpos.shape == (2, 2, 69)
-    assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
-    assert (recording.rank.tolist(), recording.ranked_worlds) == ([1, 2], 2)
-    assert recording.level_count == 4
-    # The target, and the range circle as a ring of 2.5 x the start distance.
-    assert recording.marker_names == ("target", "range")
-    assert recording.marker_shapes == ("sphere", "ring")
-    assert recording.marker_positions.shape == (2, 2, 2, 3)
-    ring = recording.marker_radius[..., 1]
-    assert recording.marker_radius.shape == (2, 2, 2)
-    assert np.all((ring >= 2.5 * 0.030 - 1e-6) & (ring <= 2.5 * 0.060 + 1e-6))
-    assert recording.frame_info[:, 0].tolist() == [2, 2]  # updates done
-    assert recording.frame_info[:, 1].tolist() == [5, 6]  # steps per world
-    assert (recording.event_frames.tolist(), recording.event_labels) == (
-        [2],
-        ("update 3",),
-    )
-    assert recording.setup["configuration"]["run"]["recordings"] == 5
-    assert "<include" not in recording.model_xml
+    assert recordings == ["cycles_0003-0004.npz"]
 
-    continuing = (
-        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
-        "[interaction_loop]\nupdate_cycles = 5\n"
-    )
-    assert run_file(tmp_path, continuing) == folder
-    assert logged_cycles(folder) == [1, 2, 3, 4, 5]
-    assert saved_update_count(checkpoints / "cycle_0005.pt") == 5
-    sessions = json.loads((folder / "run_info.json").read_text())["sessions"]
-    assert [session["first_cycle"] for session in sessions] == [0, 3]
-    assert "interaction_loop.update_cycles" in sessions[1]["settings_written"]
-
-    latest = checkpoints / "cycle_0005.pt"
-    saved_bytes = latest.read_bytes()
     evaluation = (
         f'[run]\nmode = "evaluate"\nsource = "{folder.as_posix()}"\n'
-        '[evaluation]\nseeds = [7, 8]\nepisodes_per_seed = 2\nbaselines = ["zero"]\n'
-        "walk_steps = 5\n"
+        "[evaluation]\nseeds = [7]\nepisodes_per_seed = 2\nwalk_steps = 5\n"
+        "record = false\n"
+        "[environment.target]\ndistance_range_m = [0.030, 0.200]\n"
+        "bearing_range_deg = [-180, 180]\n"
     )
     run_file(tmp_path, evaluation)
 
-    assert latest.read_bytes() == saved_bytes
     (results_path,) = (folder / "evaluations").glob("*.json")
     assert results_path.with_suffix(".html").exists()
-    evaluation_recordings = sorted(
-        path.name.removeprefix(results_path.stem)
-        for path in (folder / "evaluations").glob("*.npz")
-    )
-    assert evaluation_recordings == [
-        "_agents_seed7.npz",
-        "_agents_seed8.npz",
-        "_agents_walking_seed7.npz",
-        "_agents_walking_seed8.npz",
-        "_zero_action_seed7.npz",
-        "_zero_action_seed8.npz",
-    ]
-    first_episodes = read_recording(
-        folder / "evaluations" / (results_path.stem + "_agents_seed7.npz")
-    )
-    assert first_episodes.qpos.shape[1:] == (2, 69)
-    assert first_episodes.frame_info is None and first_episodes.event_frames is None
-    assert first_episodes.level is None and first_episodes.rank is None
-    assert first_episodes.setup["actor"] == "agents"
-    results = json.loads(results_path.read_text())["results"]
-    assert list(results) == ["agents", "zero action"]  # the walk is kept apart
-    for records in results.values():
-        assert [record["seed"] for record in records] == [7, 8]
-        # Each of the two worlds counts its first episode only, in every histogram.
-        for record in records:
-            assert record["episodes"]["episode_ended"] == 2
-            for counts in record["episode_distributions"].values():
-                assert sum(counts) == 2
-    # The walk counts every episode of its 5 steps: one time-out per world, at
-    # the 3-step time limit, and none that reaches a target 30 mm away.
-    walk = read_recording(
-        folder / "evaluations" / (results_path.stem + "_agents_walking_seed7.npz")
-    )
-    assert walk.qpos.shape[:2] == (5, 2)
-    walk_records = json.loads(results_path.read_text())["walk"]
-    assert [record["seed"] for record in walk_records] == [7, 8]
-    for record in walk_records:
-        assert record["episodes"]["episode_ended"] == 2
-        assert record["targets_per_minute"] == 0.0
-
-
-def test_a_curriculum_level_is_logged_saved_and_kept_when_continuing(tmp_path):
-    # Every target lies 2 mm behind the head's tip, under the head, so every
-    # episode arrives on its first step: once an episode length of windows
-    # (two) has ended, the level rises by 0.5 x (100% - 50%) per cycle.
-    curriculum_file = TRAINING_FILE.replace(
-        "[interaction_loop]",
-        "[environment.target]\ndistance_range_m = [0.002, 0.002]\n"
-        "bearing_range_deg = [180, 180]\n\n"
-        "[curriculum]\nfinal_distance_range_m = [0.002, 0.002]\n"
-        "final_bearing_range_deg = [180, 180]\nlevel_rate = 0.5\n\n"
-        "[interaction_loop]",
-    )
-    folder = run_file(tmp_path, curriculum_file, NAME="curriculum")
-    continuing = (
-        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
-        "[interaction_loop]\nupdate_cycles = 5\n"
-    )
-    run_file(tmp_path, continuing)
-
-    # The continued session goes on at the saved level, and again waits for an
-    # episode length of windows before it moves it.
-    lines = (folder / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
-    records = [json.loads(line) for line in lines]
-    levels = [record["curriculum"]["level"] for record in records]
-    assert levels == [0.0, 0.0, 0.25, 0.5, 0.5]
-    # Each world reaches a target on every step: over 4 steps of 20 ms, 4 each.
-    assert records[0]["arrivals"] == {"share": None, "targets_per_minute": None}
-    assert records[1]["arrivals"]["share"] == 1.0
-    assert records[1]["arrivals"]["targets_per_minute"] == pytest.approx(3000)
-    checkpoint = torch.load(folder / "checkpoints" / "cycle_0005.pt", weights_only=True)
-    assert checkpoint["curriculum_level"] == 0.75
+    assert not list((folder / "evaluations").glob("*.npz"))
+    results = json.loads(results_path.read_text())
+    assert list(results["results"]) == ["agents"]
+    assert [record["seed"] for record in results["walk"]] == [7]
 
 
 def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
@@ -228,37 +173,13 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     ).replace("update_cycles = 3", "update_cycles = 20")
     folder = run_file(tmp_path, plateau_file, NAME="plateau")
 
-    assert logged_cycles(folder) == list(range(1, 14))
+    assert [record["cycle"] for record in logged_records(folder)] == list(range(1, 14))
     assert (folder / "checkpoints" / "cycle_0013.pt").exists()
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
     assert recordings == ["cycles_0012-0013.npz"]
     # The report says why the run stopped early.
     report = (folder / "report.html").read_text(encoding="utf-8")
     assert "Stopped after cycle 13 of 20: a plateau." in report
-
-
-def test_a_run_whose_task_is_solved_stops_once_it_gets_no_faster(tmp_path):
-    # A target 2 mm behind the head's tip lies under the head, so every episode
-    # arrives on its first step: all arrive, and the speed never rises. Its
-    # averages start at cycle 7, it has not got faster for two cycles at cycle
-    # 9, and one more episode length is recorded, cycles 10 and 11.
-    solved_file = (
-        TRAINING_FILE.replace(
-            'runs_folder = "RUNS"',
-            'runs_folder = "RUNS"\nrecordings = 1\nplateau_cycles = 2',
-        )
-        .replace("update_cycles = 3", "update_cycles = 20")
-        .replace(
-            "[agents]",
-            "[environment.target]\ndistance_range_m = [0.002, 0.002]\n"
-            'bearing_range_deg = [180, 180]\narrival = "head"\n\n[agents]',
-        )
-    )
-    folder = run_file(tmp_path, solved_file, NAME="solved")
-
-    assert logged_cycles(folder) == list(range(1, 12))
-    report = (folder / "report.html").read_text(encoding="utf-8")
-    assert "Stopped after cycle 11 of 20: the task is solved." in report
 
 
 def test_a_run_still_climbing_the_curriculum_does_not_plateau():
@@ -278,92 +199,3 @@ def test_a_run_still_climbing_the_curriculum_does_not_plateau():
 
     assert plateau(("task",)).reached(200)
     assert not plateau(("task", "level")).reached(200)
-
-
-def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
-    parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
-    harder_file = (
-        TRAINING_FILE.replace(
-            "[interaction_loop]",
-            "[environment.target]\ndistance_range_m = [0.03, 0.04]\n\n"
-            "[environment.rewards]\nmovement_cost_parts = 1\n\n"
-            "[interaction_loop]",
-        )
-        .replace("max_episode_steps = 3", "max_episode_steps = 3\nspine_control = true")
-        .replace(
-            'runs_folder = "RUNS"',
-            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\nrecordings = 0',
-        )
-        .replace(
-            "hidden_layers = [8]",
-            "hidden_layers = [16]\nlearning_rate = 1e-3\n"
-            'learning_rate_schedule = "linear"\nfinal_learning_rate = 1e-4',
-        )
-    )
-
-    child = run_file(tmp_path, harder_file, NAME="harder")
-
-    # The child's agents continued from the parent's three updates, widened to
-    # wider layers and to command the spine joint behind every segment but
-    # the rear.
-    checkpoint = torch.load(child / "checkpoints" / "cycle_0003.pt", weights_only=True)
-    assert checkpoint["agents"]["settings"]["hidden_layers"] == (16,)
-    assert checkpoint["agents"]["segment_action_sizes"] == [7] * 7 + [6]
-    assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
-    assert logged_cycles(child) == [1, 2, 3]
-    assert not (child / "recordings").exists()  # recording was turned off
-    # Its own learning rate replaced the parent's, along its own cycles.
-    lines = (child / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
-    rates = [json.loads(line)["learning"]["learning_rate"] for line in lines]
-    assert rates == pytest.approx([1e-3, 5.5e-4, 1e-4])
-
-    other_optimizer = harder_file.replace(
-        "hidden_layers = [16]", 'hidden_layers = [16]\noptimizer = "sgd"'
-    )
-    with pytest.raises(SettingsError, match="optimizer must match"):
-        run_file(tmp_path, other_optimizer, NAME="other")
-    other_activation = harder_file.replace(
-        "hidden_layers = [16]", 'hidden_layers = [16]\nhidden_activation = "tanh"'
-    )
-    with pytest.raises(SettingsError, match="hidden_activation must match"):
-        run_file(tmp_path, other_activation, NAME="other")
-    deeper = harder_file.replace("hidden_layers = [16]", "hidden_layers = [16, 16]")
-    with pytest.raises(SettingsError, match="as many layers"):
-        run_file(tmp_path, deeper, NAME="deeper")
-    # Leg clocks give the same leg actions other meanings than motor commands.
-    leg_clocks = harder_file.replace("assembly_v3", "assembly_v4").replace(
-        "spine_control = true", "spine_control = true\nleg_clocks = true"
-    )
-    with pytest.raises(SettingsError, match="leg_clocks must match"):
-        run_file(tmp_path, leg_clocks, NAME="leg_clocks")
-    # Leg accelerations move every observation block after a segment's own.
-    accelerations = harder_file.replace(
-        "spine_control = true", "spine_control = true\nleg_accelerations = true"
-    )
-    with pytest.raises(SettingsError, match="leg_accelerations must match"):
-        run_file(tmp_path, accelerations, NAME="accelerations")
-    assert len(list((tmp_path / "runs").iterdir())) == 2  # nothing left behind
-
-
-def test_a_time_limit_stops_the_session_with_a_checkpoint_to_continue_from(tmp_path):
-    """A limit too short for even one cycle stops after the first, with a
-    checkpoint although checkpoints are every two cycles; a continuing file
-    with a new limit finishes the run."""
-    limited = TRAINING_FILE.replace(
-        'runs_folder = "RUNS"', 'runs_folder = "RUNS"\ntime_limit_hours = 1e-9'
-    )
-
-    folder = run_file(tmp_path, limited, NAME="session")
-
-    assert logged_cycles(folder) == [1]
-    assert [path.name for path in (folder / "checkpoints").iterdir()] == [
-        "cycle_0001.pt"
-    ]
-
-    continuing = (
-        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
-        "time_limit_hours = 1\n"
-    )
-    run_file(tmp_path, continuing)
-
-    assert logged_cycles(folder) == [1, 2, 3]

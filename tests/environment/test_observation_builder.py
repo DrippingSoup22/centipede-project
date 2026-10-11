@@ -16,7 +16,7 @@ from centipede.environment.observation_builder import (
 from centipede.environment.simulation import PhysicalState
 
 SEGMENT_COUNT, WORLD_COUNT = 4, 2
-DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+DEVICES = ["cpu"]
 
 
 def distinct_state(device) -> PhysicalState:

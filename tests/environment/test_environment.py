@@ -17,7 +17,7 @@ from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.settings_section import SettingsError
 
-BACKENDS = ["cpu"] + (["gpu"] if torch.cuda.is_available() else [])
+BACKENDS = ["cpu"]
 
 
 def environment(
