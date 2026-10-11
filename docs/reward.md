@@ -1,5 +1,8 @@
 # The reward and the tools
 
+<!-- Formulas go in ```math blocks only, never inline $...$: GitHub stops
+     rendering the blocks of a <details> section that also holds inline math. -->
+
 What the agents are paid for now, and every tool built around the reward.
 This page describes the workspace branch `oscillators` as it trains today.
 
@@ -57,7 +60,7 @@ No weight is tuned by hand: each follows from a few rules and a number of
 **parts**.
 
 - **The discount fits the episode.** With episodes of `T = 512` steps, the
-  agents discount by $\gamma = 2^{-1/T} = 0.998647$: an arrival on the last
+  agents discount by γ = 2^(−1/T) = 0.998647: an arrival on the last
   step of an episode is worth half as much, seen from its first.
 - **The worst arrival balances to zero.** Over a **cost horizon** of
   `H = 256` steps (a typical approach, not the time limit), an approach that
@@ -72,7 +75,7 @@ c \;=\; \frac{\gamma^{H-1}\,(1-\gamma)}{1-\gamma^{H}} \;=\; 0.003271 \text{ per 
 ```
 
   with `A = 1`, the arrival reward. Over the horizon this budget is
-  $H c = 0.837$ arrivals.
+  H·c = 0.837 arrivals.
 - **The budget is split into parts.** `cost_budget_parts = 7`, so **one part
   costs 0.000467 per step** (0.120 over the horizon). A cost with `p` parts
   weighs
@@ -83,7 +86,7 @@ w \;=\; p \cdot \frac{c}{7} \;=\; p \times 0.000467 \text{ per step}
 
 - **Progress is counted in parts too.** One halving of the head's distance is
   worth `progress_parts = 3` parts of the whole horizon:
-  $3 \times H c / 7 = 0.359$.
+  3 × H·c / 7 = 0.359.
 - **The arrival pays half.** `arrival_payout = 0.5`: an arrival pays 0.5, but
   the budget above is measured against a full arrival of 1, so the costs weigh
   twice as much against what an arrival actually pays.
@@ -148,7 +151,7 @@ more. Over an episode the steps add up to
 \sum_t P \;=\; \log_2 \frac{d_{\text{start}}}{\max(d_{\text{end}},\, r)}
 ```
 
-whatever the path. An approach from 45 mm is worth $\log_2(45/4) = 3.5$ halvings, so 1.25;
+whatever the path. An approach from 45 mm is worth log₂(45/4) = 3.5 halvings, so 1.25;
 from 200 mm, the curriculum's farthest, 5.6 halvings, so 2.0, four times the
 arrival's 0.5.
 
@@ -334,7 +337,7 @@ Ishiguro's quadruped (2017), whose oscillators interact only through the body.
 
 `N` is the foot's load at the end of the last step, from 0 to 1: with
 `"force"`, its normal force over the weight one segment carries,
-$N = \min\!\big(1,\ F_n / (m g / 8)\big)$; with `"contact"`, 1 when the foot
+N = min(1, Fₙ / (m·g / 8)); with `"contact"`, 1 when the foot
 touches the ground. Stance is centred at `φ = π/2`, where `cos φ` changes
 sign. σ must stay below the slowest `ω`, 2π rad/s, or a loaded clock could
 stop in stance for good.
@@ -419,7 +422,7 @@ tried in runs 02, 04, 08, 09 and 13.
 <details>
 <summary>Math</summary>
 
-Each action is sampled as $u = \mu(s) + \sigma(s)\,\varepsilon$; the sequence
+Each action is sampled as u = μ(s) + σ(s)·ε; the sequence
 of `ε` over 1,000 steps has power spectral density
 
 ```math
