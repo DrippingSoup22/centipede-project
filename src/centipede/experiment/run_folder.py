@@ -6,10 +6,9 @@ A training run's folder, under ``runs_folder``::
     ├─ configuration.toml   the complete settings; can be run again as they are
     ├─ run_info.json        how and with what each training session ran
     ├─ training_log.jsonl   one line of diagnostics per window
-    ├─ report.html          the run's summary, unless the run turned it off
     ├─ checkpoints/         cycle_0016.pt, cycle_0032.pt, ...
     ├─ recordings/          cycles_0001-0016.npz, ...: replays of episode lengths
-    └─ evaluations/         results, report, and replays of each evaluation
+    └─ evaluations/         results, page, and replays of each evaluation
 
 Folders are created only when they do not exist yet, and an existing run is
 never overwritten: a new run whose name is taken gets a numbered suffix.
@@ -43,7 +42,6 @@ class RunFolder:
         self.evaluations = path / "evaluations"
         self.log_path = path / "training_log.jsonl"
         self.run_info_path = path / "run_info.json"
-        self.report_path = path / "report.html"
 
     @classmethod
     def create(cls, runs_folder: Path, name: str) -> "RunFolder":

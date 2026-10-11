@@ -5,10 +5,10 @@
 - **train** creates a new run folder, or reopens one with ``continue_from``;
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
-  cycles, and after the last, it saves a checkpoint and refreshes the report;
-  it records ``recordings`` episode lengths of windows for replay, one file
-  each: with one, the last; with more, the first, the last, and the others
-  spread evenly between. With a
+  cycles, and after the last, it saves a checkpoint; it records
+  ``recordings`` episode lengths of windows for replay, one file each: with
+  one, the last; with more, the first, the last, and the others spread evenly
+  between. With a
   ``[curriculum]``, after each cycle it moves the target's difficulty level
   from the arrivals and gives the environment that level's target ranges.
   With ``plateau_cycles`` it stops cleanly, after recording one more episode
@@ -71,7 +71,6 @@ from centipede.experiment.recordings import (
 from centipede.experiment.report import (
     LoggedCategory,
     write_evaluation_report,
-    write_training_report,
 )
 from centipede.experiment.run_folder import RunFolder
 from centipede.interaction_loop.interaction_loop import InteractionLoop
@@ -388,7 +387,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         if next_recording and stop_cycle is None:
             recorder.arm(recording_frames)
             recording_first_cycle = cycle + 1
-        # Why the run stops early, for the console and the report.
+        # Why the run stops early, for the console.
         stop_message = None
         if out_of_time:
             stop_message = (
@@ -462,8 +461,6 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 configuration.environment.leg_clocks,
                 configuration.environment.leg_accelerations,
             )
-            if run_settings.report:
-                _write_training_report(folder, configuration, categories, stop_message)
         if stop_message is not None:
             print(stop_message)
             return folder.path
@@ -733,37 +730,6 @@ def _physics_category(loop: InteractionLoop) -> LoggedCategory:
     )
 
 
-def _write_training_report(
-    folder: RunFolder,
-    configuration: Configuration,
-    categories: list[LoggedCategory],
-    stop_message: str | None = None,
-) -> None:
-    """Refresh the run's report from its whole log; ``stop_message`` says why
-    the run stopped before its last cycle."""
-    sessions = folder.read_run_info()["sessions"]
-    run_facts = {
-        "run_folder": str(folder.path),
-        "started": sessions[0]["started"],
-        "training_sessions": len(sessions),
-        "code_version": sessions[-1]["git_commit"] or "unknown",
-        "device": sessions[-1]["device"],
-    }
-    if configuration.run.start_from is not None:
-        run_facts["agents_started_from"] = sessions[0]["checkpoint"]
-    if stop_message is not None:
-        run_facts["stopped"] = stop_message
-    write_training_report(
-        folder.report_path,
-        folder.path.name,
-        run_facts,
-        categories,
-        folder.read_log(),
-        configuration.training_values(),
-        sessions,
-    )
-
-
 def _session_facts(
     configuration_path: Path,
     device: str,
@@ -774,7 +740,7 @@ def _session_facts(
 
     ``device`` is the agents' device, which matches the physics backend.
     ``settings_written`` lists the settings the file sets itself, rather than
-    leaving to their defaults, so that the report can mark them.
+    leaving to their defaults.
     """
     if device == "cuda":
         device_name = torch.cuda.get_device_name()

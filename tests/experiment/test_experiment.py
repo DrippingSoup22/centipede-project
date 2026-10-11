@@ -158,7 +158,7 @@ def test_a_run_shaped_like_the_baseline_trains_and_is_evaluated(tmp_path):
     assert [record["seed"] for record in results["walk"]] == [7]
 
 
-def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
+def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path, capsys):
     # Three steps never reach a target 30 mm away: the arrival share stays 0.
     # An episode length is two windows, so it is first measured at cycle 2,
     # and its first average over three episode lengths (six cycles) comes at
@@ -177,9 +177,8 @@ def test_a_run_at_a_plateau_records_one_more_episode_length_and_stops(tmp_path):
     assert (folder / "checkpoints" / "cycle_0013.pt").exists()
     recordings = sorted(path.name for path in (folder / "recordings").iterdir())
     assert recordings == ["cycles_0012-0013.npz"]
-    # The report says why the run stopped early.
-    report = (folder / "report.html").read_text(encoding="utf-8")
-    assert "Stopped after cycle 13 of 20: a plateau." in report
+    # The console says why the run stopped early.
+    assert "Stopped after cycle 13 of 20: a plateau." in capsys.readouterr().out
 
 
 def test_a_run_still_climbing_the_curriculum_does_not_plateau():

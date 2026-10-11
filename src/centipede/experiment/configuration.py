@@ -66,7 +66,6 @@ class RunSettings:
     name: str
     seed: int
     checkpoint_every_cycles: int
-    report: bool
     runs_folder: Path
     start_from: Path | None
     recordings: int | str
@@ -103,7 +102,6 @@ class RunSettings:
             name=section.text("name"),
             seed=section.integer("seed", default=0, minimum=0),
             checkpoint_every_cycles=checkpoint_every_cycles,
-            report=section.boolean("report", default=True),
             runs_folder=section.path("runs_folder", default=Path("runs")),
             start_from=section.path("start_from", default=None),
             recordings=section.count_or_all("recordings", default=5, minimum=0),

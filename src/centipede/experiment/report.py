@@ -1,9 +1,9 @@
-"""A run's summary pages: one for training, one per evaluation.
+"""An evaluation's page: one self-contained HTML file that opens in any
+browser, offline.
 
-Each page is one self-contained HTML file that opens in any browser, offline.
 This module only gathers the data as plain values; ``report_page.html`` decides
 what is shown and how. Its script starts with the page's layout and a short
-explanation of every value, so changing the report means editing that list.
+explanation of every value, so changing the page means editing that list.
 Values the layout does not place are still shown, among the details, so a value
 added to a diagnostics category always appears.
 """
@@ -47,33 +47,6 @@ class LoggedCategory:
     def plain_values(self) -> dict[str, Any]:
         """The current values as numbers and lists; missing values are None."""
         return {name: _plain(value) for name, value in self.read().items()}
-
-
-def write_training_report(
-    path: Path,
-    title: str,
-    run_facts: dict[str, Any],
-    categories: Sequence[LoggedCategory],
-    log: list[dict[str, Any]],
-    settings: dict[str, Any],
-    sessions: list[dict[str, Any]],
-) -> None:
-    """Write a training run's page from its log and its complete settings.
-
-    ``run_facts`` are plain facts about the run, such as when it started, and
-    ``sessions`` are the training sessions recorded in ``run_info.json``.
-    """
-    data = {
-        "kind": "training",
-        "title": title,
-        "run_facts": run_facts,
-        "sessions": sessions,
-        "step_seconds": STEP_SECONDS,
-        "categories": [_outline(category) for category in categories],
-        "log": log,
-        "settings": settings,
-    }
-    _write_page(path, data)
 
 
 def write_evaluation_report(
