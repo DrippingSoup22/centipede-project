@@ -324,3 +324,30 @@ def test_a_force_load_is_each_foots_force_over_a_segments_weight_before_the_step
 def test_an_observation_radius_reaching_past_the_body_is_rejected():
     with pytest.raises(SettingsError, match=r"observation_radius .* 8 segments"):
         environment(observation_radius=8)
+
+
+def test_legs_with_ankles_take_a_centre_more_and_reach_their_targets():
+    """Model v5's legs have four joints: with leg clocks each leg takes seven
+    actions, the ankle's centre last, and every joint follows its target."""
+    env = environment(
+        model_path="models/assembly_v5.xml",
+        world_count=2,
+        leg_clocks=True,
+        spine_control=True,
+        passive_follower_spine=True,
+        clock={"clock_time_constant_s": 0.0},
+    )
+    assert env.segment_count == 12
+    assert env.segment_action_sizes[:2] == [15, 14]  # the head commands the spine
+    env.reset(seed=1)
+    # Every centre at 0.4 and no steps: each joint is held at 0.4 of its
+    # half range from its middle.
+    action = torch.zeros(2, env.segment_count, env.action_size)
+    action[..., 3:7] = 0.4
+    action[..., 10:14] = 0.4
+    for _ in range(10):
+        observations, *_ = env.step(action)
+    assert observations.shape == (2, 12, env.observation_size)
+    middle, half_width = env.simulation.leg_angle_range
+    angles = env.simulation.physical_state.leg_joint_position
+    assert torch.allclose(angles, middle + 0.4 * half_width, atol=0.05)

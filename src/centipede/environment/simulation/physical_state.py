@@ -23,10 +23,10 @@ class PhysicalState:
 
     body_height: torch.Tensor  # (W, N)
     body_quaternion: torch.Tensor  # (W, N, 4), (w, x, y, z)
-    leg_joint_position: torch.Tensor  # (W, N, 6), action order
+    leg_joint_position: torch.Tensor  # (W, N, M), action order, M leg motors
     body_linear_velocity: torch.Tensor  # (W, N, 3), segment frame
     body_angular_velocity: torch.Tensor  # (W, N, 3), segment frame
-    leg_joint_velocity: torch.Tensor  # (W, N, 6), action order
+    leg_joint_velocity: torch.Tensor  # (W, N, M), action order
     left_foot_ground_contact: torch.Tensor  # (W, N), bool
     right_foot_ground_contact: torch.Tensor  # (W, N), bool
     body_ground_contact: torch.Tensor  # (W, N), bool
@@ -40,9 +40,12 @@ class PhysicalState:
 
     @classmethod
     def allocate(
-        cls, world_count: int, segment_count: int, device: str
+        cls, world_count: int, segment_count: int, device: str, leg_motor_count: int = 6
     ) -> "PhysicalState":
-        """Create a physical state of zeros, to be filled in place by a backend."""
+        """Create a physical state of zeros, to be filled in place by a backend.
+
+        ``leg_motor_count`` is each segment's number of leg joints: 6, or 8
+        with ankles (model v5)."""
 
         def zeros(*trailing_shape: int, dtype: torch.dtype = torch.float32):
             return torch.zeros(
@@ -53,10 +56,10 @@ class PhysicalState:
         return cls(
             body_height=zeros(n),
             body_quaternion=zeros(n, 4),
-            leg_joint_position=zeros(n, 6),
+            leg_joint_position=zeros(n, leg_motor_count),
             body_linear_velocity=zeros(n, 3),
             body_angular_velocity=zeros(n, 3),
-            leg_joint_velocity=zeros(n, 6),
+            leg_joint_velocity=zeros(n, leg_motor_count),
             left_foot_ground_contact=zeros(n, dtype=torch.bool),
             right_foot_ground_contact=zeros(n, dtype=torch.bool),
             body_ground_contact=zeros(n, dtype=torch.bool),

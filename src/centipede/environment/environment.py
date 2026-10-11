@@ -30,15 +30,18 @@ class Environment:
     episode ends in a world, ``step`` starts the next one by itself: it resets
     the world, or after an arrival may only give it a new target.
 
-    ``segment_action_sizes`` lists how many actions each segment takes: six for
-    its legs, or with leg clocks twelve, six per leg: its clock's tempo and
-    five values of its step shape; with spine control, the spine joint behind
-    it, for every segment but the rear (only for the head with a passive
-    follower spine); and with a clock per segment, last, its clock's tempo.
+    ``segment_action_sizes`` lists how many actions each segment takes: one
+    per leg joint, six (or eight with ankles, model v5), or with leg clocks
+    six per leg (seven with an ankle): its clock's tempo and its step shape,
+    the sweep and lift amplitudes and each joint's centre; with spine
+    control, the spine joint behind it, for every segment but the rear (only
+    for the head with a passive follower spine); and with a clock per
+    segment, last, its clock's tempo.
     ``action_size`` is the width of the joint action, the largest of them; a
     segment with fewer actions is padded. ``tempo_columns`` lists each
     segment's tempo actions, and ``motor_columns`` the action that sets each
-    of its motors (with leg clocks, each leg joint's centre), for the agents'
+    of its sweep, lift and knee motors and its spine motor (with leg clocks,
+    each leg joint's centre; an ankle is not reported), for the agents'
     learning diagnostics. ``clocks`` holds the clocks, or None without them.
     """
 
@@ -49,6 +52,11 @@ class Environment:
         self.world_count = self.simulation.world_count
         self.segment_count = self.simulation.segment_count
         self.device = self.simulation.physical_state.body_height.device
+        # Each leg's joints (3, or 4 with an ankle) and each segment's leg
+        # motors, both legs'.
+        leg_joint_count = len(self.simulation.leg_roles)
+        leg_motor_count = self.simulation.leg_motor_count
+        self.leg_motor_count = leg_motor_count
 
         # The radius comes from the configuration and the segment count from
         # the model, so they can only be checked together, here.
@@ -77,6 +85,7 @@ class Environment:
                 self.simulation.step_duration_s,
                 self.device,
                 per_leg=settings.leg_clocks,
+                leg_joint_count=leg_joint_count,
             )
         self.observation_builder = ObservationBuilder(
             self.segment_count,
@@ -88,6 +97,7 @@ class Environment:
             neighbour_clock_observed=settings.neighbour_clocks,
             step_shape_observed=settings.leg_clocks,
             leg_acceleration_observed=settings.leg_accelerations,
+            leg_joint_count=leg_joint_count,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -99,10 +109,14 @@ class Environment:
             for segment_index in range(self.segment_count)
         ]
         # The leg actions come first, then the spine command, then a clock
-        # per segment's tempo. With leg clocks, each leg's six actions are its
+        # per segment's tempo. With leg clocks, each leg's actions are its
         # clock's tempo and its step shape: sweep and lift amplitudes, then
-        # sweep, lift and knee centres.
-        leg_action_count = 12 if settings.leg_clocks else 6
+        # each joint's centre, sweep, lift, knee (and ankle).
+        self.leg_clock_value_count = 3 + leg_joint_count
+        leg_action_count = (
+            2 * self.leg_clock_value_count if settings.leg_clocks else leg_motor_count
+        )
+        self.leg_action_count = leg_action_count
         self.segment_action_sizes = [
             leg_action_count + int(commands) + int(settings.clocks)
             for commands in commands_spine
@@ -115,16 +129,21 @@ class Environment:
             commands_spine[:spine_count], dtype=torch.float32, device=self.device
         )
         # Each segment's tempo actions, and the action that sets each of its
-        # motors, for the agents' learning diagnostics.
+        # sweep, lift and knee motors, for the agents' learning diagnostics.
         if settings.leg_clocks:
-            self.tempo_columns = [[0, 6] for _ in commands_spine]
-            leg_motor_columns = [3, 4, 5, 9, 10, 11]
+            per_leg = self.leg_clock_value_count
+            self.tempo_columns = [[0, per_leg] for _ in commands_spine]
+            leg_motor_columns = [
+                leg * per_leg + 3 + joint for leg in range(2) for joint in range(3)
+            ]
         else:
             self.tempo_columns = [
                 [size - 1] if settings.clocks else []
                 for size in self.segment_action_sizes
             ]
-            leg_motor_columns = [0, 1, 2, 3, 4, 5]
+            leg_motor_columns = [
+                leg * leg_joint_count + joint for leg in range(2) for joint in range(3)
+            ]
         self.motor_columns = [
             leg_motor_columns + [self.spine_column] * commands
             for commands in commands_spine
@@ -133,12 +152,14 @@ class Environment:
         self.tempo_index = torch.tensor(
             self.tempo_columns, dtype=torch.long, device=self.device
         ).expand(self.world_count, -1, -1)
-        # The joints each segment commands, among its six leg joints and the
-        # spine joint behind it.
+        # The joints each segment commands, among its leg joints and the
+        # spine joint behind it, last.
         commanded_joints = torch.ones(
-            (self.segment_count, 7), dtype=torch.float32, device=self.device
+            (self.segment_count, leg_motor_count + 1),
+            dtype=torch.float32,
+            device=self.device,
         )
-        commanded_joints[:, 6] = torch.tensor(commands_spine, dtype=torch.float32)
+        commanded_joints[:, -1] = torch.tensor(commands_spine, dtype=torch.float32)
         # Arrival under the head counts progress no closer than half the head's
         # width: within the head's reach, nothing pays more.
         self.head_outline = self.simulation.head_outline
@@ -161,6 +182,7 @@ class Environment:
             leg_angle_range=(
                 self.simulation.leg_angle_range if settings.leg_clocks else None
             ),
+            leg_motor_count=leg_motor_count,
         )
 
         # Episode state, overwritten in place.
@@ -179,7 +201,7 @@ class Environment:
             (self.world_count, 2), dtype=torch.float32, device=self.device
         )
         self.previous_joint_position = torch.zeros(
-            (self.world_count, self.segment_count, 7),
+            (self.world_count, self.segment_count, leg_motor_count + 1),
             dtype=torch.float32,
             device=self.device,
         )
@@ -203,7 +225,7 @@ class Environment:
         )
         self.segment_weight_n = self.simulation.body_weight_n / self.segment_count
         self.previous_leg_joint_velocity = torch.zeros(
-            (self.world_count, self.segment_count, 6),
+            (self.world_count, self.segment_count, leg_motor_count),
             dtype=torch.float32,
             device=self.device,
         )
@@ -211,7 +233,7 @@ class Environment:
         # of its speed divided by the step's duration; zero after a restart,
         # which has no step behind it.
         self.leg_joint_acceleration = torch.zeros(
-            (self.world_count, self.segment_count, 6),
+            (self.world_count, self.segment_count, leg_motor_count),
             dtype=torch.float32,
             device=self.device,
         )
@@ -305,14 +327,18 @@ class Environment:
         clock_step = None
         leg_amplitudes = None
         if self.settings.leg_clocks:
-            self.clocks.follow_actions(joint_action[..., :12].unflatten(-1, (2, 6)))
+            self.clocks.follow_actions(
+                joint_action[..., : self.leg_action_count].unflatten(
+                    -1, (2, self.leg_clock_value_count)
+                )
+            )
             clock_step = self.clocks.step(foot_load=self.previous_foot_load)
             leg_amplitudes = self.clocks.amplitudes
             leg_actions = leg_targets(
                 self.clocks.clock_phase, leg_amplitudes, self.clocks.centres
             )
         else:
-            leg_actions = joint_action[..., :6]
+            leg_actions = joint_action[..., : self.leg_motor_count]
         spine_actions = None
         if self.settings.spine_control:
             spine_actions = (
@@ -332,7 +358,7 @@ class Environment:
         if self.settings.clocks:
             clock_step = self.clocks.step(
                 joint_action.gather(2, self.tempo_index),
-                self.previous_joint_position[..., :6],
+                self.previous_joint_position[..., : self.leg_motor_count],
                 state.leg_joint_position,
             )
         planted = self.previous_foot_contact & _foot_contact(state)

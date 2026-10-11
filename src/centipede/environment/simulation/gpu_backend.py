@@ -110,7 +110,10 @@ def _add_leg_reset_noise(
         wp.rand_init(reset_seeds[world_index], reset_counts[world_index])
     )
     segment_count = leg_qpos_addresses.shape[0]
-    thread_number = (world_index * segment_count + segment_index) * 6 + leg_joint_index
+    leg_motor_count = leg_qpos_addresses.shape[1]
+    thread_number = (
+        world_index * segment_count + segment_index
+    ) * leg_motor_count + leg_joint_index
     random_state = wp.rand_init(reset_seed, thread_number)
 
     qpos_address = leg_qpos_addresses[segment_index, leg_joint_index]
@@ -225,7 +228,7 @@ def _read_segment_state(
             foot_position[0], foot_position[1]
         )
 
-    for leg_joint_index in range(6):
+    for leg_joint_index in range(leg_qpos_addresses.shape[1]):
         qpos_address = leg_qpos_addresses[segment_index, leg_joint_index]
         dof_address = leg_dof_addresses[segment_index, leg_joint_index]
         leg_joint_position[world_index, segment_index, leg_joint_index] = qpos[
@@ -442,8 +445,9 @@ class GPUBackend:
         self.head_tip_site_id = mapping.head_tip_site_id
         self.foot_geom_ids = to_gpu(mapping.foot_geom_ids)
 
+        self.leg_motor_count = mapping.leg_motor_count
         self.physical_state = PhysicalState.allocate(
-            world_count, mapping.segment_count, torch_device
+            world_count, mapping.segment_count, torch_device, self.leg_motor_count
         )
         state = self.physical_state
         self._body_height = wp.from_torch(state.body_height)
@@ -504,7 +508,7 @@ class GPUBackend:
     def step(
         self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
     ) -> None:
-        """Hold the (W, N, 6) leg and (W, N - 1) spine actions for 20 ms.
+        """Hold the (W, N, M) leg and (W, N - 1) spine actions for 20 ms.
 
         Without spine actions, the spine motors receive zero.
 
@@ -523,7 +527,7 @@ class GPUBackend:
         """
         wp.launch(
             kernel=_apply_leg_actions,
-            dim=(self.world_count, self.segment_count, 6),
+            dim=(self.world_count, self.segment_count, self.leg_motor_count),
             inputs=[self.leg_actuator_ids, wp.from_torch(leg_actions.contiguous())],
             outputs=[self.gpu_data.ctrl],
             device=self.device,
@@ -580,7 +584,7 @@ class GPUBackend:
         mjw.reset_data(self.gpu_model, self.gpu_data, mask_view)
         wp.launch(
             _add_leg_reset_noise,
-            dim=(self.world_count, self.segment_count, 6),
+            dim=(self.world_count, self.segment_count, self.leg_motor_count),
             inputs=[
                 mask_view,
                 self.reset_seeds,
@@ -605,7 +609,7 @@ class GPUBackend:
                     self.reset_seeds,
                     self.reset_counts,
                     self.root_quaternion_address,
-                    self.world_count * self.segment_count * 6,
+                    self.world_count * self.segment_count * self.leg_motor_count,
                     self.start_heading_range_rad,
                 ],
                 outputs=[self.gpu_data.qpos],

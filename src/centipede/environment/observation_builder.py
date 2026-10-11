@@ -2,15 +2,14 @@ import torch
 
 from centipede.environment.simulation import PhysicalState
 
-BLOCK_SIZE = 27
-# With leg accelerations: the block's six leg joints' accelerations, at its end.
-LEG_ACCELERATION_VALUE_COUNT = 6
+# A segment's block holds, for its M leg joints: its body's height (1),
+# orientation (4), leg angles (M), linear and angular velocities (3 + 3), leg
+# speeds (M), and four contact flags; with leg accelerations, its M leg
+# joints' accelerations at its end.
+BODY_VALUE_COUNT = 1 + 4 + 3 + 3 + 4
 TARGET_VALUE_COUNT = 2
 # With spine control: the angle and speed of the spine joint behind the segment.
 SPINE_VALUE_COUNT = 2
-# With leg clocks: each leg's step shape in use, its sweep and lift amplitudes
-# and its sweep, lift and knee centres.
-STEP_SHAPE_VALUE_COUNT = 10
 
 
 def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
@@ -31,9 +30,10 @@ def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
 class ObservationBuilder:
     """Builds every segment's observation from the physical state and targets.
 
-    Each segment sees its own block of 27 values (33 with
-    ``leg_acceleration_observed``, which ends every block with its segment's
-    six leg joints' accelerations), the blocks of the segments up to
+    Each segment sees its own block of 27 values, for legs of three joints
+    (31 with ankles; 33 or 39 with ``leg_acceleration_observed``, which ends
+    every block with its segment's leg joints' accelerations), the blocks of
+    the segments up to
     ``observation_radius`` ahead and behind (nearest first), and two target
     values that are real only for the head; with ``spine_observed``, the
     angle and speed of the spine joint behind it (zero for the rear segment);
@@ -41,7 +41,8 @@ class ObservationBuilder:
     a clock per segment, six for one per leg); with
     ``neighbour_clock_observed``, as many values for the clocks of each
     neighbour it sees, in the blocks' order; and with ``step_shape_observed``,
-    last, its own legs' step shape in use.
+    last, its own legs' step shape in use: each leg's sweep and lift
+    amplitudes and its joints' centres.
     A missing neighbour is a block of zeros. The layout is fixed in
     docs/environment.md.
     """
@@ -57,6 +58,7 @@ class ObservationBuilder:
         neighbour_clock_observed: bool = False,
         step_shape_observed: bool = False,
         leg_acceleration_observed: bool = False,
+        leg_joint_count: int = 3,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -72,8 +74,12 @@ class ObservationBuilder:
         self.neighbour_clock_observed = neighbour_clock_observed
         self.step_shape_observed = step_shape_observed
         self.leg_acceleration_observed = leg_acceleration_observed
-        block_size = BLOCK_SIZE + (
-            LEG_ACCELERATION_VALUE_COUNT if leg_acceleration_observed else 0
+        leg_motor_count = 2 * leg_joint_count
+        self.leg_motor_count = leg_motor_count
+        block_size = (
+            BODY_VALUE_COUNT
+            + 2 * leg_motor_count
+            + (leg_motor_count if leg_acceleration_observed else 0)
         )
         missing_neighbour = segment_count
 
@@ -112,7 +118,7 @@ class ObservationBuilder:
                 if neighbour_clock_observed
                 else 0
             )
-            + (STEP_SHAPE_VALUE_COUNT if step_shape_observed else 0)
+            + (2 * (2 + leg_joint_count) if step_shape_observed else 0)
         )
 
     def build(
@@ -131,28 +137,35 @@ class ObservationBuilder:
         with clocks, for ``c`` = ``clock_value_count``;
         ``neighbour_clock_values`` ``(W, N, 2k, c)`` its neighbours' clocks
         relative to its own, needed only with ``neighbour_clock_observed``;
-        ``step_shape`` ``(W, N, 2, 5)`` its legs' step shape in use, needed
-        only with ``step_shape_observed``; ``leg_acceleration`` ``(W, N, 6)``
-        each segment's leg joints' accelerations, needed only with
+        ``step_shape`` ``(W, N, 2, 2 + J)`` its legs' step shape in use,
+        needed only with ``step_shape_observed``; ``leg_acceleration``
+        ``(W, N, M)`` each segment's leg joints' accelerations, needed only with
         ``leg_acceleration_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
         """
         segment_count = self.segment_count
-        blocks = self.blocks
-        blocks[:, :segment_count, 0] = physical_state.body_height
-        blocks[:, :segment_count, 1:5] = physical_state.body_quaternion
-        blocks[:, :segment_count, 5:11] = physical_state.leg_joint_position
-        blocks[:, :segment_count, 11:14] = physical_state.body_linear_velocity
-        blocks[:, :segment_count, 14:17] = physical_state.body_angular_velocity
-        blocks[:, :segment_count, 17:23] = physical_state.leg_joint_velocity
-        blocks[:, :segment_count, 23] = physical_state.left_foot_ground_contact.float()
-        blocks[:, :segment_count, 24] = physical_state.right_foot_ground_contact.float()
-        blocks[:, :segment_count, 25] = physical_state.body_ground_contact.float()
-        blocks[:, :segment_count, 26] = physical_state.leg_leg_contact.float()
+        legs = self.leg_motor_count
+        blocks = self.blocks[:, :segment_count]
+        blocks[..., 0] = physical_state.body_height
+        blocks[..., 1:5] = physical_state.body_quaternion
+        blocks[..., 5 : 5 + legs] = physical_state.leg_joint_position
+        velocities = 5 + legs
+        blocks[..., velocities : velocities + 3] = physical_state.body_linear_velocity
+        blocks[..., velocities + 3 : velocities + 6] = (
+            physical_state.body_angular_velocity
+        )
+        speeds = velocities + 6
+        blocks[..., speeds : speeds + legs] = physical_state.leg_joint_velocity
+        contacts = speeds + legs
+        blocks[..., contacts] = physical_state.left_foot_ground_contact.float()
+        blocks[..., contacts + 1] = physical_state.right_foot_ground_contact.float()
+        blocks[..., contacts + 2] = physical_state.body_ground_contact.float()
+        blocks[..., contacts + 3] = physical_state.leg_leg_contact.float()
         if self.leg_acceleration_observed:
-            blocks[:, :segment_count, 27:] = leg_acceleration
+            blocks[..., contacts + 4 :] = leg_acceleration
+        blocks = self.blocks
 
         # (W, N + 1, B) gathered by the (N, 2k + 1) table gives
         # (W, N, 2k + 1, B), with B the block size; its blocks are then laid

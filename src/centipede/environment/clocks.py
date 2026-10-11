@@ -34,7 +34,7 @@ class ClockStep:
     ``leg_squared_difference`` is ``(W, N)``: how far the legs were, at the
     points of its turn the hand passed during the step, from where they were
     at the same points one turn earlier: the difference of each leg angle
-    squared, in rad², averaged over the six angles and the points.
+    squared, in rad², averaged over the angles and the points.
     ``leg_difference_known`` ``(W, N)`` is False where the hand passed only
     points it had not passed since the world restarted: in the first turn.
     Both are None with clocks per leg, which do not remember the legs.
@@ -47,14 +47,14 @@ class ClockStep:
     neighbours ahead of the segment count.
 
     With clocks per leg, three values compare the legs' clocks in use
-    (``Clocks.clock_in_use``, six values per leg, each from −1 to 1); all
+    (``Clocks.clock_in_use``, 3 + J values per leg, each from −1 to 1); all
     are None with a clock per segment. ``tracking_mismatch`` ``(W, N)`` is how
     far each segment's legs' clocks in use are from the same side's legs of
-    the segment ahead: the mean, over the two legs and the six values, of
+    the segment ahead: the mean, over the two legs and their values, of
     |difference| ÷ 2, from 0 to 1; 0 for the head, with nothing ahead. The
     phase is not compared. ``change_size`` ``(W, N)`` is how fast each
     segment's legs' clocks in use changed on the step: the mean, over the two
-    legs and the six values, of (change ÷ the largest change the lag allows
+    legs and their values, of (change ÷ the largest change the lag allows
     in one step)², each at most 1; 0 on the first step after a restart.
     ``head_synchrony`` ``(W,)`` is how close the followers' legs' clocks in
     use are to the head's: each follower scores 1 − the mean, over its two
@@ -75,26 +75,28 @@ class ClockStep:
 def leg_targets(
     phase: torch.Tensor, amplitudes: torch.Tensor, centres: torch.Tensor
 ) -> torch.Tensor:
-    """Every leg joint's target on the step shape, ``(W, N, 6)`` in action order.
+    """Every leg joint's target on the step shape, ``(W, N, 2J)`` in action
+    order, with ``J`` joints per leg.
 
     ``phase`` ``(W, N, 2)`` is each leg's clock, the left leg's first;
     ``amplitudes`` ``(W, N, 2, 2)`` holds each leg's sweep and lift
-    amplitudes, and ``centres`` ``(W, N, 2, 3)`` its sweep, lift and knee
-    centres, in action units:
+    amplitudes, and ``centres`` ``(W, N, 2, J)`` its joints' centres, sweep,
+    lift, knee (and ankle), in action units:
 
         sweep = sweep centre + sweep amplitude × cos φ
         lift  = lift centre + lift amplitude × max(0, −sin φ)
-        knee  = knee centre
+        knee  = knee centre, and so the ankle
 
     Over the first half of a turn the foot sweeps back with the leg down
     (stance); over the second it comes forward, lifted (swing). Nothing is
     clipped: a negative sweep amplitude steps backward.
     """
     sweep_amplitude, lift_amplitude = amplitudes.unbind(dim=-1)
-    sweep_centre, lift_centre, knee_centre = centres.unbind(dim=-1)
-    sweep = sweep_centre + sweep_amplitude * torch.cos(phase)
-    lift = lift_centre + lift_amplitude * (-torch.sin(phase)).clamp(min=0.0)
-    return torch.stack((sweep, lift, knee_centre), dim=-1).flatten(start_dim=2)
+    sweep = centres[..., 0] + sweep_amplitude * torch.cos(phase)
+    lift = centres[..., 1] + lift_amplitude * (-torch.sin(phase)).clamp(min=0.0)
+    return torch.cat(
+        (sweep[..., None], lift[..., None], centres[..., 2:]), dim=-1
+    ).flatten(start_dim=2)
 
 
 def lag_rate(time_constant_s: float, step_duration_s: float) -> float:
@@ -121,15 +123,16 @@ class Clocks:
     describe a segment's own clocks in its observation, and each neighbour's.
 
     A clock per segment also compares the legs with its last turn: it
-    remembers each segment's six leg angles at REMEMBERED_POINTS points of
-    the turn, the centres of as many equal parts; the hand passes each point
-    once per turn, so every turn replaces what the last one left. Clocks per
-    leg also keep ``step_shape`` ``(W, N, 2, 5)``, each leg's step shape in
-    use, which follows the shape actions slowly, as the tempo does
+    remembers each segment's leg angles at REMEMBERED_POINTS points of the
+    turn, the centres of as many equal parts; the hand passes each point once
+    per turn, so every turn replaces what the last one left. Clocks per leg
+    also keep ``step_shape`` ``(W, N, 2, 2 + J)``, each leg's step shape in
+    use for its ``J`` joints (``leg_joint_count``: 3, or 4 with an ankle),
+    which follows the shape actions slowly, as the tempo does
     (``follow_actions``): ``amplitudes`` ``(W, N, 2, 2)``, the sweep and lift
-    amplitudes, and ``centres`` ``(W, N, 2, 3)``, the sweep, lift and knee
-    centres, are views of it. ``clock_change`` ``(W, N, 2, 6)`` is how far
-    each leg's clock in use (``clock_in_use``) moved on the last step.
+    amplitudes, and ``centres`` ``(W, N, 2, J)``, the joints' centres, are
+    views of it. ``clock_change`` ``(W, N, 2, 3 + J)`` is how far each leg's
+    clock in use (``clock_in_use``) moved on the last step.
     """
 
     def __init__(
@@ -141,6 +144,7 @@ class Clocks:
         step_duration_s: float,
         device: torch.device | str,
         per_leg: bool = False,
+        leg_joint_count: int = 3,
     ) -> None:
         """Allocate the clocks and count what each clock is compared with."""
         self.settings = settings
@@ -160,7 +164,9 @@ class Clocks:
         self.value_count = VALUES_PER_CLOCK * shape[2]
         if per_leg:
             self.step_shape = torch.zeros(
-                (world_count, segment_count, 2, 5), dtype=torch.float32, device=device
+                (world_count, segment_count, 2, 2 + leg_joint_count),
+                dtype=torch.float32,
+                device=device,
             )
             self.amplitudes = self.step_shape[..., :2]
             self.centres = self.step_shape[..., 2:]
@@ -172,7 +178,9 @@ class Clocks:
             # How far each leg's clock in use moved on the last step, in the
             # units of ``clock_in_use``.
             self.clock_change = torch.zeros(
-                (world_count, segment_count, 2, 6), dtype=torch.float32, device=device
+                (world_count, segment_count, 2, 3 + leg_joint_count),
+                dtype=torch.float32,
+                device=device,
             )
         else:
             # The hand passes at most this many points in one step, at the
@@ -183,7 +191,7 @@ class Clocks:
                 most_points, dtype=torch.float32, device=device
             )
             self.remembered_angles = torch.zeros(
-                (world_count, segment_count, REMEMBERED_POINTS, 6),
+                (world_count, segment_count, REMEMBERED_POINTS, 2 * leg_joint_count),
                 dtype=torch.float32,
                 device=device,
             )
@@ -252,7 +260,7 @@ class Clocks:
         ``(W, N, 1)``, from −1 to 1; a leg's clock turns at the tempo that
         ``follow_actions`` left it. A clock per segment also compares the legs
         with its last turn, from ``leg_angles_before`` and ``leg_angles``
-        ``(W, N, 6)``, the leg angles before and after the step (see
+        ``(W, N, 2J)``, the leg angles before and after the step (see
         ``_compare_legs``). With load
         feedback σ, a leg's clock whose foot bears the load ``N``, from 0 to 1
         in ``foot_load`` ``(W, N, 2)``, turns at ``ω + σ N cos φ`` rad/s
@@ -296,7 +304,7 @@ class Clocks:
         )
 
     def clock_in_use(self) -> torch.Tensor:
-        """Every leg's clock in use, ``(W, N, 2, 6)``, each value from −1 to 1.
+        """Every leg's clock in use, ``(W, N, 2, 3 + J)``, each from −1 to 1.
 
         For each leg, the left leg's first: its tempo in use in octaves over
         ``tempo_range_octaves``, the tempo action it follows, then its step
@@ -308,9 +316,9 @@ class Clocks:
     def follow_actions(self, leg_clock_actions: torch.Tensor) -> None:
         """Move every leg's clock in use toward its actions, before ``step``.
 
-        ``leg_clock_actions`` is ``(W, N, 2, 6)``: for each leg, its tempo
-        action, then its sweep and lift amplitudes and its sweep, lift and
-        knee centres, in action units. The tempo in octaves and the step shape
+        ``leg_clock_actions`` is ``(W, N, 2, 3 + J)``: for each leg, its tempo
+        action, then its sweep and lift amplitudes and its joints' centres,
+        in action units. The tempo in octaves and the step shape
         follow their actions as a first-order lag (``lag_rate``) with
         ``clock_time_constant_s``, which covers 1 − e^(−1), 63%, of a sudden
         change in one time constant. On the first step after a restart, the
@@ -398,7 +406,7 @@ class Clocks:
         # Compare the legs with what was remembered at the points passed, then
         # remember them in its place.
         index = point.long().remainder(REMEMBERED_POINTS)
-        angle_index = index[..., None].expand(*index.shape, 6)
+        angle_index = index[..., None].expand(*index.shape, leg_angles.shape[-1])
         remembered_angles = self.remembered_angles.gather(2, angle_index)
         remembered = self.remembered.gather(2, index)
         known = passed & remembered

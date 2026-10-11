@@ -73,6 +73,8 @@ class PhysicsSimulation:
             )
 
         self.segment_count = mapping.segment_count
+        self.leg_roles = mapping.leg_roles
+        self.leg_motor_count = mapping.leg_motor_count
         self.legs_take_angles = mapping.legs_take_angles
         self.head_outline = mapping.head_outline
         # The whole body's weight, in newtons: the mass of the tree under the
@@ -87,7 +89,7 @@ class PhysicsSimulation:
         self.diagnostics = self._backend.diagnostics
 
         # Legs that take angles: the middle and half the width of each leg
-        # joint's range, (N, 6) each, which the mapping checked is the range
+        # joint's range, (N, M) each, which the mapping checked is the range
         # of angles its motor accepts. None when the legs take torques. The
         # environment's diagnostics read it to give the step shape in angles.
         self.leg_angle_range: tuple[torch.Tensor, torch.Tensor] | None = None
@@ -108,7 +110,7 @@ class PhysicsSimulation:
     def step(
         self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
     ) -> None:
-        """Hold the (W, N, 6) leg and (W, N - 1) spine actions for one step.
+        """Hold the (W, N, M) leg and (W, N - 1) spine actions for one step.
 
         Spine command ``i`` drives the joint between segments ``i`` and ``i + 1``;
         without spine actions, the spine motors receive zero. When the legs

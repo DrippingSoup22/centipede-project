@@ -323,21 +323,26 @@ class EnvironmentDiagnostics:
         simulation_facts: SimulationFacts,
         clocks: Clocks | None = None,
         leg_angle_range: tuple[torch.Tensor, torch.Tensor] | None = None,
+        leg_motor_count: int = 6,
     ) -> None:
         """Allocate the categories and the running totals, all zero.
 
         ``leg_angle_range``, given with a clock per leg, is the middle and half
-        the width of each leg joint's range, ``(N, 6)`` each in rad, which turn
-        the step shape's actions into angles.
+        the width of each leg joint's range, ``(N, M)`` each in rad, with
+        ``M``, ``leg_motor_count``, leg joints per segment, which turn the
+        step shape's actions into angles.
         """
         self.reward_part_names = list(reward_part_names)
         self.simulation = simulation_facts
         self.clocks = clocks
-        # Each leg's sweep, lift and knee, (N, 2, 3), as the actions order them.
+        # Each leg's joints, (N, 2, M / 2), as the actions order them.
         self._leg_angle_range = (
             None
             if leg_angle_range is None
-            else tuple(part.unflatten(-1, (2, 3)) for part in leg_angle_range)
+            else tuple(
+                part.unflatten(-1, (2, leg_motor_count // 2))
+                for part in leg_angle_range
+            )
         )
 
         def zeros(*trailing_shape: int, dtype=torch.float32) -> torch.Tensor:
@@ -420,7 +425,7 @@ class EnvironmentDiagnostics:
         self._start_bearing = zeros()
         self._bearing_edges = torch.tensor(BEARING_EDGES_RAD[1:-1], device=device)
         # The leg angles after the last step, or a new episode's first.
-        self._previous_leg_angles = zeros(segment_count, 6)
+        self._previous_leg_angles = zeros(segment_count, leg_motor_count)
         # Remaining shares of the start distance that separate the endings
         # "within a quarter", "within half", "closer", and "not closer".
         self._remaining_edges = torch.tensor([0.25, 0.5, 1.0], device=device)
@@ -530,7 +535,8 @@ class EnvironmentDiagnostics:
         leg_angles = physical_state.leg_joint_position
         movement = leg_angles - self._previous_leg_angles
         self._previous_leg_angles.copy_(leg_angles)
-        step.left_right_similarity.copy_(_cosine(movement[..., :3], movement[..., 3:]))
+        left_leg, right_leg = movement.unflatten(-1, (2, -1)).unbind(dim=-2)
+        step.left_right_similarity.copy_(_cosine(left_leg, right_leg))
         step.neighbour_leg_similarity.copy_(_cosine(movement[:, :-1], movement[:, 1:]))
         if self.rhythm is not None:
             self._record_rhythm(step_rewards, clock_step)

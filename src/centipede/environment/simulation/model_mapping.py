@@ -11,14 +11,11 @@ RIGHT_FOOT_CATEGORY = 4
 MEMBRANE_CATEGORY = 5
 ALL_CATEGORIES = range(6)
 
-LEG_ACTION_ORDER = (
-    ("left", "sweep"),
-    ("left", "lift"),
-    ("left", "knee"),
-    ("right", "sweep"),
-    ("right", "lift"),
-    ("right", "knee"),
-)
+# The roles of a leg's joints, in action order: every leg has the first
+# three; model v5's legs also have an ankle, between tibia and tarsus. A
+# segment's leg actions are its left leg's joints, then its right leg's.
+LEG_ROLES = ("sweep", "lift", "knee", "ankle")
+SIDES = ("left", "right")
 
 
 class ModelContractError(ValueError):
@@ -48,11 +45,15 @@ class ModelMapping:
     one entry per spine joint, ``(N - 1,)``: entry ``i`` is the yaw joint that
     joins segment ``i`` to segment ``i + 1`` behind it. ``legs_take_angles``
     says whether the leg motors take target angles (position actuators, model
-    v4) or torques (v1 to v3).
+    v4) or torques (v1 to v3). ``leg_roles`` are the roles of each leg's
+    joints, in action order: three, or four with an ankle (model v5); the
+    leg tables have ``2 × len(leg_roles)`` columns, the segment's
+    ``leg_motor_count``.
     """
 
     segment_count: int
     legs_take_angles: bool
+    leg_roles: tuple[str, ...]
     leg_actuator_ids: np.ndarray
     leg_qpos_addresses: np.ndarray
     leg_dof_addresses: np.ndarray
@@ -68,12 +69,18 @@ class ModelMapping:
     foot_geom_ids: np.ndarray
     head_outline: HeadOutline
 
+    @property
+    def leg_motor_count(self) -> int:
+        """How many leg motors each segment has: its two legs' joints."""
+        return 2 * len(self.leg_roles)
+
     @classmethod
     def from_model(cls, model: mujoco.MjModel) -> "ModelMapping":
         """Check the segment contract once and build the index tables."""
         segment_count = _count_segments(model)
+        leg_roles = _leg_roles(model)
         legs_take_angles, leg_actuator_ids, leg_qpos_addresses, leg_dof_addresses = (
-            _map_leg_motors(model, segment_count)
+            _map_leg_motors(model, segment_count, leg_roles)
         )
         spine_actuator_ids, spine_qpos_addresses, spine_dof_addresses = (
             _map_spine_motors(model, segment_count)
@@ -92,6 +99,7 @@ class ModelMapping:
         return cls(
             segment_count=segment_count,
             legs_take_angles=legs_take_angles,
+            leg_roles=leg_roles,
             leg_actuator_ids=leg_actuator_ids,
             leg_qpos_addresses=leg_qpos_addresses,
             leg_dof_addresses=leg_dof_addresses,
@@ -217,24 +225,35 @@ def _check_motor(
     return driven_joint_id
 
 
+def _leg_roles(model: mujoco.MjModel) -> tuple[str, ...]:
+    """The roles of each leg's joints: with an ankle if the head's left leg
+    has one; every leg is then checked to have the same."""
+    has_ankle = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "segment_00_left_ankle"
+    ) != -1
+    return LEG_ROLES if has_ankle else LEG_ROLES[:3]
+
+
 def _map_leg_motors(
-    model: mujoco.MjModel, segment_count: int
+    model: mujoco.MjModel, segment_count: int, leg_roles: tuple[str, ...]
 ) -> tuple[bool, np.ndarray, np.ndarray, np.ndarray]:
     """Find and check every leg motor; return whether they take angles, and
-    three (segments, 6) index tables.
+    three (segments, 2 × roles) index tables.
 
     The leg motors must all take torques or all take angles. Row ``s``, column
-    ``k`` of each table describes segment ``s``'s ``k``-th action in
-    ``LEG_ACTION_ORDER``: the motor's ID (where the command goes in
-    ``data.ctrl``), and its joint's addresses in ``data.qpos`` and ``data.qvel``.
+    ``k`` of each table describes segment ``s``'s ``k``-th leg action: the left
+    leg's roles, then the right leg's. It holds the motor's ID (where the
+    command goes in ``data.ctrl``), and its joint's addresses in ``data.qpos``
+    and ``data.qvel``.
     """
-    motor_ids = np.zeros((segment_count, 6), dtype=np.int32)
-    qpos_addresses = np.zeros((segment_count, 6), dtype=np.int32)
-    qvel_addresses = np.zeros((segment_count, 6), dtype=np.int32)
+    order = [(side, role) for side in SIDES for role in leg_roles]
+    motor_ids = np.zeros((segment_count, len(order)), dtype=np.int32)
+    qpos_addresses = np.zeros((segment_count, len(order)), dtype=np.int32)
+    qvel_addresses = np.zeros((segment_count, len(order)), dtype=np.int32)
     command_kinds = set()
 
     for segment_index in range(segment_count):
-        for action_index, (side, role) in enumerate(LEG_ACTION_ORDER):
+        for action_index, (side, role) in enumerate(order):
             joint_name = f"segment_{segment_index:02d}_{side}_{role}"
             motor_name = f"{joint_name}_motor"
 
