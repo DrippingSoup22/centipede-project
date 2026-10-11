@@ -24,15 +24,15 @@
          spread along the body carry it for 2 s and those of two do not. -->
     <default class="leg_sweep">
       <position kp="2e-04" kv="1e-07" inheritrange="1" forcerange="-8e-06 8e-06" />
-      <default class="leg_ankle">
-      <position kp="2e-04" kv="1e-07" inheritrange="1" forcerange="-3.75e-06 3.75e-06" />
     </default>
-  </default>
     <default class="leg_lift">
       <position kp="2e-04" kv="1e-07" inheritrange="1" forcerange="-1.35e-05 1.35e-05" />
     </default>
     <default class="leg_knee">
       <position kp="2e-04" kv="1e-07" inheritrange="1" forcerange="-7.5e-06 7.5e-06" />
+    </default>
+    <default class="leg_ankle">
+      <position kp="2e-04" kv="1e-07" inheritrange="1" forcerange="-3.75e-06 3.75e-06" />
     </default>
   </default>
   <visual>
