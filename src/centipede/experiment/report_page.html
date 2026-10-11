@@ -205,7 +205,7 @@ const METRICS = {
   "episodes.final_distance": { label: "Distance at the end", unit: "mm", scale: 1000,
     about: "The head's flat distance to its target when the episode ended, averaged over the episodes. An arrival ends within the arrival radius; an episode that ran out of time ends wherever the head was. Compare it with the distance at the start: an end distance larger than the start means the heads moved away from their targets." },
   "step_facts.reward_parts": { label: "Reward per step, by term", unit: "",
-    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, and progress while the head comes closer to the target) above it, the costs below it (body contact, legs touching, and, as the reward settings switch them on, the step cost, foot slip, legs off tempo, out of tempo, no support, both feet down, the followers' clock tracking, the head's clock change, and progress while the head moves away). The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
+    about: "The average reward per step, split into its terms and averaged over the segments. The terms are stacked: those above zero (arrival, progress while the head comes closer to the target, and the followers' head synchrony when the reward pays it) above it, the costs below it (body contact, legs touching, and, as the reward settings switch them on, the step cost, foot slip, legs off tempo, out of tempo, no support, both feet down, the followers' clock tracking, the head's clock change, and progress while the head moves away). The line is their sum, the reward per step. It shows why the reward changes, for example costs shrinking or arrivals growing. With the earlier efficiency reward, one efficiency term takes the place of progress and the step cost." },
 
   // -- How the episodes spread -------------------------------------------------
   "episode_distributions.distance_closed": { label: "Distance closed, every episode", source: "episodes.distance_closed", better: "higher",
@@ -423,8 +423,10 @@ const SETTING_CHIPS = [
       const progress = r.progress_parts ? `progress ${number(r.progress_parts)} parts per halving of the distance` : `progress: head ${number(r.head_progress_ratio)} × step cost`;
       const budget = r.cost_budget_parts !== undefined && r.cost_budget_parts !== used ? ` of a ${number(r.cost_budget_parts)}-part budget` : "";
       const horizon = r.cost_horizon_steps ? ` over ${count(r.cost_horizon_steps)} steps` : "";
+      // Head synchrony is a reward counted in the costs' parts, outside their budget.
+      const synchrony = r.head_synchrony_reward_parts ? ` · head synchrony ${number(r.head_synchrony_reward_parts)} parts, paid to every follower alike` : "";
       return `rewards: arrival ${r.arrival_reward}${payout}${followerArrival} · costs in parts${budget}${horizon}: ` +
-        `${costs.filter(([, parts]) => parts).map(([name, parts]) => `${name} ${number(parts)}`).join(", ")} · ${progress}, ${followers}`;
+        `${costs.filter(([, parts]) => parts).map(([name, parts]) => `${name} ${number(parts)}`).join(", ")} · ${progress}, ${followers}${synchrony}`;
     } },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
@@ -913,13 +915,16 @@ const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
 // Reward terms by name: arrival green, progress blue, the step cost grey, the
 // posture costs warm, the movement cost its own, the walking costs amber,
-// violet, brown, magenta and teal, and the clock costs slate and cyan, so that
-// no two terms of one reward share a colour; efficiency is the term of the
-// earlier efficiency reward, which held the step cost and progress together.
+// violet, brown, magenta and teal, the clock costs slate and cyan, and head
+// synchrony, a reward, lavender, so that no two terms of one reward share a
+// colour (legs off tempo, the other violet, never comes with leg clocks);
+// efficiency is the term of the earlier efficiency reward, which held the
+// step cost and progress together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
-  no_support: "#c2569b", both_feet_down: "#2a9d8f", clock_tracking: "#5b6fa8", clock_change: "#17a2c4" };
+  no_support: "#c2569b", both_feet_down: "#2a9d8f", clock_tracking: "#5b6fa8", clock_change: "#17a2c4",
+  head_synchrony: "#b48ef0" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }
