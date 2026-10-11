@@ -14,8 +14,11 @@ viewer.
 > **This branch, `oscillators`, is the experiment workspace.** It holds
 > everything tried while training, such as a clock per leg and the reward
 > terms built around it ([`docs/environment.md`](docs/environment.md),
-> "Clocks"). It is never merged into `main` as it is: `main` holds the clean
-> program, and a clean version of what works will join it.
+> "Clocks"), and keeps only what training needs: the code, the models, the
+> tests of what experiments change, and the smoke configuration. The rest of
+> this README and the documents describe `main`, which holds the clean
+> program; this branch is never merged into it as it is, and a clean version
+> of what works will join it.
 
 ## Goals
 
