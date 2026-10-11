@@ -46,8 +46,8 @@ class ClockStep:
     side's legs of those neighbours. With ``coupling = "ahead"``, only the
     neighbours ahead of the segment count.
 
-    With clocks per leg, two values compare the legs' clocks in use
-    (``Clocks.clock_in_use``, six values per leg, each from −1 to 1); both
+    With clocks per leg, three values compare the legs' clocks in use
+    (``Clocks.clock_in_use``, six values per leg, each from −1 to 1); all
     are None with a clock per segment. ``tracking_mismatch`` ``(W, N)`` is how
     far each segment's legs' clocks in use are from the same side's legs of
     the segment ahead: the mean, over the two legs and the six values, of
@@ -56,6 +56,12 @@ class ClockStep:
     segment's legs' clocks in use changed on the step: the mean, over the two
     legs and the six values, of (change ÷ the largest change the lag allows
     in one step)², each at most 1; 0 on the first step after a restart.
+    ``head_synchrony`` ``(W,)`` is how close the followers' legs' clocks in
+    use are to the head's: each follower scores 1 − the mean, over its two
+    legs and three values, the tempo and the sweep and lift amplitudes, of
+    |difference from the head's same-side leg| ÷ 2; the mean of the
+    followers' scores, from 0 to 1. The centres and the phase are not
+    compared.
     """
 
     leg_squared_difference: torch.Tensor | None
@@ -63,6 +69,7 @@ class ClockStep:
     tempo_mismatch: torch.Tensor
     tracking_mismatch: torch.Tensor | None = None
     change_size: torch.Tensor | None = None
+    head_synchrony: torch.Tensor | None = None
 
 
 def leg_targets(
@@ -274,15 +281,18 @@ class Clocks:
                 turned[..., 0], leg_angles_before, leg_angles
             )
         self.clock_phase.copy_((self.clock_phase + turned).remainder(2 * math.pi))
-        tracking_mismatch = change_size = None
+        tracking_mismatch = change_size = head_synchrony = None
         if self.per_leg:
-            tracking_mismatch, change_size = self._compare_clocks_in_use()
+            tracking_mismatch, change_size, head_synchrony = (
+                self._compare_clocks_in_use()
+            )
         return ClockStep(
             leg_squared_difference,
             leg_difference_known,
             self._tempo_mismatch(),
             tracking_mismatch,
             change_size,
+            head_synchrony,
         )
 
     def clock_in_use(self) -> torch.Tensor:
@@ -328,8 +338,11 @@ class Clocks:
         self.clock_change.masked_fill_(restarted[..., None], 0.0)
         self.restarted.fill_(False)
 
-    def _compare_clocks_in_use(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """``ClockStep.tracking_mismatch`` and ``change_size``, ``(W, N)`` each.
+    def _compare_clocks_in_use(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """``ClockStep.tracking_mismatch`` and ``change_size``, ``(W, N)``
+        each, and ``head_synchrony``, ``(W,)``.
 
         Every value of a clock in use lies from −1 to 1, so a difference of 2
         is the largest. In one step the lag moves a value by at most its rate
@@ -347,7 +360,12 @@ class Clocks:
             .clamp(max=1.0)
             .mean(dim=(-2, -1))
         )
-        return tracking_mismatch, change_size
+        # The tempo and the two amplitudes, the first three values of a leg's
+        # clock in use, of every follower against the head's.
+        tempo_and_amplitudes = clock[..., :3]
+        head_distance = (tempo_and_amplitudes[:, 1:] - tempo_and_amplitudes[:, :1]) / 2
+        head_synchrony = 1 - head_distance.abs().mean(dim=(1, 2, 3))
+        return tracking_mismatch, change_size, head_synchrony
 
     def _compare_legs(
         self,

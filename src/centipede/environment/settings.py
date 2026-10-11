@@ -184,6 +184,7 @@ PROPORTION_KEYS = (
     "no_support_cost_parts",
     "both_feet_down_cost_parts",
     "clock_tracking_cost_parts",
+    "head_synchrony_reward_parts",
     "head_clock_change_cost_parts",
     "movement_cost_parts",
     "random_command_movement_deg",
@@ -198,9 +199,13 @@ PROPORTION_KEYS = (
     "follower_progress_ratio",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
-# the two that compare the legs' clocks in use need clocks per leg.
+# the terms that compare the legs' clocks in use need clocks per leg.
 CLOCK_COST_KEYS = ("legs_off_tempo_cost_parts", "out_of_tempo_cost_parts")
-LEG_CLOCK_COST_KEYS = ("clock_tracking_cost_parts", "head_clock_change_cost_parts")
+LEG_CLOCK_TERM_KEYS = (
+    "clock_tracking_cost_parts",
+    "head_synchrony_reward_parts",
+    "head_clock_change_cost_parts",
+)
 
 
 @dataclass(frozen=True)
@@ -265,6 +270,14 @@ class RewardSettings:
     from those of the segment ahead, and head clock change charges the head
     for how fast its own legs' clocks in use change.
 
+    ``head_synchrony_reward_parts`` gives a reward, not a cost, that also
+    needs clocks per leg: every follower receives alike how close the
+    followers' legs' tempos and amplitudes in use are to the head's. Its
+    parts are counted in the unit of a cost's, so that 1 part pays per step
+    what a 1-part cost charges, but they are no part of the budget: they
+    neither count in ``cost_budget_parts``' default nor appear among the
+    costs' episode shares.
+
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
     ahead had been; it is None unless a file sets it, and in such a file
@@ -291,6 +304,7 @@ class RewardSettings:
     no_support_cost_parts: float | None
     both_feet_down_cost_parts: float | None
     clock_tracking_cost_parts: float | None
+    head_synchrony_reward_parts: float | None
     head_clock_change_cost_parts: float | None
     movement_cost_parts: float | None
     random_command_movement_deg: float | None
@@ -352,6 +366,7 @@ class RewardSettings:
                 no_support_cost_parts=None,
                 both_feet_down_cost_parts=None,
                 clock_tracking_cost_parts=None,
+                head_synchrony_reward_parts=None,
                 head_clock_change_cost_parts=None,
                 movement_cost_parts=None,
                 random_command_movement_deg=None,
@@ -420,6 +435,9 @@ class RewardSettings:
                 no_support_cost_parts=parts[6],
                 both_feet_down_cost_parts=parts[7],
                 clock_tracking_cost_parts=parts[8],
+                head_synchrony_reward_parts=section.number(
+                    "head_synchrony_reward_parts", default=0.0, minimum=0.0
+                ),
                 head_clock_change_cost_parts=parts[9],
                 movement_cost_parts=parts[10],
                 random_command_movement_deg=section.positive_number(
@@ -486,7 +504,9 @@ class RewardSettings:
         the ``H`` steps; a cost with no parts is left out. The arrival pays
         ``arrival_payout`` of the arrival reward, and a halving of the head's
         distance ``progress_parts`` of the budget, or ``head_progress_ratio``
-        times the step cost's share.
+        times the step cost's share. Head synchrony, a reward, pays per step
+        its parts times one part's per-step weight, as a cost charges, and
+        has no episode share.
         """
         arrival = self.arrival_reward
         if self.uses_per_step_weights:
@@ -505,6 +525,7 @@ class RewardSettings:
             discount ** (steps - 1) * (1 - discount) / (1 - discount**steps)
         )
         part = steps * every_cost_per_step / self.cost_budget_parts
+        # Every term counted in parts of the budget, in the reward's order.
         shares = {
             name: part * parts
             for name, parts in (
@@ -517,6 +538,7 @@ class RewardSettings:
                 ("no_support", self.no_support_cost_parts),
                 ("both_feet_down", self.both_feet_down_cost_parts),
                 ("clock_tracking", self.clock_tracking_cost_parts),
+                ("head_synchrony", self.head_synchrony_reward_parts),
                 ("clock_change", self.head_clock_change_cost_parts),
                 ("movement", self.movement_cost_parts),
             )
@@ -539,6 +561,8 @@ class RewardSettings:
             per_step["command"] = (
                 self.command_cost_ratio * self.step_cost_parts * part * arrival / steps
             )
+        # A reward, counted in the costs' unit but no part of their budget.
+        shares.pop("head_synchrony", None)
         return RewardWeights(per_step=per_step, episode_shares=shares)
 
 
@@ -634,10 +658,10 @@ class EnvironmentSettings:
                 f"[environment.rewards] {', '.join(clock_costs)} need the segments'"
                 " clocks: set clocks = true in [environment]"
             )
-        leg_clock_costs = [key for key in LEG_CLOCK_COST_KEYS if getattr(rewards, key)]
-        if leg_clock_costs and not settings.leg_clocks:
+        leg_clock_terms = [key for key in LEG_CLOCK_TERM_KEYS if getattr(rewards, key)]
+        if leg_clock_terms and not settings.leg_clocks:
             raise SettingsError(
-                f"[environment.rewards] {', '.join(leg_clock_costs)} compare the"
+                f"[environment.rewards] {', '.join(leg_clock_terms)} compare the"
                 " legs' clocks in use, which needs a clock per leg: set"
                 " leg_clocks = true in [environment]"
             )

@@ -196,6 +196,24 @@ def test_leg_clocks_turn_each_leg_and_compare_it_with_its_sibling_and_its_side()
     assert torch.allclose(ahead_of_segment_1, torch.tensor(expected), atol=1e-6)
 
 
+def test_head_synchrony_compares_the_followers_tempos_and_amplitudes_with_the_head():
+    """Each follower's legs against the head's same side; the centres do not
+    count."""
+    clock = clocks(world_count=1, per_leg=True)
+    clock.reset(torch.ones(1, dtype=torch.bool), seed=0)
+    clock_actions = torch.zeros(1, 3, 2, 6)
+    clock_actions[0, 1, 0, 0] = 1.0  # segment 1's left tempo, an octave up
+    clock_actions[0, 2, 1, 2] = -0.5  # segment 2's right lift amplitude
+    clock_actions[0, 1:, :, 3:] = 1.0  # the followers' centres
+
+    clock.follow_actions(clock_actions)
+    result = clock.step()
+
+    # Over two legs and three values: 1 - (1 / 2) / 6 and 1 - (0.5 / 2) / 6.
+    scores = [1 - 0.5 / 6, 1 - 0.25 / 6]
+    assert result.head_synchrony.tolist() == pytest.approx([sum(scores) / 2])
+
+
 def test_load_feedback_holds_a_loaded_legs_clock_past_mid_stance():
     """At 2 Hz, omega = 4 pi rad/s; with sigma = 50 rad/s a loaded leg's hand
     settles where cos phi = -omega / sigma. The right feet are in the air."""

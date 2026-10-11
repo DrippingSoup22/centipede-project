@@ -905,7 +905,7 @@ each switched on by giving it parts of the budget. The first five are paid by
 every segment for its own legs; the last two judge the legs' clocks: clock
 tracking is paid by every follower, head clock change by the head alone.
 None prescribes a gait, though both feet down favours standing on one foot
-at a time.
+at a time. One reward, head synchrony, judges the legs' clocks as well.
 
 - **Foot slip** `S_i` (`foot_slip_cost_parts`): each foot that touches the
   ground at both ends of a step pays how fast it slid along it, in units of
@@ -1005,6 +1005,33 @@ at a time.
   −1 to 1, which lowers it). The head may change its clock, but not so fast
   that its followers cannot track it.
 
+**Head synchrony** `Y` (`head_synchrony_reward_parts`, with leg clocks) is
+a reward, not a cost: how well the whole body keeps the head's clock, paid
+alike to every follower; the head receives nothing. Each follower scores
+1 − the mean, over its two legs and three values of their clocks in use,
+the tempo in octaves over `tempo_range_octaves` and the sweep and lift
+amplitudes, of |difference from the head's same-side leg| ÷ 2, and `Y` is
+the mean of the followers' scores: 0 when every follower is as far from the
+head's clock as it can be, 1 when every follower's tempos and amplitudes
+equal the head's. Its parts are counted in a cost's unit: its weight per
+step is its parts times one part's, so that 1 part pays per step what a
+1-part cost charges. It is no part of the budget, though: its parts do not
+count in `cost_budget_parts`' default, and it has no share among the costs'
+totals over the horizon.
+
+It is shared by design, the user's choice on 2026-10-11. Clock tracking
+compares each follower only with the segment ahead, so small mismatches
+add up along the body, as the tempo that fell from the head to the tail
+showed; head synchrony judges every follower against the head itself, and
+pays each follower for the whole body's fidelity, so that each gains when
+the others keep the clock too. The followers cannot see the head, so they
+can earn it only by passing its clock down faithfully, each from the
+segment ahead. The phase is left out deliberately, so that the offset
+between neighbours, and with it a wave along the body, stays free; the
+centres are left out too, so that each segment keeps its own posture. It
+asks for no walking: followers that copy a head standing still earn it in
+full, and only the head's task makes walking pay.
+
 **Why support costs on both sides.** No support alone made hanging the
 cheaper choice for a segment that cannot step yet. In three training runs
 with leg clocks and no support at 1.5 parts (one seed each, model v4), it was
@@ -1064,13 +1091,15 @@ alone as above, and every other cost at 0: the step cost, foot slip, no
 support, both feet down, out of tempo, legs off tempo and movement. Load
 feedback ([Clocks](#clocks)) stays available as the one way in which the
 physics, rather than a reward, can settle the phases, as in Owaki and
-Ishiguro's quadruped.
+Ishiguro's quadruped. Head synchrony keeps to the same principle, and a run
+may add it: it judges the clocks only, and pays the followers for passing
+the head's clock down together.
 
 **Open question.** The delay between neighbours, their phase offset, is no
-term's to prescribe: clock tracking leaves it free, and nothing else judges
-it. Whether a steady offset, and so a wave along the body, emerges from the
-body's mechanics and load feedback, or does not, is the question a run with
-the clean reward asks.
+term's to prescribe: clock tracking and head synchrony leave it free, and
+nothing else judges it. Whether a steady offset, and so a wave along the
+body, emerges from the body's mechanics and load feedback, or does not, is
+the question a run with the clean reward asks.
 
 ### Optional costs
 
@@ -1185,6 +1214,7 @@ These are the keys of the environment sections of the configuration file (see
 | `no_support_cost_parts` | 0 | [No support](#walking-costs)'s parts; 0 is off |
 | `both_feet_down_cost_parts` | 0 | [Both feet down](#walking-costs)'s parts, the counterpart of no support; 0 is off |
 | `clock_tracking_cost_parts` | 0 | [Clock tracking](#walking-costs)'s parts: each follower's legs' clocks in use against the segment ahead's; needs leg clocks |
+| `head_synchrony_reward_parts` | 0 | [Head synchrony](#walking-costs)'s parts, a reward every follower shares: how close the followers' legs' tempos and amplitudes in use are to the head's. Counted like a cost's parts, but outside the budget; needs leg clocks |
 | `head_clock_change_cost_parts` | 0 | [Head clock change](#walking-costs)'s parts: how fast the head's legs' clocks in use change; needs leg clocks |
 | `foot_slip_unit_m_per_s` | 0.010 | Foot slip's unit: the sliding speed that costs 1 |
 | `legs_off_tempo_unit_deg` | 20 | Legs off tempo's unit: the difference that costs 1 |

@@ -268,6 +268,23 @@ def test_clock_tracking_charges_each_follower_for_its_distance_to_the_clock_ahea
     assert not parts["clock_tracking"][0].any()
 
 
+def test_head_synchrony_pays_every_follower_alike_and_the_head_nothing():
+    settings = RewardSettings.from_section({"head_synchrony_reward_parts": 2})
+    clock = ClockStep(
+        None, None, torch.zeros(2, 3), head_synchrony=torch.tensor([1.0, 0.75])
+    )
+
+    _, parts, weights = rewards_for(unchanged_state(), settings=settings, clock=clock)
+
+    # Counted in the costs' unit, outside their budget.
+    assert settings.cost_budget_parts == 6
+    assert "head_synchrony" not in settings.weights(EPISODE_STEPS).episode_shares
+    synchrony = weights["head_synchrony"]
+    assert synchrony == pytest.approx(2 * weights["leg_contact"])
+    expected = torch.tensor([[0.0, 1.0, 1.0], [0.0, 0.75, 0.75]]) * synchrony
+    assert torch.allclose(parts["head_synchrony"], expected)
+
+
 def test_clock_change_charges_the_head_alone_for_changing_its_clock_fast():
     settings = RewardSettings.from_section({"head_clock_change_cost_parts": 1})
     change_size = torch.zeros(2, 3)

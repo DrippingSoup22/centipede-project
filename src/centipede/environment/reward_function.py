@@ -269,6 +269,26 @@ def clock_tracking(context: RewardContext, settings: RewardSettings) -> torch.Te
     return -context.clock.tracking_mismatch
 
 
+def head_synchrony(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """How well the whole body keeps the head's clock, 0 to 1, paid alike to
+    every follower; the head receives 0.
+
+    With leg clocks, each follower's legs' tempos and sweep and lift
+    amplitudes in use are compared with the head's same-side leg: a
+    follower scores 1 − the mean, over its two legs and the three values, of
+    |difference| ÷ 2, and every follower receives the mean of the
+    followers' scores. A shared reward: the followers cannot see the head,
+    so they earn it only by passing its clock down faithfully. The centres
+    and the phase are left out, so posture and the offset between
+    neighbours stay free.
+    """
+    rewards = context.clock.head_synchrony[:, None].repeat(
+        1, context.distance_after.shape[1]
+    )
+    rewards[:, 0] = 0.0
+    return rewards
+
+
 def clock_change(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−how fast the head's legs' clocks change, 0 to 1; the followers pay 0.
 
@@ -345,6 +365,7 @@ TERMS = {
     "no_support": no_support,
     "both_feet_down": both_feet_down,
     "clock_tracking": clock_tracking,
+    "head_synchrony": head_synchrony,
     "clock_change": clock_change,
     "movement": movement,
     "command": command,
