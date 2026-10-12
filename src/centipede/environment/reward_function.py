@@ -258,6 +258,54 @@ def tempo_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tenso
     return -context.clock.tempo_gap_ahead.clamp(max=1.0)
 
 
+# The tempo gap at which each of the tempo chain's costs reaches its whole
+# weight: two octaves, the widest gap between two segments' tempos at the
+# start of an episode (1 to 4 Hz), so that neither stops growing before it.
+TEMPO_CHAIN_OCTAVES = 2.0
+
+
+def tempo_chain_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−the segment's tempo gap to the segment ahead over two octaves, 0 to 1.
+
+    The tempo chain (the user's rule, 2026-10-13): each segment copies the
+    tempo of the segment ahead, the cost growing in proportion to the gap so
+    that small gaps still cost (lesson 3 of the oscillators study), and
+    minds the segment behind (``tempo_chain_behind``). The head, with nothing
+    ahead, pays nothing here.
+    """
+    gap = context.clock.tempo_gap_ahead / TEMPO_CHAIN_OCTAVES
+    return -gap.clamp(max=1.0)
+
+
+def tempo_chain_behind(
+    context: RewardContext, settings: RewardSettings
+) -> torch.Tensor:
+    """−(the segment's tempo gap to the segment behind over two octaves)², 0 to 1.
+
+    Squared, so that a small gap costs almost nothing and a large one a lot:
+    at the same weight as ``tempo_chain_ahead``, a follower copies the segment
+    ahead until it is one octave from the segment behind, then waits for it,
+    and the head may lead the body but not run away from it. The rear
+    segment, with nothing behind, pays nothing here.
+    """
+    gap = context.clock.tempo_gap_behind / TEMPO_CHAIN_OCTAVES
+    return -gap.clamp(max=1.0).square()
+
+
+def energy(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−the positive power of the segment's leg motors, 0 to 1.
+
+    The work the motors put into the legs per second: each motor's force
+    times its speed wherever it pushes the way its joint moves, summed over
+    the segment's leg motors and averaged over the step's physics steps, in
+    units of ``energy_reference_w``, at most 1. A motor holding a pose or
+    pushed back spends nothing. Fu et al. (CoRL 2021) charged their robots
+    the motors' power: without it, their legs tapped at high frequency.
+    """
+    power = context.physical_state.leg_motor_power
+    return -(power / settings.energy_reference_w).clamp(max=1.0)
+
+
 def foot_slip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−how fast the segment's feet slid along the ground, from 0 to 1.
 
@@ -450,6 +498,9 @@ TERMS = {
     "carry": carry,
     "grip": grip,
     "tempo_ahead": tempo_ahead,
+    "tempo_chain_ahead": tempo_chain_ahead,
+    "tempo_chain_behind": tempo_chain_behind,
+    "energy": energy,
 }
 
 

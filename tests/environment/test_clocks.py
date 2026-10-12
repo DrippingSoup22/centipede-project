@@ -20,6 +20,7 @@ def clocks(
     clock_time_constant_s=0.0,
     coupling="both",
     follow_nudge=0.0,
+    observation_radius=1,
 ):
     settings = ClockSettings(
         middle_tempo_hz=middle_tempo_hz,
@@ -31,7 +32,13 @@ def clocks(
         follow_nudge_rad_per_s=follow_nudge,
     )
     return Clocks(
-        settings, world_count, segment_count, 1, STEP_S, "cpu", per_leg=per_leg
+        settings,
+        world_count,
+        segment_count,
+        observation_radius,
+        STEP_S,
+        "cpu",
+        per_leg=per_leg,
     )
 
 
@@ -130,6 +137,20 @@ def test_each_segment_sees_its_neighbours_clocks_relative_to_its_own():
     only_ahead = torch.tensor(expected)
     only_ahead[:, 1] = 0.0
     assert torch.allclose(ahead.neighbour_values()[0], only_ahead, atol=1e-6)
+
+
+def test_each_segment_hears_the_tempos_of_every_neighbour_it_sees():
+    """Radius 2: the two segments ahead, then the two behind, each tempo
+    minus the segment's own in octaves, whatever the coupling."""
+    clock = clocks(world_count=1, coupling="ahead", observation_radius=2)
+    clock.tempo_octaves.copy_(torch.tensor([[1.0, 0.0, -0.5]]))
+
+    expected = [
+        [0.0, 0.0, -1.0, -1.5],
+        [1.0, 0.0, -0.5, 0.0],
+        [0.5, 1.5, 0.0, 0.0],
+    ]
+    assert clock.neighbour_tempos()[0].tolist() == expected
 
 
 def test_the_step_shape_pushes_back_on_the_ground_and_lifts_the_leg_coming_forward():

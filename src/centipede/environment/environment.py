@@ -62,7 +62,9 @@ class Environment:
         """Create the simulation and the parts, and allocate the episode state."""
         self.settings = settings
         self.simulation = PhysicsSimulation(
-            settings.simulation, average_floor_forces=settings.feet_physics
+            settings.simulation,
+            average_floor_forces=settings.feet_physics,
+            measure_leg_power=settings.rewards.energy_cost_parts > 0,
         )
         self.world_count = self.simulation.world_count
         self.segment_count = self.simulation.segment_count
@@ -116,6 +118,7 @@ class Environment:
             leg_joint_count=leg_joint_count,
             feet_physics_observed=settings.feet_physics,
             tilt_observed=settings.tilt,
+            neighbour_tempo_observed=settings.neighbour_tempos,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -662,6 +665,7 @@ class Environment:
             clocks.step_shape if self.settings.leg_clocks else None,
             self.leg_joint_acceleration,
             self._feet_values() if self.settings.feet_physics else None,
+            clocks.neighbour_tempos() if self.settings.neighbour_tempos else None,
         )
 
     def _feet_values(self) -> torch.Tensor:

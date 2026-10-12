@@ -465,3 +465,42 @@ def test_carry_grip_and_tempo_ahead_with_health_hardening_by_level(level):
     )
     for name in ("carry", "grip", "tempo_ahead"):
         assert not parts[name][0].any()
+
+
+def test_the_tempo_chain_and_the_energy_cost():
+    """World 1: segment 1 is one octave from the head and half an octave
+    from segment 2; the segments' leg motors put in 0.5, 2 and 0 mW. The
+    chain charges the gap ahead in proportion and the gap behind squared,
+    both over two octaves; energy charges the power in milliwatts, at most 1."""
+    settings = RewardSettings.from_section(
+        {
+            "tempo_chain_ahead_cost_parts": 1.75,
+            "tempo_chain_behind_cost_parts": 1.75,
+            "energy_cost_parts": 2,
+        }
+    )
+    ahead = torch.tensor([[0.0, 0.0, 0.0], [0.0, 1.0, 0.5]])
+    behind = torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.5, 0.0]])
+    clock = ClockStep(
+        None, None, torch.zeros(2, 3), tempo_gap_ahead=ahead, tempo_gap_behind=behind
+    )
+    state = unchanged_state()
+    state.leg_motor_power[1] = torch.tensor([0.0005, 0.002, 0.0])
+
+    _, parts, weights = rewards_for(state, settings=settings, clock=clock)
+
+    assert parts["tempo_chain_ahead"][1].tolist() == pytest.approx(
+        [0.0, -0.5 * weights["tempo_chain_ahead"], -0.25 * weights["tempo_chain_ahead"]]
+    )
+    assert parts["tempo_chain_behind"][1].tolist() == pytest.approx(
+        [
+            -0.25 * weights["tempo_chain_behind"],
+            -0.0625 * weights["tempo_chain_behind"],
+            0.0,
+        ]
+    )
+    assert parts["energy"][1].tolist() == pytest.approx(
+        [-0.5 * weights["energy"], -weights["energy"], 0.0]
+    )
+    for name in ("tempo_chain_ahead", "tempo_chain_behind", "energy"):
+        assert not parts[name][0].any()

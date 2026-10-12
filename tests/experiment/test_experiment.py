@@ -1,9 +1,10 @@
 """Tests for the experiment's front file, with tiny runs on the CPU.
 
 The main test trains and evaluates a run shaped like the oscillators'
-baseline (model v4, a clock per leg, load feedback from the foot's force,
-the clean reward, the curriculum), so that the path every training takes
-is run before any launch. The others cover the plateau stop.
+pilots (model v5 with model B's curves, the heart, the feet's physics, the
+neighbours' tempos, the tempo chain and the energy cost, the circle
+curriculum), so that the path every training takes is run before any
+launch. The others cover the plateau stop.
 """
 
 import json
@@ -13,7 +14,8 @@ from types import SimpleNamespace
 from centipede.experiment.experiment import _plateau_readings, recorded_blocks, run
 from centipede.experiment.plateau import Plateau
 
-# Run 26's settings, made tiny: 2 worlds, 4-step episodes, 4 cycles.
+# Cycle 3's pilot settings (2026-10-13), made tiny: 2 worlds, 4-step
+# episodes, 4 cycles, with both new costs at once.
 BASELINE_FILE = """
 [run]
 mode = "train"
@@ -30,50 +32,72 @@ spine_control = true
 passive_follower_spine = true
 leg_clocks = true
 leg_accelerations = true
+leg_drive = "waves"
+waves = 2
+feet_physics = true
+tilt = true
+neighbour_tempos = true
 
 [environment.simulation]
-model_path = "models/assembly_v4.xml"
+model_path = "models/assembly_v5.xml"
 backend = "cpu"
 world_count = 2
+start_heading_range_deg = 180
 
 [environment.target]
-distance_range_m = [0.030, 0.060]
-bearing_range_deg = [-90, 90]
+distance_range_m = [0.100, 0.100]
+bearing_range_deg = [-180, 180]
 arrival = "head"
 range_circle_ratio = 2.5
 range_circle_margin_m = 0.035
 after_arrival = "new_target"
 
 [environment.clock]
-load_feedback_rad_per_s = 6.0
-load_feedback_source = "force"
+clock_time_constant_s = 0.0
+coupling = "ahead"
+segment_tempo = true
+default_swing_deg = 15.0
+default_lift_deg = 15.0
+tempo_rate_octaves_per_s = 1.0
+start_tempo_range_hz = [1.0, 4.0]
+max_tempo_hz = 12.5
 
 [environment.rewards]
 arrival_payout = 0.5
-follower_arrival_share = 0
-follower_progress_share = 0
-progress_parts = 3
+progress_parts = 0.84
+cost_horizon_steps = 256
 cost_budget_parts = 7
-step_cost_parts = 0
-body_contact_cost_parts = 2.5
-leg_contact_cost_parts = 2
-clock_tracking_cost_parts = 5
+step_cost_parts = 1
+body_contact_cost_parts = 0
+leg_contact_cost_parts = 0
+leg_pushing_cost_parts = 2
+carry_cost_parts = 3
+grip_cost_parts = 2
+tempo_chain_ahead_cost_parts = 1.75
+tempo_chain_behind_cost_parts = 1.75
+energy_cost_parts = 2
+health_ramp_start = 1.0
+follower_health_scale = 0.5
 
 [agents]
 hidden_layers = [8]
 actor_last_layer_scale = 0.01
-exploration_noise_beta = 0.5
+initial_action_std = 0.29
+initial_action_offset_spread = 0.2
+exploration_noise_beta = 2.0
 
 [agents.ppo]
 minibatch_size = 4
+temporal_smoothness_coefficient = 0.3
 
 [interaction_loop]
 rollout_window_steps = 2
 update_cycles = 4
 
 [curriculum]
-final_distance_range_m = [0.030, 0.200]
+final_distance_range_m = [0.400, 0.400]
 final_bearing_range_deg = [-180, 180]
+level_bonus = 0.05
 """
 
 TRAINING_FILE = """
@@ -136,8 +160,9 @@ def test_a_run_shaped_like_the_baseline_trains_and_is_evaluated(tmp_path):
     assert records[0]["curriculum"]["level"] == 0.4
     for record in records:
         for segment_parts in record["step_facts"]["reward_parts"]:
-            # Arrival, progress, body down, legs touching, following.
-            assert len(segment_parts) == 5
+            # Arrival, progress, time, leg pushing, carry, grip, the tempo
+            # chain ahead and behind, energy.
+            assert len(segment_parts) == 9
             assert all(math.isfinite(part) for part in segment_parts)
     checkpoints = sorted(path.name for path in (folder / "checkpoints").iterdir())
     assert checkpoints == ["cycle_0002.pt", "cycle_0004.pt"]

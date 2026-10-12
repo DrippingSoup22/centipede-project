@@ -8,7 +8,8 @@ sets each leg's tempo, the size of its steps, and its joints' centres, which
 the clocks let follow slowly, as they let its tempo, and observes the step
 shape in use. With
 ``neighbour_clocks``, a segment also observes its neighbours' clocks,
-relative to its own. See docs/environment.md, "Clocks".
+relative to its own; with ``neighbour_tempos``, only their tempos. See
+docs/environment.md, "Clocks".
 """
 
 import math
@@ -65,7 +66,8 @@ class ClockStep:
     followers' scores, from 0 to 1. The centres and the phase are not
     compared. ``tempo_gap_ahead`` ``(W, N)``, with clocks per leg, is how far
     each segment's tempo, its first clock's, is from the segment ahead's, in
-    octaves; 0 for the head.
+    octaves; 0 for the head. ``tempo_gap_behind`` likewise from the segment
+    behind's; 0 for the rear segment.
     """
 
     leg_squared_difference: torch.Tensor | None
@@ -76,6 +78,7 @@ class ClockStep:
     head_synchrony: torch.Tensor | None = None
     step_size_tracking_mismatch: torch.Tensor | None = None
     tempo_gap_ahead: torch.Tensor | None = None
+    tempo_gap_behind: torch.Tensor | None = None
 
 
 def leg_targets(
@@ -338,7 +341,7 @@ class Clocks:
             )
         self.clock_phase.copy_((self.clock_phase + turned).remainder(2 * math.pi))
         tracking_mismatch = change_size = head_synchrony = step_size_mismatch = None
-        tempo_gap_ahead = None
+        tempo_gap_ahead = tempo_gap_behind = None
         if self.per_leg:
             tracking_mismatch, change_size, head_synchrony, step_size_mismatch = (
                 self._compare_clocks_in_use()
@@ -346,6 +349,8 @@ class Clocks:
             tempo = self.clock_tempo_octaves[..., 0]
             tempo_gap_ahead = torch.zeros_like(tempo)
             tempo_gap_ahead[:, 1:] = (tempo[:, 1:] - tempo[:, :-1]).abs()
+            tempo_gap_behind = torch.zeros_like(tempo)
+            tempo_gap_behind[:, :-1] = tempo_gap_ahead[:, 1:]
         return ClockStep(
             leg_squared_difference,
             leg_difference_known,
@@ -355,6 +360,7 @@ class Clocks:
             head_synchrony,
             step_size_mismatch,
             tempo_gap_ahead,
+            tempo_gap_behind,
         )
 
     def clock_in_use(self) -> torch.Tensor:
@@ -571,4 +577,23 @@ class Clocks:
                 values[:, :-offset, k + column] = relative(
                     slice(offset, None), slice(None, -offset)
                 )
+        return values
+
+    def neighbour_tempos(self) -> torch.Tensor:
+        """Each neighbour's tempo as a segment hears it, ``(W, N, 2k)``.
+
+        The ``k`` segments ahead, nearest first, then the ``k`` behind, for the
+        observation radius ``k``, whatever the coupling: the neighbour's tempo,
+        its first clock's, minus the segment's own, in octaves; 0 for a
+        neighbour that does not exist. Only the tempo, never the hand: how fast
+        a neighbour steps, not when, so the offsets between neighbours stay
+        free.
+        """
+        tempo = self.clock_tempo_octaves[..., 0]
+        k = len(self.neighbour_offsets)
+        values = tempo.new_zeros((*tempo.shape, 2 * k))
+        for column, offset in enumerate(self.neighbour_offsets):
+            # Segment i's neighbour ahead is i − offset, behind it i + offset.
+            values[:, offset:, column] = tempo[:, :-offset] - tempo[:, offset:]
+            values[:, :-offset, k + column] = tempo[:, offset:] - tempo[:, :-offset]
         return values

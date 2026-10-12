@@ -44,9 +44,11 @@ class ObservationBuilder:
     with clocks, the ``clock_value_count`` values of its own clocks (three for
     a clock per segment, six for one per leg); with
     ``neighbour_clock_observed``, as many values for the clocks of each
-    neighbour it sees, in the blocks' order; and with ``step_shape_observed``,
-    last, its own legs' step shape in use: each leg's sweep and lift
-    amplitudes and its joints' centres.
+    neighbour it sees, in the blocks' order; with ``step_shape_observed``,
+    its own legs' step shape in use: each leg's sweep and lift amplitudes and
+    its joints' centres; and with ``neighbour_tempo_observed``, last, the
+    tempo of each neighbour it sees, in the blocks' order (cycle 3,
+    2026-10-13: last, so that a run can start from one saved without them).
     A missing neighbour is a block of zeros. The layout is fixed in
     docs/environment.md.
 
@@ -73,6 +75,7 @@ class ObservationBuilder:
         leg_joint_count: int = 3,
         feet_physics_observed: bool = False,
         tilt_observed: bool = False,
+        neighbour_tempo_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -90,6 +93,7 @@ class ObservationBuilder:
         self.leg_acceleration_observed = leg_acceleration_observed
         self.feet_physics_observed = feet_physics_observed
         self.tilt_observed = tilt_observed
+        self.neighbour_tempo_observed = neighbour_tempo_observed
         leg_motor_count = 2 * leg_joint_count
         self.leg_motor_count = leg_motor_count
         self.orientation_count = TILT_VALUE_COUNT if tilt_observed else 4
@@ -141,6 +145,7 @@ class ObservationBuilder:
                 else 0
             )
             + (2 * (2 + leg_joint_count) if step_shape_observed else 0)
+            + (2 * observation_radius if neighbour_tempo_observed else 0)
         )
 
     def build(
@@ -152,6 +157,7 @@ class ObservationBuilder:
         step_shape: torch.Tensor | None = None,
         leg_acceleration: torch.Tensor | None = None,
         feet_values: torch.Tensor | None = None,
+        neighbour_tempos: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
@@ -164,7 +170,9 @@ class ObservationBuilder:
         needed only with ``step_shape_observed``; ``leg_acceleration``
         ``(W, N, M)`` each segment's leg joints' accelerations, needed only with
         ``leg_acceleration_observed``; ``feet_values`` ``(W, N, 5)`` its feet's
-        physics, needed only with ``feet_physics_observed``.
+        physics, needed only with ``feet_physics_observed``;
+        ``neighbour_tempos`` ``(W, N, 2k)`` its neighbours' tempos, needed only
+        with ``neighbour_tempo_observed``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -237,4 +245,6 @@ class ObservationBuilder:
             parts.append(neighbour_clock_values.flatten(start_dim=2))
         if self.step_shape_observed:
             parts.append(step_shape.flatten(start_dim=2))
+        if self.neighbour_tempo_observed:
+            parts.append(neighbour_tempos)
         return torch.cat(parts, dim=-1)

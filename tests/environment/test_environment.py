@@ -460,3 +460,25 @@ def test_models_a_and_b_drive_the_legs_along_the_hand_and_feel_their_feet():
     hand = waves.clocks.clock_phase[..., 0]
     assert torch.allclose(leg_phase[..., 0], hand - math.pi / 2)
     assert torch.allclose(amplitudes[..., 0, 0], torch.tensor(0.3))
+
+
+def test_with_an_energy_cost_the_simulation_measures_the_leg_motors_power():
+    """Model v4, whose legs take angles: legs that have reached their targets
+    spend almost nothing; legs sent to the ends of their ranges spend."""
+    env = environment(
+        world_count=2,
+        model_path="models/assembly_v4.xml",
+        rewards={"energy_cost_parts": 2},
+    )
+    env.reset(seed=0)
+    still = torch.zeros(2, env.segment_count, env.action_size)
+    for _ in range(10):
+        env.step(still)
+    power = env.simulation.physical_state.leg_motor_power
+    assert (power < 1e-6).all()  # watts
+
+    moving = still.clone()
+    moving[1] = 1.0
+    env.step(moving)
+    assert (power[0] < 1e-6).all()
+    assert (power[1] > 1e-4).all()

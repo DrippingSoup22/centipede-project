@@ -43,7 +43,10 @@ class PhysicsSimulation:
     """
 
     def __init__(
-        self, settings: SimulationSettings, average_floor_forces: bool = False
+        self,
+        settings: SimulationSettings,
+        average_floor_forces: bool = False,
+        measure_leg_power: bool = False,
     ) -> None:
         """Load and check the model, then create the chosen backend.
 
@@ -51,7 +54,10 @@ class PhysicsSimulation:
         normal force from the floor, averaged over the step's physics steps
         (``foot_floor_force``): a reading at the step's end alone misses
         what happened during it, by about a twentieth of a segment's weight
-        on average in run 28's walk (CentipedeTraining, foot_step.py).
+        on average in run 28's walk (CentipedeTraining, foot_step.py). With
+        ``measure_leg_power`` every step also measures each segment's leg
+        motors' positive power, averaged over its physics steps
+        (``leg_motor_power``), which the energy cost reads.
         """
         model = mujoco.MjModel.from_xml_path(str(settings.model_path))
         mapping = ModelMapping.from_model(model)
@@ -66,6 +72,7 @@ class PhysicsSimulation:
                 steps_per_action,
                 start_heading_range_rad,
                 average_floor_forces,
+                measure_leg_power,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -82,6 +89,7 @@ class PhysicsSimulation:
                 settings.constraints_per_world,
                 start_heading_range_rad,
                 average_floor_forces,
+                measure_leg_power,
             )
 
         self.segment_count = mapping.segment_count

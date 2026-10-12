@@ -140,6 +140,44 @@ def _add_floor_forces(
 
 
 @wp.kernel
+def _clear_leg_motor_power(
+    # Out
+    leg_motor_power: wp.array2d[float],
+) -> None:
+    """Zero every segment's leg motors' power; one thread per (world, segment)."""
+    world_index, segment_index = wp.tid()
+    leg_motor_power[world_index, segment_index] = 0.0
+
+
+@wp.kernel
+def _add_leg_motor_power(
+    # In: data
+    actuator_force: wp.array2d[float],
+    actuator_velocity: wp.array2d[float],
+    # In: tables
+    leg_actuator_ids: wp.array2d[wp.int32],
+    scale: float,
+    # Out
+    leg_motor_power: wp.array2d[float],
+) -> None:
+    """Add ``scale`` times each leg motor's positive power, in watts, to its
+    segment's; one thread per (world, segment, leg motor).
+
+    A motor's power is its force times its speed, which MuJoCo Warp computed
+    for the physics step just taken; only where they agree in sign. Launched
+    after every physics step with ``scale`` 1 / steps, it averages the power
+    over the action.
+    """
+    world_index, segment_index, leg_joint_index = wp.tid()
+    motor_id = leg_actuator_ids[segment_index, leg_joint_index]
+    power = (
+        actuator_force[world_index, motor_id] * actuator_velocity[world_index, motor_id]
+    )
+    if power > 0.0:
+        wp.atomic_add(leg_motor_power, world_index, segment_index, scale * power)
+
+
+@wp.kernel
 def _apply_spine_actions(
     # In
     spine_actuator_ids: wp.array1d[wp.int32],
@@ -488,6 +526,7 @@ class GPUBackend:
         constraints_per_world: int,
         start_heading_range_rad: float = 0.0,
         average_floor_forces: bool = False,
+        measure_leg_power: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -495,7 +534,8 @@ class GPUBackend:
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
         turn the body about the vertical. With ``average_floor_forces`` every
         step also measures each foot's floor force, averaged over its physics
-        steps. ``solver`` is "newton" or "cg"; it is
+        steps, and with ``measure_leg_power`` each segment's leg motors'
+        positive power, averaged likewise. ``solver`` is "newton" or "cg"; it is
         set on the host model before the copy, because MuJoCo Warp reads it
         while building the GPU model. The contact and constraint capacities are
         reserved here once: contacts in one pool shared by all worlds,
@@ -569,6 +609,8 @@ class GPUBackend:
         self._foot_normal_force = wp.from_torch(state.foot_normal_force)
         self._leg_leg_force = wp.from_torch(state.leg_leg_force)
         self._foot_floor_force = wp.from_torch(state.foot_floor_force)
+        self._leg_motor_power = wp.from_torch(state.leg_motor_power)
+        self.measure_leg_power = measure_leg_power
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
         self.average_floor_forces = average_floor_forces
         # The leg actions at the start and the end of an action, which the
@@ -733,10 +775,18 @@ class GPUBackend:
     def _run_physics_steps(self) -> None:
         """The physics steps of one action, launched from Python: each writes
         its leg actions, then, with ``average_floor_forces``, adds its share
-        of the feet's floor forces."""
+        of the feet's floor forces, and with ``measure_leg_power`` its share
+        of the leg motors' power."""
         steps = self.physics_steps_per_action
         if self.average_floor_forces:
             self._clear_floor_forces(self._every_world)
+        if self.measure_leg_power:
+            wp.launch(
+                _clear_leg_motor_power,
+                dim=(self.world_count, self.segment_count),
+                outputs=[self._leg_motor_power],
+                device=self.device,
+            )
         for physics_step in range(steps):
             wp.launch(
                 _set_leg_actions_between,
@@ -753,6 +803,19 @@ class GPUBackend:
             mjw.step(self.gpu_model, self.gpu_data)
             if self.average_floor_forces:
                 self._add_floor_forces(self._every_world, 1 / steps)
+            if self.measure_leg_power:
+                wp.launch(
+                    _add_leg_motor_power,
+                    dim=(self.world_count, self.segment_count, self.leg_motor_count),
+                    inputs=[
+                        self.gpu_data.actuator_force,
+                        self.gpu_data.actuator_velocity,
+                        self.leg_actuator_ids,
+                        1 / steps,
+                    ],
+                    outputs=[self._leg_motor_power],
+                    device=self.device,
+                )
 
     def _clear_floor_forces(self, world_mask: wp.array) -> None:
         """Zero the masked worlds' feet's floor forces."""

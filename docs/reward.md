@@ -11,11 +11,13 @@ This page describes the workspace branch `oscillators` as it trains today.
 - **Part 2, the tools:** everything that is not a reward term, in use or
   tried before, so that any of them can be tried again.
 
-**Current as of:** cycle 2's pilot (`configs/oscillators/31_cycle2_b_caps0.toml`
-to `34_...` in CentipedeTraining), on model v5. The pilot compares two ways of
-driving the legs (models A and B), CAPS strengths, noise colours and two
-versions of the task reward; the values marked *measured* come from open-loop
-checks on the laptop's CPU, not from training.
+**Current as of:** cycle 3's pilot (`configs/oscillators/41_run39_circle.toml`
+to `43_...` in CentipedeTraining), on model v5 with model B. Three runs start
+from run 39 on the [circle task](#curriculum) and differ only in the rhythm
+and energy costs: today's [tempo ahead](#tempo-ahead) (41), the
+[tempo chain](#tempo-chain) in its place (42), and tempo ahead plus
+[energy](#energy) (43). The values marked *measured* come from checks on the
+laptop's CPU, not from training.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
 > another part, implement and test it) and an **experiment phase** (train and
@@ -48,10 +50,14 @@ harder, so that early on the agents may walk badly before they walk well.
 | 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 3 parts × h | −0.00140 × h |
 | 2. Health | [Grip](#grip) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
 | 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
-| 3. Rhythm | [Tempo ahead](#tempo-ahead) | – | ✔ | 3.5 parts | −0.00164 |
+| 3. Rhythm | [Tempo ahead](#tempo-ahead) (runs 41, 43) | – | ✔ | 3.5 parts | −0.00164 |
+| 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 42) | – | ✔ | 1.75 parts | −0.00082 |
+| 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 42) | ✔ | ✔ (not the rear) | 1.75 parts | −0.00082 |
+| 4. Energy | [Energy](#energy) (run 43) | ✔ | ✔ | 2 parts | −0.00093 |
 
 `h` is the [health hardening](#health-hardening), from 0.3 at the first
-targets to 1 at the final ones. The two task versions, **P** (arrival 0.5 and
+targets to 1 at the final ones (1 throughout in cycle 3, whose runs start
+from a body that already walks). The two task versions, **P** (arrival 0.5 and
 progress) and **T** (arrival 1 alone), are both in the pilot:
 
 ```math
@@ -335,6 +341,78 @@ its own random tempo between 1 and 4 Hz, so a follower pays about −0.0010
 per step (measured, two thirds of an octave on average) until it matches. It
 should fall within the first cycles; the [heart](#the-heart) lets a tempo
 change by at most an octave per second.
+
+**What it did** (runs 31 to 39). The followers learned to match each other
+from the legs alone, but the head, which pays nothing, raced to the ceiling
+(11 Hz in run 39, against its followers' 2): segment 1, more than an octave
+away, paid the whole cost whatever it did, so nothing pulled it toward the
+head, nor the head toward it.
+</details>
+
+#### Tempo chain
+
+**Idea.** The user's rule (2026-10-13), in run 42 in place of tempo ahead:
+each segment copies the tempo of the segment ahead and minds the segment
+behind. The gap ahead costs in proportion, so that small gaps still cost;
+the gap behind costs its square, so that a small lead is almost free and a
+large one dear. At equal weights a follower copies the segment ahead until
+it is an octave from the segment behind, then waits for it; the head, which
+has only a segment behind, may lead the body but not run away from it. It
+judges only tempos, never phases, so the wave stays free to emerge.
+
+<details>
+<summary>Math, and what to expect</summary>
+
+```math
+A_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i-1} \rvert}{2}\Big), \qquad
+B_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i+1} \rvert}{2}\Big)^{2}, \qquad
+w_A = w_B = 1.75 \times 0.000467 = 0.00082
+```
+
+with `A_0 = 0` for the head and `B = 0` for the rear segment. Both reach
+their whole weight at two octaves, the widest gap between two tempos at the
+start of an episode (1 to 4 Hz), so neither stops growing before it; tempo
+ahead stopped at one octave. A middle follower's tempo parts stay 3.5, so the
+budget and every other weight are unchanged.
+
+| Gap | ¼ octave | ½ octave | 1 octave | 2 octaves |
+| --- | ---: | ---: | ---: | ---: |
+| Ahead, share of its weight | 12.5% | 25% | 50% | 100% |
+| Behind, share of its weight | 1.6% | 6% | 25% | 100% |
+
+**What to expect.** Run 39's head, two octaves above segment 1, would pay
+the whole behind cost, −0.00082 per step, and segment 1 half its ahead cost
+(*measured* on its last checkpoint); the other followers, within a tenth of
+an octave of each other, about −0.00002.
+</details>
+
+### 4. Energy
+
+#### Energy
+
+**Idea.** In run 43: what the leg motors put into the legs costs, as a real
+animal pays for every contraction. Our motors had limits but no price, and
+fast movement was free; Fu et al. (CoRL 2021) charged their robots the
+motors' power, and without it their legs tapped at high frequency. Only the
+work the motors put in counts: a motor holding a pose, or pushed back,
+spends nothing.
+
+<details>
+<summary>Math, and what to expect</summary>
+
+```math
+E_i \;=\; \min\!\Big(1,\ \frac{1}{1\ \text{mW}} \cdot \frac{1}{S} \sum_{s=1}^{S} \sum_{\text{leg motors of } i} \max\big(0,\ \tau\,\dot q\big)\Big), \qquad w = 2 \times 0.000467 = 0.00093
+```
+
+`τ` is a motor's force and `q̇` its joint's speed, as MuJoCo computes them on
+each of the step's `S` physics steps (134). 1 mW is twice the most any
+segment of run 39 spent, so the cost stays in proportion over the range
+seen. The budget stays 7 parts, so the energy's 2 come on top.
+
+**What to expect** (*measured*). Model A's default step spends 9.8 µW per
+segment at 2 Hz and 114 µW at 12 Hz, without walking faster. Run 39's head
+spent 490 µW and its followers 150 to 490 µW, about 30 times the default
+step at the same tempo: they would pay −0.00014 to −0.00046 per step.
 </details>
 
 ---
@@ -364,10 +442,11 @@ study notes (`results/oscillators/README.md` in CentipedeTraining).
 | ✅ | [Observation radius 2](#observation-radius) | What a segment sees | `observation_radius = 2` | 03– (1 in 01–02) |
 | ✅ | [Leg accelerations](#leg-accelerations) | What a segment sees | `leg_accelerations = true` | 15– |
 | ⬜ | [Neighbours' clocks](#neighbours-clocks) | What a segment sees | `neighbour_clocks = true` | 08–14, 17 |
+| ✅ | [Neighbours' tempos](#neighbours-tempos) | What a segment sees | `neighbour_tempos = true` | 41– |
 | ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 2` | 2: 31–; 1: 02, 04, 08, 09, 13; 0.5: 10–12, 14–28 |
 | ✅ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34 |
 | ✅ | [A random first guess](#a-random-first-guess) | Learning | `initial_action_offset_spread = 0.2` | 31– |
-| ✅ | [Curriculum](#curriculum) | Training | `[curriculum]`; `level_bonus = 0.05` from the next round | all |
+| ✅ | [Curriculum](#curriculum) | Training | `[curriculum]`; `level_bonus = 0.05` (39–); the circle task (41–) | all |
 | ✅ | [Plateau stop](#plateau-stop) | Training | `plateau_cycles = 48` | all |
 | ✅ | [Range circle](#range-circle) | Task | `range_circle_ratio = 2.5` | all |
 | ✅ | [Walking on after an arrival](#walking-on-after-an-arrival) | Task | `after_arrival = "new_target"` | all |
@@ -619,6 +698,18 @@ its own. In run 17 the right legs locked in phase and pressed instead of
 stepping, so the clocks are read only from the legs; seeing them would also
 give away a rhythm the segment should find.
 
+#### Neighbours' tempos
+
+✅ **Idea.** The user's choice (2026-10-13): each segment hears the tempo of
+every neighbour it sees, as if it heard their heartbeats, so that it can
+keep the [tempo chain](#tempo-chain) or [tempo ahead](#tempo-ahead) without
+reading them from the legs. Only the tempo, never the hand: how fast a
+neighbour steps, not when, so the offsets between neighbours stay free. With
+radius 2, four values: the two segments ahead, then the two behind, each
+tempo minus the segment's own in octaves, 0 where there is no neighbour.
+They come last in the observation, so a run starts from one saved without
+them: its networks are widened, the new inputs starting at zero weight.
+
 ### Exploration and learning
 
 #### Coloured exploration noise
@@ -690,6 +781,15 @@ often. Cycle 2 starts easier, from 15–30 mm within ±45° (30–60 mm within
 targets; the final ranges stay 30–200 mm all around. The level settles where
 about half of the episodes arrive, so the level is the run's progress on the
 task, and it also hardens the [health costs](#health-hardening).
+
+**The circle task** (cycle 3, the user's idea, 2026-10-13). Every target of
+a level lies at one distance, in any direction: 10 cm at level 0, growing
+to 40 cm (8 body lengths) at level 1. Before, a level drew distances from a
+range, so even at level 1 a third of the targets lay within 8 cm, 1.5 body
+lengths, and the agents arrived 86% of the time without a wave. A target
+allows 10 s, so each level asks for a speed toward the target, turn
+included: 10 mm/s at level 0, 40 mm/s at level 1, more than twice run 35's
+15 to 17. The level then reads as the body's speed.
 
 <details>
 <summary>Math</summary>

@@ -34,6 +34,7 @@ class CPUBackend:
         physics_steps_per_action: int,
         start_heading_range_rad: float = 0.0,
         average_floor_forces: bool = False,
+        measure_leg_power: bool = False,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
@@ -41,8 +42,9 @@ class CPUBackend:
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
         turn the body about the vertical. With ``average_floor_forces`` every
         step also measures each foot's floor force, averaged over its physics
-        steps. The generators start from seed 0 until ``reset`` is given a
-        seed. Each
+        steps, and with ``measure_leg_power`` each segment's leg motors'
+        positive power, averaged likewise. The generators start from seed 0
+        until ``reset`` is given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
         """
@@ -52,6 +54,7 @@ class CPUBackend:
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
         self.average_floor_forces = average_floor_forces
+        self.measure_leg_power = measure_leg_power
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -84,6 +87,7 @@ class CPUBackend:
         self._foot_normal_force = self.physical_state.foot_normal_force.numpy()
         self._leg_leg_force = self.physical_state.leg_leg_force.numpy()
         self._foot_floor_force = self.physical_state.foot_floor_force.numpy()
+        self._leg_motor_power = self.physical_state.leg_motor_power.numpy()
         # Each shape's foot side, 0 left or 1 right, or -1 for any other shape.
         self._foot_side = np.full(len(mapping.geom_categories), -1)
         self._foot_side[mapping.geom_categories == LEFT_FOOT_CATEGORY] = 0
@@ -180,6 +184,8 @@ class CPUBackend:
             data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
             floor_force = self._foot_floor_force[world_index]
             floor_force[:] = 0.0
+            leg_power = self._leg_motor_power[world_index]
+            leg_power[:] = 0.0
             for physics_step in range(steps):
                 share = (physics_step + 1) / steps
                 data.ctrl[self.mapping.leg_actuator_ids] = start[
@@ -188,6 +194,11 @@ class CPUBackend:
                 mujoco.mj_step(self.model, data)
                 if self.average_floor_forces:
                     self._add_floor_forces(data, floor_force, 1 / steps)
+                if self.measure_leg_power:
+                    # The force and speed MuJoCo computed for this physics step.
+                    ids = self.mapping.leg_actuator_ids
+                    power = data.actuator_force[ids] * data.actuator_velocity[ids]
+                    leg_power += np.maximum(power, 0.0).sum(axis=-1) / steps
             self._check_world(world_index)
 
             mujoco.mj_forward(self.model, data)

@@ -265,6 +265,10 @@ PROPORTION_KEYS = (
     "grip_unit_m_per_s",
     "health_ramp_start",
     "follower_health_scale",
+    "tempo_chain_ahead_cost_parts",
+    "tempo_chain_behind_cost_parts",
+    "energy_cost_parts",
+    "energy_reference_w",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -274,6 +278,8 @@ LEG_CLOCK_TERM_KEYS = (
     "head_synchrony_reward_parts",
     "head_clock_change_cost_parts",
     "tempo_ahead_cost_parts",
+    "tempo_chain_ahead_cost_parts",
+    "tempo_chain_behind_cost_parts",
 )
 
 
@@ -369,6 +375,14 @@ class RewardSettings:
     harden only as the centipede learns to arrive; and for the followers,
     also by ``follower_health_scale``. Both scales are 1 by default.
 
+    Cycle 3 (2026-10-13) adds three costs, each off by default. The tempo
+    chain replaces tempo ahead: ``tempo_chain_ahead_cost_parts`` charges each
+    segment for its tempo gap to the segment ahead, in proportion, and
+    ``tempo_chain_behind_cost_parts`` for its gap to the segment behind,
+    squared, both over two octaves; they need clocks per leg. Energy
+    (``energy_cost_parts``) charges each segment for the positive power of
+    its leg motors, in units of ``energy_reference_w``, at most 1.
+
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
     ahead had been; it is None unless a file sets it, and in such a file
@@ -421,6 +435,10 @@ class RewardSettings:
     grip_unit_m_per_s: float = 0.016
     health_ramp_start: float = 1.0
     follower_health_scale: float = 1.0
+    tempo_chain_ahead_cost_parts: float = 0.0
+    tempo_chain_behind_cost_parts: float = 0.0
+    energy_cost_parts: float = 0.0
+    energy_reference_w: float = 0.001
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -511,6 +529,9 @@ class RewardSettings:
                     ("carry_cost_parts", 0.0),
                     ("grip_cost_parts", 0.0),
                     ("tempo_ahead_cost_parts", 0.0),
+                    ("tempo_chain_ahead_cost_parts", 0.0),
+                    ("tempo_chain_behind_cost_parts", 0.0),
+                    ("energy_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
@@ -604,6 +625,12 @@ class RewardSettings:
                 follower_health_scale=section.number(
                     "follower_health_scale", default=1.0, minimum=0.0
                 ),
+                tempo_chain_ahead_cost_parts=parts[15],
+                tempo_chain_behind_cost_parts=parts[16],
+                energy_cost_parts=parts[17],
+                energy_reference_w=section.positive_number(
+                    "energy_reference_w", default=0.001
+                ),
             )
         section.reject_unknown_keys()
         return settings
@@ -666,6 +693,9 @@ class RewardSettings:
                 ("carry", self.carry_cost_parts),
                 ("grip", self.grip_cost_parts),
                 ("tempo_ahead", self.tempo_ahead_cost_parts),
+                ("tempo_chain_ahead", self.tempo_chain_ahead_cost_parts),
+                ("tempo_chain_behind", self.tempo_chain_behind_cost_parts),
+                ("energy", self.energy_cost_parts),
             )
             if parts
         }
@@ -725,6 +755,10 @@ class EnvironmentSettings:
     flags by its feet's loads, their sliding and its support over the last
     stride, and ``tilt`` its orientation in the world by its tilt and its
     bend from the segment ahead.
+
+    Cycle 3 (2026-10-13): with ``neighbour_tempos`` (off by default), a
+    segment also hears the tempo of each neighbour it sees, relative to its
+    own; it needs clocks per leg.
     """
 
     max_episode_steps: int
@@ -743,6 +777,7 @@ class EnvironmentSettings:
     waves: int = 2
     feet_physics: bool = False
     tilt: bool = False
+    neighbour_tempos: bool = False
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -781,6 +816,7 @@ class EnvironmentSettings:
             waves=section.positive_integer("waves", default=2),
             feet_physics=section.boolean("feet_physics", default=False),
             tilt=section.boolean("tilt", default=False),
+            neighbour_tempos=section.boolean("neighbour_tempos", default=False),
         )
         section.reject_unknown_keys()
         feet_costs = [
@@ -832,6 +868,12 @@ class EnvironmentSettings:
                 f"[environment.rewards] {', '.join(leg_clock_terms)} compare the"
                 " legs' clocks in use, which needs a clock per leg: set"
                 " leg_clocks = true in [environment]"
+            )
+        if settings.neighbour_tempos and not settings.leg_clocks:
+            raise SettingsError(
+                "[environment] neighbour_tempos lets each segment hear its"
+                " neighbours' tempos, which needs a clock per leg: set leg_clocks ="
+                " true"
             )
         if settings.clock.load_feedback_rad_per_s and not settings.leg_clocks:
             raise SettingsError(
