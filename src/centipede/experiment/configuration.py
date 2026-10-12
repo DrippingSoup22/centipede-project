@@ -142,7 +142,9 @@ class CurriculumSettings:
 
     ``level_bonus`` (0, off, by default; cycle 2, the user's idea) adds that
     much to the level whenever the agents keep arriving as the targets get
-    harder (``Curriculum.update``).
+    harder (``Curriculum.update``). ``start_level`` (0 by default) is the
+    level a new run starts at, such as the level reached by the run it starts
+    from; a continued run starts at its saved level.
     """
 
     final_distance_range_m: tuple[float, float]
@@ -150,6 +152,7 @@ class CurriculumSettings:
     arrival_share: float
     level_rate: float
     level_bonus: float = 0.0
+    start_level: float = 0.0
 
     @classmethod
     def from_section(cls, values: dict) -> "CurriculumSettings":
@@ -166,6 +169,9 @@ class CurriculumSettings:
             level_rate=section.positive_number("level_rate", default=0.02),
             level_bonus=section.number(
                 "level_bonus", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            start_level=section.number(
+                "start_level", default=0.0, minimum=0.0, maximum=1.0
             ),
         )
         section.reject_unknown_keys()

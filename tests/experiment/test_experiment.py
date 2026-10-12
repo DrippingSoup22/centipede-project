@@ -126,10 +126,14 @@ def test_recordings_spread_from_the_first_episode_length_to_the_last():
 
 
 def test_a_run_shaped_like_the_baseline_trains_and_is_evaluated(tmp_path):
-    folder = run_file(tmp_path, BASELINE_FILE)
+    starting_late = BASELINE_FILE.replace(
+        "[curriculum]\n", "[curriculum]\nstart_level = 0.4\n"
+    )
+    folder = run_file(tmp_path, starting_late)
 
     records = logged_records(folder)
     assert [record["cycle"] for record in records] == [1, 2, 3, 4]
+    assert records[0]["curriculum"]["level"] == 0.4
     for record in records:
         for segment_parts in record["step_facts"]["reward_parts"]:
             # Arrival, progress, body down, legs touching, following.

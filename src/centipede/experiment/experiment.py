@@ -145,7 +145,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.shape_columns,
     )
     completed_cycles = 0
-    saved_level = 0.0
+    saved_level = (
+        0.0
+        if configuration.curriculum is None
+        else configuration.curriculum.start_level
+    )
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
             checkpoint_path, configuration.agents.device
@@ -162,8 +166,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         # it starts from, such as the spine, or wider layers: its agents are
         # then widened.
         agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
-    # The curriculum: a new run starts at level 0, a continued one at its saved
-    # level.
+    # The curriculum: a new run starts at its start level, a continued one at
+    # its saved level.
     curriculum = None
     if configuration.curriculum is not None:
         curriculum = Curriculum(
