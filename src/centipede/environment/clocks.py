@@ -378,7 +378,7 @@ class Clocks:
         change in one time constant. On the first step after a restart, the
         clock in use starts at the actions, and its change counts zero. With a
         heart, the tempo action instead changes the tempo from where it is, by
-        up to ``heart_step_octaves`` per step.
+        up to ``heart_step_octaves`` per step, up to ``max_tempo_hz`` when set.
         """
         before = self.clock_in_use()
         restarted = self.restarted[:, None, None]
@@ -386,6 +386,12 @@ class Clocks:
             self.clock_tempo_octaves.add_(
                 leg_clock_actions[..., 0] * self.heart_step_octaves
             )
+            if self.settings.max_tempo_hz:
+                self.clock_tempo_octaves.clamp_(
+                    max=math.log2(
+                        self.settings.max_tempo_hz / self.settings.middle_tempo_hz
+                    )
+                )
         else:
             tempo_octaves = (
                 leg_clock_actions[..., 0] * self.settings.tempo_range_octaves

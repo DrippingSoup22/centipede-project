@@ -306,8 +306,8 @@ def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_const
 
 def test_a_heart_starts_at_a_random_tempo_and_its_action_changes_it():
     """Both legs share the tempo, which starts between 1 and 4 Hz and moves by
-    the action times one octave per second; each follower's gap is to the
-    segment ahead."""
+    the action times one octave per second, never past the ceiling; each
+    follower's gap is to the segment ahead."""
     settings = ClockSettings(
         middle_tempo_hz=2.0,
         tempo_range_octaves=1.0,
@@ -318,6 +318,7 @@ def test_a_heart_starts_at_a_random_tempo_and_its_action_changes_it():
         segment_tempo=True,
         tempo_rate_octaves_per_s=1.0,
         start_tempo_range_hz=(1.0, 4.0),
+        max_tempo_hz=4.5,
     )
     heart = Clocks(settings, 2, 3, 1, STEP_S, "cpu", per_leg=True)
     heart.reset(torch.ones(2, dtype=torch.bool), seed=0)
@@ -338,3 +339,7 @@ def test_a_heart_starts_at_a_random_tempo_and_its_action_changes_it():
         step.tempo_gap_ahead[:, 1:], (tempo[:, 1:] - tempo[:, :-1]).abs()
     )
     assert not step.tempo_gap_ahead[:, 0].any()
+
+    for _ in range(100):
+        heart.follow_actions(actions)
+    assert heart.clock_tempo_octaves[0].max() == pytest.approx(math.log2(4.5 / 2))

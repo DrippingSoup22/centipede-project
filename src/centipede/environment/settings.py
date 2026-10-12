@@ -117,7 +117,10 @@ class ClockSettings:
     speeds up or slows down: each step the tempo moves by the action times
     this many octaves per second, with no range and no lag. Every episode,
     each segment's tempo then starts at its own random value, uniform in
-    octaves between ``start_tempo_range_hz``'s ends.
+    octaves between ``start_tempo_range_hz``'s ends. ``max_tempo_hz`` (0, none,
+    by default) is the heart's ceiling: without one, the heads of the first
+    pilot runs, which pay no tempo cost, raced past 25 Hz, where a 20 ms step
+    jumps more than half a turn and samples the curve like a strobe light.
     """
 
     middle_tempo_hz: float
@@ -132,6 +135,7 @@ class ClockSettings:
     default_lift_deg: float = 0.0
     tempo_rate_octaves_per_s: float = 0.0
     start_tempo_range_hz: tuple[float, float] = (2.0, 2.0)
+    max_tempo_hz: float = 0.0
 
     @classmethod
     def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
@@ -170,7 +174,18 @@ class ClockSettings:
             start_tempo_range_hz=section.number_range(
                 "start_tempo_range_hz", default=(2.0, 2.0), minimum=1e-3
             ),
+            max_tempo_hz=section.number("max_tempo_hz", default=0.0, minimum=0.0),
         )
+        if settings.max_tempo_hz and not (
+            settings.tempo_rate_octaves_per_s
+            and max(settings.start_tempo_range_hz) <= settings.max_tempo_hz <= 12.5
+        ):
+            raise SettingsError(
+                "[environment.clock] max_tempo_hz is a heart's ceiling: it needs"
+                " tempo_rate_octaves_per_s, at least the start tempos and at most"
+                " 12.5 Hz, a quarter of a turn per 20 ms step; got"
+                f" {settings.max_tempo_hz:g}"
+            )
         if settings.tempo_rate_octaves_per_s and not settings.segment_tempo:
             raise SettingsError(
                 "[environment.clock] tempo_rate_octaves_per_s changes each segment's"
