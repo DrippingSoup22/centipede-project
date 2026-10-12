@@ -72,6 +72,8 @@ def test_defaults_fill_everything_but_the_simulation_requirements():
         no_support_cost_parts=0.0,
         both_feet_down_cost_parts=0.0,
         clock_tracking_cost_parts=0.0,
+        clock_tracking_centres=True,
+        leg_pushing_cost_parts=0.0,
         head_synchrony_reward_parts=0.0,
         head_clock_change_cost_parts=0.0,
         movement_cost_parts=0.0,

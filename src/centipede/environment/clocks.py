@@ -52,7 +52,9 @@ class ClockStep:
     far each segment's legs' clocks in use are from the same side's legs of
     the segment ahead: the mean, over the two legs and their values, of
     |difference| ÷ 2, from 0 to 1; 0 for the head, with nothing ahead. The
-    phase is not compared. ``change_size`` ``(W, N)`` is how fast each
+    phase is not compared. ``step_size_tracking_mismatch`` ``(W, N)`` is the
+    same over the tempo and the sweep and lift amplitudes only, the centres
+    left out. ``change_size`` ``(W, N)`` is how fast each
     segment's legs' clocks in use changed on the step: the mean, over the two
     legs and their values, of (change ÷ the largest change the lag allows
     in one step)², each at most 1; 0 on the first step after a restart.
@@ -70,6 +72,7 @@ class ClockStep:
     tracking_mismatch: torch.Tensor | None = None
     change_size: torch.Tensor | None = None
     head_synchrony: torch.Tensor | None = None
+    step_size_tracking_mismatch: torch.Tensor | None = None
 
 
 def leg_targets(
@@ -253,6 +256,7 @@ class Clocks:
         leg_angles_before: torch.Tensor | None = None,
         leg_angles: torch.Tensor | None = None,
         foot_load: torch.Tensor | None = None,
+        foot_down: torch.Tensor | None = None,
     ) -> ClockStep:
         """Turn every hand for one step at its clock's tempo in use.
 
@@ -270,6 +274,14 @@ class Clocks:
         would stop where ``cos φ = −ω / (σ N)`` until its load fell, for good
         with a contact flag, since the foot leaves the ground only in swing;
         the settings keep σ below the slowest tempo's ω, and N is at most 1.
+
+        With the follow nudge ρ, a follower's leg in the second half of
+        stance (sin φ ≥ 0, cos φ < 0) also turns ρ |cos φ| rad/s slower while
+        the same-side foot of the segment ahead is down, in ``foot_down``
+        ``(W, N, 2)`` from before the step, and as much faster while it is
+        lifted, so that it lifts soon after the leg ahead. The head, with
+        nothing ahead, is not nudged. A held hand may stop, or turn back a
+        little, until the foot ahead lifts.
         """
         if not self.per_leg:
             self.clock_tempo_octaves.copy_(
@@ -282,6 +294,15 @@ class Clocks:
         load_feedback = self.settings.load_feedback_rad_per_s
         if load_feedback:
             speed = speed + load_feedback * foot_load * torch.cos(self.clock_phase)
+        follow_nudge = self.settings.follow_nudge_rad_per_s
+        if follow_nudge:
+            late_stance = (-torch.cos(self.clock_phase)).clamp(min=0.0) * (
+                torch.sin(self.clock_phase) >= 0
+            )
+            ahead_lifted = 1 - 2 * foot_down[:, :-1].float()  # -1 down, +1 lifted
+            nudge = torch.zeros_like(speed)
+            nudge[:, 1:] = follow_nudge * late_stance[:, 1:] * ahead_lifted
+            speed = speed + nudge
         turned = speed * self.step_duration_s
         leg_squared_difference = leg_difference_known = None
         if not self.per_leg:
@@ -289,9 +310,9 @@ class Clocks:
                 turned[..., 0], leg_angles_before, leg_angles
             )
         self.clock_phase.copy_((self.clock_phase + turned).remainder(2 * math.pi))
-        tracking_mismatch = change_size = head_synchrony = None
+        tracking_mismatch = change_size = head_synchrony = step_size_mismatch = None
         if self.per_leg:
-            tracking_mismatch, change_size, head_synchrony = (
+            tracking_mismatch, change_size, head_synchrony, step_size_mismatch = (
                 self._compare_clocks_in_use()
             )
         return ClockStep(
@@ -301,6 +322,7 @@ class Clocks:
             tracking_mismatch,
             change_size,
             head_synchrony,
+            step_size_mismatch,
         )
 
     def clock_in_use(self) -> torch.Tensor:
@@ -348,9 +370,10 @@ class Clocks:
 
     def _compare_clocks_in_use(
         self,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """``ClockStep.tracking_mismatch`` and ``change_size``, ``(W, N)``
-        each, and ``head_synchrony``, ``(W,)``.
+        each, ``head_synchrony``, ``(W,)``, and
+        ``step_size_tracking_mismatch``, ``(W, N)``.
 
         Every value of a clock in use lies from −1 to 1, so a difference of 2
         is the largest. In one step the lag moves a value by at most its rate
@@ -358,9 +381,11 @@ class Clocks:
         """
         clock = self.clock_in_use()
         tracking_mismatch = clock.new_zeros(clock.shape[:2])
-        tracking_mismatch[:, 1:] = (
-            ((clock[:, 1:] - clock[:, :-1]) / 2).abs().mean(dim=(-2, -1))
-        )
+        step_size_mismatch = clock.new_zeros(clock.shape[:2])
+        difference = ((clock[:, 1:] - clock[:, :-1]) / 2).abs()
+        tracking_mismatch[:, 1:] = difference.mean(dim=(-2, -1))
+        # The tempo and the two amplitudes, the first three values.
+        step_size_mismatch[:, 1:] = difference[..., :3].mean(dim=(-2, -1))
         largest_change = 2 * self.lag_rate
         change_size = (
             (self.clock_change / largest_change)
@@ -373,7 +398,7 @@ class Clocks:
         tempo_and_amplitudes = clock[..., :3]
         head_distance = (tempo_and_amplitudes[:, 1:] - tempo_and_amplitudes[:, :1]) / 2
         head_synchrony = 1 - head_distance.abs().mean(dim=(1, 2, 3))
-        return tracking_mismatch, change_size, head_synchrony
+        return tracking_mismatch, change_size, head_synchrony, step_size_mismatch
 
     def _compare_legs(
         self,

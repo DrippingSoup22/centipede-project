@@ -78,6 +78,7 @@ class CPUBackend:
         self._spine_yaw_position = self.physical_state.spine_yaw_position.numpy()
         self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
         self._foot_normal_force = self.physical_state.foot_normal_force.numpy()
+        self._leg_leg_force = self.physical_state.leg_leg_force.numpy()
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
@@ -280,10 +281,14 @@ class CPUBackend:
         rows (one row for a frictionless contact), as in MuJoCo's own touch
         sensor. A contact the solver left out
         (``efc_address`` below 0) carries no force. Any contact of a foot
-        counts, with the floor or with another leg.
+        counts, with the floor or with another leg. A contact between two legs
+        (neither shape the floor) also adds its force to both owners' leg-leg
+        force.
         """
         forces = self._foot_normal_force[world_index]
         forces[:] = 0.0
+        leg_leg_forces = self._leg_leg_force[world_index]
+        leg_leg_forces[:] = 0.0
         data = self.world_data[world_index]
         owner_indices = self.mapping.geom_owner_indices
         categories = self.mapping.geom_categories
@@ -297,6 +302,9 @@ class CPUBackend:
                 continue
             row_count = max(2 * (dimension - 1), 1) if self.pyramidal_cone else 1
             normal_force = data.efc_force[efc_address : efc_address + row_count].sum()
+            if FLOOR_CATEGORY not in (categories[geom_ids[0]], categories[geom_ids[1]]):
+                for geom_id in geom_ids:
+                    leg_leg_forces[owner_indices[geom_id]] += normal_force
             for geom_id in geom_ids:
                 side = foot_sides.get(int(categories[geom_id]))
                 if side is not None:

@@ -29,7 +29,8 @@ class RewardContext:
     ``foot_slip_speed`` is ``(W, N, 2)``: how fast each foot slid along the
     ground during the step, m/s, counted only for a foot that touched the
     ground at both ends of it. ``clock`` is the clocks' step, or None without
-    clocks.
+    clocks. ``leg_push_unit_n`` is the leg-leg force that costs a whole leg
+    pushing cost: one segment's weight.
     """
 
     physical_state: PhysicalState
@@ -41,6 +42,7 @@ class RewardContext:
     command_size: torch.Tensor
     foot_slip_speed: torch.Tensor
     clock: ClockStep | None
+    leg_push_unit_n: float
 
     @classmethod
     def from_step(
@@ -56,6 +58,7 @@ class RewardContext:
         joint_action: torch.Tensor,
         foot_slip_speed: torch.Tensor,
         clock: ClockStep | None,
+        leg_push_unit_n: float,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
@@ -100,6 +103,7 @@ class RewardContext:
             command_size=squared_command.sum(dim=-1) / joint_count,
             foot_slip_speed=foot_slip_speed,
             clock=clock,
+            leg_push_unit_n=leg_push_unit_n,
         )
 
 
@@ -185,6 +189,18 @@ def leg_contact(context: RewardContext, settings: RewardSettings) -> torch.Tenso
     return -context.physical_state.leg_leg_contact.float()
 
 
+def leg_pushing(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how hard the segment's legs press on other legs, from 0 to 1.
+
+    The summed normal force of the contacts between one of its legs and
+    another leg, in units of one segment's weight, at most 1. Both segments of
+    a contact pay. Legs that brush past each other cost almost nothing; legs
+    that push against each other cost.
+    """
+    force = context.physical_state.leg_leg_force
+    return -(force / context.leg_push_unit_n).clamp(max=1.0)
+
+
 def foot_slip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     """−how fast the segment's feet slid along the ground, from 0 to 1.
 
@@ -264,9 +280,13 @@ def clock_tracking(context: RewardContext, settings: RewardSettings) -> torch.Te
     costs in proportion to its size. The phase is not
     compared, so the offset between neighbours stays free. The head, with
     nothing ahead, pays nothing: a follower's job is to track the clock
-    ahead, so that the head's clock passes down the body.
+    ahead, so that the head's clock passes down the body. With
+    ``clock_tracking_centres`` off, only the tempo and the two amplitudes
+    are compared, so that the posture stays free.
     """
-    return -context.clock.tracking_mismatch
+    if settings.clock_tracking_centres:
+        return -context.clock.tracking_mismatch
+    return -context.clock.step_size_tracking_mismatch
 
 
 def head_synchrony(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
@@ -368,6 +388,7 @@ TERMS = {
     "head_synchrony": head_synchrony,
     "clock_change": clock_change,
     "movement": movement,
+    "leg_pushing": leg_pushing,
     "command": command,
 }
 
@@ -387,13 +408,16 @@ class RewardFunction:
         max_episode_steps: int,
         arrival_radius_m: float,
         commanded_joints: torch.Tensor,
+        leg_push_unit_n: float,
     ) -> None:
         """Pair every term with its name and weight, in a fixed order.
 
-        ``commanded_joints`` is the ``(N, M + 1)`` mask of ``RewardContext``.
+        ``commanded_joints`` is the ``(N, M + 1)`` mask of ``RewardContext``,
+        and ``leg_push_unit_n`` its unit of leg pushing.
         """
         self.settings = reward_settings
         self.arrival_radius_m = arrival_radius_m
+        self.leg_push_unit_n = leg_push_unit_n
         self.commanded_joints = commanded_joints
         self.weights = reward_settings.weights(max_episode_steps)
         self.reward_terms = [
@@ -430,6 +454,7 @@ class RewardFunction:
             joint_action,
             foot_slip_speed,
             clock,
+            self.leg_push_unit_n,
         )
         reward_parts = torch.stack(
             [

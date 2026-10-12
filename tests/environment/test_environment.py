@@ -321,6 +321,51 @@ def test_a_force_load_is_each_foots_force_over_a_segments_weight_before_the_step
     assert 0 < expected.max() <= 1
 
 
+def test_one_tempo_per_segment_and_a_default_step_drive_both_legs():
+    """With segment_tempo, a segment's first action sets both legs' tempos;
+    with the default step, an action of 0 sweeps 15 and lifts 15 degrees."""
+    env = environment(
+        world_count=1,
+        model_path="models/assembly_v4.xml",
+        leg_clocks=True,
+        clock={"segment_tempo": True, "default_swing_deg": 15, "default_lift_deg": 15},
+    )
+    assert env.segment_action_sizes == [11] * 8
+    assert env.tempo_columns == [[0]] * 8
+    assert env.motor_columns == [[3, 4, 5, 8, 9, 10]] * 8
+    env.reset(seed=1)
+    action = torch.zeros(1, 8, 11)
+    action[0, :, 0] = 1.0  # 4 Hz for both legs
+
+    env.step(action)
+
+    assert torch.allclose(env.clocks.clock_tempo_hz, torch.tensor(4.0))
+    _, half_width = env.simulation.leg_angle_range
+    swing, lift = env.clocks.amplitudes[0, 0, 0] * half_width.reshape(-1)[:2]
+    assert math.degrees(swing) == pytest.approx(15)
+    assert math.degrees(lift) == pytest.approx(15)
+
+
+def test_legs_pressing_on_each_other_measure_their_force():
+    """Neighbours in opposite phase with the largest sweep collide. Every leg
+    force belongs to a segment whose legs touch another leg, and contacts
+    with no force are possible, so some touching legs may push with none."""
+    env = environment(
+        world_count=1, model_path="models/assembly_v4.xml", leg_clocks=True
+    )
+    env.reset(seed=1)
+    env.clocks.clock_phase[0, :, :] = torch.tensor([0.0, math.pi] * 4)[:, None]
+    action = torch.zeros(1, 8, 12)
+    action[..., 1] = action[..., 7] = 1.0  # sweep amplitudes, 40 degrees
+    force_seen = False
+    for _ in range(15):
+        env.step(action)
+        state = env.simulation.physical_state
+        assert not (state.leg_leg_force > 0)[~state.leg_leg_contact].any()
+        force_seen |= bool((state.leg_leg_force > 0).any())
+    assert force_seen
+
+
 def test_an_observation_radius_reaching_past_the_body_is_rejected():
     with pytest.raises(SettingsError, match=r"observation_radius .* 8 segments"):
         environment(observation_radius=8)

@@ -101,6 +101,16 @@ class ClockSettings:
     neighbours' clocks a segment sees and is compared with: ``"both"``, those
     ahead and behind, or ``"ahead"``, only those ahead, so that the rhythm
     passes from the head backward.
+
+    Three more need leg clocks; each is off by default. The follow nudge
+    ``follow_nudge_rad_per_s`` (ρ) times a follower's leg's lift-off to the
+    same-side leg ahead (Yasui et al., PLoS ONE 2017): in the second half of
+    stance its hand turns ρ max(0, −cos φ) rad/s slower while that foot is on
+    the ground and as much faster while it is lifted. With ``segment_tempo``
+    a segment sets one tempo for both its legs' clocks, its heartbeat, with
+    one action instead of two. ``default_swing_deg`` and ``default_lift_deg``
+    are the step an action of 0 asks for: they are added to the sweep and
+    lift amplitude actions, so that every leg steps from the start.
     """
 
     middle_tempo_hz: float
@@ -109,6 +119,10 @@ class ClockSettings:
     load_feedback_source: str
     clock_time_constant_s: float
     coupling: str
+    follow_nudge_rad_per_s: float = 0.0
+    segment_tempo: bool = False
+    default_swing_deg: float = 0.0
+    default_lift_deg: float = 0.0
 
     @classmethod
     def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
@@ -135,6 +149,12 @@ class ClockSettings:
                 minimum=0.0,
             ),
             coupling=section.choice("coupling", ("both", "ahead"), default="both"),
+            follow_nudge_rad_per_s=section.number(
+                "follow_nudge_rad_per_s", default=0.0, minimum=0.0
+            ),
+            segment_tempo=section.boolean("segment_tempo", default=False),
+            default_swing_deg=section.number("default_swing_deg", default=0.0),
+            default_lift_deg=section.number("default_lift_deg", default=0.0),
         )
         if (
             settings.load_feedback_source == "force"
@@ -158,8 +178,11 @@ class ClockSettings:
                 f" never move on; got {settings.load_feedback_rad_per_s:g}"
             )
         fastest = settings.middle_tempo_hz * 2**settings.tempo_range_octaves
-        # Load feedback can hurry a hand by up to σ rad/s.
-        fastest += settings.load_feedback_rad_per_s / (2 * math.pi)
+        # Load feedback can hurry a hand by up to σ rad/s, before mid-stance,
+        # and the follow nudge by up to ρ, after it.
+        fastest += max(
+            settings.load_feedback_rad_per_s, settings.follow_nudge_rad_per_s
+        ) / (2 * math.pi)
         if fastest >= 12.5:
             raise SettingsError(
                 "[environment.clock] the fastest tempo, load feedback included, must"
@@ -184,6 +207,8 @@ PROPORTION_KEYS = (
     "no_support_cost_parts",
     "both_feet_down_cost_parts",
     "clock_tracking_cost_parts",
+    "clock_tracking_centres",
+    "leg_pushing_cost_parts",
     "head_synchrony_reward_parts",
     "head_clock_change_cost_parts",
     "movement_cost_parts",
@@ -270,6 +295,13 @@ class RewardSettings:
     from those of the segment ahead, and head clock change charges the head
     for how fast its own legs' clocks in use change.
 
+    Leg pushing (``leg_pushing_cost_parts``) charges each segment for the
+    force with which its legs press on other legs, in units of one segment's
+    weight, at most 1: legs that only touch cost almost nothing. Clock
+    tracking compares every value of the clocks in use, or with
+    ``clock_tracking_centres = false`` only the tempo and the sweep and lift
+    amplitudes, so that the posture stays free.
+
     ``head_synchrony_reward_parts`` gives a reward, not a cost, that also
     needs clocks per leg: every follower receives alike how close the
     followers' legs' tempos and amplitudes in use are to the head's. Its
@@ -304,6 +336,8 @@ class RewardSettings:
     no_support_cost_parts: float | None
     both_feet_down_cost_parts: float | None
     clock_tracking_cost_parts: float | None
+    clock_tracking_centres: bool | None
+    leg_pushing_cost_parts: float | None
     head_synchrony_reward_parts: float | None
     head_clock_change_cost_parts: float | None
     movement_cost_parts: float | None
@@ -366,6 +400,8 @@ class RewardSettings:
                 no_support_cost_parts=None,
                 both_feet_down_cost_parts=None,
                 clock_tracking_cost_parts=None,
+                clock_tracking_centres=None,
+                leg_pushing_cost_parts=None,
                 head_synchrony_reward_parts=None,
                 head_clock_change_cost_parts=None,
                 movement_cost_parts=None,
@@ -406,6 +442,7 @@ class RewardSettings:
                     ("clock_tracking_cost_parts", 0.0),
                     ("head_clock_change_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
+                    ("leg_pushing_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
@@ -435,6 +472,10 @@ class RewardSettings:
                 no_support_cost_parts=parts[6],
                 both_feet_down_cost_parts=parts[7],
                 clock_tracking_cost_parts=parts[8],
+                clock_tracking_centres=section.boolean(
+                    "clock_tracking_centres", default=True
+                ),
+                leg_pushing_cost_parts=parts[11],
                 head_synchrony_reward_parts=section.number(
                     "head_synchrony_reward_parts", default=0.0, minimum=0.0
                 ),
@@ -541,6 +582,7 @@ class RewardSettings:
                 ("head_synchrony", self.head_synchrony_reward_parts),
                 ("clock_change", self.head_clock_change_cost_parts),
                 ("movement", self.movement_cost_parts),
+                ("leg_pushing", self.leg_pushing_cost_parts),
             )
             if parts
         }
@@ -670,6 +712,22 @@ class EnvironmentSettings:
                 "[environment.clock] load_feedback_rad_per_s holds a loaded foot's"
                 " clock in stance, which needs a clock per leg: set leg_clocks = true"
                 " in [environment]"
+            )
+        clock = settings.clock
+        leg_clock_settings = [
+            name
+            for name, value in (
+                ("follow_nudge_rad_per_s", clock.follow_nudge_rad_per_s),
+                ("segment_tempo", clock.segment_tempo),
+                ("default_swing_deg", clock.default_swing_deg),
+                ("default_lift_deg", clock.default_lift_deg),
+            )
+            if value
+        ]
+        if leg_clock_settings and not settings.leg_clocks:
+            raise SettingsError(
+                f"[environment.clock] {', '.join(leg_clock_settings)} act on the"
+                " legs' clocks: set leg_clocks = true in [environment]"
             )
         if settings.clock.clock_time_constant_s and not settings.leg_clocks:
             raise SettingsError(

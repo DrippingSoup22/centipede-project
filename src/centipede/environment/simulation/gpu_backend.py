@@ -334,8 +334,10 @@ def _read_foot_normal_forces(
     geom_categories: wp.array1d[int],
     # Out
     foot_normal_force: wp.array3d[float],
+    leg_leg_force: wp.array2d[float],
 ) -> None:
-    """Add each foot contact's normal force to its foot, in newtons.
+    """Add each foot contact's normal force to its foot, in newtons, and
+    each contact between two legs' to both legs' owners.
 
     Launched with one thread per pool slot, like ``_read_contact_flags``. The
     arithmetic is that of the CPU backend and of MuJoCo Warp's own touch
@@ -343,7 +345,7 @@ def _read_foot_normal_forces(
     normal force, and with a pyramidal friction cone its first ``2 (dim - 1)``
     rows together. MuJoCo Warp keeps every row's address, and each world's
     constraint forces in its own row of ``efc_force``. Several contacts may
-    touch one foot, so the forces are added atomically into a cleared array.
+    touch one foot, so the forces are added atomically into cleared arrays.
     """
     contact_index = wp.tid()
     if contact_index >= nacon[0]:
@@ -361,6 +363,14 @@ def _read_foot_normal_forces(
             ]
 
     pair = contact_geom[contact_index]
+    if (
+        geom_categories[pair[0]] != FLOOR_CATEGORY
+        and geom_categories[pair[1]] != FLOOR_CATEGORY
+    ):
+        for end in range(2):
+            wp.atomic_add(
+                leg_leg_force, world_index, geom_owner_indices[pair[end]], normal_force
+            )
     for end in range(2):
         geom_id = pair[end]
         category = geom_categories[geom_id]
@@ -475,6 +485,7 @@ class GPUBackend:
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
         self._foot_normal_force = wp.from_torch(state.foot_normal_force)
+        self._leg_leg_force = wp.from_torch(state.leg_leg_force)
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
 
         # The simulation's category, as views of MuJoCo Warp's own arrays: the
@@ -733,6 +744,7 @@ class GPUBackend:
         )
 
         self._foot_normal_force.zero_()
+        self._leg_leg_force.zero_()
         wp.launch(
             _read_foot_normal_forces,
             dim=self.gpu_data.naconmax,
@@ -747,6 +759,6 @@ class GPUBackend:
                 self.geom_owner_indices,
                 self.geom_categories,
             ],
-            outputs=[self._foot_normal_force],
+            outputs=[self._foot_normal_force, self._leg_leg_force],
             device=self.device,
         )

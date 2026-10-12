@@ -9,6 +9,8 @@ and columns to create the agents, and its curriculum changes the target ranges
 between update cycles with ``set_target_ranges``. See docs/environment.md.
 """
 
+import math
+
 import torch
 
 from centipede.environment.clocks import Clocks, leg_targets
@@ -33,7 +35,9 @@ class Environment:
     ``segment_action_sizes`` lists how many actions each segment takes: one
     per leg joint, six (or eight with ankles, model v5), or with leg clocks
     six per leg (seven with an ankle): its clock's tempo and its step shape,
-    the sweep and lift amplitudes and each joint's centre; with spine
+    the sweep and lift amplitudes and each joint's centre (with
+    ``segment_tempo``, one tempo for both legs first, then each leg's step
+    shape); with spine
     control, the spine joint behind it, for every segment but the rear (only
     for the head with a passive follower spine); and with a clock per
     segment, last, its clock's tempo.
@@ -113,8 +117,11 @@ class Environment:
         # clock's tempo and its step shape: sweep and lift amplitudes, then
         # each joint's centre, sweep, lift, knee (and ankle).
         self.leg_clock_value_count = 3 + leg_joint_count
+        segment_tempo = settings.clock.segment_tempo
         leg_action_count = (
-            2 * self.leg_clock_value_count if settings.leg_clocks else leg_motor_count
+            2 * self.leg_clock_value_count - int(segment_tempo)
+            if settings.leg_clocks
+            else leg_motor_count
         )
         self.leg_action_count = leg_action_count
         self.segment_action_sizes = [
@@ -132,10 +139,20 @@ class Environment:
         # sweep, lift and knee motors, for the agents' learning diagnostics.
         if settings.leg_clocks:
             per_leg = self.leg_clock_value_count
-            self.tempo_columns = [[0, per_leg] for _ in commands_spine]
-            leg_motor_columns = [
-                leg * per_leg + 3 + joint for leg in range(2) for joint in range(3)
-            ]
+            if segment_tempo:
+                # The tempo, then each leg's step shape: its centres follow
+                # its two amplitudes.
+                self.tempo_columns = [[0] for _ in commands_spine]
+                leg_motor_columns = [
+                    1 + leg * (per_leg - 1) + 2 + joint
+                    for leg in range(2)
+                    for joint in range(3)
+                ]
+            else:
+                self.tempo_columns = [[0, per_leg] for _ in commands_spine]
+                leg_motor_columns = [
+                    leg * per_leg + 3 + joint for leg in range(2) for joint in range(3)
+                ]
         else:
             self.tempo_columns = [
                 [size - 1] if settings.clocks else []
@@ -164,6 +181,7 @@ class Environment:
         # width: within the head's reach, nothing pays more.
         self.head_outline = self.simulation.head_outline
         target = settings.target
+        self.segment_weight_n = self.simulation.body_weight_n / self.segment_count
         self.reward_function = RewardFunction(
             settings.rewards,
             settings.max_episode_steps,
@@ -171,7 +189,22 @@ class Environment:
             if target.arrival == "head"
             else target.arrival_radius_m,
             commanded_joints,
+            self.segment_weight_n,
         )
+        # The step an action of 0 asks for, added to each leg's clock actions:
+        # the sweep and lift amplitudes, in action units.
+        self.default_step = torch.zeros(
+            self.leg_clock_value_count, dtype=torch.float32, device=self.device
+        )
+        if settings.leg_clocks:
+            _, half_width = self.simulation.leg_angle_range
+            sweep_half_width, lift_half_width = half_width.reshape(-1)[:2].tolist()
+            self.default_step[1] = (
+                math.radians(settings.clock.default_swing_deg) / sweep_half_width
+            )
+            self.default_step[2] = (
+                math.radians(settings.clock.default_lift_deg) / lift_half_width
+            )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
             self.segment_count,
@@ -223,7 +256,6 @@ class Environment:
             dtype=torch.float32,
             device=self.device,
         )
-        self.segment_weight_n = self.simulation.body_weight_n / self.segment_count
         self.previous_leg_joint_velocity = torch.zeros(
             (self.world_count, self.segment_count, leg_motor_count),
             dtype=torch.float32,
@@ -328,11 +360,11 @@ class Environment:
         leg_amplitudes = None
         if self.settings.leg_clocks:
             self.clocks.follow_actions(
-                joint_action[..., : self.leg_action_count].unflatten(
-                    -1, (2, self.leg_clock_value_count)
-                )
+                self._leg_clock_actions(joint_action) + self.default_step
             )
-            clock_step = self.clocks.step(foot_load=self.previous_foot_load)
+            clock_step = self.clocks.step(
+                foot_load=self.previous_foot_load, foot_down=self.previous_foot_contact
+            )
             leg_amplitudes = self.clocks.amplitudes
             leg_actions = leg_targets(
                 self.clocks.clock_phase, leg_amplitudes, self.clocks.centres
@@ -441,6 +473,17 @@ class Environment:
             truncated,
             final_observations,
         )
+
+    def _leg_clock_actions(self, joint_action: torch.Tensor) -> torch.Tensor:
+        """Each leg's clock actions, ``(W, N, 2, 3 + J)``: its tempo, then
+        its step shape. With ``segment_tempo``, both legs take the segment's
+        one tempo action."""
+        leg_columns = joint_action[..., : self.leg_action_count]
+        if not self.settings.clock.segment_tempo:
+            return leg_columns.unflatten(-1, (2, self.leg_clock_value_count))
+        tempo = leg_columns[..., None, :1].expand(-1, -1, 2, -1)
+        shapes = leg_columns[..., 1:].unflatten(-1, (2, self.leg_clock_value_count - 1))
+        return torch.cat((tempo, shapes), dim=-1)
 
     def _observations(self) -> torch.Tensor:
         """Every segment's observation of the current state."""

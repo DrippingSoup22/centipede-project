@@ -19,6 +19,7 @@ def clocks(
     feedback=0.0,
     clock_time_constant_s=0.0,
     coupling="both",
+    follow_nudge=0.0,
 ):
     settings = ClockSettings(
         middle_tempo_hz=middle_tempo_hz,
@@ -27,6 +28,7 @@ def clocks(
         load_feedback_source="contact",
         clock_time_constant_s=clock_time_constant_s,
         coupling=coupling,
+        follow_nudge_rad_per_s=follow_nudge,
     )
     return Clocks(
         settings, world_count, segment_count, 1, STEP_S, "cpu", per_leg=per_leg
@@ -251,6 +253,25 @@ def test_a_half_load_pushes_a_hand_half_as_hard():
     speed = 4 * math.pi + 6.0 / 2 * torch.cos(start)
     expected = (start + speed * STEP_S).remainder(2 * math.pi)
     assert torch.allclose(clock.clock_phase, expected, atol=1e-5)
+
+
+def test_the_follow_nudge_holds_a_leg_in_late_stance_while_the_foot_ahead_is_down():
+    """Every hand at 3π/4, late stance, where |cos φ| = √2 / 2. The left feet
+    of the head and segment 1 are down, the right feet lifted: segment 1's
+    and 2's left legs are held, their right legs hurried, the head's not
+    nudged. A hand in early stance or in swing is never nudged."""
+    clock = clocks(world_count=1, per_leg=True, follow_nudge=8.0)
+    start = torch.full((1, 3, 2), 0.75 * math.pi)
+    feet_down = torch.tensor([[[True, False]] * 3])
+    for phase, nudged in ((start, True), (start - math.pi / 2, False)):
+        clock.clock_phase.copy_(phase)
+        clock.step(foot_down=feet_down)
+        turned = clock.clock_phase - phase
+        nudge = (
+            8.0 * math.sqrt(0.5) * torch.tensor([[0.0, 0.0], [-1.0, 1.0], [-1.0, 1.0]])
+        )
+        expected = (4 * math.pi + nudge * nudged) * STEP_S
+        assert torch.allclose(turned, expected, atol=1e-5)
 
 
 def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_constant():

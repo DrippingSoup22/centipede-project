@@ -18,6 +18,7 @@ from centipede.environment.simulation import PhysicalState
 
 EPISODE_STEPS = 256
 ARRIVAL_RADIUS = 0.001
+SEGMENT_WEIGHT_N = 0.001
 SETTINGS = RewardSettings.from_section({})  # the rules' defaults
 CENTRES = torch.tensor([[0.0, 0.0], [-0.004, 0.0], [-0.008, 0.0]])
 TIP = torch.tensor([0.005, 0.0])
@@ -41,7 +42,9 @@ def rewards_for(
     foot_slip_speed=None,
     clock=None,
 ):
-    function = RewardFunction(settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS)
+    function = RewardFunction(
+        settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS, SEGMENT_WEIGHT_N
+    )
     step = function.compute(
         state,
         previous_body_planar_position=CENTRES.expand(2, 3, 2).clone(),
@@ -266,6 +269,48 @@ def test_clock_tracking_charges_each_follower_for_its_distance_to_the_clock_ahea
         [0.0, -tracking * 0.25, -tracking]
     )
     assert not parts["clock_tracking"][0].any()
+
+
+def test_following_without_centres_compares_only_the_tempo_and_amplitudes():
+    settings = RewardSettings.from_section(
+        {"clock_tracking_cost_parts": 2, "clock_tracking_centres": False}
+    )
+    every_value = torch.full((2, 3), 0.5)
+    step_size = torch.zeros(2, 3)
+    step_size[1] = torch.tensor([0.0, 0.25, 0.0])
+    clock = ClockStep(
+        None,
+        None,
+        torch.zeros(2, 3),
+        every_value,
+        step_size_tracking_mismatch=step_size,
+    )
+
+    _, parts, weights = rewards_for(unchanged_state(), settings=settings, clock=clock)
+
+    assert parts["clock_tracking"][1].tolist() == pytest.approx(
+        [0.0, -weights["clock_tracking"] * 0.25, 0.0]
+    )
+    assert not parts["clock_tracking"][0].any()
+
+
+def test_leg_pushing_charges_the_force_between_legs_in_segment_weights():
+    """World 1: segment 1's legs press with half a segment's weight, segment
+    2's with three; touching without force costs nothing."""
+    settings = RewardSettings.from_section({"leg_pushing_cost_parts": 2})
+    state = unchanged_state()
+    state.leg_leg_contact[1] = True
+    state.leg_leg_force[1] = torch.tensor([0.0, 0.5, 3.0]) * SEGMENT_WEIGHT_N
+
+    _, parts, weights = rewards_for(state, settings=settings)
+
+    shares = settings.weights(EPISODE_STEPS).episode_shares
+    assert shares["leg_pushing"] == pytest.approx(2 * shares["leg_contact"])
+    pushing = weights["leg_pushing"]
+    assert parts["leg_pushing"][1].tolist() == pytest.approx(
+        [0.0, -pushing * 0.5, -pushing]
+    )
+    assert not parts["leg_pushing"][0].any()
 
 
 def test_head_synchrony_pays_every_follower_alike_and_the_head_nothing():
