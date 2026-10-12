@@ -51,6 +51,33 @@ def test_the_level_follows_the_arrival_share_within_0_and_1():
     assert curriculum.target_ranges() == ((0.03, 0.06), (-30, 30))
 
 
+def test_the_level_bonus_comes_while_the_arrivals_hold():
+    """With episodes of 2 cycles: the first check at cycle 8, then every 4
+    while the arrivals hold above the share held; a drop waits 8 again."""
+    settings = CurriculumSettings.from_section(
+        {
+            "final_distance_range_m": [0.03, 0.2],
+            "final_bearing_range_deg": [-180, 180],
+            "level_rate": 0.01,
+            "level_bonus": 0.05,
+        }
+    )
+    curriculum = Curriculum(settings, TargetSettings.from_section({}), 0.0, 2)
+    levels = []
+    for share in [0.7] * 12 + [0.6] * 8 + [0.6] * 8:
+        curriculum.update(share)
+        levels.append(curriculum.level)
+    steps = [
+        after - before
+        for before, after in zip([0.0] + levels[:-1], levels, strict=True)
+    ]
+    bonus_cycles = [cycle + 1 for cycle, step in enumerate(steps) if step > 0.01]
+    # Held at 8 and 12; at 16 the share fell by 0.1, so the next check is at
+    # 24 and the one after at 28, where it has held since.
+    assert bonus_cycles == [8, 12, 24, 28]
+    assert curriculum.level == pytest.approx(12 * 0.002 + 16 * 0.001 + 4 * 0.05)
+
+
 def test_a_level_between_moves_each_end_of_each_range_in_proportion():
     curriculum = make_curriculum()
     curriculum.level = 0.5

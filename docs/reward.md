@@ -367,7 +367,7 @@ study notes (`results/oscillators/README.md` in CentipedeTraining).
 | ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 2` | 2: 31–; 1: 02, 04, 08, 09, 13; 0.5: 10–12, 14–28 |
 | ✅ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34 |
 | ✅ | [A random first guess](#a-random-first-guess) | Learning | `initial_action_offset_spread = 0.2` | 31– |
-| ✅ | [Curriculum](#curriculum) | Training | `[curriculum]` | all |
+| ✅ | [Curriculum](#curriculum) | Training | `[curriculum]`; `level_bonus = 0.05` from the next round | all |
 | ✅ | [Plateau stop](#plateau-stop) | Training | `plateau_cycles = 48` | all |
 | ✅ | [Range circle](#range-circle) | Task | `range_circle_ratio = 2.5` | all |
 | ✅ | [Walking on after an arrival](#walking-on-after-an-arrival) | Task | `after_arrival = "new_target"` | all |
@@ -702,6 +702,26 @@ After every update cycle, with arrival share `a`:
 
 and each end of the target ranges lies a share `ℓ` of the way from the start
 range to the final one.
+
+**The level bonus** (`level_bonus = 0.05`, the user's idea, from the round
+after runs 35 to 38; 0 is off). The rule above moves the level slowly: at
+70% arrivals, 0.004 per cycle, 250 cycles from 0 to 1, though run 31,
+trained at level 0.05, already arrived 58% and 84% at the final targets. So
+the level also jumps by 0.05 whenever the agents keep arriving as the
+targets get harder. At each check the arrival share `a` (the share of the
+last episode length) must hold:
+
+```math
+a \;\ge\; 0.5 \quad\text{and}\quad a \;\ge\; a_{\text{last check}} - 0.02
+```
+
+The first check comes four episode lengths (32 cycles) into the run, so a
+lucky run of easy targets cannot earn it; after a bonus the next comes two
+episode lengths (16 cycles) later, one for the episodes started at the old
+level to end and one to measure the new; after a failed check, 32 again.
+0.02 is about the chance difference of two readings of about 1,000 episodes
+each. Like the "bold driver" rule for learning rates (Vogl et al.,
+Biological Cybernetics 1988; Battiti, Complex Systems 1989).
 </details>
 
 #### Plateau stop

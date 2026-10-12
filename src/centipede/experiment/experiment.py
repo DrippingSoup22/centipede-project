@@ -167,7 +167,13 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     curriculum = None
     if configuration.curriculum is not None:
         curriculum = Curriculum(
-            configuration.curriculum, configuration.environment.target, saved_level
+            configuration.curriculum,
+            configuration.environment.target,
+            saved_level,
+            episode_cycles=math.ceil(
+                configuration.environment.max_episode_steps
+                / loop_settings.rollout_window_steps
+            ),
         )
         environment.set_target_ranges(*curriculum.target_ranges())
         environment.set_curriculum_level(curriculum.level)

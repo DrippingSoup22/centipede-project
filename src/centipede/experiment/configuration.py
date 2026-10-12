@@ -139,12 +139,17 @@ class CurriculumSettings:
     each update cycle the level moves by ``level_rate`` times the gap between
     the arrival share and ``arrival_share``, within 0 and 1, so that it settles
     where the agents arrive that often. See docs/configuration.md.
+
+    ``level_bonus`` (0, off, by default; cycle 2, the user's idea) adds that
+    much to the level whenever the agents keep arriving as the targets get
+    harder (``Curriculum.update``).
     """
 
     final_distance_range_m: tuple[float, float]
     final_bearing_range_deg: tuple[float, float]
     arrival_share: float
     level_rate: float
+    level_bonus: float = 0.0
 
     @classmethod
     def from_section(cls, values: dict) -> "CurriculumSettings":
@@ -159,6 +164,9 @@ class CurriculumSettings:
                 "arrival_share", default=0.5, minimum=0.0, maximum=1.0
             ),
             level_rate=section.positive_number("level_rate", default=0.02),
+            level_bonus=section.number(
+                "level_bonus", default=0.0, minimum=0.0, maximum=1.0
+            ),
         )
         section.reject_unknown_keys()
         return settings
