@@ -350,7 +350,7 @@ study notes (`results/oscillators/README.md` in CentipedeTraining).
 | :---: | --- | --- | --- | --- |
 | ✅ | [Model A, the network draws](#model-a-the-network-draws) | Leg control | `leg_drive = "swing"` | pilot |
 | ✅ | [Model B, the clock is the engine](#model-b-the-clock-is-the-engine) | Leg control | `leg_drive = "waves"`, `waves = 2` | 31– |
-| ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]` | 31– |
+| ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]`, `max_tempo_hz = 12.5` | 31– (ceiling 35–) |
 | ✅ | [Targets along the curve](#targets-along-the-curve) | Leg control | always with models A and B | 31– |
 | ✅ | [A clock per leg](#a-clock-per-leg) | Leg control | `leg_clocks = true`, `segment_tempo = true` | 08– |
 | ✅ | [Passive follower spine](#passive-follower-spine) | Leg control | `passive_follower_spine = true` | all |
@@ -436,13 +436,19 @@ legs. The segment's first action does not set the tempo, it changes it: at
 most doubling or halving it per second, so the tempo cannot jump. Each
 episode every segment starts at its own random tempo between 1 and 4 Hz, and
 each leg's hand at its own random place: nothing about the rhythm or the
-phases between legs is given. There is no upper or lower limit.
+phases between legs is given. Since run 35 the tempo has a ceiling of
+12.5 Hz, a quarter turn per 20 ms step: without one (runs 31 to 34), the
+heads, which pay no tempo cost, raced, up to 112 Hz in run 31's evaluation,
+where a step jumps more than half a turn and samples the curve like a strobe
+light, and the legs moved fast and without coordination. Real *S.
+polymorpha* steps at about 6 Hz on flat ground (Diaz et al., J. Exp. Biol.
+2023). There is no lower limit.
 
 <details>
 <summary>Math</summary>
 
 ```math
-\log_2 f \;\leftarrow\; \log_2 f + a_{\text{tempo}} \cdot 1\ \tfrac{\text{octave}}{\text{s}} \cdot \Delta t, \qquad
+\log_2 f \;\leftarrow\; \min\!\Big(\log_2 f + a_{\text{tempo}} \cdot 1\ \tfrac{\text{octave}}{\text{s}} \cdot \Delta t,\ \log_2 12.5\Big), \qquad
 \varphi \;\leftarrow\; \varphi + 2\pi f\,\Delta t, \qquad \Delta t = 0.02\ \text{s}
 ```
 
