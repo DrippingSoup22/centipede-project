@@ -11,8 +11,10 @@ This page describes the workspace branch `oscillators` as it trains today.
 - **Part 2, the tools:** everything that is not a reward term, in use or
   tried before, so that any of them can be tried again.
 
-**Current as of:** the baseline, run 26 (`configs/oscillators/26_tracking5_abs.toml`
-in CentipedeTraining), before cycle 1.
+**Current as of:** cycle 1's baseline, run 28
+(`configs/oscillators/28_v5_cycle1.toml` in CentipedeTraining), on model v5.
+The numbers measured at the end of a run are still run 26's (model v4), the
+last baseline trained.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
 > another part, implement and test it) and an **experiment phase** (train and
@@ -26,32 +28,33 @@ in CentipedeTraining), before cycle 1.
 
 ### At a glance
 
-Eight agents, one per segment: the **head** (segment 0) and seven
-**followers** (segments 1 to 7). Every term is computed on every 20 ms step,
-for every segment. Numbers are in units of one arrival reward.
+Twelve agents on model v5, one per segment: the **head** (segment 0) and
+eleven **followers** (segments 1 to 11). Every term is computed on every
+20 ms step, for every segment. Numbers are in units of one arrival reward.
 
 | Group | Term | Head | Followers | Weight | Most per step | Run 26 at the end, per step |
 | --- | --- | :---: | :---: | --- | --- | --- |
 | 1. Task | [Arrival](#arrival) | ✔ | – | 0.5 per arrival | 0.5, on the arrival step | +0.00063 |
 | 1. Task | [Progress](#progress) | ✔ | – | 0.359 per halving | about 0.003 while walking | +0.00278 |
 | 2. Posture | [Body on the ground](#body-on-the-ground) | ✔ | ✔ | 2.5 parts | −0.00117 | head −0.000023, followers ≈ 0 |
-| 2. Posture | [Legs touching](#legs-touching) | ✔ | ✔ | 2 parts | −0.00093 | head −0.000023, followers −0.000013 |
-| 3. Rhythm | [Following the clock ahead](#following-the-clock-ahead) | – | ✔ | 5 parts | −0.00234 | followers −0.00012 (segment 1 −0.00037) |
+| 2. Posture | [Leg pushing](#leg-pushing) | ✔ | ✔ | 2 parts | −0.00093 | new (legs touching, which it replaces: head −0.000023, followers −0.000013) |
+| 3. Rhythm | [Following the clock ahead](#following-the-clock-ahead) | – | ✔ | 5 parts | −0.00234 | followers −0.00012, over six values (segment 1 −0.00037) |
 
 So the head earns, and every segment pays for its posture; the followers
 earn nothing and are judged only on their posture and on how well they copy
 the clock of the segment ahead:
 
 ```math
-r_0 \;=\; \underbrace{0.5\,\mathbf{1}[\text{arrived}] \;+\; 0.359\,P}_{\text{task}} \;-\; \underbrace{0.00117\,B_0 \;-\; 0.00093\,L_0}_{\text{posture}}
+r_0 \;=\; \underbrace{0.5\,\mathbf{1}[\text{arrived}] \;+\; 0.359\,P}_{\text{task}} \;-\; \underbrace{0.00117\,B_0 \;-\; 0.00093\,F_0}_{\text{posture}}
 ```
 
 ```math
-r_i \;=\; -\,\underbrace{0.00117\,B_i \;-\; 0.00093\,L_i}_{\text{posture}} \;-\; \underbrace{0.00234\,C_i}_{\text{rhythm}} \qquad i = 1,\dots,7
+r_i \;=\; -\,\underbrace{0.00117\,B_i \;-\; 0.00093\,F_i}_{\text{posture}} \;-\; \underbrace{0.00234\,C_i}_{\text{rhythm}} \qquad i = 1,\dots,11
 ```
 
-`P` is the head's progress, `B` and `L` the contact flags (0 or 1), and `C`
-the follower's clock mismatch (0 to 1), all defined below.
+`P` is the head's progress, `B` the body's contact flag (0 or 1), `F` the
+force between the segment's legs and others (0 to 1), and `C` the follower's
+clock mismatch (0 to 1), all defined below.
 
 <details>
 <summary><b>How the weights are set</b>: the cost budget, in parts</summary>
@@ -182,23 +185,34 @@ B_i = \mathbf{1}[\text{segment } i\text{'s body touches the ground}], \qquad w =
 rise means the body has started to crawl.
 </details>
 
-#### Legs touching
+#### Leg pushing
 
-**Idea.** Legs that hit each other waste the stride; both segments involved
-pay.
+**Idea.** In the real animal legs touching is no problem; legs that push on
+each other are, since they block the stride. So the cost is the force
+between legs, not the touch: both segments of a contact pay, in proportion
+to how hard they press, and legs that brush past each other pay almost
+nothing. It replaces legs touching (runs 08 to 27), a flag that charged every
+touch alike. The user's decision of 2026-10-12; a run without it is planned.
 
 <details>
 <summary>Math, and what to expect</summary>
 
 ```math
-L_i = \mathbf{1}[\text{one of segment } i\text{'s legs touches another leg}], \qquad w = 2 \times 0.000467 = 0.00093
+F_i = \min\!\Big(1,\ \frac{\sum \text{normal force of the contacts between one of segment } i\text{'s legs and another leg}}{m g / N}\Big), \qquad w = 2 \times 0.000467 = 0.00093
 ```
 
-**What to expect.** Small: the legs touch in 2.5% to 3.8% of steps at the
-head and segments 1 and 2, where the sweeps are large, and almost never
-behind. Run 26 ended at −0.000023 on the head and −0.000013 on the followers.
-The open question of the study is whether this cost, or the geometry of
-model v4, keeps the followers' sweeps small.
+`m g / N` is the weight one segment carries, 0.86 mN on v5, about the
+strongest push a leg's sweep motor makes at its foot. A full push costs what
+a touch cost before, at the same 2 parts.
+
+**What to expect.** Open loop on v5 (clocks at random hands, no reflexes),
+the legs touched in 4% of segment-steps at a 15-degree swing and 29% at 25;
+when they touched they pressed with 1.3 and 2.7 segment weights at the
+median, so about two thirds of touching steps pay the whole cost and a third
+less. With the reflexes the legs touch under 1.5% of the time at swings up
+to 25 degrees, so the part should stay small unless the strides grow or the
+body turns hard. Both backends sum the forces (`leg_leg_force` in the
+physical state).
 </details>
 
 ### 3. Rhythm terms
@@ -210,21 +224,25 @@ between neighbours, the wave, stays free to emerge.
 #### Following the clock ahead
 
 **Idea.** Each follower copies the clock **in use** of the same-side leg of
-the segment ahead: its tempo and its step shape, but not its phase. The head,
-with nothing ahead, sets the clock, and it passes down the body one segment at
-a time. Charged on the absolute difference, so that small mismatches still
-cost (the squared form left them nearly free).
+the segment ahead: its tempo and the size of its step, the sweep and lift
+amplitudes, but not its phase and not its posture. The head, with nothing
+ahead, sets the clock, and it passes down the body one segment at a time.
+Charged on the absolute difference, so that small mismatches still cost (the
+squared form left them nearly free). The joint centres left the comparison
+in cycle 1 (`clock_tracking_centres = false`): copying the posture turned the
+whole body at once and forbade useful differences along it.
 
 <details>
 <summary>Math, and what to expect</summary>
 
-Each leg's clock in use has six values, each from −1 to 1: the tempo (in
-octaves, over the range of one octave), the sweep and lift amplitudes, and
-the sweep, lift and knee centres. For follower `i`, over its two legs and the
-six values:
+Each leg's clock in use holds the tempo (in octaves, over the range of one
+octave) and the sweep and lift amplitudes, each from −1 to 1 (with the
+default step added, so they may reach a little past 1). With one tempo per
+segment both legs share the tempo. For follower `i`, over its two legs and
+the three values:
 
 ```math
-C_i \;=\; \frac{1}{12} \sum_{\ell \in \{\text{left},\,\text{right}\}} \;\sum_{k=1}^{6} \frac{\lvert u_{i,\ell,k} - u_{i-1,\ell,k} \rvert}{2},
+C_i \;=\; \frac{1}{6} \sum_{\ell \in \{\text{left},\,\text{right}\}} \;\sum_{k=1}^{3} \frac{\lvert u_{i,\ell,k} - u_{i-1,\ell,k} \rvert}{2},
 \qquad C_0 = 0,
 \qquad w = 5 \times 0.000467 = 0.00234
 ```
@@ -232,11 +250,20 @@ C_i \;=\; \frac{1}{12} \sum_{\ell \in \{\text{left},\,\text{right}\}} \;\sum_{k=
 `C = 0` copies the segment ahead exactly; `C = 1` is the largest possible
 mismatch.
 
-**What to expect.** Run 26 ended at −0.00012 per step on the followers on
-average: segment 1 −0.00037 (16% of its most), the others 3% to 4%. Segment 1
-pays most because the head's sweep is large and its own is small. Close to 0
-everywhere means either a body that copies well or one whose clocks are all
-alike and still: check the sweeps (lesson 9 of the study notes).
+**Why 5 parts.** The weight sets what a follower trades between copying the
+stride ahead and pushing its neighbours' legs. A follower 23 degrees short
+of a sweep ahead pays (23/40)/2 over three values, about 0.1 of the term,
+0.48 parts per step, 12 part-steps over a 2 Hz step of 25 steps; copying a
+stride that makes the legs push fully for a quarter of the step costs about
+6 × 2 = 12 part-steps of leg pushing. So a follower copies unless copying
+makes it push for more than about a quarter of every step.
+
+**What to expect.** Run 26, over six values, ended at −0.00012 per step on
+the followers on average: segment 1 −0.00037 (16% of its most), the others
+3% to 4%, because the head's sweep was large and segment 1's small. Over
+three values the same mismatches weigh twice as much. Close to 0 everywhere
+means either a body that copies well or one whose clocks are all alike and
+still: check the sweeps (lesson 9 of the study notes).
 </details>
 
 ---
@@ -252,7 +279,10 @@ notes (`results/oscillators/README.md` in CentipedeTraining).
 | :---: | --- | --- | --- | --- |
 | ✅ | [A clock per leg, with its step shape](#a-clock-per-leg-with-its-step-shape) | Leg control | `leg_clocks = true` | 08–27 |
 | ✅ | [The clock's lag](#the-clocks-lag) (the action filter) | Leg control | `clock_time_constant_s = 0.5` | 11–13, 15–27 |
-| ✅ | [Load feedback](#load-feedback) | Leg control | `load_feedback_rad_per_s = 6`, `load_feedback_source = "force"` | contact: 09, 12, 15, 17, 18; force: 19–24, 26, 27 |
+| ✅ | [Load feedback](#load-feedback) | Leg control | `load_feedback_rad_per_s = 3`, `load_feedback_source = "force"` | contact: 09, 12, 15, 17, 18; force: 19–24, 26, 27 (6 rad/s), 28 (3) |
+| ✅ | [The follow nudge](#the-follow-nudge) | Leg control | `follow_nudge_rad_per_s = 12` | 28 |
+| ✅ | [One tempo per segment](#one-tempo-per-segment) | Leg control | `segment_tempo = true` | 28 |
+| ✅ | [The default step](#the-default-step) | Leg control | `default_swing_deg = 15`, `default_lift_deg = 15` | 28 |
 | ✅ | [Passive follower spine](#passive-follower-spine) | Leg control | `passive_follower_spine = true` | all |
 | ⬜ | [A clock per segment](#a-clock-per-segment) | Leg control | `clocks = true` | 01–04 |
 | ✅ | [Observation radius 2](#observation-radius) | What a segment sees | `observation_radius = 2` | 03–27 (1 in 01–02) |
@@ -278,8 +308,10 @@ time together is learnt. CPG-RL works this way (Bellegarda and Ijspeert, 2022).
 <details>
 <summary>Math</summary>
 
-Each leg's six actions `a` set its tempo, sweep and lift amplitudes, and
-sweep, lift and knee centres. The tempo in Hz, from 1 to 4:
+Each leg's actions `a` set its tempo, sweep and lift amplitudes, and its
+joints' centres: sweep, lift and knee, and on model v5 the ankle (with one
+tempo per segment, the segment's first action sets both legs' tempo). The
+tempo in Hz, from 1 to 4:
 
 ```math
 f = 2 \cdot 2^{\,a_{\text{tempo}}} \qquad \varphi \leftarrow \varphi + 2\pi f\,\Delta t \quad (\Delta t = 0.02\ \text{s, plus load feedback})
@@ -290,7 +322,7 @@ The joint targets, in action units mapped onto each joint's range:
 ```math
 \text{sweep} = c_{s} + A_{s}\cos\varphi, \qquad
 \text{lift} = c_{l} + A_{l}\,\max(0,\,-\sin\varphi), \qquad
-\text{knee} = c_{k}
+\text{knee} = c_{k}\ (\text{and the ankle} = c_{a})
 ```
 
 Stance is `φ` from 0 to π, swing from π to 2π. A segment sees each of its
@@ -327,20 +359,87 @@ toward mid-stance and is held back after it, so it stays on the ground while
 the others take their turn. Our best friend so far: with clocks driving the
 legs, a wave formed only with it (runs 15 against 16, 20 against 25). From Owaki and
 Ishiguro's quadruped (2017), whose oscillators interact only through the body.
+Along the body it pulls neighbours toward alternation, the short waves that
+limited the stride; across it, with one tempo per segment, it alternates a
+segment's two legs, as the shared weight holds one down while the other is
+lifted. Since cycle 1, σ = 3 rad/s: the open-loop sweep on v5
+(`analysis/open_loop_wave.py`, `reflex_*_v5*.json` in CentipedeTraining)
+found that 6 nearly stops the clocks at 1 Hz, and that without it a
+segment's two legs keep whatever gap they started with.
 
 <details>
 <summary>Math</summary>
 
 ```math
-\frac{d\varphi}{dt} \;=\; \omega + \sigma N \cos\varphi, \qquad \omega = 2\pi f, \quad \sigma = 6\ \text{rad/s}
+\frac{d\varphi}{dt} \;=\; \omega + \sigma N \cos\varphi, \qquad \omega = 2\pi f, \quad \sigma = 3\ \text{rad/s}
 ```
 
 `N` is the foot's load at the end of the last step, from 0 to 1: with
 `"force"`, its normal force over the weight one segment carries,
-N = min(1, Fₙ / (m·g / 8)); with `"contact"`, 1 when the foot
+N = min(1, Fₙ / (m·g / segments)); with `"contact"`, 1 when the foot
 touches the ground. Stance is centred at `φ = π/2`, where `cos φ` changes
 sign. σ must stay below the slowest `ω`, 2π rad/s, or a loaded clock could
 stop in stance for good.
+</details>
+
+#### The follow nudge
+
+✅ **Idea.** Each follower's leg times its lift-off to the same-side leg of
+the segment ahead: in the second half of its stance it is held back while
+that foot is on the ground and hurried while it is lifted, so it lifts soon
+after the leg ahead. The physics, not the reward, then makes a wave from head
+to tail, and each segment still sees only its neighbours. Real *Scolopendra*
+legs over a gap stop stepping until the legs ahead touch the ground, and
+Yasui et al. (PLoS ONE 2017) model each leg reacting to its own and its
+neighbours' foot forces. Open loop on v5 it makes a uniform wave of 7 to 11
+legs at 1 to 4 Hz and swings of 8 to 25 degrees, with the legs almost never
+touching; without it no case held a wave.
+
+<details>
+<summary>Math, and how ρ was chosen</summary>
+
+```math
+\frac{d\varphi_i}{dt} \;=\; \omega + \sigma N_i \cos\varphi_i \;+\; \rho \,\max(0,\,-\cos\varphi_i)\,\mathbf{1}[\sin\varphi_i \ge 0]\,\big(1 - 2\,D_{i-1}\big), \qquad \rho = 12\ \text{rad/s}
+```
+
+`D` is 1 while the same-side foot of the segment ahead is on the ground
+(before the step), else 0; the head is not nudged. A held hand may stop, or
+turn back a little, until the foot ahead lifts. ρ is the weakest strength
+that held the wave in every case of the open-loop sweep (rule A, the user's
+choice, fixed before the results): three tempos by three swings, and every
+segment's tempo up to 10% off over four random draws, on the 12-unit body
+and on a 21-unit test body. The stronger the nudge, the larger the tempo
+difference it pulls into step; ρ = 10 failed one draw on 21 units.
+</details>
+
+#### One tempo per segment
+
+✅ **Idea.** A segment works at one frequency, like a heartbeat: one action
+sets the tempo of both its legs' clocks, while each leg keeps its own phase,
+step size and posture. With a tempo per leg the two sides formed separate
+chains and drifted apart (run 26: 1.8 to 2.0 Hz on the left, 2.1 to 2.4 on
+the right). The head steers with its step sizes and its neck instead of a
+tempo difference. The user's decision of 2026-10-12.
+
+#### The default step
+
+✅ **Idea.** An action of 0 asks for a step, 15 degrees of swing and of lift,
+instead of standing still, so that every segment steps from the start and
+none begins as an anchor. 15 degrees is the largest swing whose pinch stays
+below the legs' touching limit in the reflexes' wave. Exploration noise
+spreads the early steps around it, about ±20 degrees.
+
+<details>
+<summary>Math</summary>
+
+The default is added to the amplitude actions before the clock's lag, in
+action units of each joint's half range:
+
+```math
+A_{s} = a_{s} + \frac{15^\circ}{40^\circ}, \qquad A_{l} = a_{l} + \frac{15^\circ}{32.5^\circ}
+```
+
+on model v5, whose sweep spans ±40 degrees and lift −25 to 40.
 </details>
 
 #### Passive follower spine
