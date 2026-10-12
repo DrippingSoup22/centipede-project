@@ -111,6 +111,13 @@ class ClockSettings:
     one action instead of two. ``default_swing_deg`` and ``default_lift_deg``
     are the step an action of 0 asks for: they are added to the sweep and
     lift amplitude actions, so that every leg steps from the start.
+
+    With ``tempo_rate_octaves_per_s`` above 0 (off by default, cycle 2), a
+    tempo action no longer sets the tempo but changes it, like a heart that
+    speeds up or slows down: each step the tempo moves by the action times
+    this many octaves per second, with no range and no lag. Every episode,
+    each segment's tempo then starts at its own random value, uniform in
+    octaves between ``start_tempo_range_hz``'s ends.
     """
 
     middle_tempo_hz: float
@@ -123,6 +130,8 @@ class ClockSettings:
     segment_tempo: bool = False
     default_swing_deg: float = 0.0
     default_lift_deg: float = 0.0
+    tempo_rate_octaves_per_s: float = 0.0
+    start_tempo_range_hz: tuple[float, float] = (2.0, 2.0)
 
     @classmethod
     def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
@@ -155,7 +164,18 @@ class ClockSettings:
             segment_tempo=section.boolean("segment_tempo", default=False),
             default_swing_deg=section.number("default_swing_deg", default=0.0),
             default_lift_deg=section.number("default_lift_deg", default=0.0),
+            tempo_rate_octaves_per_s=section.number(
+                "tempo_rate_octaves_per_s", default=0.0, minimum=0.0
+            ),
+            start_tempo_range_hz=section.number_range(
+                "start_tempo_range_hz", default=(2.0, 2.0), minimum=1e-3
+            ),
         )
+        if settings.tempo_rate_octaves_per_s and not settings.segment_tempo:
+            raise SettingsError(
+                "[environment.clock] tempo_rate_octaves_per_s changes each segment's"
+                " one tempo, its heartbeat: set segment_tempo = true"
+            )
         if (
             settings.load_feedback_source == "force"
             and settings.load_feedback_rad_per_s == 0
@@ -183,7 +203,9 @@ class ClockSettings:
         fastest += max(
             settings.load_feedback_rad_per_s, settings.follow_nudge_rad_per_s
         ) / (2 * math.pi)
-        if fastest >= 12.5:
+        # A heart's tempo has no range (the user's choice, 2026-10-12): the
+        # legs' physics keeps it from racing.
+        if fastest >= 12.5 and not settings.tempo_rate_octaves_per_s:
             raise SettingsError(
                 "[environment.clock] the fastest tempo, load feedback included, must"
                 " stay below 12.5 turns per second, a quarter of a turn per 20 ms"
@@ -222,6 +244,12 @@ PROPORTION_KEYS = (
     "progress_parts",
     "follower_progress_share",
     "follower_progress_ratio",
+    "carry_cost_parts",
+    "grip_cost_parts",
+    "tempo_ahead_cost_parts",
+    "grip_unit_m_per_s",
+    "health_ramp_start",
+    "follower_health_scale",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -230,6 +258,7 @@ LEG_CLOCK_TERM_KEYS = (
     "clock_tracking_cost_parts",
     "head_synchrony_reward_parts",
     "head_clock_change_cost_parts",
+    "tempo_ahead_cost_parts",
 )
 
 
@@ -310,6 +339,21 @@ class RewardSettings:
     neither count in ``cost_budget_parts``' default nor appear among the
     costs' episode shares.
 
+    Cycle 2 (2026-10-12) adds three costs, each off by default, and two
+    scales. Carry (``carry_cost_parts``) charges each segment for the share
+    of its own weight its feet do not carry from the floor, averaged over
+    its last stride; carrying more costs nothing. Grip (``grip_cost_parts``)
+    charges each segment for its planted feet's sliding speed, each weighted
+    by the load it bears over the segment's weight, in units of
+    ``grip_unit_m_per_s``, at most 1. Both need ``feet_physics``. Tempo ahead
+    (``tempo_ahead_cost_parts``) charges each follower for how far its tempo
+    is from the segment ahead's, one octave or more costing it all; it needs
+    clocks per leg. The health costs, carry, grip and leg pushing, are
+    multiplied by ``health_ramp_start`` at the curriculum's first level,
+    growing in proportion to the level up to 1 at its last, so that they
+    harden only as the centipede learns to arrive; and for the followers,
+    also by ``follower_health_scale``. Both scales are 1 by default.
+
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
     ahead had been; it is None unless a file sets it, and in such a file
@@ -356,6 +400,12 @@ class RewardSettings:
     body_contact_cost: float | None
     leg_contact_cost: float | None
     distance_ratio_epsilon_m: float
+    carry_cost_parts: float = 0.0
+    grip_cost_parts: float = 0.0
+    tempo_ahead_cost_parts: float = 0.0
+    grip_unit_m_per_s: float = 0.016
+    health_ramp_start: float = 1.0
+    follower_health_scale: float = 1.0
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -443,6 +493,9 @@ class RewardSettings:
                     ("head_clock_change_cost_parts", 0.0),
                     ("movement_cost_parts", 0.0),
                     ("leg_pushing_cost_parts", 0.0),
+                    ("carry_cost_parts", 0.0),
+                    ("grip_cost_parts", 0.0),
+                    ("tempo_ahead_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
@@ -524,6 +577,18 @@ class RewardSettings:
                 body_contact_cost=None,
                 leg_contact_cost=None,
                 distance_ratio_epsilon_m=epsilon,
+                carry_cost_parts=parts[12],
+                grip_cost_parts=parts[13],
+                tempo_ahead_cost_parts=parts[14],
+                grip_unit_m_per_s=section.positive_number(
+                    "grip_unit_m_per_s", default=0.016
+                ),
+                health_ramp_start=section.number(
+                    "health_ramp_start", default=1.0, minimum=0.0, maximum=1.0
+                ),
+                follower_health_scale=section.number(
+                    "follower_health_scale", default=1.0, minimum=0.0
+                ),
             )
         section.reject_unknown_keys()
         return settings
@@ -583,6 +648,9 @@ class RewardSettings:
                 ("clock_change", self.head_clock_change_cost_parts),
                 ("movement", self.movement_cost_parts),
                 ("leg_pushing", self.leg_pushing_cost_parts),
+                ("carry", self.carry_cost_parts),
+                ("grip", self.grip_cost_parts),
+                ("tempo_ahead", self.tempo_ahead_cost_parts),
             )
             if parts
         }
@@ -628,6 +696,20 @@ class EnvironmentSettings:
     clocks of the neighbours it sees, relative to its own. With
     ``leg_accelerations``, every observation block ends with its six leg
     joints' accelerations.
+
+    Cycle 2 (2026-10-12) adds three settings, each off by default.
+    ``leg_drive`` says how leg clocks move the legs: ``"step_shape"``, the
+    clocks' step shape that the actions set; ``"swing"`` (model A), a simple
+    swing under each leg's hand plus the segment's angle for each leg joint,
+    every 20 ms; or ``"waves"`` (model B), each joint's curve over its leg's
+    turn, a centre and ``waves`` waves at 1, 2, ... times the tempo, each
+    with a cosine and a sine amount, which the segment sets every 20 ms. With
+    either new drive, the targets move along the curve during the step
+    instead of jumping once per step, and the observations leave out the
+    step shape in use. ``feet_physics`` replaces each block's four contact
+    flags by its feet's loads, their sliding and its support over the last
+    stride, and ``tilt`` its orientation in the world by its tilt and its
+    bend from the segment ahead.
     """
 
     max_episode_steps: int
@@ -642,6 +724,10 @@ class EnvironmentSettings:
     target: TargetSettings
     rewards: RewardSettings
     clock: ClockSettings
+    leg_drive: str = "step_shape"
+    waves: int = 2
+    feet_physics: bool = False
+    tilt: bool = False
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -674,8 +760,33 @@ class EnvironmentSettings:
                 section.table("rewards"), clock.coupling
             ),
             clock=clock,
+            leg_drive=section.choice(
+                "leg_drive", ("step_shape", "swing", "waves"), default="step_shape"
+            ),
+            waves=section.positive_integer("waves", default=2),
+            feet_physics=section.boolean("feet_physics", default=False),
+            tilt=section.boolean("tilt", default=False),
         )
         section.reject_unknown_keys()
+        feet_costs = [
+            key
+            for key in ("carry_cost_parts", "grip_cost_parts")
+            if getattr(settings.rewards, key)
+        ]
+        if feet_costs and not settings.feet_physics:
+            raise SettingsError(
+                f"[environment.rewards] {', '.join(feet_costs)} read the feet's"
+                " floor forces, which feet_physics measures: set feet_physics ="
+                " true in [environment]"
+            )
+        if settings.leg_drive != "step_shape" and not (
+            settings.leg_clocks and settings.clock.segment_tempo
+        ):
+            raise SettingsError(
+                f'[environment] leg_drive = "{settings.leg_drive}" moves the legs'
+                " with their clocks at their segment's one tempo: set leg_clocks ="
+                " true and [environment.clock] segment_tempo = true"
+            )
         if settings.passive_follower_spine and not settings.spine_control:
             raise SettingsError(
                 "[environment] passive_follower_spine leaves the head its neck, which"

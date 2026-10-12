@@ -396,3 +396,57 @@ def test_legs_with_ankles_take_a_centre_more_and_reach_their_targets():
     middle, half_width = env.simulation.leg_angle_range
     angles = env.simulation.physical_state.leg_joint_position
     assert torch.allclose(angles, middle + 0.4 * half_width, atol=0.05)
+
+
+def test_models_a_and_b_drive_the_legs_along_the_hand_and_feel_their_feet():
+    """Model B with its first wave's cosine at the swing's sweep draws model
+    A's sweep; during a step the targets move from the hand's place before it
+    to its place after it; and the feet carry the body's weight."""
+    clock = {
+        "segment_tempo": True,
+        "clock_time_constant_s": 0.0,
+        "default_swing_deg": 15.0,
+        "default_lift_deg": 15.0,
+    }
+    models = {
+        drive: environment(
+            world_count=1,
+            model_path="models/assembly_v5.xml",
+            leg_clocks=True,
+            leg_drive=drive,
+            feet_physics=True,
+            clock=clock,
+        )
+        for drive in ("swing", "waves")
+    }
+    swing, waves = models["swing"], models["waves"]
+    joints = len(swing.simulation.leg_roles)
+    assert swing.segment_action_sizes[0] == 1 + 2 * joints
+    assert waves.segment_action_sizes[0] == 1 + 2 * joints * 5
+    phase = 2 * math.pi * torch.rand(1, swing.segment_count, 2)
+    zero = torch.zeros(1, swing.segment_count, swing.action_size)
+    drawn = torch.zeros(1, waves.segment_count, waves.action_size)
+    for leg in range(2):
+        drawn[..., 1 + leg * joints * 5 + 1] = swing.default_step[1]  # sweep cos 1
+
+    sweeps = [0, joints]
+    assert torch.allclose(
+        swing._drive_targets(zero, phase)[..., sweeps],
+        waves._drive_targets(drawn, phase)[..., sweeps],
+        atol=1e-6,
+    )
+
+    waves.reset(seed=1)
+    for _ in range(20):
+        waves.step(drawn)
+    end = waves._drive_targets(drawn, waves.clocks.clock_phase)
+    middle, half_width = waves.simulation.leg_angle_range
+    backend = waves.simulation._backend
+    ctrl = backend.world_data[0].ctrl[backend.mapping.leg_actuator_ids]
+    assert torch.allclose(
+        torch.as_tensor(ctrl, dtype=torch.float32),
+        middle + end[0] * half_width,
+        atol=1e-5,
+    )
+    carried = (waves.foot_load[0] * waves.own_weight_n[:, None]).sum()
+    assert float(carried) == pytest.approx(waves.simulation.body_weight_n, rel=0.05)

@@ -41,10 +41,15 @@ def rewards_for(
     joint_action=None,
     foot_slip_speed=None,
     clock=None,
+    foot_load=None,
+    stride_support=None,
+    level=None,
 ):
     function = RewardFunction(
         settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS, SEGMENT_WEIGHT_N
     )
+    if level is not None:
+        function.set_level(level)
     step = function.compute(
         state,
         previous_body_planar_position=CENTRES.expand(2, 3, 2).clone(),
@@ -57,6 +62,8 @@ def rewards_for(
             torch.zeros(2, 3, 2) if foot_slip_speed is None else foot_slip_speed
         ),
         clock=clock,
+        foot_load=foot_load,
+        stride_support=stride_support,
     )
     parts = dict(zip(function.term_names, step.reward_parts.unbind(-1), strict=True))
     return step, parts, function.weights.per_step
@@ -411,3 +418,50 @@ def test_the_reward_used_before_2026_10_08_keeps_its_terms():
         -0.003 * 10.001 / 15.001, rel=1e-5
     )
     assert not parts["leg_contact"].any()  # a zero weight switches its term off
+
+
+@pytest.mark.parametrize("level", [0.0, 1.0])
+def test_carry_grip_and_tempo_ahead_with_health_hardening_by_level(level):
+    """World 1: the segments carry 0.6, 1.3 and none of their weight over the
+    stride; each foot bears half its segment's weight and slides at one grip
+    unit; the tempos are 0, 0.5 and 2 octaves from the one ahead. Health
+    costs weigh 0.3 at level 0 and 1 at level 1, halved for the followers;
+    the tempo is never scaled."""
+    settings = RewardSettings.from_section(
+        {
+            "carry_cost_parts": 3,
+            "grip_cost_parts": 2,
+            "tempo_ahead_cost_parts": 3.5,
+            "health_ramp_start": 0.3,
+            "follower_health_scale": 0.5,
+        }
+    )
+    support = torch.tensor([[1.0, 1.0, 1.0], [0.6, 1.3, 0.0]])
+    foot_load = torch.zeros(2, 3, 2)
+    foot_load[1] = 0.5
+    foot_slip_speed = torch.zeros(2, 3, 2)
+    foot_slip_speed[1] = settings.grip_unit_m_per_s
+    gaps = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.5, 2.0]])
+    clock = ClockStep(None, None, torch.zeros(2, 3), tempo_gap_ahead=gaps)
+
+    _, parts, weights = rewards_for(
+        unchanged_state(),
+        settings=settings,
+        foot_slip_speed=foot_slip_speed,
+        clock=clock,
+        foot_load=foot_load,
+        stride_support=support,
+        level=level,
+    )
+
+    scale = torch.tensor([1.0, 0.5, 0.5]) * (0.3 + 0.7 * level)
+    expected_carry = -weights["carry"] * torch.tensor([0.4, 0.0, 1.0]) * scale
+    assert parts["carry"][1].tolist() == pytest.approx(expected_carry.tolist())
+    assert parts["grip"][1].tolist() == pytest.approx(
+        (-weights["grip"] * scale).tolist()
+    )
+    assert parts["tempo_ahead"][1].tolist() == pytest.approx(
+        [0.0, -0.5 * weights["tempo_ahead"], -weights["tempo_ahead"]]
+    )
+    for name in ("carry", "grip", "tempo_ahead"):
+        assert not parts[name][0].any()

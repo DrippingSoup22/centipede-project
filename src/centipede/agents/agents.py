@@ -33,6 +33,7 @@ class Agents:
         segment_action_sizes: list[int] | None = None,
         tempo_columns: list[list[int]] | None = None,
         motor_columns: list[list[int]] | None = None,
+        shape_columns: list[list[int]] | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -43,7 +44,8 @@ class Agents:
         diagnostics need: for each segment, which actions set clock tempos
         (none when not given), and which action sets each of its motors (when
         not given, its first six actions its leg motors and a seventh its
-        spine joint).
+        spine joint). ``shape_columns``, the environment's as well, lists each
+        segment's actions that draw its legs' curves (none when not given).
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
@@ -62,6 +64,9 @@ class Agents:
                 settings=settings,
                 seed=seed * segment_count + segment_index,
                 action_size=self.segment_action_sizes[segment_index],
+                shape_columns=None
+                if shape_columns is None
+                else shape_columns[segment_index],
             )
             for segment_index in range(segment_count)
         ]

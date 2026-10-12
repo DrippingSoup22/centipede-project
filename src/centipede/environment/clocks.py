@@ -63,7 +63,9 @@ class ClockStep:
     legs and three values, the tempo and the sweep and lift amplitudes, of
     |difference from the head's same-side leg| ÷ 2; the mean of the
     followers' scores, from 0 to 1. The centres and the phase are not
-    compared.
+    compared. ``tempo_gap_ahead`` ``(W, N)``, with clocks per leg, is how far
+    each segment's tempo, its first clock's, is from the segment ahead's, in
+    octaves; 0 for the head.
     """
 
     leg_squared_difference: torch.Tensor | None
@@ -73,6 +75,7 @@ class ClockStep:
     change_size: torch.Tensor | None = None
     head_synchrony: torch.Tensor | None = None
     step_size_tracking_mismatch: torch.Tensor | None = None
+    tempo_gap_ahead: torch.Tensor | None = None
 
 
 def leg_targets(
@@ -178,6 +181,11 @@ class Clocks:
             # The share of the way to its action the clock in use covers in a
             # step: tempo, amplitudes and centres alike.
             self.lag_rate = lag_rate(settings.clock_time_constant_s, step_duration_s)
+            # With a heart, the most a tempo action changes the tempo in one
+            # step, in octaves; 0 without one.
+            self.heart_step_octaves = (
+                settings.tempo_rate_octaves_per_s * step_duration_s
+            )
             # How far each leg's clock in use moved on the last step, in the
             # units of ``clock_in_use``.
             self.clock_change = torch.zeros(
@@ -227,7 +235,10 @@ class Clocks:
         A ``seed`` restarts the hands' random sequence. The legs' remembered
         angles are forgotten, so the first turn after a restart costs nothing,
         and the legs' step shapes are zero until the next step starts the
-        clocks in use at its actions.
+        clocks in use at its actions. With a heart, each segment's tempo
+        starts instead at a random value, uniform in octaves over
+        ``start_tempo_range_hz``, the same for both its legs, drawn after the
+        hands.
         """
         if seed is not None:
             self.generator.manual_seed(seed)
@@ -242,8 +253,24 @@ class Clocks:
         )
         restarted = world_mask[:, None, None]
         self.clock_phase.copy_(torch.where(restarted, new_phase, self.clock_phase))
-        self.clock_tempo_octaves.masked_fill_(restarted, 0.0)
-        self.clock_tempo_hz.masked_fill_(restarted, self.settings.middle_tempo_hz)
+        start_octaves = torch.zeros_like(self.clock_tempo_octaves)
+        if self.per_leg and self.heart_step_octaves:
+            low, high = (
+                math.log2(tempo / self.settings.middle_tempo_hz)
+                for tempo in self.settings.start_tempo_range_hz
+            )
+            draw = torch.rand(
+                self.clock_phase.shape[:2],
+                generator=self.generator,
+                device=self.clock_phase.device,
+            )
+            start_octaves[:] = (low + (high - low) * draw)[..., None]
+        self.clock_tempo_octaves.copy_(
+            torch.where(restarted, start_octaves, self.clock_tempo_octaves)
+        )
+        self.clock_tempo_hz.copy_(
+            self.settings.middle_tempo_hz * torch.exp2(self.clock_tempo_octaves)
+        )
         if self.per_leg:
             self.step_shape.masked_fill_(restarted[..., None], 0.0)
             self.restarted.logical_or_(world_mask)
@@ -311,10 +338,14 @@ class Clocks:
             )
         self.clock_phase.copy_((self.clock_phase + turned).remainder(2 * math.pi))
         tracking_mismatch = change_size = head_synchrony = step_size_mismatch = None
+        tempo_gap_ahead = None
         if self.per_leg:
             tracking_mismatch, change_size, head_synchrony, step_size_mismatch = (
                 self._compare_clocks_in_use()
             )
+            tempo = self.clock_tempo_octaves[..., 0]
+            tempo_gap_ahead = torch.zeros_like(tempo)
+            tempo_gap_ahead[:, 1:] = (tempo[:, 1:] - tempo[:, :-1]).abs()
         return ClockStep(
             leg_squared_difference,
             leg_difference_known,
@@ -323,6 +354,7 @@ class Clocks:
             change_size,
             head_synchrony,
             step_size_mismatch,
+            tempo_gap_ahead,
         )
 
     def clock_in_use(self) -> torch.Tensor:
@@ -344,18 +376,27 @@ class Clocks:
         follow their actions as a first-order lag (``lag_rate``) with
         ``clock_time_constant_s``, which covers 1 − e^(−1), 63%, of a sudden
         change in one time constant. On the first step after a restart, the
-        clock in use starts at the actions, and its change counts zero.
+        clock in use starts at the actions, and its change counts zero. With a
+        heart, the tempo action instead changes the tempo from where it is, by
+        up to ``heart_step_octaves`` per step.
         """
         before = self.clock_in_use()
         restarted = self.restarted[:, None, None]
-        tempo_octaves = leg_clock_actions[..., 0] * self.settings.tempo_range_octaves
-        self.clock_tempo_octaves.copy_(
-            torch.where(
-                restarted,
-                tempo_octaves,
-                self.clock_tempo_octaves.lerp(tempo_octaves, self.lag_rate),
+        if self.heart_step_octaves:
+            self.clock_tempo_octaves.add_(
+                leg_clock_actions[..., 0] * self.heart_step_octaves
             )
-        )
+        else:
+            tempo_octaves = (
+                leg_clock_actions[..., 0] * self.settings.tempo_range_octaves
+            )
+            self.clock_tempo_octaves.copy_(
+                torch.where(
+                    restarted,
+                    tempo_octaves,
+                    self.clock_tempo_octaves.lerp(tempo_octaves, self.lag_rate),
+                )
+            )
         shape_actions = leg_clock_actions[..., 1:]
         self.step_shape.copy_(
             torch.where(

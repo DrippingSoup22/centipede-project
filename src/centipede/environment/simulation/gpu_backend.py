@@ -41,23 +41,102 @@ CAPACITY_OVERFLOWS = CONSTRAINT_OVERFLOWS | CONTACT_OVERFLOWS
 
 
 @wp.kernel
-def _apply_leg_actions(
+def _set_leg_actions_between(
     # In
     leg_actuator_ids: wp.array2d[wp.int32],
-    leg_actions: wp.array3d[float],
+    start: wp.array3d[float],
+    end: wp.array3d[float],
+    share: float,
     # Out
     ctrl: wp.array2d[float],
 ) -> None:
-    """Write each world's leg actions into its row of ``ctrl``.
+    """Write each leg action ``share`` of the way from ``start`` to ``end``.
 
-    Launched with one thread per (world, segment, leg joint). Each thread copies
-    one action to the motor that drives its joint.
+    Launched before every physics step of an action, with one thread per
+    (world, segment, leg joint), so that a leg's target moves along a straight
+    line over the action instead of being held.
     """
     world_index, segment_index, leg_joint_index = wp.tid()
+    first = start[world_index, segment_index, leg_joint_index]
+    last = end[world_index, segment_index, leg_joint_index]
     motor_id = leg_actuator_ids[segment_index, leg_joint_index]
-    ctrl[world_index, motor_id] = leg_actions[
-        world_index, segment_index, leg_joint_index
-    ]
+    ctrl[world_index, motor_id] = first + share * (last - first)
+
+
+@wp.kernel
+def _clear_floor_forces(
+    # In
+    world_mask: wp.array1d[bool],
+    # Out
+    foot_floor_force: wp.array3d[float],
+) -> None:
+    """Zero the masked worlds' feet's floor forces; one thread per (world,
+    segment, foot)."""
+    world_index, segment_index, side = wp.tid()
+    if world_mask[world_index]:
+        foot_floor_force[world_index, segment_index, side] = 0.0
+
+
+@wp.kernel
+def _add_floor_forces(
+    # In: model
+    pyramidal_cone: bool,
+    # In: data
+    nacon: wp.array1d[int],
+    contact_geom: wp.array1d[wp.vec2i],
+    contact_worldid: wp.array1d[int],
+    contact_dim: wp.array1d[int],
+    contact_efc_address: wp.array2d[int],
+    efc_force: wp.array2d[float],
+    # In: tables
+    geom_owner_indices: wp.array1d[int],
+    geom_categories: wp.array1d[int],
+    world_mask: wp.array1d[bool],
+    scale: float,
+    # Out
+    foot_floor_force: wp.array3d[float],
+) -> None:
+    """Add ``scale`` times each foot's normal force from the floor, in
+    newtons, for the masked worlds.
+
+    The arithmetic of ``_read_foot_normal_forces``, for the contacts between
+    a foot and the floor only. Launched after every physics step with
+    ``scale`` 1 / steps, it averages the force over the action.
+    """
+    contact_index = wp.tid()
+    if contact_index >= nacon[0]:
+        return
+    efc_address = contact_efc_address[contact_index, 0]
+    world_index = contact_worldid[contact_index]
+    if efc_address < 0 or not world_mask[world_index]:
+        return
+    pair = contact_geom[contact_index]
+    foot_geom = pair[0]
+    if geom_categories[pair[0]] == FLOOR_CATEGORY:
+        foot_geom = pair[1]
+    elif geom_categories[pair[1]] != FLOOR_CATEGORY:
+        return
+    side = -1
+    if geom_categories[foot_geom] == LEFT_FOOT_CATEGORY:
+        side = 0
+    elif geom_categories[foot_geom] == RIGHT_FOOT_CATEGORY:
+        side = 1
+    if side < 0:
+        return
+
+    normal_force = efc_force[world_index, efc_address]
+    if pyramidal_cone:
+        for row in range(1, 2 * (contact_dim[contact_index] - 1)):
+            normal_force += efc_force[
+                world_index, contact_efc_address[contact_index, row]
+            ]
+    wp.atomic_add(
+        foot_floor_force,
+        world_index,
+        geom_owner_indices[foot_geom],
+        side,
+        scale * normal_force,
+    )
 
 
 @wp.kernel
@@ -408,12 +487,15 @@ class GPUBackend:
         contacts_per_world: int,
         constraints_per_world: int,
         start_heading_range_rad: float = 0.0,
+        average_floor_forces: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
-        turn the body about the vertical. ``solver`` is "newton" or "cg"; it is
+        turn the body about the vertical. With ``average_floor_forces`` every
+        step also measures each foot's floor force, averaged over its physics
+        steps. ``solver`` is "newton" or "cg"; it is
         set on the host model before the copy, because MuJoCo Warp reads it
         while building the GPU model. The contact and constraint capacities are
         reserved here once: contacts in one pool shared by all worlds,
@@ -486,7 +568,15 @@ class GPUBackend:
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
         self._foot_normal_force = wp.from_torch(state.foot_normal_force)
         self._leg_leg_force = wp.from_torch(state.leg_leg_force)
+        self._foot_floor_force = wp.from_torch(state.foot_floor_force)
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
+        self.average_floor_forces = average_floor_forces
+        # The leg actions at the start and the end of an action, which the
+        # recorded physics steps read; ``step`` writes them before each replay.
+        leg_shape = (world_count, self.segment_count, self.leg_motor_count)
+        self._leg_actions_start = wp.zeros(leg_shape, dtype=float, device=self.device)
+        self._leg_actions_end = wp.zeros(leg_shape, dtype=float, device=self.device)
+        self._every_world = wp.full(world_count, True, dtype=bool, device=self.device)
 
         # The simulation's category, as views of MuJoCo Warp's own arrays: the
         # physics refreshes them, so nothing is copied per step.
@@ -517,14 +607,22 @@ class GPUBackend:
         )
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        leg_actions_end: torch.Tensor | None = None,
     ) -> None:
         """Hold the (W, N, M) leg and (W, N - 1) spine actions for 20 ms.
 
-        Without spine actions, the spine motors receive zero.
+        Without spine actions, the spine motors receive zero. With
+        ``leg_actions_end``, (W, N, M), the leg actions move in a straight
+        line from ``leg_actions`` to it over the physics steps, reaching it on
+        the last one, instead of being held.
 
-        The actions are written into ``ctrl`` once, then the physics runs its
-        steps for the action (134 for model v3). Launched from Python, each
+        The spine actions are written into ``ctrl`` once and the leg actions'
+        two ends into their buffers, then the physics runs its steps for the
+        action (134 for model v3), each after writing its leg actions into
+        ``ctrl``. Launched from Python, each
         step's solver would make the CPU wait for the GPU after every
         iteration, to decide whether to iterate again.
         So the first step runs them from Python, which also compiles every
@@ -536,13 +634,10 @@ class GPUBackend:
         updates the values derived from the new positions, such as site
         positions and contacts, before the physical state is refreshed.
         """
-        wp.launch(
-            kernel=_apply_leg_actions,
-            dim=(self.world_count, self.segment_count, self.leg_motor_count),
-            inputs=[self.leg_actuator_ids, wp.from_torch(leg_actions.contiguous())],
-            outputs=[self.gpu_data.ctrl],
-            device=self.device,
-        )
+        if leg_actions_end is None:
+            leg_actions_end = leg_actions
+        wp.copy(self._leg_actions_start, wp.from_torch(leg_actions.contiguous()))
+        wp.copy(self._leg_actions_end, wp.from_torch(leg_actions_end.contiguous()))
         if spine_actions is None:
             spine_actions = self.passive_spine_actions
         wp.launch(
@@ -629,11 +724,67 @@ class GPUBackend:
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        # A restarted world has no step behind it: its feet's floor forces
+        # are those of the starting pose.
+        self._clear_floor_forces(mask_view)
+        if self.average_floor_forces:
+            self._add_floor_forces(mask_view, 1.0)
 
     def _run_physics_steps(self) -> None:
-        """The physics steps of one action, launched from Python."""
-        for _ in range(self.physics_steps_per_action):
+        """The physics steps of one action, launched from Python: each writes
+        its leg actions, then, with ``average_floor_forces``, adds its share
+        of the feet's floor forces."""
+        steps = self.physics_steps_per_action
+        if self.average_floor_forces:
+            self._clear_floor_forces(self._every_world)
+        for physics_step in range(steps):
+            wp.launch(
+                _set_leg_actions_between,
+                dim=(self.world_count, self.segment_count, self.leg_motor_count),
+                inputs=[
+                    self.leg_actuator_ids,
+                    self._leg_actions_start,
+                    self._leg_actions_end,
+                    (physics_step + 1) / steps,
+                ],
+                outputs=[self.gpu_data.ctrl],
+                device=self.device,
+            )
             mjw.step(self.gpu_model, self.gpu_data)
+            if self.average_floor_forces:
+                self._add_floor_forces(self._every_world, 1 / steps)
+
+    def _clear_floor_forces(self, world_mask: wp.array) -> None:
+        """Zero the masked worlds' feet's floor forces."""
+        wp.launch(
+            _clear_floor_forces,
+            dim=(self.world_count, self.segment_count, 2),
+            inputs=[world_mask],
+            outputs=[self._foot_floor_force],
+            device=self.device,
+        )
+
+    def _add_floor_forces(self, world_mask: wp.array, scale: float) -> None:
+        """Add ``scale`` times the masked worlds' feet's current floor forces."""
+        wp.launch(
+            _add_floor_forces,
+            dim=self.gpu_data.naconmax,
+            inputs=[
+                self.pyramidal_cone,
+                self.gpu_data.nacon,
+                self.gpu_data.contact.geom,
+                self.gpu_data.contact.worldid,
+                self.gpu_data.contact.dim,
+                self.gpu_data.contact.efc_address,
+                self.gpu_data.efc.force,
+                self.geom_owner_indices,
+                self.geom_categories,
+                world_mask,
+                scale,
+            ],
+            outputs=[self._foot_floor_force],
+            device=self.device,
+        )
 
     def _check_worlds(self) -> None:
         """Stop the run if any world's physics went wrong during the last step.

@@ -38,11 +38,21 @@ class PhysicsSimulation:
     mapped onto its joint's range before the backend applies it.
     ``physical_state`` is refreshed in place by every ``reset`` and ``step``,
     and so is ``diagnostics.facts``, the simulation's diagnostics category.
-    ``body_weight_n`` is the whole body's weight, the unit of the feet's loads.
+    ``body_weight_n`` is the whole body's weight, the unit of the feet's loads,
+    and ``own_weight_n`` ``(N,)`` each segment's own, its body and legs.
     """
 
-    def __init__(self, settings: SimulationSettings) -> None:
-        """Load and check the model, then create the chosen backend."""
+    def __init__(
+        self, settings: SimulationSettings, average_floor_forces: bool = False
+    ) -> None:
+        """Load and check the model, then create the chosen backend.
+
+        With ``average_floor_forces`` every step also measures each foot's
+        normal force from the floor, averaged over the step's physics steps
+        (``foot_floor_force``): a reading at the step's end alone misses
+        what happened during it, by about a twentieth of a segment's weight
+        on average in run 28's walk (CentipedeTraining, foot_step.py).
+        """
         model = mujoco.MjModel.from_xml_path(str(settings.model_path))
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
@@ -55,6 +65,7 @@ class PhysicsSimulation:
                 settings.world_count,
                 steps_per_action,
                 start_heading_range_rad,
+                average_floor_forces,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -70,6 +81,7 @@ class PhysicsSimulation:
                 settings.contacts_per_world,
                 settings.constraints_per_world,
                 start_heading_range_rad,
+                average_floor_forces,
             )
 
         self.segment_count = mapping.segment_count
@@ -82,6 +94,15 @@ class PhysicsSimulation:
         self.body_weight_n = float(
             model.body_subtreemass[mapping.body_ids[0]]
             * np.linalg.norm(model.opt.gravity)
+        )
+        # Each segment's own weight, (N,) newtons: its body and legs, the mass
+        # of its tree less the next segment's, which hangs from it.
+        subtree_mass = model.body_subtreemass[mapping.body_ids]
+        own_mass = subtree_mass - np.append(subtree_mass[1:], 0.0)
+        self.own_weight_n = torch.as_tensor(
+            own_mass * np.linalg.norm(model.opt.gravity),
+            dtype=torch.float32,
+            device=self._backend.physical_state.body_height.device,
         )
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
@@ -108,17 +129,26 @@ class PhysicsSimulation:
         self._backend.reset(world_mask, seed)
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        leg_actions_end: torch.Tensor | None = None,
     ) -> None:
         """Hold the (W, N, M) leg and (W, N - 1) spine actions for one step.
 
         Spine command ``i`` drives the joint between segments ``i`` and ``i + 1``;
-        without spine actions, the spine motors receive zero. When the legs
-        take angles, each leg action becomes a target angle on its joint's
-        range: -1 its lower limit, 0 its middle, 1 its upper limit. Nothing is
-        clipped; MuJoCo holds each target within its range.
+        without spine actions, the spine motors receive zero. With
+        ``leg_actions_end``, (W, N, M), the leg actions move in a straight line
+        from ``leg_actions`` to it over the step's physics steps, reaching it on
+        the last one, so that a target that moves during the step is followed
+        instead of jumping once per step. When the legs take angles, each leg
+        action becomes a target angle on its joint's range: -1 its lower limit,
+        0 its middle, 1 its upper limit. Nothing is clipped; MuJoCo holds each
+        target within its range.
         """
         if self.leg_angle_range is not None:
             middle, half_width = self.leg_angle_range
             leg_actions = torch.addcmul(middle, leg_actions, half_width)
-        self._backend.step(leg_actions, spine_actions)
+            if leg_actions_end is not None:
+                leg_actions_end = torch.addcmul(middle, leg_actions_end, half_width)
+        self._backend.step(leg_actions, spine_actions, leg_actions_end)

@@ -14,7 +14,9 @@ class PhysicalState:
     for each segment, the yaw joint that joins it to the segment behind; the
     rear segment has none, and its entries stay zero. The normal force on
     each foot is used only by the clocks' load feedback, and the force between
-    legs only by the leg pushing cost.
+    legs only by the leg pushing cost. ``foot_floor_force`` is each foot's
+    normal force from the floor alone, averaged over the step's physics steps;
+    it stays zero unless the simulation was asked to measure it.
 
     The tensors are created once and overwritten in place by every ``step()``
     and ``reset()``. After either returns, they describe the current state of
@@ -41,6 +43,7 @@ class PhysicalState:
     # (W, N), N: the summed normal forces of the contacts between one of the
     # segment's legs and another leg.
     leg_leg_force: torch.Tensor
+    foot_floor_force: torch.Tensor  # (W, N, 2), left and right, N
 
     @classmethod
     def allocate(
@@ -75,4 +78,5 @@ class PhysicalState:
             spine_yaw_velocity=zeros(n),
             foot_normal_force=zeros(n, 2),
             leg_leg_force=zeros(n),
+            foot_floor_force=zeros(n, 2),
         )

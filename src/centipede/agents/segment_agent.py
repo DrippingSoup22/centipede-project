@@ -34,12 +34,15 @@ class SegmentAgent:
         settings: AgentSettings,
         seed: int,
         action_size: int = LEG_ACTION_COUNT,
+        shape_columns: list[int] | None = None,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
         The seed sets the networks' starting weights and starts the PPO's own
         generator, which draws its actions and orders its minibatches.
-        ``action_size`` is how many motors the segment commands.
+        ``action_size`` is how many motors the segment commands, and
+        ``shape_columns`` the actions that draw its legs' curves, which start
+        at random values with ``initial_action_offset_spread``.
         """
         self.segment_index = segment_index
         self.settings = settings
@@ -64,6 +67,15 @@ class SegmentAgent:
                 hidden_sizes=settings.hidden_layers,
                 activation=settings.hidden_activation,
             )
+            spread = settings.initial_action_offset_spread
+            if spread and shape_columns:
+                # The actor's mean passes through tanh into the action's
+                # range, so a starting action u needs a bias of atanh(u).
+                offsets = (2 * torch.rand(len(shape_columns)) - 1) * spread
+                with torch.no_grad():
+                    actor_network.mean_network[-1].bias[shape_columns] += torch.atanh(
+                        offsets
+                    )
         # Optimizers keep references to the parameters, so they are created
         # after the networks have moved to the device.
         actor_network.to(device)

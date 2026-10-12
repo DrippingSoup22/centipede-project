@@ -47,12 +47,23 @@ class Environment:
     of its sweep, lift and knee motors and its spine motor (with leg clocks,
     each leg joint's centre; an ankle is not reported), for the agents'
     learning diagnostics. ``clocks`` holds the clocks, or None without them.
+
+    With ``leg_drive = "swing"`` (model A) a segment's actions are its tempo
+    action, then an angle for each of its leg joints, left leg first, added
+    to a simple swing under each leg's hand; with ``"waves"`` (model B) its
+    tempo action, then for each leg joint, left leg first, its curve's
+    centre and each wave's cosine and sine amounts. ``shape_columns`` lists,
+    for each segment, the actions that draw its legs' curves (model B's
+    amounts; empty otherwise), whose starting values the agents may draw at
+    random.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
         """Create the simulation and the parts, and allocate the episode state."""
         self.settings = settings
-        self.simulation = PhysicsSimulation(settings.simulation)
+        self.simulation = PhysicsSimulation(
+            settings.simulation, average_floor_forces=settings.feet_physics
+        )
         self.world_count = self.simulation.world_count
         self.segment_count = self.simulation.segment_count
         self.device = self.simulation.physical_state.body_height.device
@@ -99,9 +110,12 @@ class Environment:
             spine_observed=settings.spine_control,
             clock_value_count=0 if self.clocks is None else self.clocks.value_count,
             neighbour_clock_observed=settings.neighbour_clocks,
-            step_shape_observed=settings.leg_clocks,
+            step_shape_observed=settings.leg_clocks
+            and settings.leg_drive == "step_shape",
             leg_acceleration_observed=settings.leg_accelerations,
             leg_joint_count=leg_joint_count,
+            feet_physics_observed=settings.feet_physics,
+            tilt_observed=settings.tilt,
         )
         self.observation_size = self.observation_builder.observation_size
         # Which segments command the spine joint behind them: with spine
@@ -118,11 +132,18 @@ class Environment:
         # each joint's centre, sweep, lift, knee (and ankle).
         self.leg_clock_value_count = 3 + leg_joint_count
         segment_tempo = settings.clock.segment_tempo
-        leg_action_count = (
-            2 * self.leg_clock_value_count - int(segment_tempo)
-            if settings.leg_clocks
-            else leg_motor_count
-        )
+        self.leg_drive = settings.leg_drive
+        # Each leg joint's values with model B: its centre, then a cosine and
+        # a sine amount for each wave.
+        self.wave_value_count = 1 + 2 * settings.waves
+        if self.leg_drive == "swing":
+            leg_action_count = 1 + leg_motor_count
+        elif self.leg_drive == "waves":
+            leg_action_count = 1 + leg_motor_count * self.wave_value_count
+        elif settings.leg_clocks:
+            leg_action_count = 2 * self.leg_clock_value_count - int(segment_tempo)
+        else:
+            leg_action_count = leg_motor_count
         self.leg_action_count = leg_action_count
         self.segment_action_sizes = [
             leg_action_count + int(commands) + int(settings.clocks)
@@ -137,7 +158,22 @@ class Environment:
         )
         # Each segment's tempo actions, and the action that sets each of its
         # sweep, lift and knee motors, for the agents' learning diagnostics.
-        if settings.leg_clocks:
+        self.shape_columns = [[] for _ in commands_spine]
+        if self.leg_drive != "step_shape":
+            # The tempo first; then each joint's angle, or its curve's values
+            # starting with its centre.
+            per_joint = 1 if self.leg_drive == "swing" else self.wave_value_count
+            self.tempo_columns = [[0] for _ in commands_spine]
+            leg_motor_columns = [
+                1 + (leg * leg_joint_count + joint) * per_joint
+                for leg in range(2)
+                for joint in range(3)
+            ]
+            if self.leg_drive == "waves":
+                self.shape_columns = [
+                    list(range(1, leg_action_count)) for _ in commands_spine
+                ]
+        elif settings.leg_clocks:
             per_leg = self.leg_clock_value_count
             if segment_tempo:
                 # The tempo, then each leg's step shape: its centres follow
@@ -182,6 +218,7 @@ class Environment:
         self.head_outline = self.simulation.head_outline
         target = settings.target
         self.segment_weight_n = self.simulation.body_weight_n / self.segment_count
+        self.own_weight_n = self.simulation.own_weight_n
         self.reward_function = RewardFunction(
             settings.rewards,
             settings.max_episode_steps,
@@ -205,6 +242,15 @@ class Environment:
             self.default_step[2] = (
                 math.radians(settings.clock.default_lift_deg) / lift_half_width
             )
+        # Model A's swing under every leg: the default step's sweep and lift
+        # amplitudes, around each joint's middle.
+        self.swing_amplitudes = self.default_step[1:3].expand(
+            self.world_count, self.segment_count, 2, 2
+        )
+        self.swing_centres = torch.zeros(
+            (self.world_count, self.segment_count, 2, leg_joint_count),
+            device=self.device,
+        )
         self.diagnostics = EnvironmentDiagnostics(
             self.world_count,
             self.segment_count,
@@ -274,6 +320,19 @@ class Environment:
         self.range_radius = torch.full(
             (self.world_count,), torch.inf, dtype=torch.float32, device=self.device
         )
+        # With the feet's physics: each foot's floor force over its segment's
+        # own weight on the last step, and both feet's together averaged over
+        # each segment's last stride (an exponential average whose time
+        # constant is one turn of its clock, or 0.5 s without clocks).
+        self.foot_load = torch.zeros(
+            (self.world_count, self.segment_count, 2), device=self.device
+        )
+        self.stride_support = torch.ones(
+            (self.world_count, self.segment_count), device=self.device
+        )
+        self.foot_slip_speed = torch.zeros(
+            (self.world_count, self.segment_count, 2), device=self.device
+        )
 
         # Targets have their own random sequence, separate from the starting
         # poses, so changing how targets are drawn never changes the poses.
@@ -296,6 +355,11 @@ class Environment:
         self.distance_range_m = distance_range_m
         self.bearing_range_deg = bearing_range_deg
 
+    def set_curriculum_level(self, level: float) -> None:
+        """Harden the health costs to the curriculum's ``level``, 0 to 1; the
+        experiment's curriculum calls this between update cycles."""
+        self.reward_function.set_level(level)
+
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
 
@@ -312,6 +376,7 @@ class Environment:
         self._place_targets(every_world)
         self.episode_steps.zero_()
         self.leg_joint_acceleration.zero_()
+        self._start_feet(every_world)
         state = self.simulation.physical_state
         self.diagnostics.start_episodes(
             every_world, state, self.target_position, self.range_radius
@@ -358,7 +423,25 @@ class Environment:
         # spine is passive.
         clock_step = None
         leg_amplitudes = None
-        if self.settings.leg_clocks:
+        leg_actions_end = None
+        if self.leg_drive != "step_shape":
+            # Models A and B: the tempo action moves the heart, the hands turn,
+            # and each leg's targets follow its curve from the hand's place
+            # before the step to its place after it.
+            tempo = joint_action[..., :1].expand(-1, -1, 2)
+            clock_actions = torch.zeros(
+                (*tempo.shape, self.leg_clock_value_count), device=self.device
+            )
+            clock_actions[..., 0] = tempo
+            self.clocks.follow_actions(clock_actions)
+            phase_before = self.clocks.clock_phase.clone()
+            clock_step = self.clocks.step(
+                foot_load=self.previous_foot_load, foot_down=self.previous_foot_contact
+            )
+            leg_amplitudes = self.clocks.amplitudes
+            leg_actions = self._drive_targets(joint_action, phase_before)
+            leg_actions_end = self._drive_targets(joint_action, self.clocks.clock_phase)
+        elif self.settings.leg_clocks:
             self.clocks.follow_actions(
                 self._leg_clock_actions(joint_action) + self.default_step
             )
@@ -376,7 +459,9 @@ class Environment:
             spine_actions = (
                 joint_action[:, :-1, self.spine_column] * self.spine_command_mask
             )
-        self.simulation.step(leg_actions, spine_actions)
+        self.simulation.step(leg_actions, spine_actions, leg_actions_end)
+        if leg_actions_end is not None:
+            leg_actions = leg_actions_end
         self.episode_steps += 1
         torch.sub(
             state.leg_joint_velocity,
@@ -401,6 +486,17 @@ class Environment:
             / self.simulation.step_duration_s
             * planted
         )
+        self.foot_slip_speed.copy_(foot_slip_speed)
+        if self.settings.feet_physics:
+            torch.div(
+                state.foot_floor_force,
+                self.own_weight_n[:, None],
+                out=self.foot_load,
+            )
+            # One turn of each segment's first clock, or 0.5 s without clocks.
+            tempo_hz = self.clocks.tempo_hz if self.clocks is not None else 2.0
+            turns = torch.as_tensor(tempo_hz * self.simulation.step_duration_s)
+            self.stride_support.lerp_(self.foot_load.sum(dim=-1), 1 - torch.exp(-turns))
 
         # 3. Arrival, or a cut: the time limit or leaving the range circle,
         # which end the episode alike. Arrival wins when both happen.
@@ -429,6 +525,8 @@ class Environment:
             torch.cat((leg_actions, spine_command), dim=-1),
             foot_slip_speed,
             clock_step,
+            self.foot_load if self.settings.feet_physics else None,
+            self.stride_support if self.settings.feet_physics else None,
         )
         observations = self._observations()
         self.diagnostics.record_step(
@@ -459,6 +557,7 @@ class Environment:
             if self.clocks is not None:
                 self.clocks.reset(restarted)
             self.leg_joint_acceleration.masked_fill_(restarted[:, None, None], 0.0)
+            self._start_feet(restarted)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
             self.diagnostics.start_episodes(
@@ -473,6 +572,49 @@ class Environment:
             truncated,
             final_observations,
         )
+
+    def _drive_targets(
+        self, joint_action: torch.Tensor, phase: torch.Tensor
+    ) -> torch.Tensor:
+        """Every leg joint's target, ``(W, N, M)`` in action units, with model A
+        or B, each leg's hand at ``phase`` ``(W, N, 2)``.
+
+        Model A: the swing under the leg (``leg_targets`` with the default
+        step's amplitudes) plus the segment's angle for the joint. Model B:
+        each joint's curve at the hand, its centre plus, for each wave k, its
+        cosine amount times cos kφ and its sine amount times sin kφ.
+        """
+        joint_count = len(self.simulation.leg_roles)
+        values = joint_action[..., 1 : self.leg_action_count]
+        if self.leg_drive == "swing":
+            swing = leg_targets(phase, self.swing_amplitudes, self.swing_centres)
+            return swing + values
+        amounts = values.unflatten(-1, (2, joint_count, self.wave_value_count))
+        wave_count = (self.wave_value_count - 1) // 2
+        harmonics = torch.arange(1, wave_count + 1, device=self.device)
+        angle = phase[..., None, None] * harmonics  # (W, N, 2, 1, K)
+        cosine_amounts = amounts[..., 1::2]
+        sine_amounts = amounts[..., 2::2]
+        curve = amounts[..., 0] + (
+            cosine_amounts * torch.cos(angle) + sine_amounts * torch.sin(angle)
+        ).sum(dim=-1)
+        return curve.flatten(start_dim=2)
+
+    def _start_feet(self, world_mask: torch.Tensor) -> None:
+        """Start the masked worlds' feet's loads at the starting pose's and
+        their stride support at those loads, at most 1."""
+        if not self.settings.feet_physics:
+            return
+        state = self.simulation.physical_state
+        load = state.foot_floor_force / self.own_weight_n[:, None]
+        mask = world_mask[:, None, None]
+        self.foot_load.copy_(torch.where(mask, load, self.foot_load))
+        self.stride_support.copy_(
+            torch.where(
+                mask[..., 0], load.sum(dim=-1).clamp(max=1.0), self.stride_support
+            )
+        )
+        self.foot_slip_speed.masked_fill_(mask, 0.0)
 
     def _leg_clock_actions(self, joint_action: torch.Tensor) -> torch.Tensor:
         """Each leg's clock actions, ``(W, N, 2, 3 + J)``: its tempo, then
@@ -495,6 +637,20 @@ class Environment:
             clocks.neighbour_values() if self.settings.neighbour_clocks else None,
             clocks.step_shape if self.settings.leg_clocks else None,
             self.leg_joint_acceleration,
+            self._feet_values() if self.settings.feet_physics else None,
+        )
+
+    def _feet_values(self) -> torch.Tensor:
+        """Each segment's feet as it feels them, ``(W, N, 5)``: each foot's load
+        (its floor force over the segment's own weight), each foot's sliding
+        speed while planted in grip units, and its support over the stride."""
+        return torch.cat(
+            (
+                self.foot_load,
+                self.foot_slip_speed / self.settings.rewards.grip_unit_m_per_s,
+                self.stride_support[..., None],
+            ),
+            dim=-1,
         )
 
     def _place_targets(self, world_mask: torch.Tensor) -> None:

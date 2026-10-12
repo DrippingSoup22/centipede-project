@@ -142,6 +142,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.segment_action_sizes,
         environment.tempo_columns,
         environment.motor_columns,
+        environment.shape_columns,
     )
     completed_cycles = 0
     saved_level = 0.0
@@ -169,6 +170,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             configuration.curriculum, configuration.environment.target, saved_level
         )
         environment.set_target_ranges(*curriculum.target_ranges())
+        environment.set_curriculum_level(curriculum.level)
     # A recording covers whole windows: the episode length, rounded up.
     recording_windows = math.ceil(
         configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
@@ -338,6 +340,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             if arrival_share.value is not None:
                 curriculum.update(arrival_share.value)
             environment.set_target_ranges(*curriculum.target_ranges())
+            environment.set_curriculum_level(curriculum.level)
         if environment.clocks is not None:
             record["clock_snapshot"] = _clock_snapshot(environment)
         folder.append_log(record)
@@ -810,6 +813,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         environment.segment_action_sizes,
         environment.tempo_columns,
         environment.motor_columns,
+        environment.shape_columns,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     _check_legs_match(checkpoint, configuration.environment, checkpoint_path)

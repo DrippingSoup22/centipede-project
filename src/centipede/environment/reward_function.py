@@ -31,6 +31,13 @@ class RewardContext:
     ground at both ends of it. ``clock`` is the clocks' step, or None without
     clocks. ``leg_push_unit_n`` is the leg-leg force that costs a whole leg
     pushing cost: one segment's weight.
+
+    With the feet's physics (cycle 2), ``foot_load`` ``(W, N, 2)`` is each
+    foot's normal force from the floor over the segment's own weight,
+    averaged over the step, and ``stride_support`` ``(W, N)`` both feet's
+    together averaged over the segment's last stride; None without it.
+    ``health_scale`` ``(N,)`` multiplies each segment's health costs: the
+    curriculum's ramp, times the followers' scale.
     """
 
     physical_state: PhysicalState
@@ -43,6 +50,9 @@ class RewardContext:
     foot_slip_speed: torch.Tensor
     clock: ClockStep | None
     leg_push_unit_n: float
+    foot_load: torch.Tensor | None = None
+    stride_support: torch.Tensor | None = None
+    health_scale: torch.Tensor | float = 1.0
 
     @classmethod
     def from_step(
@@ -59,6 +69,9 @@ class RewardContext:
         foot_slip_speed: torch.Tensor,
         clock: ClockStep | None,
         leg_push_unit_n: float,
+        foot_load: torch.Tensor | None = None,
+        stride_support: torch.Tensor | None = None,
+        health_scale: torch.Tensor | float = 1.0,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
@@ -104,6 +117,9 @@ class RewardContext:
             foot_slip_speed=foot_slip_speed,
             clock=clock,
             leg_push_unit_n=leg_push_unit_n,
+            foot_load=foot_load,
+            stride_support=stride_support,
+            health_scale=health_scale,
         )
 
 
@@ -195,10 +211,51 @@ def leg_pushing(context: RewardContext, settings: RewardSettings) -> torch.Tenso
     The summed normal force of the contacts between one of its legs and
     another leg, in units of one segment's weight, at most 1. Both segments of
     a contact pay. Legs that brush past each other cost almost nothing; legs
-    that push against each other cost.
+    that push against each other cost. A health cost: times the context's
+    ``health_scale``.
     """
     force = context.physical_state.leg_leg_force
-    return -(force / context.leg_push_unit_n).clamp(max=1.0)
+    return -(force / context.leg_push_unit_n).clamp(max=1.0) * context.health_scale
+
+
+def carry(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−the share of its own weight a segment's feet did not carry, 0 to 1.
+
+    max(0, 1 − the feet's floor force over the segment's own weight,
+    averaged over its last stride): a segment carried by its neighbours
+    pays, one that carries more than its weight pays nothing (the user's
+    choice, 2026-10-12: that is its neighbours' problem). A health cost:
+    times the context's ``health_scale``.
+    """
+    shortfall = (1 - context.stride_support).clamp(min=0.0)
+    return -shortfall * context.health_scale
+
+
+def grip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how fast the segment's loaded feet slid on the floor, 0 to 1.
+
+    Each foot that touched the ground at both ends of the step counts its
+    sliding speed weighted by its load, its floor force over the segment's
+    own weight; the two feet's sum in units of ``grip_unit_m_per_s`` (about
+    a default stroke's foot speed), at most 1. A foot that slides while
+    bearing no weight costs nothing; a loaded foot dragged along costs. A
+    health cost: times the context's ``health_scale``.
+    """
+    loaded_sliding = (context.foot_load * context.foot_slip_speed).sum(dim=-1)
+    unit = settings.grip_unit_m_per_s
+    return -(loaded_sliding / unit).clamp(max=1.0) * context.health_scale
+
+
+def tempo_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how far the segment's tempo is from the segment ahead's, 0 to 1.
+
+    The difference in octaves, a whole octave (one tempo twice the other) or
+    more costing 1, in proportion below (the absolute form, which works
+    where the squared one did not; lesson 3 of the oscillators study). The
+    head, with nothing ahead, pays nothing: each follower keeps the tempo of
+    the one ahead, and so, down the chain, the head's.
+    """
+    return -context.clock.tempo_gap_ahead.clamp(max=1.0)
 
 
 def foot_slip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
@@ -390,6 +447,9 @@ TERMS = {
     "movement": movement,
     "leg_pushing": leg_pushing,
     "command": command,
+    "carry": carry,
+    "grip": grip,
+    "tempo_ahead": tempo_ahead,
 }
 
 
@@ -420,11 +480,24 @@ class RewardFunction:
         self.leg_push_unit_n = leg_push_unit_n
         self.commanded_joints = commanded_joints
         self.weights = reward_settings.weights(max_episode_steps)
+        # Each segment's health costs' multiplier: the ramp's start until the
+        # curriculum sets a level, times the followers' scale.
+        self.health_scale = torch.ones(
+            commanded_joints.shape[0], device=commanded_joints.device
+        )
+        self.set_level(0.0)
         self.reward_terms = [
             (name, weight, TERMS[name])
             for name, weight in self.weights.per_step.items()
         ]
         self.term_names = [name for name, _, _ in self.reward_terms]
+
+    def set_level(self, level: float) -> None:
+        """Harden the health costs to the curriculum's ``level``, 0 to 1:
+        ``health_ramp_start`` at 0, growing in proportion to 1 at 1."""
+        start = self.settings.health_ramp_start
+        self.health_scale.fill_(start + (1 - start) * level)
+        self.health_scale[1:] *= self.settings.follower_health_scale
 
     def compute(
         self,
@@ -437,6 +510,8 @@ class RewardFunction:
         joint_action: torch.Tensor,
         foot_slip_speed: torch.Tensor,
         clock: ClockStep | None = None,
+        foot_load: torch.Tensor | None = None,
+        stride_support: torch.Tensor | None = None,
     ) -> StepRewards:
         """Every segment's reward for the step just taken, with its parts.
 
@@ -455,6 +530,9 @@ class RewardFunction:
             foot_slip_speed,
             clock,
             self.leg_push_unit_n,
+            foot_load,
+            stride_support,
+            self.health_scale,
         )
         reward_parts = torch.stack(
             [

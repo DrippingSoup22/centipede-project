@@ -189,3 +189,30 @@ def test_forward_direction_survives_a_head_pointing_straight_up():
     nose_up = torch.tensor([[math.cos(-math.pi / 4), 0.0, math.sin(-math.pi / 4), 0.0]])
 
     assert torch.isfinite(head_forward_direction(nose_up)).all()
+
+
+def test_with_tilt_and_feet_a_block_sees_its_tilt_its_bend_and_its_feet():
+    """Segment 1 of world 0 rolls by 0.2 rad, the others are level; each
+    block's bend is the spine joint ahead of it, none for the head."""
+    state = distinct_state("cpu")
+    state.body_quaternion[:] = torch.tensor([1.0, 0.0, 0.0, 0.0])
+    state.body_quaternion[0, 1] = torch.tensor([math.cos(0.1), math.sin(0.1), 0, 0])
+    feet = torch.rand(WORLD_COUNT, SEGMENT_COUNT, 5)
+    builder = ObservationBuilder(
+        SEGMENT_COUNT,
+        0,
+        WORLD_COUNT,
+        "cpu",
+        feet_physics_observed=True,
+        tilt_observed=True,
+    )
+
+    observations = builder.build(state, torch.zeros(WORLD_COUNT, 2), feet_values=feet)
+
+    head, rolled = observations[0, 0], observations[0, 1]
+    assert builder.observation_size == 1 + 3 + 6 + 3 + 3 + 6 + 5 + 2
+    assert head[1:4].tolist() == pytest.approx([0.0, 0.0, 0.0])
+    assert rolled[1:4].tolist() == pytest.approx(
+        [0.0, math.sin(0.2), float(state.spine_yaw_position[0, 0])]
+    )
+    assert torch.equal(rolled[22:27], feet[0, 1])

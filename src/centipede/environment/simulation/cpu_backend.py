@@ -33,13 +33,16 @@ class CPUBackend:
         world_count: int,
         physics_steps_per_action: int,
         start_heading_range_rad: float = 0.0,
+        average_floor_forces: bool = False,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
-        turn the body about the vertical. The generators start from seed 0
-        until ``reset`` is given a seed. Each
+        turn the body about the vertical. With ``average_floor_forces`` every
+        step also measures each foot's floor force, averaged over its physics
+        steps. The generators start from seed 0 until ``reset`` is given a
+        seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
         """
@@ -48,6 +51,7 @@ class CPUBackend:
         self.world_count = world_count
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
+        self.average_floor_forces = average_floor_forces
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -79,6 +83,11 @@ class CPUBackend:
         self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
         self._foot_normal_force = self.physical_state.foot_normal_force.numpy()
         self._leg_leg_force = self.physical_state.leg_leg_force.numpy()
+        self._foot_floor_force = self.physical_state.foot_floor_force.numpy()
+        # Each shape's foot side, 0 left or 1 right, or -1 for any other shape.
+        self._foot_side = np.full(len(mapping.geom_categories), -1)
+        self._foot_side[mapping.geom_categories == LEFT_FOOT_CATEGORY] = 0
+        self._foot_side[mapping.geom_categories == RIGHT_FOOT_CATEGORY] = 1
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
@@ -135,31 +144,50 @@ class CPUBackend:
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)
+            # A restarted world has no step behind it: its feet's floor
+            # forces are those of the starting pose.
+            self._foot_floor_force[world_index] = 0.0
+            if self.average_floor_forces:
+                self._add_floor_forces(data, self._foot_floor_force[world_index], 1.0)
         self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        leg_actions_end: torch.Tensor | None = None,
     ) -> None:
         """Hold each world's leg and spine actions for one 20 ms step.
 
         ``leg_actions`` has shape (W, N, M): every world's segment actions, in
         action order. ``spine_actions`` has shape (W, N - 1), one command per
         spine joint from the head back; without it the spine motors receive
-        zero. Stops the run if the physics fails; afterwards the physical state
-        is refreshed.
+        zero. With ``leg_actions_end``, (W, N, M), the leg actions move in a
+        straight line from ``leg_actions`` to it over the step's physics steps,
+        reaching it on the last one, instead of being held. Stops the run if
+        the physics fails; afterwards the physical state is refreshed.
         """
-        actions = leg_actions.cpu().numpy()
+        start = leg_actions.cpu().numpy()
+        end = start if leg_actions_end is None else leg_actions_end.cpu().numpy()
         spine_commands = (
             np.zeros((self.world_count, self.mapping.segment_count - 1))
             if spine_actions is None
             else spine_actions.cpu().numpy()
         )
+        steps = self.physics_steps_per_action
 
         for world_index, data in enumerate(self.world_data):
-            data.ctrl[self.mapping.leg_actuator_ids] = actions[world_index]
             data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
-            for _ in range(self.physics_steps_per_action):
+            floor_force = self._foot_floor_force[world_index]
+            floor_force[:] = 0.0
+            for physics_step in range(steps):
+                share = (physics_step + 1) / steps
+                data.ctrl[self.mapping.leg_actuator_ids] = start[
+                    world_index
+                ] + share * (end[world_index] - start[world_index])
                 mujoco.mj_step(self.model, data)
+                if self.average_floor_forces:
+                    self._add_floor_forces(data, floor_force, 1 / steps)
             self._check_world(world_index)
 
             mujoco.mj_forward(self.model, data)
@@ -270,6 +298,26 @@ class CPUBackend:
             ground_flag = ground_flags.get(int(categories[other_geom_id]))
             if ground_flag is not None:
                 ground_flag[world_index, owner_indices[other_geom_id]] = True
+
+    def _add_floor_forces(
+        self, data: mujoco.MjData, floor_force: np.ndarray, scale: float
+    ) -> None:
+        """Add ``scale`` times each foot's normal force from the floor to
+        ``floor_force`` (N, 2), from the contacts of the physics step just
+        taken, with the arithmetic of ``_read_foot_normal_forces``."""
+        contact = data.contact
+        pairs = contact.geom
+        on_floor = self.mapping.geom_categories[pairs] == FLOOR_CATEGORY
+        # The other end of a floor contact; a foot when its side is 0 or 1.
+        other = np.where(on_floor[:, 0], pairs[:, 1], pairs[:, 0])
+        side = self._foot_side[other]
+        touching = on_floor.any(axis=1) & (side >= 0) & (contact.efc_address >= 0)
+        for index in np.flatnonzero(touching):
+            address = contact.efc_address[index]
+            rows = max(2 * (contact.dim[index] - 1), 1) if self.pyramidal_cone else 1
+            floor_force[self.mapping.geom_owner_indices[other[index]], side[index]] += (
+                scale * data.efc_force[address : address + rows].sum()
+            )
 
     def _read_foot_normal_forces(self, world_index: int) -> None:
         """Sum the normal force of every contact of each foot, in newtons.

@@ -302,3 +302,39 @@ def test_the_clock_in_use_starts_at_the_actions_then_follows_with_its_time_const
     clock.follow_actions(torch.full((1, 3, 2, 6), -0.5))
     assert torch.allclose(clock.step_shape, torch.tensor(-0.5))  # ... and starts afresh
     assert torch.allclose(clock.clock_tempo_octaves, torch.tensor(-0.5))
+
+
+def test_a_heart_starts_at_a_random_tempo_and_its_action_changes_it():
+    """Both legs share the tempo, which starts between 1 and 4 Hz and moves by
+    the action times one octave per second; each follower's gap is to the
+    segment ahead."""
+    settings = ClockSettings(
+        middle_tempo_hz=2.0,
+        tempo_range_octaves=1.0,
+        load_feedback_rad_per_s=0.0,
+        load_feedback_source="contact",
+        clock_time_constant_s=0.0,
+        coupling="ahead",
+        segment_tempo=True,
+        tempo_rate_octaves_per_s=1.0,
+        start_tempo_range_hz=(1.0, 4.0),
+    )
+    heart = Clocks(settings, 2, 3, 1, STEP_S, "cpu", per_leg=True)
+    heart.reset(torch.ones(2, dtype=torch.bool), seed=0)
+    start = heart.clock_tempo_octaves.clone()
+    actions = torch.zeros(2, 3, 2, 6)
+    actions[0, ..., 0] = 1.0
+    actions[1, ..., 0] = -0.5
+
+    heart.follow_actions(actions)
+    step = heart.step()
+
+    assert torch.equal(start[..., 0], start[..., 1])
+    assert ((start >= -1) & (start <= 1)).all() and start[0, :, 0].unique().numel() == 3
+    change = torch.tensor([1.0, -0.5])[:, None, None] * STEP_S
+    assert torch.allclose(heart.clock_tempo_octaves, start + change)
+    tempo = heart.clock_tempo_octaves[..., 0]
+    assert torch.allclose(
+        step.tempo_gap_ahead[:, 1:], (tempo[:, 1:] - tempo[:, :-1]).abs()
+    )
+    assert not step.tempo_gap_ahead[:, 0].any()

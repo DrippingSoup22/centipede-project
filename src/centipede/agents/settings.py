@@ -82,6 +82,13 @@ class AgentSettings:
     (and, for SGD, ``momentum``); their learning rate follows
     ``learning_rate_schedule`` over the run's update cycles
     (``learning_rate_at``).
+
+    ``initial_action_offset_spread`` (cycle 2, 0 by default) gives each
+    agent a random first guess for the actions that draw its legs' curves
+    (the environment's ``shape_columns``, model B's wave amounts): each
+    starts at its own value drawn uniformly within plus or minus this
+    spread, through the starting bias of the actor's last layer. The
+    network may change it from the first update; nothing pulls it back.
     """
 
     device: str
@@ -102,6 +109,7 @@ class AgentSettings:
     normaliser_epsilon: float
     observation_clip: float
     ppo: PPOSettings
+    initial_action_offset_spread: float = 0.0
 
     def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
         """The learning rate of the update in ``cycle``, counted from 1 to
@@ -178,6 +186,9 @@ class AgentSettings:
             ),
             observation_clip=section.positive_number("observation_clip", default=10.0),
             ppo=PPOSettings.from_section(section.table("ppo")),
+            initial_action_offset_spread=section.number(
+                "initial_action_offset_spread", default=0.0, minimum=0.0, maximum=0.99
+            ),
         )
         section.reject_unknown_keys()
         return settings
