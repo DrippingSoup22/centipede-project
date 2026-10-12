@@ -259,13 +259,15 @@ def tempo_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tenso
 
 
 # The tempo gap at which each of the tempo chain's costs reaches its whole
-# weight: two octaves, the widest gap between two segments' tempos at the
-# start of an episode (1 to 4 Hz), so that neither stops growing before it.
-TEMPO_CHAIN_OCTAVES = 2.0
+# weight: four octaves, beyond any gap two segments reach (the heart's
+# 12.5 Hz ceiling over a 1 Hz neighbour is 3.6), so that neither cost ever
+# stops growing and their sum always has one cheapest tempo. Two octaves,
+# the first scale, let the costs go flat under run 42's racing head (2.3).
+TEMPO_CHAIN_OCTAVES = 4.0
 
 
 def tempo_chain_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
-    """−the segment's tempo gap to the segment ahead over two octaves, 0 to 1.
+    """−the segment's tempo gap to the segment ahead over four octaves, 0 to 1.
 
     The tempo chain (the user's rule, 2026-10-13): each segment copies the
     tempo of the segment ahead, the cost growing in proportion to the gap so
@@ -280,13 +282,14 @@ def tempo_chain_ahead(context: RewardContext, settings: RewardSettings) -> torch
 def tempo_chain_behind(
     context: RewardContext, settings: RewardSettings
 ) -> torch.Tensor:
-    """−(the segment's tempo gap to the segment behind over two octaves)², 0 to 1.
+    """−(the segment's tempo gap to the segment behind over four octaves)², 0 to 1.
 
-    Squared, so that a small gap costs almost nothing and a large one a lot:
-    at the same weight as ``tempo_chain_ahead``, a follower copies the segment
-    ahead until it is one octave from the segment behind, then waits for it,
-    and the head may lead the body but not run away from it. The rear
-    segment, with nothing behind, pays nothing here.
+    Squared, so that a small gap costs almost nothing and a large one a lot.
+    With weights w_ahead and w_behind, a follower copies the segment ahead
+    until it is 2 w_ahead / w_behind octaves from the segment behind, then
+    waits for it (where the two costs' slopes meet); the head may lead the
+    body but not run away from it. The rear segment, with nothing behind,
+    pays nothing here.
     """
     gap = context.clock.tempo_gap_behind / TEMPO_CHAIN_OCTAVES
     return -gap.clamp(max=1.0).square()

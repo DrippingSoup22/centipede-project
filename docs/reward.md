@@ -15,8 +15,9 @@ This page describes the workspace branch `oscillators` as it trains today.
 to `43_...` in CentipedeTraining), on model v5 with model B. Three runs start
 from run 39 on the [circle task](#curriculum) and differ only in the rhythm
 and energy costs: today's [tempo ahead](#tempo-ahead) (41), the
-[tempo chain](#tempo-chain) in its place (42), and tempo ahead plus
-[energy](#energy) (43). The values marked *measured* come from checks on the
+[tempo chain](#tempo-chain) in its place (42, stopped for a flaw in its
+scale, and 44, fixed and longer), and tempo ahead plus [energy](#energy)
+(43). The values marked *measured* come from checks on the
 laptop's CPU, not from training.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
@@ -51,8 +52,8 @@ harder, so that early on the agents may walk badly before they walk well.
 | 2. Health | [Grip](#grip) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
 | 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
 | 3. Rhythm | [Tempo ahead](#tempo-ahead) (runs 41, 43) | – | ✔ | 3.5 parts | −0.00164 |
-| 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 42) | – | ✔ | 1.75 parts | −0.00082 |
-| 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 42) | ✔ | ✔ (not the rear) | 1.75 parts | −0.00082 |
+| 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 44) | – | ✔ | 3.5 parts | −0.00164 |
+| 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 44) | ✔ | ✔ (not the rear) | 7 parts | −0.00327 |
 | 4. Energy | [Energy](#energy) (run 43) | ✔ | ✔ | 2 parts | −0.00093 |
 
 `h` is the [health hardening](#health-hardening), from 0.3 at the first
@@ -351,39 +352,47 @@ head, nor the head toward it.
 
 #### Tempo chain
 
-**Idea.** The user's rule (2026-10-13), in run 42 in place of tempo ahead:
-each segment copies the tempo of the segment ahead and minds the segment
-behind. The gap ahead costs in proportion, so that small gaps still cost;
-the gap behind costs its square, so that a small lead is almost free and a
-large one dear. At equal weights a follower copies the segment ahead until
-it is an octave from the segment behind, then waits for it; the head, which
-has only a segment behind, may lead the body but not run away from it. It
-judges only tempos, never phases, so the wave stays free to emerge.
+**Idea.** The user's rule (2026-10-13), in place of tempo ahead: each
+segment copies the tempo of the segment ahead and minds the segment behind.
+The gap ahead costs in proportion, so that even a small gap is worth
+closing; the gap behind costs its square, so that a small lead is almost
+free and a large one dear. With the behind weight twice the ahead weight, a
+follower copies the segment ahead until it is an octave from the segment
+behind, then waits for it; the head, which has only a segment behind, may
+lead the body but not run away from it. It judges only tempos, never
+phases, so the wave stays free to emerge.
 
 <details>
 <summary>Math, and what to expect</summary>
 
 ```math
-A_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i-1} \rvert}{2}\Big), \qquad
-B_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i+1} \rvert}{2}\Big)^{2}, \qquad
-w_A = w_B = 1.75 \times 0.000467 = 0.00082
+A_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i-1} \rvert}{4}\Big), \qquad
+B_i \;=\; \min\!\Big(1,\ \frac{\lvert \log_2 f_i - \log_2 f_{i+1} \rvert}{4}\Big)^{2}, \qquad
+w_A = 3.5 \times 0.000467, \quad w_B = 7 \times 0.000467
 ```
 
 with `A_0 = 0` for the head and `B = 0` for the rear segment. Both reach
-their whole weight at two octaves, the widest gap between two tempos at the
-start of an episode (1 to 4 Hz), so neither stops growing before it; tempo
-ahead stopped at one octave. A middle follower's tempo parts stay 3.5, so the
-budget and every other weight are unchanged.
+their whole weight at four octaves, beyond any gap the body reaches (the
+12.5 Hz ceiling over a 1 Hz neighbour is 3.6), so neither ever goes flat:
+their sum has exactly one cheapest tempo for every pair of neighbours, and
+from anywhere else the cost falls steadily toward it. The first scale, two
+octaves (run 42), went flat under the racing head, 2.3 octaves above
+segment 1, so neither of them felt any pull. A follower stops copying where
+the two slopes meet, 2 w_A / w_B = 1 octave from the segment behind. The
+gaps seen: at an episode's start 0.67 octave on average between neighbours
+(a quarter over 1); once settled, 0.05 to 0.13 between runs 39 to 41's
+followers. At the largest gap reached, 2 octaves, a middle follower pays
+1.75 + 1.75 parts, today's 3.5; the 10.5 of four octaves is never reached.
 
 | Gap | ¼ octave | ½ octave | 1 octave | 2 octaves |
 | --- | ---: | ---: | ---: | ---: |
-| Ahead, share of its weight | 12.5% | 25% | 50% | 100% |
-| Behind, share of its weight | 1.6% | 6% | 25% | 100% |
+| Ahead, per step | −0.00010 | −0.00020 | −0.00041 | −0.00082 |
+| Behind, per step | −0.00001 | −0.00005 | −0.00020 | −0.00082 |
 
-**What to expect.** Run 39's head, two octaves above segment 1, would pay
-the whole behind cost, −0.00082 per step, and segment 1 half its ahead cost
-(*measured* on its last checkpoint); the other followers, within a tenth of
-an octave of each other, about −0.00002.
+**What to expect.** Run 39's head, 2.3 octaves above segment 1, would pay
+−0.0011 per step behind, about two time costs, less with every octave it
+comes down; segment 1 −0.00094 ahead. A head leading by a quarter octave
+pays −0.00001.
 </details>
 
 ### 4. Energy

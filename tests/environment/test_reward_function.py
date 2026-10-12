@@ -468,19 +468,19 @@ def test_carry_grip_and_tempo_ahead_with_health_hardening_by_level(level):
 
 
 def test_the_tempo_chain_and_the_energy_cost():
-    """World 1: segment 1 is one octave from the head and half an octave
-    from segment 2; the segments' leg motors put in 0.5, 2 and 0 mW. The
-    chain charges the gap ahead in proportion and the gap behind squared,
-    both over two octaves; energy charges the power in milliwatts, at most 1."""
+    """World 1: segment 1 is two octaves from the head and one from
+    segment 2; the segments' leg motors put in 0.5, 2 and 0 mW. The chain
+    charges the gap ahead in proportion and the gap behind squared, both
+    over four octaves; energy charges the power in milliwatts, at most 1."""
     settings = RewardSettings.from_section(
         {
-            "tempo_chain_ahead_cost_parts": 1.75,
-            "tempo_chain_behind_cost_parts": 1.75,
+            "tempo_chain_ahead_cost_parts": 3.5,
+            "tempo_chain_behind_cost_parts": 7,
             "energy_cost_parts": 2,
         }
     )
-    ahead = torch.tensor([[0.0, 0.0, 0.0], [0.0, 1.0, 0.5]])
-    behind = torch.tensor([[0.0, 0.0, 0.0], [1.0, 0.5, 0.0]])
+    ahead = torch.tensor([[0.0, 0.0, 0.0], [0.0, 2.0, 1.0]])
+    behind = torch.tensor([[0.0, 0.0, 0.0], [2.0, 1.0, 0.0]])
     clock = ClockStep(
         None, None, torch.zeros(2, 3), tempo_gap_ahead=ahead, tempo_gap_behind=behind
     )
