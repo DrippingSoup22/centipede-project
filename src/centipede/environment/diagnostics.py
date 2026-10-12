@@ -482,6 +482,7 @@ class EnvironmentDiagnostics:
         left_range: torch.Tensor,
         clock_step: ClockStep | None = None,
         leg_amplitudes: torch.Tensor | None = None,
+        leg_phase: torch.Tensor | None = None,
     ) -> None:
         """Refresh the step facts, add to the totals, and publish ended episodes.
 
@@ -491,7 +492,10 @@ class EnvironmentDiagnostics:
         range circle; ``clock_step`` is what the clocks read on the step, None
         without clocks; ``leg_amplitudes`` ``(W, N, 2, 2)``, with a clock per
         leg, is each leg's sweep and lift amplitudes in use on the step, after
-        the clocks' filter.
+        the clocks' filter. ``leg_phase`` ``(W, N, 2)``, with models A and B,
+        is where each leg is in its step, which with model B need not be its
+        hand; the rhythm and the legs then read it instead of the clocks'
+        hands.
         """
         step = self.step
         quaternion = physical_state.body_quaternion
@@ -539,9 +543,9 @@ class EnvironmentDiagnostics:
         step.left_right_similarity.copy_(_cosine(left_leg, right_leg))
         step.neighbour_leg_similarity.copy_(_cosine(movement[:, :-1], movement[:, 1:]))
         if self.rhythm is not None:
-            self._record_rhythm(step_rewards, clock_step)
+            self._record_rhythm(step_rewards, clock_step, leg_phase)
         if self.legs is not None:
-            self._record_legs(leg_amplitudes)
+            self._record_legs(leg_amplitudes, leg_phase)
 
         self._steps += 1
         self._segment_return += step_rewards.rewards
@@ -594,10 +598,16 @@ class EnvironmentDiagnostics:
         ):
             summary.copy_(torch.where(_per_world(ended, summary), value, summary))
 
-    def _record_rhythm(self, step_rewards: StepRewards, clock_step: ClockStep) -> None:
-        """Refresh the rhythm from the clocks, which the step has advanced."""
+    def _record_rhythm(
+        self,
+        step_rewards: StepRewards,
+        clock_step: ClockStep,
+        leg_phase: torch.Tensor | None,
+    ) -> None:
+        """Refresh the rhythm from the clocks, which the step has advanced, or
+        from the left legs' ``leg_phase`` when given."""
         rhythm = self.rhythm
-        phase = self.clocks.phase
+        phase = self.clocks.phase if leg_phase is None else leg_phase[..., 0]
         rhythm.tempo.copy_(self.clocks.tempo_hz)
         rhythm.neighbour_offset.copy_(_wrapped(phase[:, :-1] - phase[:, 1:]))
         rhythm.head_offset.copy_(_wrapped(phase[:, :1] - phase))
@@ -607,11 +617,15 @@ class EnvironmentDiagnostics:
             rhythm.legs_on_tempo.copy_(1 - step_rewards.legs_off_tempo)
         rhythm.foot_slip.copy_(step_rewards.foot_slip)
 
-    def _record_legs(self, leg_amplitudes: torch.Tensor) -> None:
-        """Refresh the legs from their clocks and the step shape in use: the
-        amplitudes and the centres the clocks keep."""
+    def _record_legs(
+        self, leg_amplitudes: torch.Tensor, leg_phase: torch.Tensor | None
+    ) -> None:
+        """Refresh the legs from their clocks, or ``leg_phase`` when given,
+        and the step shape in use: the amplitudes and the centres the clocks
+        keep."""
         legs = self.legs
-        left, right = self.clocks.clock_phase.unbind(dim=-1)
+        phase = self.clocks.clock_phase if leg_phase is None else leg_phase
+        left, right = phase.unbind(dim=-1)
         legs.tempo.copy_(self.clocks.clock_tempo_hz)
         legs.left_right_offset.copy_(_wrapped(left - right))
         legs.right_neighbour_offset.copy_(_wrapped(right[:, :-1] - right[:, 1:]))

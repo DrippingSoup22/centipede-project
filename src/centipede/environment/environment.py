@@ -423,6 +423,7 @@ class Environment:
         # spine is passive.
         clock_step = None
         leg_amplitudes = None
+        leg_phase = None
         leg_actions_end = None
         if self.leg_drive != "step_shape":
             # Models A and B: the tempo action moves the heart, the hands turn,
@@ -438,7 +439,7 @@ class Environment:
             clock_step = self.clocks.step(
                 foot_load=self.previous_foot_load, foot_down=self.previous_foot_contact
             )
-            leg_amplitudes = self.clocks.amplitudes
+            leg_phase, leg_amplitudes = self._leg_rhythm(joint_action)
             leg_actions = self._drive_targets(joint_action, phase_before)
             leg_actions_end = self._drive_targets(joint_action, self.clocks.clock_phase)
         elif self.settings.leg_clocks:
@@ -540,6 +541,7 @@ class Environment:
             left_range,
             clock_step,
             leg_amplitudes,
+            leg_phase,
         )
 
         # 6. Start a new episode in the worlds whose episode ended: restart
@@ -599,6 +601,28 @@ class Environment:
             cosine_amounts * torch.cos(angle) + sine_amounts * torch.sin(angle)
         ).sum(dim=-1)
         return curve.flatten(start_dim=2)
+
+    def _leg_rhythm(
+        self, joint_action: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Where each leg is in its step and how far it swings, for the
+        diagnostics, with model A or B: ``(W, N, 2)`` phases and ``(W, N, 2,
+        2)`` sweep and lift amplitudes in action units.
+
+        Model A's legs swing under their hands, with the swing's amplitudes.
+        Model B's sweep follows its first wave, a cos φ + b sin φ =
+        R cos(φ − atan2(b, a)): the leg's step lags its hand by atan2(b, a),
+        and its sweep and lift amplitudes are their first waves' R.
+        """
+        if self.leg_drive == "swing":
+            return self.clocks.clock_phase, self.swing_amplitudes
+        joint_count = len(self.simulation.leg_roles)
+        amounts = joint_action[..., 1 : self.leg_action_count].unflatten(
+            -1, (2, joint_count, self.wave_value_count)
+        )
+        first_wave = amounts[..., :2, 1:3]  # (W, N, 2 legs, sweep and lift, cos, sin)
+        sweep_lag = torch.atan2(first_wave[..., 0, 1], first_wave[..., 0, 0])
+        return self.clocks.clock_phase - sweep_lag, first_wave.norm(dim=-1)
 
     def _start_feet(self, world_mask: torch.Tensor) -> None:
         """Start the masked worlds' feet's loads at the starting pose's and

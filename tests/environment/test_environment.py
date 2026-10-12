@@ -401,7 +401,8 @@ def test_legs_with_ankles_take_a_centre_more_and_reach_their_targets():
 def test_models_a_and_b_drive_the_legs_along_the_hand_and_feel_their_feet():
     """Model B with its first wave's cosine at the swing's sweep draws model
     A's sweep; during a step the targets move from the hand's place before it
-    to its place after it; and the feet carry the body's weight."""
+    to its place after it; the feet carry the body's weight; and the
+    diagnostics read where a leg is in its step from its curve."""
     clock = {
         "segment_tempo": True,
         "clock_time_constant_s": 0.0,
@@ -450,3 +451,12 @@ def test_models_a_and_b_drive_the_legs_along_the_hand_and_feel_their_feet():
     )
     carried = (waves.foot_load[0] * waves.own_weight_n[:, None]).sum()
     assert float(carried) == pytest.approx(waves.simulation.body_weight_n, rel=0.05)
+
+    # The diagnostics read model B's step from its first sweep wave: a sine
+    # amount alone puts the leg a quarter turn behind its hand.
+    lagging = torch.zeros_like(drawn)
+    lagging[..., 1 + 2] = 0.3  # the left sweep's first sine
+    leg_phase, amplitudes = waves._leg_rhythm(lagging)
+    hand = waves.clocks.clock_phase[..., 0]
+    assert torch.allclose(leg_phase[..., 0], hand - math.pi / 2)
+    assert torch.allclose(amplitudes[..., 0, 0], torch.tensor(0.3))
