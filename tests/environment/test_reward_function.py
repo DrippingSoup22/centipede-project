@@ -428,7 +428,7 @@ def test_carry_grip_and_tempo_ahead_with_health_hardening_by_level(level):
     stride; each foot bears half its segment's weight and slides at one grip
     unit; the tempos are 0, 0.5 and 2 octaves from the one ahead. Health
     costs weigh 0.3 at level 0 and 1 at level 1, halved for the followers;
-    the tempo is never scaled."""
+    the tempo is never scaled. Carry judged every step reads the step's load."""
     settings = RewardSettings.from_section(
         {
             "carry_cost_parts": 3,
@@ -467,6 +467,28 @@ def test_carry_grip_and_tempo_ahead_with_health_hardening_by_level(level):
     )
     for name in ("carry", "grip", "tempo_ahead"):
         assert not parts[name][0].any()
+
+    # Judged every step, the step's load counts instead of the stride's:
+    # world 0's feet carry nothing this step, world 1's their whole weight.
+    every_step = RewardSettings.from_section(
+        {
+            "carry_cost_parts": 3,
+            "carry_every_step": True,
+            "health_ramp_start": 0.3,
+            "follower_health_scale": 0.5,
+        }
+    )
+    _, parts, weights = rewards_for(
+        unchanged_state(),
+        settings=every_step,
+        foot_load=foot_load,
+        stride_support=support,
+        level=level,
+    )
+    assert parts["carry"][0].tolist() == pytest.approx(
+        (-weights["carry"] * scale).tolist()
+    )
+    assert not parts["carry"][1].any()
 
 
 def test_the_tempo_chain_and_the_energy_cost():

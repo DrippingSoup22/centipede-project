@@ -21,7 +21,11 @@ place, the [health](#2-health-terms) costs foot hold 6, carry 4, leg pushing
 Runs 53 and 54 are 51 and 52 from scratch with foot hold looking ahead.
 Run 55 is run 54 (pink) on model v6, whose floor grips like a claw
 (friction 2.2, impratio 10: in v5 a leg dragged its own loaded foot), with
-the same reward. Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
+the same reward; it ran twice as slowly (impratio's solver cost) and was
+stopped. Run 56 is run 54 (pink, model v5) with [carry](#carry) judged on
+every step instead of over the stride, at 6 parts, foot hold's weight: the
+user's call that balance must not depend on the floor's friction. Before
+them, runs 49 and 50 (CAPS 1, grip; 50 with the
 health costs tripled) and cycle 3's pilot (runs 41 to 47, from run 39). The
 values marked *measured* come from checks on the laptop's CPU, not from
 training.
@@ -54,7 +58,7 @@ harder, so that early on the agents may walk badly before they walk well.
 | 1. Task | [Arrival](#arrival) | ✔ | ✔ (shared) | P: 0.5, T: 1 per arrival | the weight, on the arrival step |
 | 1. Task | [Progress](#progress) | ✔ | ✔ (shared) | P: 0.100 per halving, T: none | about 0.0005 while walking |
 | 1. Task | [Time](#time) | ✔ | ✔ | 1 part | −0.00047 |
-| 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 4 parts × h (3 to run 50) | −0.00187 × h |
+| 2. Health | [Carry](#carry) (every step from run 56) | ✔ | ✔ (half) | 6 parts × h (4 to run 55, 3 to run 50) | −0.00280 × h |
 | 2. Health | [Grip](#grip) (to run 50) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
 | 2. Health | [Foot hold](#foot-hold) (from run 51; looking ahead from 53) | ✔ | ✔ (half) | 6 parts × h | −0.00280 × h |
 | 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 4 parts × h (2 to run 50) | −0.00187 × h |
@@ -70,15 +74,16 @@ stays at 0 through the early stage, so 0.45 gives run 50's early health,
 progress) and **T** (arrival 1 alone), are both in the pilot:
 
 ```math
-r_i \;=\; \underbrace{w_A\,\mathbf{1}[\text{arrived}] \;+\; w_P\,P}_{\text{task, every segment}} \;-\; \underbrace{0.00047}_{\text{time}} \;-\; h_i\,\underbrace{\big(0.00140\,K_i \;+\; 0.00093\,G_i \;+\; 0.00093\,F_i\big)}_{\text{health}} \;-\; \underbrace{0.00164\,D_i}_{\text{rhythm, followers}}
+r_i \;=\; \underbrace{w_A\,\mathbf{1}[\text{arrived}] \;+\; w_P\,P}_{\text{task, every segment}} \;-\; \underbrace{0.00047}_{\text{time}} \;-\; h_i\,\underbrace{\big(0.00280\,K_i \;+\; 0.00280\,H_i \;+\; 0.00187\,F_i\big)}_{\text{health}} \;-\; \underbrace{0.00164\,D_i}_{\text{rhythm, followers}}
 ```
 
 with `w_A = 0.5`, `w_P = 0.100` in version P and `w_A = 1`, `w_P = 0` in
 version T. `P` is the head's progress, `K` the share of its weight a segment's
-feet did not carry, `G` its loaded feet's sliding, `F` the force between its
-legs and others, and `D` its tempo's distance from the segment ahead's, all
-from 0 to 1 and defined below. `h_0 = 0.3 + 0.7ℓ` for the head and half of it
-for the followers, at the curriculum's level `ℓ`.
+feet did not carry on the step, `H` its foot hold (its loaded feet's
+sliding and lifts), `F` the force between its legs and others, and `D` its
+tempo's distance from the segment ahead's, defined below; the tempo chain
+behind adds its own term. The weights are run 56's. `h_0 = 0.45 + 0.55ℓ`
+for the head and half of it for the followers, at the curriculum's level `ℓ`.
 
 <details>
 <summary><b>How the weights are set</b>: the cost budget, in parts</summary>
@@ -263,19 +268,49 @@ up by its neighbours, legs in the air, pays for the weight its feet did not
 carry; one that carries more than its own pays nothing (that is its
 neighbours' business).
 
+**Every step** (the user's, 2026-10-13, from run 56). Judged over the
+stride, carry let a segment hang between short, heavy stances: in runs 53
+and 54 the followers had no foot down on 42 to 54% of their steps, about as
+often as two feet moving at random would, while their stride support stayed
+near 1 (stances bore about twice the weight). A hanging segment does not
+sink (4.5 mm high with no foot down or one, measured): the spine holds it,
+and its weight goes to the neighbours. Other walkers judge balance on the
+whole body instead (legged_gym, Rudin et al. 2022: the trunk's vertical and
+turning speeds, the episode ends when it touches the ground; Gymnasium's
+Ant: the torso's height); a centipede's body never touches down, so the
+charge goes where the weight goes. Walknet's insects keep a loaded leg in
+stance (Schilling et al., Biol Cybern 2013), which carry every step, with
+foot hold's lift charge, asks for: a segment must shift its weight to its
+other foot before it lifts one. It also rules out a segment ever being
+airborne, which only fast running needs.
+
+**The weight: 6 parts, foot hold's** (from run 56). A foot dragged at the
+grip unit or faster under the segment's whole weight costs foot hold's full
+weight per step; a segment that hangs instead costs carry's. With the two
+equal, standing on a foot never costs more than hanging, and costs less
+whenever the foot slides slower than 16 mm/s: putting weight on a foot is
+always worth it unless it is dragged. At 4 parts hanging was the cheaper
+escape from a dragged foot, the trap run 08 fell into ("being carried was
+cheaper than standing").
+
 <details>
 <summary>Math, and what to expect</summary>
 
 ```math
-K_i \;=\; \max\!\big(0,\ 1 - S_i\big), \qquad w = 3 \times 0.000467 = 0.00140
+K_i \;=\; \max\!\big(0,\ 1 - S_i\big), \qquad w = 6 \times 0.000467 = 0.00280
 ```
 
-`S` is the segment's [stride support](#the-feets-physics): its feet's floor
-force over its own weight, averaged over its last stride.
+`S` is the segment's support: its feet's floor force over its own weight,
+averaged over the step's physics steps (from run 56), or the [stride
+support](#the-feets-physics), averaged over its last stride (to run 55).
 
-**What to expect.** Small for a body that stands or steps evenly (measured:
-−0.000007 to −0.00011 per step); large for a segment that hangs from its
-neighbours, as the anchored followers of runs 08 to 13 did.
+**What to expect.** Over the stride: small for a body that stands or steps
+evenly (measured: −0.000007 to −0.00011 per step); large for a segment that
+hangs from its neighbours, as the anchored followers of runs 08 to 13 did.
+Every step, on the checkpoints of runs 53 and 54 (mean action, 8 worlds):
+a follower's shortfall is 0.41 to 0.51 per step against 0.06 to 0.09 over
+the stride, 2.5 to 3.0 parts at 6, beside foot hold's 3.0 to 4.4; 0.81 to
+0.90 on the steps with no foot down, 0.08 to 0.13 with one.
 </details>
 
 #### Grip

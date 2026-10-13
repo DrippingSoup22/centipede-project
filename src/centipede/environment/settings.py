@@ -271,6 +271,7 @@ PROPORTION_KEYS = (
     "energy_reference_w",
     "foot_hold_cost_parts",
     "foot_hold_looks_ahead",
+    "carry_every_step",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -393,7 +394,11 @@ class RewardSettings:
     each divided by its distance in segments: a leg should lift only once the
     legs ahead have, the follow nudge's head-to-tail order judged on the
     outcome. Then only the sliding is capped at 1, and a lift pays its whole
-    load, so that a loaded lift does not hide the feet ahead.
+    load, so that a loaded lift does not hide the feet ahead. With
+    ``carry_every_step`` (off by default), carry judges each step's load
+    instead of the stride's average: a segment pays on every step its feet
+    carry less than its weight, so hanging from its neighbours between short,
+    heavy stances is no longer free.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -453,6 +458,7 @@ class RewardSettings:
     energy_reference_w: float = 0.001
     foot_hold_cost_parts: float = 0.0
     foot_hold_looks_ahead: bool = False
+    carry_every_step: bool = False
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -650,6 +656,7 @@ class RewardSettings:
                 foot_hold_looks_ahead=section.boolean(
                     "foot_hold_looks_ahead", default=False
                 ),
+                carry_every_step=section.boolean("carry_every_step", default=False),
             )
         section.reject_unknown_keys()
         return settings
@@ -857,6 +864,11 @@ class EnvironmentSettings:
                 "[environment.rewards] foot_hold_looks_ahead adds the feet ahead"
                 " that a segment sees to foot hold: set foot_hold_cost_parts above"
                 " 0 and observation_radius above 0"
+            )
+        if settings.rewards.carry_every_step and not settings.rewards.carry_cost_parts:
+            raise SettingsError(
+                "[environment.rewards] carry_every_step changes how carry judges a"
+                " segment's support: set carry_cost_parts above 0"
             )
         if settings.leg_drive != "step_shape" and not (
             settings.leg_clocks and settings.clock.segment_tempo

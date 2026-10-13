@@ -231,9 +231,17 @@ def carry(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     averaged over its last stride): a segment carried by its neighbours
     pays, one that carries more than its weight pays nothing (the user's
     choice, 2026-10-12: that is its neighbours' problem). A health cost:
-    times the context's ``health_scale``.
+    times the context's ``health_scale``. With ``carry_every_step``, the
+    step's own load instead of the stride's average (the user's choice,
+    2026-10-13: followers hung from their neighbours on half their steps,
+    unseen by the average).
     """
-    shortfall = (1 - context.stride_support).clamp(min=0.0)
+    support = (
+        context.foot_load.sum(dim=-1)
+        if settings.carry_every_step
+        else context.stride_support
+    )
+    shortfall = (1 - support).clamp(min=0.0)
     return -shortfall * context.health_scale
 
 
