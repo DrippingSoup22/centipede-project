@@ -89,6 +89,19 @@ class AgentSettings:
     starts at its own value drawn uniformly within plus or minus this
     spread, through the starting bias of the actor's last layer. The
     network may change it from the first update; nothing pulls it back.
+
+    ``follower_tempo_noise_gap_octaves`` (cycle 3, the user's rule, 0 off by
+    default) makes a follower explore its tempo only while it is out of step:
+    at each step the noise on its tempo action is its learned spread times
+    min(1, |gap| / this many octaves), never less than
+    ``MIN_TEMPO_NOISE_SCALE`` of it, with the gap its tempo's distance from
+    the segment ahead's, which it observes (``neighbour_tempos``). The head
+    keeps its whole spread: the tempo is explored there. A follower's tempo
+    noise adds up, through the heart, into a drift of its tempo, and a wave
+    holds only while neighbours' tempos stay within about 0.006 octave; at
+    0.17 octaves, with a spread near today's 0.35, the noise cannot move a
+    follower's tempo by more than its gap within one stride (about 0.5 s at
+    2 Hz), and at the wave's 0.006 it is 3-4% of the whole.
     """
 
     device: str
@@ -110,6 +123,7 @@ class AgentSettings:
     observation_clip: float
     ppo: PPOSettings
     initial_action_offset_spread: float = 0.0
+    follower_tempo_noise_gap_octaves: float = 0.0
 
     def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
         """The learning rate of the update in ``cycle``, counted from 1 to
@@ -188,6 +202,9 @@ class AgentSettings:
             ppo=PPOSettings.from_section(section.table("ppo")),
             initial_action_offset_spread=section.number(
                 "initial_action_offset_spread", default=0.0, minimum=0.0, maximum=0.99
+            ),
+            follower_tempo_noise_gap_octaves=section.number(
+                "follower_tempo_noise_gap_octaves", default=0.0, minimum=0.0
             ),
         )
         section.reject_unknown_keys()

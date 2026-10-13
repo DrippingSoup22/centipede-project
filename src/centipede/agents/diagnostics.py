@@ -62,6 +62,11 @@ class LearningSummary:
         " squashing; with leg clocks, the mean of its two legs'; 0 without"
         " clocks, (N,)"
     )
+    tempo_noise_scale: torch.Tensor = measure(
+        "The mean share of its learned spread the segment's tempo noise had"
+        " over the last window, with follower_tempo_noise_gap_octaves; 1 for"
+        " a segment whose noise is not scaled, (N,)"
+    )
 
 
 # The values copied straight from RL_lib's update summary, in its order.
@@ -95,6 +100,7 @@ class AgentDiagnostics:
             action_std=torch.zeros((segment_count, LEG_ACTION_COUNT), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
             tempo_action_std=torch.zeros(segment_count, device=device),
+            tempo_noise_scale=torch.ones(segment_count, device=device),
         )
 
     def record_update(
@@ -127,3 +133,4 @@ class AgentDiagnostics:
                     self.learning.tempo_action_std[segment_index] = spread[
                         tempo_columns
                     ].mean()
+                self.learning.tempo_noise_scale[segment_index] = agent.tempo_noise_scale

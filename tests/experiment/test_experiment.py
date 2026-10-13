@@ -85,6 +85,7 @@ actor_last_layer_scale = 0.01
 initial_action_std = 0.29
 initial_action_offset_spread = 0.2
 exploration_noise_beta = 2.0
+follower_tempo_noise_gap_octaves = 0.17
 
 [agents.ppo]
 minibatch_size = 4

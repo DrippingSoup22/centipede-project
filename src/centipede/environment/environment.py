@@ -47,6 +47,9 @@ class Environment:
     of its sweep, lift and knee motors and its spine motor (with leg clocks,
     each leg joint's centre; an ankle is not reported), for the agents'
     learning diagnostics. ``clocks`` holds the clocks, or None without them.
+    With ``neighbour_tempos``, ``tempo_gap_ahead_column`` is the observation
+    that holds a segment's tempo gap to the segment ahead, in octaves (None
+    otherwise), which the agents may read.
 
     With ``leg_drive = "swing"`` (model A) a segment's actions are its tempo
     action, then an angle for each of its leg joints, left leg first, added
@@ -121,6 +124,13 @@ class Environment:
             neighbour_tempo_observed=settings.neighbour_tempos,
         )
         self.observation_size = self.observation_builder.observation_size
+        # With the neighbours' tempos, observed last, the first of them is a
+        # segment's tempo gap to the segment just ahead, in octaves.
+        self.tempo_gap_ahead_column = (
+            self.observation_size - 2 * settings.observation_radius
+            if settings.neighbour_tempos
+            else None
+        )
         # Which segments command the spine joint behind them: with spine
         # control every segment but the rear, or only the head.
         spine_count = self.segment_count - 1

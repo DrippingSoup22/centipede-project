@@ -34,18 +34,22 @@ class Agents:
         tempo_columns: list[list[int]] | None = None,
         motor_columns: list[list[int]] | None = None,
         shape_columns: list[list[int]] | None = None,
+        tempo_gap_ahead_column: int | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
         Every (run seed, segment) pair gets a different agent seed.
         ``segment_action_sizes`` is the environment's: how many actions each
         segment takes, six each when not given. ``tempo_columns`` and
-        ``motor_columns`` are the environment's too, which only the learning
-        diagnostics need: for each segment, which actions set clock tempos
-        (none when not given), and which action sets each of its motors (when
-        not given, its first six actions its leg motors and a seventh its
-        spine joint). ``shape_columns``, the environment's as well, lists each
-        segment's actions that draw its legs' curves (none when not given).
+        ``motor_columns`` are the environment's too: for each segment, which
+        actions set clock tempos (none when not given), and which action sets
+        each of its motors (when not given, its first six actions its leg
+        motors and a seventh its spine joint). ``shape_columns``, the
+        environment's as well, lists each segment's actions that draw its
+        legs' curves (none when not given). ``tempo_gap_ahead_column``, the
+        environment's, is the observation that holds a segment's tempo gap to
+        the segment ahead; with ``follower_tempo_noise_gap_octaves`` every
+        follower's tempo noise follows it, and the head's never does.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
@@ -54,6 +58,7 @@ class Agents:
             segment_action_sizes or [LEG_ACTION_COUNT] * segment_count
         )
         self.action_size = max(self.segment_action_sizes)
+        gap_scaled = settings.follower_tempo_noise_gap_octaves > 0
 
         self.segment_agents: list[SegmentAgent] = [
             SegmentAgent(
@@ -67,6 +72,12 @@ class Agents:
                 shape_columns=None
                 if shape_columns is None
                 else shape_columns[segment_index],
+                tempo_columns=None
+                if tempo_columns is None
+                else tempo_columns[segment_index],
+                tempo_gap_column=tempo_gap_ahead_column
+                if gap_scaled and segment_index > 0
+                else None,
             )
             for segment_index in range(segment_count)
         ]

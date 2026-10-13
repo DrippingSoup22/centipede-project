@@ -388,6 +388,14 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
         ),
         **extra,
     )
+    if (
+        configuration.agents.follower_tempo_noise_gap_octaves
+        and not configuration.environment.neighbour_tempos
+    ):
+        raise SettingsError(
+            "[agents] follower_tempo_noise_gap_octaves needs [environment] "
+            "neighbour_tempos = true: a follower reads its tempo gap there"
+        )
     backend = configuration.environment.simulation.backend
     if configuration.agents.device != DEVICE_FOR_BACKEND[backend]:
         raise SettingsError(

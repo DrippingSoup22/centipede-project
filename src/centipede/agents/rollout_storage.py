@@ -23,8 +23,10 @@ class RolloutStorage:
         observation_size: int,
         device: torch.device | str,
         action_size: int = 6,
+        noise_scaled: bool = False,
     ) -> None:
-        """Allocate every tensor once, filled with zeros."""
+        """Allocate every tensor once, filled with zeros; with ``noise_scaled``,
+        also each step's noise scales, which PPO needs again when learning."""
         step_rows = (rollout_window_steps, world_count)
         self.observations = torch.zeros(
             (*step_rows, observation_size), dtype=torch.float32, device=device
@@ -32,6 +34,9 @@ class RolloutStorage:
         # The latent Gaussian samples, which PPO re-evaluates when learning.
         self.policy_actions = torch.zeros(
             (*step_rows, action_size), dtype=torch.float32, device=device
+        )
+        self.noise_scales = (
+            torch.ones_like(self.policy_actions) if noise_scaled else None
         )
         self.log_probabilities = torch.zeros(
             step_rows, dtype=torch.float32, device=device
@@ -48,14 +53,20 @@ class RolloutStorage:
         self.step_index = 0
 
     def store_action(
-        self, normalised_observations: torch.Tensor, sample: PPOActionSample
+        self,
+        normalised_observations: torch.Tensor,
+        sample: PPOActionSample,
+        noise_scales: torch.Tensor | None = None,
     ) -> None:
-        """Write the action side of the current step: what the agent saw and did."""
+        """Write the action side of the current step: what the agent saw and did,
+        and the noise scales it was drawn with, if any."""
         row = self.step_index
         self.observations[row].copy_(normalised_observations)
         self.policy_actions[row].copy_(sample.policy_action)
         self.log_probabilities[row].copy_(sample.log_probability)
         self.values[row].copy_(sample.value)
+        if noise_scales is not None:
+            self.noise_scales[row].copy_(noise_scales)
 
     def store_outcome(
         self,
@@ -103,6 +114,12 @@ class RolloutStorage:
             advantages.reshape(-1),
             return_targets.reshape(-1),
         )
+
+    def noise_scale_batch(self) -> torch.Tensor | None:
+        """The window's noise scales in ``training_batch``'s sample order, or None."""
+        if self.noise_scales is None:
+            return None
+        return self.noise_scales.reshape(-1, self.noise_scales.shape[-1])
 
     def clear(self) -> None:
         """Start a new window; the next steps overwrite the old rows."""

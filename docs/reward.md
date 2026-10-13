@@ -11,14 +11,16 @@ This page describes the workspace branch `oscillators` as it trains today.
 - **Part 2, the tools:** everything that is not a reward term, in use or
   tried before, so that any of them can be tried again.
 
-**Current as of:** cycle 3's pilot (`configs/oscillators/41_run39_circle.toml`
-to `43_...` in CentipedeTraining), on model v5 with model B. Three runs start
-from run 39 on the [circle task](#curriculum) and differ only in the rhythm
-and energy costs: today's [tempo ahead](#tempo-ahead) (41), the
-[tempo chain](#tempo-chain) in its place (42, stopped for a flaw in its
-scale, and 44, fixed and longer), and tempo ahead plus [energy](#energy)
-(43). The values marked *measured* come from checks on the
-laptop's CPU, not from training.
+**Current as of:** cycle 3's fresh start (`configs/oscillators/49_...` and
+`50_...` in CentipedeTraining), on model v5 with model B: the whole cycle-3
+design from the first step, the [tempo chain](#tempo-chain) and the
+[circle task](#curriculum) from 10 cm, CAPS 1, red noise. Run 50 triples the
+three [health](#2-health-terms) costs (carry 9, grip 6, leg pushing 6 parts).
+The next run adds [tempo noise that follows the
+gap](#tempo-noise-that-follows-the-gap). Before them, cycle 3's pilot (runs
+41 to 47) started from run 39 and compared [tempo ahead](#tempo-ahead), the
+chain and [energy](#energy). The values marked *measured* come from checks
+on the laptop's CPU, not from training.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
 > another part, implement and test it) and an **experiment phase** (train and
@@ -453,6 +455,7 @@ study notes (`results/oscillators/README.md` in CentipedeTraining).
 | ⬜ | [Neighbours' clocks](#neighbours-clocks) | What a segment sees | `neighbour_clocks = true` | 08–14, 17 |
 | ✅ | [Neighbours' tempos](#neighbours-tempos) | What a segment sees | `neighbour_tempos = true` | 41– |
 | ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 2` | 2: 31–; 1: 02, 04, 08, 09, 13; 0.5: 10–12, 14–28 |
+| ✅ | [Tempo noise that follows the gap](#tempo-noise-that-follows-the-gap) | Exploration | `[agents] follower_tempo_noise_gap_octaves = 0.17` | next run |
 | ✅ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34 |
 | ✅ | [A random first guess](#a-random-first-guess) | Learning | `initial_action_offset_spread = 0.2` | 31– |
 | ✅ | [Curriculum](#curriculum) | Training | `[curriculum]`; `level_bonus = 0.05` (39–); the circle task (41–) | all |
@@ -743,6 +746,42 @@ S(f) \;\propto\; \frac{1}{f^{\beta}}
 
 while each step's `ε` stays standard normal, so the policy's probabilities are
 unchanged. Code: RL_lib, `docs/colored-noise.md`.
+</details>
+
+#### Tempo noise that follows the gap
+
+✅ **Idea.** The user's rule (2026-10-13): only the head explores the tempo
+freely; a follower explores its tempo only while it is out of step with the
+segment ahead, and its exploration fades as it falls into step. The tempo
+chain still teaches it to copy the tempo ahead and to wait for the segment
+behind. The reason is the heart: a follower's tempo noise adds up into a
+drift of its tempo, about 0.3 octave per second with red noise at today's
+spread, while a wave holds only when neighbours' tempos stay within about
+0.006 octave (at 2 Hz, a 0.06-octave gap slides the phase offset a whole turn
+every 12 s). The followers of runs 31 to 47 answered that drift by steering
+to a fixed tempo of their own. People do something alike: their movements
+vary more after a failure and less after a success (Pekny, Izawa and
+Shadmehr, J Neurosci 2015).
+
+<details>
+<summary>Math</summary>
+
+A follower's tempo action is drawn with its learned spread times
+
+```math
+s \;=\; \operatorname{clip}\!\Big(\frac{|g|}{g_0},\; 0.03,\; 1\Big), \qquad g_0 = 0.17 \text{ octave}
+```
+
+with `g` its tempo gap to the segment ahead, which it observes
+([neighbours' tempos](#neighbours-tempos)), read at every step: after a
+restart, when the clocks start at random tempos, and whenever the head
+changes its tempo, the noise is whole; in step, it is 3% of it. At
+`g_0 = 0.17`, with a spread near 0.35, the noise cannot move a follower's
+tempo by more than its gap within one stride (about 0.5 s at 2 Hz). PPO
+evaluates each sample again with the scale it was drawn with (RL_lib's
+`SquashedGaussianPolicy`), so the scale is part of the policy at that
+observation. The head's spread is never scaled. The learning log reports
+each segment's mean scale over its last window (`tempo_noise_scale`).
 </details>
 
 #### CAPS, smooth mean actions

@@ -143,6 +143,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.tempo_columns,
         environment.motor_columns,
         environment.shape_columns,
+        environment.tempo_gap_ahead_column,
     )
     completed_cycles = 0
     saved_level = (
@@ -824,6 +825,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         environment.tempo_columns,
         environment.motor_columns,
         environment.shape_columns,
+        environment.tempo_gap_ahead_column,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     _check_legs_match(checkpoint, configuration.environment, checkpoint_path)

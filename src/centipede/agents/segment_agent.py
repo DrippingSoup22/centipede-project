@@ -20,6 +20,10 @@ from centipede.agents.settings import AgentSettings
 # Each segment drives the six motors of its two legs; with spine control, the
 # spine joint behind it is a seventh action.
 LEG_ACTION_COUNT = 6
+# The least a follower's tempo noise is scaled to by its gap to the segment
+# ahead (``follower_tempo_noise_gap_octaves``): about the noise at which a
+# wave holds, so that a locked tempo still explores a little.
+MIN_TEMPO_NOISE_SCALE = 0.03
 
 
 class SegmentAgent:
@@ -35,6 +39,8 @@ class SegmentAgent:
         seed: int,
         action_size: int = LEG_ACTION_COUNT,
         shape_columns: list[int] | None = None,
+        tempo_columns: list[int] | None = None,
+        tempo_gap_column: int | None = None,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
@@ -42,11 +48,20 @@ class SegmentAgent:
         generator, which draws its actions and orders its minibatches.
         ``action_size`` is how many motors the segment commands, and
         ``shape_columns`` the actions that draw its legs' curves, which start
-        at random values with ``initial_action_offset_spread``.
+        at random values with ``initial_action_offset_spread``. With
+        ``tempo_gap_column``, the observation that holds the segment's tempo
+        gap to the segment ahead in octaves, the noise on its
+        ``tempo_columns`` follows that gap
+        (``follower_tempo_noise_gap_octaves``).
         """
         self.segment_index = segment_index
         self.settings = settings
         self.action_size = action_size
+        self.tempo_columns = tempo_columns
+        self.tempo_gap_column = tempo_gap_column
+        # The mean scale of the tempo noise over the last window, for the
+        # learning diagnostics: 1 for an agent whose noise is not scaled.
+        self.tempo_noise_scale = torch.ones((), device=settings.device)
         device = torch.device(settings.device)
 
         # The starting weights come from PyTorch's global generator. Seed it
@@ -112,6 +127,14 @@ class SegmentAgent:
             observation_size,
             device=device,
             action_size=action_size,
+            noise_scaled=tempo_gap_column is not None,
+        )
+        # Each world's noise scales for the step being taken, 1 but for the
+        # tempo actions.
+        self.noise_scales = (
+            torch.ones((world_count, action_size), device=device)
+            if tempo_gap_column is not None
+            else None
         )
         # Completed updates, saved with the agent's state.
         self.update_count = 0
@@ -128,8 +151,18 @@ class SegmentAgent:
         )
         if not training:
             return self.ppo.select_action(normalised_observations, deterministic=True)
-        sample = self.ppo.sample_action(normalised_observations)
-        self.rollout_storage.store_action(normalised_observations, sample)
+        if self.noise_scales is not None:
+            # The tempo explores in proportion to the gap, read in octaves
+            # before normalising.
+            gap = observations[:, self.tempo_gap_column].abs()
+            scale = (gap / self.settings.follower_tempo_noise_gap_octaves).clamp(
+                MIN_TEMPO_NOISE_SCALE, 1.0
+            )
+            self.noise_scales[:, self.tempo_columns] = scale[:, None]
+        sample = self.ppo.sample_action(normalised_observations, self.noise_scales)
+        self.rollout_storage.store_action(
+            normalised_observations, sample, self.noise_scales
+        )
         return sample.environment_action
 
     def record(
@@ -178,7 +211,12 @@ class SegmentAgent:
             )
             if ppo_settings.temporal_smoothness_coefficient
             else None,
+            noise_scales=storage.noise_scale_batch(),
         )
+        if storage.noise_scales is not None:
+            self.tempo_noise_scale = storage.noise_scales[
+                ..., self.tempo_columns
+            ].mean()
         self.rollout_storage.clear()
         self.update_count += 1
         return summary
