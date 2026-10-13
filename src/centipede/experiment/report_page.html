@@ -752,14 +752,18 @@ const BLUE = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", 
 const RED = ["#9a2525", "#c13433", "#e34948", "#ec7c7b", "#f4a9a8"];
 const SERIES = [1, 2, 3, 4, 5, 6].map((n) => `var(--series-${n})`);
 const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)"];
-// Reward terms by name: arrival green, progress blue, the step cost grey, the
-// posture costs warm, the movement cost its own, the walking costs amber,
-// violet, brown, magenta and teal, the clock costs slate and cyan, and head
-// synchrony, a reward, lavender, so that no two terms of one reward share a
-// colour (legs off tempo, the other violet, never comes with leg clocks);
-// efficiency is the term of the earlier efficiency reward, which held the
-// step cost and progress together.
-const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
+// Reward terms by name, so that no two terms of one reward share a colour.
+// Today's terms take D3's category10 palette, made so that no two look alike:
+// arrival green, progress blue, the step cost grey; the health costs red (leg
+// pushing), orange (grip) and brown (carry); the tempo chain purple (ahead)
+// and pink (behind); tempo ahead cyan, energy olive. Earlier rewards' terms
+// keep theirs: the posture costs warm, the movement cost its own, the walking
+// costs amber, violet, brown, magenta and teal, the clock costs slate and
+// cyan, head synchrony lavender; efficiency held the step cost and progress
+// together.
+const PART_COLORS = { arrival: "#2ca02c", progress: "#1f77b4", step_cost: "var(--baseline-1)",
+  leg_pushing: "#d62728", grip: "#ff7f0e", carry: "#8c564b",
+  tempo_chain_ahead: "#9467bd", tempo_chain_behind: "#e377c2", tempo_ahead: "#17becf", energy: "#bcbd22",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
   no_support: "#c2569b", both_feet_down: "#2a9d8f", clock_tracking: "#5b6fa8", clock_change: "#17a2c4",
