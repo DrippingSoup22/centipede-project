@@ -1,7 +1,7 @@
 """Tests for the experiment's front file, with tiny runs on the CPU.
 
 The main test trains and evaluates a run shaped like the oscillators'
-pilots (model v5 with model B's curves, the heart, the feet's physics, the
+pilots (model v6 with model B's curves, the heart, the feet's physics, the
 neighbours' tempos, the tempo chain and the energy cost, the circle
 curriculum), so that the path every training takes is run before any
 launch. The others cover the plateau stop.
@@ -39,7 +39,7 @@ tilt = true
 neighbour_tempos = true
 
 [environment.simulation]
-model_path = "models/assembly_v5.xml"
+model_path = "models/assembly_v6.xml"
 backend = "cpu"
 world_count = 2
 start_heading_range_deg = 180

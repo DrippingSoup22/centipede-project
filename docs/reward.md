@@ -19,7 +19,9 @@ gap](#tempo-noise-that-follows-the-gap), [foot hold](#foot-hold) in grip's
 place, the [health](#2-health-terms) costs foot hold 6, carry 4, leg pushing
 4 parts with the hardening from 0.45, no CAPS, red (51) or pink (52) noise.
 Runs 53 and 54 are 51 and 52 from scratch with foot hold looking ahead.
-Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
+Run 55 is run 54 (pink) on model v6, whose floor grips like a claw
+(friction 2.2, impratio 10: in v5 a leg dragged its own loaded foot), with
+the same reward. Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
 health costs tripled) and cycle 3's pilot (runs 41 to 47, from run 39). The
 values marked *measured* come from checks on the laptop's CPU, not from
 training.
