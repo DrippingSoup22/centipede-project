@@ -44,6 +44,7 @@ def rewards_for(
     foot_load=None,
     stride_support=None,
     level=None,
+    foot_lift_load=None,
 ):
     function = RewardFunction(
         settings, EPISODE_STEPS, ARRIVAL_RADIUS, COMMANDED_JOINTS, SEGMENT_WEIGHT_N
@@ -64,6 +65,7 @@ def rewards_for(
         clock=clock,
         foot_load=foot_load,
         stride_support=stride_support,
+        foot_lift_load=foot_lift_load,
     )
     parts = dict(zip(function.term_names, step.reward_parts.unbind(-1), strict=True))
     return step, parts, function.weights.per_step
@@ -504,3 +506,34 @@ def test_the_tempo_chain_and_the_energy_cost():
     )
     for name in ("tempo_chain_ahead", "tempo_chain_behind", "energy"):
         assert not parts[name][0].any()
+
+
+def test_foot_hold_charges_loaded_feet_that_slide_or_lift():
+    """World 1: the head's left foot slides at 8 mm/s under half its weight
+    (a quarter of grip's 16 mm/s unit); segment 1's right foot lifts while
+    bearing 0.6 of it; segment 2's foot lifts under 0.1 and its other slides
+    at 32 mm/s under 0.5, together past the most, 1."""
+    settings = RewardSettings.from_section({"foot_hold_cost_parts": 6})
+    load = torch.zeros(2, 3, 2)
+    slip = torch.zeros(2, 3, 2)
+    lift = torch.zeros(2, 3, 2)
+    load[1, 0, 0], slip[1, 0, 0] = 0.5, 0.008
+    lift[1, 1, 1] = 0.6
+    lift[1, 2, 0], load[1, 2, 1], slip[1, 2, 1] = 0.1, 0.5, 0.032
+
+    _, parts, weights = rewards_for(
+        unchanged_state(),
+        settings=settings,
+        foot_slip_speed=slip,
+        foot_load=load,
+        foot_lift_load=lift,
+    )
+
+    assert parts["foot_hold"][1].tolist() == pytest.approx(
+        [
+            -0.25 * weights["foot_hold"],
+            -0.6 * weights["foot_hold"],
+            -weights["foot_hold"],
+        ]
+    )
+    assert not parts["foot_hold"][0].any()

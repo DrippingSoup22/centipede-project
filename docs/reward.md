@@ -50,9 +50,10 @@ harder, so that early on the agents may walk badly before they walk well.
 | 1. Task | [Arrival](#arrival) | ✔ | ✔ (shared) | P: 0.5, T: 1 per arrival | the weight, on the arrival step |
 | 1. Task | [Progress](#progress) | ✔ | ✔ (shared) | P: 0.100 per halving, T: none | about 0.0005 while walking |
 | 1. Task | [Time](#time) | ✔ | ✔ | 1 part | −0.00047 |
-| 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 3 parts × h | −0.00140 × h |
-| 2. Health | [Grip](#grip) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
-| 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
+| 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 3 parts × h; next run 4 | −0.00140 × h |
+| 2. Health | [Grip](#grip) (to run 50) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
+| 2. Health | [Foot hold](#foot-hold) (next run, in grip's place) | ✔ | ✔ (half) | 6 parts × h | −0.00280 × h |
+| 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 2 parts × h; next run 4 | −0.00093 × h |
 | 3. Rhythm | [Tempo ahead](#tempo-ahead) (runs 41, 43) | – | ✔ | 3.5 parts | −0.00164 |
 | 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 44) | – | ✔ | 3.5 parts | −0.00164 |
 | 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 44) | ✔ | ✔ (not the rear) | 7 parts | −0.00327 |
@@ -292,6 +293,37 @@ G_i \;=\; \min\!\Big(1,\ \frac{\sum_{\text{feet}} N_f\, v_f}{16\ \text{mm/s}}\Bi
 **What to expect.** Near 0 for a still body; for the default step a few
 hundred-thousandths at the first targets, three times more at the final ones
 (measured). It falls as the stance foot learns to stay planted.
+</details>
+
+#### Foot hold
+
+**Idea.** The user's load rule (2026-10-13), grip generalised: a foot that
+bears weight must not move, neither slide nor lift. A foot lifts free once
+its weight has passed to other feet, its sibling's or its neighbours', so
+the cheapest walk lifts each leg while the legs around it stand. That is the
+load feedback of Owaki and Ishiguro (2017), here judged on the outcome
+instead of acting on the clocks; in arthropods, load signals keep a leg in
+stance until it is unloaded (Duysens, Clarac and Cruse, Physiol Rev 2000).
+No term names a phase: the timing between legs is left to the agents. Our
+open-loop sweep of 2026-10-12 found that load feedback makes each segment's
+two legs alternate, but alone never made a head-to-tail wave.
+
+<details>
+<summary>Math, and what to expect</summary>
+
+```math
+H_i \;=\; \min\!\Big(1,\ \sum_{\text{feet}} \Big(\frac{N_f\, v_f}{16\ \text{mm/s}} \;+\; N_f^{\text{before}}\, \mathbf{1}[\text{the foot left the ground}]\Big)\Big), \qquad w = 6 \times 0.000467 = 0.00280
+```
+
+The first part is [grip](#grip)'s; `N^before` is the load the foot bore on
+the step before it lifted, in units of the segment's own weight.
+
+**What to expect.** Measured on run 49's walk (cycle 128, mean action, 8
+worlds): 94% of its feet left the ground still loaded, on average with 1.27
+times their segment's weight, so the lift part would charge 0.16 per segment
+and step against grip's 0.28. The lift part should shrink as the legs learn
+to hand their weight over before lifting; the dashboard's left–right step
+should rise above chance first.
 </details>
 
 #### Leg pushing

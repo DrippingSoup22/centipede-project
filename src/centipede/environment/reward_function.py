@@ -36,6 +36,8 @@ class RewardContext:
     foot's normal force from the floor over the segment's own weight,
     averaged over the step, and ``stride_support`` ``(W, N)`` both feet's
     together averaged over the segment's last stride; None without it.
+    ``foot_lift_load`` ``(W, N, 2)`` is, for each foot that left the ground
+    on the step, the load it bore on the step before (0 for the others).
     ``health_scale`` ``(N,)`` multiplies each segment's health costs: the
     curriculum's ramp, times the followers' scale.
     """
@@ -53,6 +55,7 @@ class RewardContext:
     foot_load: torch.Tensor | None = None
     stride_support: torch.Tensor | None = None
     health_scale: torch.Tensor | float = 1.0
+    foot_lift_load: torch.Tensor | None = None
 
     @classmethod
     def from_step(
@@ -72,6 +75,7 @@ class RewardContext:
         foot_load: torch.Tensor | None = None,
         stride_support: torch.Tensor | None = None,
         health_scale: torch.Tensor | float = 1.0,
+        foot_lift_load: torch.Tensor | None = None,
     ) -> "RewardContext":
         """Build the context from the state after the step and saved copies.
 
@@ -120,6 +124,7 @@ class RewardContext:
             foot_load=foot_load,
             stride_support=stride_support,
             health_scale=health_scale,
+            foot_lift_load=foot_lift_load,
         )
 
 
@@ -244,6 +249,25 @@ def grip(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     loaded_sliding = (context.foot_load * context.foot_slip_speed).sum(dim=-1)
     unit = settings.grip_unit_m_per_s
     return -(loaded_sliding / unit).clamp(max=1.0) * context.health_scale
+
+
+def foot_hold(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how much the segment's loaded feet moved, 0 to 1: grip, and lifting.
+
+    A foot that bears weight must not move (cycle 3, the user's load rule):
+    grip's loaded sliding, plus, for each foot that left the ground on the
+    step, the load it bore on the step before, in units of the segment's own
+    weight. A foot lifts free once its weight has passed to other feet, its
+    sibling's or its neighbours', so the cheapest walk lifts each leg while
+    the legs around it stand: the load feedback of Owaki and Ishiguro (2017)
+    judged on the outcome, never acting on the clocks; in arthropods, load
+    signals keep a leg in stance until it is unloaded (Duysens, Clarac and
+    Cruse, Physiol Rev 2000). At most 1. A health cost.
+    """
+    loaded_sliding = (context.foot_load * context.foot_slip_speed).sum(dim=-1)
+    moved = loaded_sliding / settings.grip_unit_m_per_s
+    moved = moved + context.foot_lift_load.sum(dim=-1)
+    return -moved.clamp(max=1.0) * context.health_scale
 
 
 def tempo_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
@@ -500,6 +524,7 @@ TERMS = {
     "command": command,
     "carry": carry,
     "grip": grip,
+    "foot_hold": foot_hold,
     "tempo_ahead": tempo_ahead,
     "tempo_chain_ahead": tempo_chain_ahead,
     "tempo_chain_behind": tempo_chain_behind,
@@ -566,6 +591,7 @@ class RewardFunction:
         clock: ClockStep | None = None,
         foot_load: torch.Tensor | None = None,
         stride_support: torch.Tensor | None = None,
+        foot_lift_load: torch.Tensor | None = None,
     ) -> StepRewards:
         """Every segment's reward for the step just taken, with its parts.
 
@@ -587,6 +613,7 @@ class RewardFunction:
             foot_load,
             stride_support,
             self.health_scale,
+            foot_lift_load,
         )
         reward_parts = torch.stack(
             [

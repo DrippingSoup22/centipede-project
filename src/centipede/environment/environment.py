@@ -501,7 +501,12 @@ class Environment:
             * planted
         )
         self.foot_slip_speed.copy_(foot_slip_speed)
+        foot_lift_load = None
         if self.settings.feet_physics:
+            # The load each foot that left the ground bore on the step before.
+            foot_lift_load = self.foot_load * (
+                self.previous_foot_contact & ~_foot_contact(state)
+            )
             torch.div(
                 state.foot_floor_force,
                 self.own_weight_n[:, None],
@@ -541,6 +546,7 @@ class Environment:
             clock_step,
             self.foot_load if self.settings.feet_physics else None,
             self.stride_support if self.settings.feet_physics else None,
+            foot_lift_load,
         )
         observations = self._observations()
         self.diagnostics.record_step(

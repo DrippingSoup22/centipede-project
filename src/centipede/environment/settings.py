@@ -269,6 +269,7 @@ PROPORTION_KEYS = (
     "tempo_chain_behind_cost_parts",
     "energy_cost_parts",
     "energy_reference_w",
+    "foot_hold_cost_parts",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -381,7 +382,11 @@ class RewardSettings:
     ``tempo_chain_behind_cost_parts`` for its gap to the segment behind,
     squared, both over two octaves; they need clocks per leg. Energy
     (``energy_cost_parts``) charges each segment for the positive power of
-    its leg motors, in units of ``energy_reference_w``, at most 1.
+    its leg motors, in units of ``energy_reference_w``, at most 1. Foot hold
+    (``foot_hold_cost_parts``) is grip generalised to the user's load rule,
+    a loaded foot must not move: grip's charge plus, for each foot that left
+    the ground, the load it bore the step before; a health cost that needs
+    ``feet_physics``, used in grip's place.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -439,6 +444,7 @@ class RewardSettings:
     tempo_chain_behind_cost_parts: float = 0.0
     energy_cost_parts: float = 0.0
     energy_reference_w: float = 0.001
+    foot_hold_cost_parts: float = 0.0
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -532,6 +538,7 @@ class RewardSettings:
                     ("tempo_chain_ahead_cost_parts", 0.0),
                     ("tempo_chain_behind_cost_parts", 0.0),
                     ("energy_cost_parts", 0.0),
+                    ("foot_hold_cost_parts", 0.0),
                 )
             ]
             budget_parts = section.number(
@@ -631,6 +638,7 @@ class RewardSettings:
                 energy_reference_w=section.positive_number(
                     "energy_reference_w", default=0.001
                 ),
+                foot_hold_cost_parts=parts[18],
             )
         section.reject_unknown_keys()
         return settings
@@ -696,6 +704,7 @@ class RewardSettings:
                 ("tempo_chain_ahead", self.tempo_chain_ahead_cost_parts),
                 ("tempo_chain_behind", self.tempo_chain_behind_cost_parts),
                 ("energy", self.energy_cost_parts),
+                ("foot_hold", self.foot_hold_cost_parts),
             )
             if parts
         }
@@ -821,7 +830,7 @@ class EnvironmentSettings:
         section.reject_unknown_keys()
         feet_costs = [
             key
-            for key in ("carry_cost_parts", "grip_cost_parts")
+            for key in ("carry_cost_parts", "grip_cost_parts", "foot_hold_cost_parts")
             if getattr(settings.rewards, key)
         ]
         if feet_costs and not settings.feet_physics:
