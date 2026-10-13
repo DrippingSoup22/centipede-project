@@ -18,8 +18,8 @@ cycle-3 design from the first step, the [tempo chain](#tempo-chain), the
 gap](#tempo-noise-that-follows-the-gap), [foot hold](#foot-hold) in grip's
 place, the [health](#2-health-terms) costs foot hold 6, carry 4, leg pushing
 4 parts with the hardening from 0.45, no CAPS, red (51) or pink (52) noise.
-Runs 53 and 54 continue 51 and 52 from their cycle 64 with foot hold
-looking ahead. Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
+Runs 53 and 54 are 51 and 52 from scratch with foot hold looking ahead.
+Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
 health costs tripled) and cycle 3's pilot (runs 41 to 47, from run 39). The
 values marked *measured* come from checks on the laptop's CPU, not from
 training.
@@ -315,6 +315,11 @@ and behind, so it picks no direction. The wave came from the follow nudge,
 which held a follower's leg while the same-side foot ahead was down (10 of
 10 cases).
 
+**Carry stays beside it** (checked 2026-10-13): foot hold charges a foot
+for moving while it carries weight, so its cheapest escape is to carry none
+and be carried; progress, shared by the team, does not care which segment
+carries, and run 08 learned exactly that. [Carry](#carry) charges it.
+
 **Looking ahead** (the user's, 2026-10-13, from run 53): so a lifting foot
 also answers for the load still on the same-side feet ahead that its segment
 sees, within the observation radius, each divided by its distance in
@@ -340,7 +345,19 @@ N_f^{\text{before}} \;+\; \sum_{d=1}^{R} \frac{N_{f,\,d\ \text{ahead}}^{\text{be
 ```
 
 over the same-side feet `d` segments ahead, up to the observation radius
-`R` (0 where no segment is).
+`R` (0 where no segment is). Looking ahead, only the sliding is capped at 1
+and a lift pays its whole load:
+
+```math
+H_i \;=\; \min\!\Big(1,\ \sum_{\text{feet}} \frac{N_f\, v_f}{16\ \text{mm/s}}\Big) \;+\; \sum_{\text{feet}} \Big(N_f^{\text{before}} + \sum_{d=1}^{R} \frac{N_{f,\,d\ \text{ahead}}^{\text{before}}}{d}\Big)\,\mathbf{1}[\text{the foot left the ground}]
+```
+
+With one cap over both, a loaded lift alone (about 1.27 of the segment's
+weight) reached it in 67% of the followers' lift-offs (run 51, cycle 80,
+mean action, 8 worlds): the feet ahead added 0.012 per step of their 0.069.
+Uncapped, foot hold is 0.587 per segment and step instead of 0.435; one step
+in eight passes 1, the largest 6.5 (both feet lifting under full load),
+under 1% of an arrival's pay.
 
 **What to expect, looking ahead.** In a head-to-tail wave the foot ahead has
 already lifted when a follower's foot lifts, so the added part falls to 0.

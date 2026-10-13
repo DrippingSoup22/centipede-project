@@ -268,12 +268,19 @@ def foot_hold(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     adds it): alone, a foot's own load made a segment's two legs alternate
     but no wave pass along the body (the open-loop sweep, 2026-10-12); the
     wave came from the follow nudge, which held a leg while the foot ahead
-    was down. At most 1. A health cost.
+    was down. At most 1; looking ahead, only the sliding is capped at 1 and a
+    lift pays its whole load: a loaded lift alone passed the cap in two thirds
+    of the followers' lift-offs (run 51, cycle 80), which hid the feet ahead.
+    A health cost.
     """
     loaded_sliding = (context.foot_load * context.foot_slip_speed).sum(dim=-1)
-    moved = loaded_sliding / settings.grip_unit_m_per_s
-    moved = moved + context.foot_lift_load.sum(dim=-1)
-    return -moved.clamp(max=1.0) * context.health_scale
+    sliding = loaded_sliding / settings.grip_unit_m_per_s
+    lifting = context.foot_lift_load.sum(dim=-1)
+    if settings.foot_hold_looks_ahead:
+        moved = sliding.clamp(max=1.0) + lifting
+    else:
+        moved = (sliding + lifting).clamp(max=1.0)
+    return -moved * context.health_scale
 
 
 def tempo_ahead(context: RewardContext, settings: RewardSettings) -> torch.Tensor:

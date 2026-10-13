@@ -392,7 +392,8 @@ class RewardSettings:
     the same-side feet ahead that its segment sees (``observation_radius``),
     each divided by its distance in segments: a leg should lift only once the
     legs ahead have, the follow nudge's head-to-tail order judged on the
-    outcome.
+    outcome. Then only the sliding is capped at 1, and a lift pays its whole
+    load, so that a loaded lift does not hide the feet ahead.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment

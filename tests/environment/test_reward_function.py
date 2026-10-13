@@ -537,3 +537,16 @@ def test_foot_hold_charges_loaded_feet_that_slide_or_lift():
         ]
     )
     assert not parts["foot_hold"][0].any()
+
+    # Looking ahead, only the sliding is capped: segment 2 pays 1 + 0.1.
+    looking_ahead = RewardSettings.from_section(
+        {"foot_hold_cost_parts": 6, "foot_hold_looks_ahead": True}
+    )
+    _, parts, _ = rewards_for(
+        unchanged_state(),
+        settings=looking_ahead,
+        foot_slip_speed=slip,
+        foot_load=load,
+        foot_lift_load=lift,
+    )
+    assert parts["foot_hold"][1, 2].item() == pytest.approx(-1.1 * weights["foot_hold"])
