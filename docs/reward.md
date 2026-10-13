@@ -11,16 +11,18 @@ This page describes the workspace branch `oscillators` as it trains today.
 - **Part 2, the tools:** everything that is not a reward term, in use or
   tried before, so that any of them can be tried again.
 
-**Current as of:** cycle 3's fresh start (`configs/oscillators/49_...` and
-`50_...` in CentipedeTraining), on model v5 with model B: the whole cycle-3
-design from the first step, the [tempo chain](#tempo-chain) and the
-[circle task](#curriculum) from 10 cm, CAPS 1, red noise. Run 50 triples the
-three [health](#2-health-terms) costs (carry 9, grip 6, leg pushing 6 parts).
-The next run adds [tempo noise that follows the
-gap](#tempo-noise-that-follows-the-gap). Before them, cycle 3's pilot (runs
-41 to 47) started from run 39 and compared [tempo ahead](#tempo-ahead), the
-chain and [energy](#energy). The values marked *measured* come from checks
-on the laptop's CPU, not from training.
+**Current as of:** cycle 3's foot-hold runs (`configs/oscillators/51_...`
+to `54_...` in CentipedeTraining), on model v5 with model B: the whole
+cycle-3 design from the first step, the [tempo chain](#tempo-chain), the
+[circle task](#curriculum) from 10 cm, [tempo noise that follows the
+gap](#tempo-noise-that-follows-the-gap), [foot hold](#foot-hold) in grip's
+place, the [health](#2-health-terms) costs foot hold 6, carry 4, leg pushing
+4 parts with the hardening from 0.45, no CAPS, red (51) or pink (52) noise.
+Runs 53 and 54 continue 51 and 52 from their cycle 64 with foot hold
+looking ahead. Before them, runs 49 and 50 (CAPS 1, grip; 50 with the
+health costs tripled) and cycle 3's pilot (runs 41 to 47, from run 39). The
+values marked *measured* come from checks on the laptop's CPU, not from
+training.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
 > another part, implement and test it) and an **experiment phase** (train and
@@ -50,18 +52,19 @@ harder, so that early on the agents may walk badly before they walk well.
 | 1. Task | [Arrival](#arrival) | ✔ | ✔ (shared) | P: 0.5, T: 1 per arrival | the weight, on the arrival step |
 | 1. Task | [Progress](#progress) | ✔ | ✔ (shared) | P: 0.100 per halving, T: none | about 0.0005 while walking |
 | 1. Task | [Time](#time) | ✔ | ✔ | 1 part | −0.00047 |
-| 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 3 parts × h; next run 4 | −0.00140 × h |
+| 2. Health | [Carry](#carry) | ✔ | ✔ (half) | 4 parts × h (3 to run 50) | −0.00187 × h |
 | 2. Health | [Grip](#grip) (to run 50) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
-| 2. Health | [Foot hold](#foot-hold) (next run, in grip's place) | ✔ | ✔ (half) | 6 parts × h | −0.00280 × h |
-| 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 2 parts × h; next run 4 | −0.00093 × h |
+| 2. Health | [Foot hold](#foot-hold) (from run 51; looking ahead from 53) | ✔ | ✔ (half) | 6 parts × h | −0.00280 × h |
+| 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 4 parts × h (2 to run 50) | −0.00187 × h |
 | 3. Rhythm | [Tempo ahead](#tempo-ahead) (runs 41, 43) | – | ✔ | 3.5 parts | −0.00164 |
 | 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 44) | – | ✔ | 3.5 parts | −0.00164 |
 | 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 44) | ✔ | ✔ (not the rear) | 7 parts | −0.00327 |
 | 4. Energy | [Energy](#energy) (run 43) | ✔ | ✔ | 2 parts | −0.00093 |
 
-`h` is the [health hardening](#health-hardening), from 0.3 at the first
-targets to 1 at the final ones (1 throughout in cycle 3, whose runs start
-from a body that already walks). The two task versions, **P** (arrival 0.5 and
+`h` is the [health hardening](#health-hardening), from 0.45 at the first
+targets to 1 at the final ones (0.3 to run 50; with 10 cm targets the level
+stays at 0 through the early stage, so 0.45 gives run 50's early health,
+6.3 parts, the strongest known to still learn to walk). The two task versions, **P** (arrival 0.5 and
 progress) and **T** (arrival 1 alone), are both in the pilot:
 
 ```math
@@ -306,7 +309,20 @@ instead of acting on the clocks; in arthropods, load signals keep a leg in
 stance until it is unloaded (Duysens, Clarac and Cruse, Physiol Rev 2000).
 No term names a phase: the timing between legs is left to the agents. Our
 open-loop sweep of 2026-10-12 found that load feedback makes each segment's
-two legs alternate, but alone never made a head-to-tail wave.
+two legs alternate, but alone never made a head-to-tail wave (0 of 10
+cases): the shared weight pushes neighbours apart in time the same way ahead
+and behind, so it picks no direction. The wave came from the follow nudge,
+which held a follower's leg while the same-side foot ahead was down (10 of
+10 cases).
+
+**Looking ahead** (the user's, 2026-10-13, from run 53): so a lifting foot
+also answers for the load still on the same-side feet ahead that its segment
+sees, within the observation radius, each divided by its distance in
+segments. A leg then lifts free only once the legs ahead have: the follow
+nudge's head-to-tail order, judged on the outcome. The nearest foot ahead
+counts fully, as the nudge read it; with radius 2 the next counts half, a
+warning of the wave coming. The head has no foot ahead; its cost is
+unchanged.
 
 <details>
 <summary>Math, and what to expect</summary>
@@ -316,7 +332,21 @@ H_i \;=\; \min\!\Big(1,\ \sum_{\text{feet}} \Big(\frac{N_f\, v_f}{16\ \text{mm/s
 ```
 
 The first part is [grip](#grip)'s; `N^before` is the load the foot bore on
-the step before it lifted, in units of the segment's own weight.
+the step before it lifted, in units of the segment's own weight. Looking
+ahead, it becomes
+
+```math
+N_f^{\text{before}} \;+\; \sum_{d=1}^{R} \frac{N_{f,\,d\ \text{ahead}}^{\text{before}}}{d}
+```
+
+over the same-side feet `d` segments ahead, up to the observation radius
+`R` (0 where no segment is).
+
+**What to expect, looking ahead.** In a head-to-tail wave the foot ahead has
+already lifted when a follower's foot lifts, so the added part falls to 0.
+With radius 2, lifting free also asks the foot two ahead to be in the air,
+which favours waves of more than about 4 legs when half a step is in the
+air; the sweep's reflex waves were 6 to 12 legs, run 28's about 5.
 
 **What to expect.** Measured on run 49's walk (cycle 128, mean action, 8
 worlds): 94% of its feet left the ground still loaded, on average with 1.27

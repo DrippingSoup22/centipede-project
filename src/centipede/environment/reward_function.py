@@ -37,7 +37,8 @@ class RewardContext:
     averaged over the step, and ``stride_support`` ``(W, N)`` both feet's
     together averaged over the segment's last stride; None without it.
     ``foot_lift_load`` ``(W, N, 2)`` is, for each foot that left the ground
-    on the step, the load it bore on the step before (0 for the others).
+    on the step, the load it bore on the step before, with the look-ahead
+    plus the load on the same-side feet ahead (0 for the others).
     ``health_scale`` ``(N,)`` multiplies each segment's health costs: the
     curriculum's ramp, times the followers' scale.
     """
@@ -262,7 +263,12 @@ def foot_hold(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     the legs around it stand: the load feedback of Owaki and Ishiguro (2017)
     judged on the outcome, never acting on the clocks; in arthropods, load
     signals keep a leg in stance until it is unloaded (Duysens, Clarac and
-    Cruse, Physiol Rev 2000). At most 1. A health cost.
+    Cruse, Physiol Rev 2000). With ``foot_hold_looks_ahead`` the lift's load
+    also counts the load still on the same-side feet ahead (the environment
+    adds it): alone, a foot's own load made a segment's two legs alternate
+    but no wave pass along the body (the open-loop sweep, 2026-10-12); the
+    wave came from the follow nudge, which held a leg while the foot ahead
+    was down. At most 1. A health cost.
     """
     loaded_sliding = (context.foot_load * context.foot_slip_speed).sum(dim=-1)
     moved = loaded_sliding / settings.grip_unit_m_per_s

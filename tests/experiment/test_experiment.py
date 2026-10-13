@@ -73,6 +73,7 @@ leg_contact_cost_parts = 0
 leg_pushing_cost_parts = 4
 carry_cost_parts = 4
 foot_hold_cost_parts = 6
+foot_hold_looks_ahead = true
 tempo_chain_ahead_cost_parts = 1.75
 tempo_chain_behind_cost_parts = 1.75
 energy_cost_parts = 2

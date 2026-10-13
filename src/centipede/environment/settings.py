@@ -270,6 +270,7 @@ PROPORTION_KEYS = (
     "energy_cost_parts",
     "energy_reference_w",
     "foot_hold_cost_parts",
+    "foot_hold_looks_ahead",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -386,7 +387,12 @@ class RewardSettings:
     (``foot_hold_cost_parts``) is grip generalised to the user's load rule,
     a loaded foot must not move: grip's charge plus, for each foot that left
     the ground, the load it bore the step before; a health cost that needs
-    ``feet_physics``, used in grip's place.
+    ``feet_physics``, used in grip's place. With ``foot_hold_looks_ahead``
+    (off by default), a foot that lifts also answers for the load still on
+    the same-side feet ahead that its segment sees (``observation_radius``),
+    each divided by its distance in segments: a leg should lift only once the
+    legs ahead have, the follow nudge's head-to-tail order judged on the
+    outcome.
 
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
@@ -445,6 +451,7 @@ class RewardSettings:
     energy_cost_parts: float = 0.0
     energy_reference_w: float = 0.001
     foot_hold_cost_parts: float = 0.0
+    foot_hold_looks_ahead: bool = False
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -639,6 +646,9 @@ class RewardSettings:
                     "energy_reference_w", default=0.001
                 ),
                 foot_hold_cost_parts=parts[18],
+                foot_hold_looks_ahead=section.boolean(
+                    "foot_hold_looks_ahead", default=False
+                ),
             )
         section.reject_unknown_keys()
         return settings
@@ -838,6 +848,14 @@ class EnvironmentSettings:
                 f"[environment.rewards] {', '.join(feet_costs)} read the feet's"
                 " floor forces, which feet_physics measures: set feet_physics ="
                 " true in [environment]"
+            )
+        if settings.rewards.foot_hold_looks_ahead and not (
+            settings.rewards.foot_hold_cost_parts and settings.observation_radius
+        ):
+            raise SettingsError(
+                "[environment.rewards] foot_hold_looks_ahead adds the feet ahead"
+                " that a segment sees to foot hold: set foot_hold_cost_parts above"
+                " 0 and observation_radius above 0"
             )
         if settings.leg_drive != "step_shape" and not (
             settings.leg_clocks and settings.clock.segment_tempo

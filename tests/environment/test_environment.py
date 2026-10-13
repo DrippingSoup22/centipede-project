@@ -12,7 +12,7 @@ import math
 import pytest
 import torch
 
-from centipede.environment.environment import Environment
+from centipede.environment.environment import Environment, _load_ahead
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.settings_section import SettingsError
@@ -319,6 +319,17 @@ def test_a_force_load_is_each_foots_force_over_a_segments_weight_before_the_step
     expected = (force / segment_weight).clamp(max=1.0)
     assert torch.allclose(env.previous_foot_load, expected)
     assert 0 < expected.max() <= 1
+
+
+def test_foot_holds_look_ahead_counts_the_same_side_feet_ahead_by_distance():
+    # One world of four segments: left feet loaded 1, 2, 3, 4; right feet 0.
+    foot_load = torch.tensor([[[1.0, 0.0], [2.0, 0.0], [3.0, 0.0], [4.0, 0.0]]])
+
+    ahead = _load_ahead(foot_load, radius=2)
+
+    # Segment 2's left foot: segment 1's at full weight, the head's at half.
+    assert ahead[0, :, 0].tolist() == [0.0, 1.0, 2.5, 4.0]
+    assert ahead[0, :, 1].tolist() == [0.0, 0.0, 0.0, 0.0]
 
 
 def test_one_tempo_per_segment_and_a_default_step_drive_both_legs():

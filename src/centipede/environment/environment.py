@@ -503,8 +503,14 @@ class Environment:
         self.foot_slip_speed.copy_(foot_slip_speed)
         foot_lift_load = None
         if self.settings.feet_physics:
-            # The load each foot that left the ground bore on the step before.
-            foot_lift_load = self.foot_load * (
+            # The load each foot that left the ground bore on the step before,
+            # and with the look-ahead the load still on the feet ahead.
+            lift_load = self.foot_load
+            if self.settings.rewards.foot_hold_looks_ahead:
+                lift_load = lift_load + _load_ahead(
+                    self.foot_load, self.settings.observation_radius
+                )
+            foot_lift_load = lift_load * (
                 self.previous_foot_contact & ~_foot_contact(state)
             )
             torch.div(
@@ -759,3 +765,14 @@ def _foot_contact(state) -> torch.Tensor:
     return torch.stack(
         (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
     )
+
+
+def _load_ahead(foot_load: torch.Tensor, radius: int) -> torch.Tensor:
+    """For each foot, the loads ``(W, N, 2)`` of the same-side feet up to
+    ``radius`` segments ahead, each divided by its distance; 0 for the head.
+    The nearest foot ahead counts fully, as the follow nudge read it; farther
+    ones warn of the wave coming."""
+    ahead = torch.zeros_like(foot_load)
+    for distance in range(1, radius + 1):
+        ahead[:, distance:] += foot_load[:, :-distance] / distance
+    return ahead
