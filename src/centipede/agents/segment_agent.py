@@ -59,7 +59,8 @@ class SegmentAgent:
         critic each, the task's advantage weighing this much against the
         walk's 1 (``head_task_critic_weight``); otherwise their sum, with one.
         With ``masked``, ``act`` takes the environment's action mask, and the
-        agent learns only from the actions that took effect.
+        agent learns only from the actions that took effect, each decision
+        judged on all the steps it held (``RolloutStorage.training_batch``).
         """
         self.segment_index = segment_index
         self.settings = settings

@@ -521,36 +521,53 @@ def test_the_carrying_is_measured_on_every_physics_step():
     assert state.loaded_sliding_m[1].min() > 10 * state.loaded_sliding_m[0].max()
 
 
-def test_held_curves_change_only_when_their_legs_clock_starts_a_turn():
-    """Model B with held curves: after a restart every leg takes its curve
-    from the first action; then only the leg whose clock started a turn
-    takes the next action's curve, and the segment its tempo. The mask
-    marks those actions, and each segment sees what it holds, last."""
+def test_a_segment_decides_once_per_turn_and_plays_it_at_one_tempo():
+    """Model B with held curves, every segment's heart at 2 Hz: after a
+    restart each segment takes its legs' curves and its tempo from the first
+    action, the heart moving at once as far as it would over a turn (0.5 ×
+    1 octave/s × 0.5 s), and holds them, at that tempo, its legs' hands
+    keeping their places apart, until its turn hand comes round: 22 steps at
+    2.38 Hz. Only then does the mask mark its actions again, and it take the
+    next action's. Each segment sees what it holds, last."""
     env = environment(
         world_count=1,
         model_path="models/assembly_v5.xml",
         leg_clocks=True,
         leg_drive="waves",
         hold_curves=True,
-        clock={"segment_tempo": True, "clock_time_constant_s": 0.0},
+        clock={
+            "segment_tempo": True,
+            "clock_time_constant_s": 0.0,
+            "tempo_rate_octaves_per_s": 1.0,
+            "start_tempo_range_hz": [2.0, 2.0],
+        },
     )
     held = env.leg_action_count
-    leg_values = (held - 1) // 2
     env.reset(seed=1)
     assert torch.all(env.action_mask == 1)
-    # Each left hand starts a turn during the first step; no right hand does.
-    env.clocks.clock_phase[..., 0] = 2 * math.pi - 0.01
-    env.clocks.clock_phase[..., 1] = 0.5
     first = torch.full((1, env.segment_count, env.action_size), 0.1)
+    first[..., 0] = 0.5
     second = torch.full_like(first, -0.2)
+    legs_apart = env.clocks.clock_phase.diff(dim=-1)
 
     observations, *_ = env.step(first)
     torch.testing.assert_close(observations[..., -held:], first[..., :held])
-    left = slice(1, 1 + leg_values)
-    assert torch.all(env.action_mask[..., : 1 + leg_values] == 1)
-    assert torch.all(env.action_mask[..., 1 + leg_values :] == 0)
+    tempo_hz = torch.full_like(env.clocks.clock_tempo_hz, 2 * 2**0.25)
+    torch.testing.assert_close(env.clocks.clock_tempo_hz, tempo_hz)
+    steps = 1
+    while not env.deciding.any():
+        assert torch.all(env.action_mask == 0)
+        env.step(second)
+        steps += 1
+        assert torch.equal(env.held_actions, first[..., :held])
+        torch.testing.assert_close(env.clocks.clock_tempo_hz, tempo_hz)
+    assert steps == 22 and env.deciding.all()
+    turned_apart = env.clocks.clock_phase.diff(dim=-1) - legs_apart
+    torch.testing.assert_close(turned_apart.cos(), torch.ones_like(turned_apart))
 
+    assert torch.all(env.action_mask == 1)
     env.step(second)
-    assert torch.all(env.held_actions[..., 0] == -0.2)
-    assert torch.all(env.held_actions[..., left] == -0.2)
-    assert torch.all(env.held_actions[..., 1 + leg_values :] == 0.1)
+    assert torch.all(env.held_actions == -0.2)
+    torch.testing.assert_close(
+        env.clocks.clock_tempo_hz, tempo_hz * 2 ** (-0.2 / tempo_hz)
+    )

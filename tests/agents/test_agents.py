@@ -3,6 +3,7 @@
 import torch
 
 from centipede.agents.agents import Agents
+from centipede.agents.rollout_storage import RolloutStorage
 from centipede.agents.settings import AgentSettings
 
 
@@ -69,3 +70,20 @@ def test_the_head_learns_the_task_with_a_critic_of_its_own():
     learning = agents.diagnostics.learning
     assert not learning.task_explained_variance[0].isnan()
     assert learning.task_explained_variance[1].isnan()
+
+
+def test_a_masked_agent_judges_each_decision_on_its_whole_turn():
+    """One world, five steps: decisions on steps 0 and 3 (every action marked)
+    held by the steps between (none marked); rewards 1, values 0. Each
+    decision's advantage adds all its turn's discounted rewards, and the first
+    takes lambda times the second's."""
+    storage = RolloutStorage(5, 1, 2, "cpu", action_size=2, masked=True)
+    storage.rewards.fill_(1.0)
+    storage.action_masks.zero_()
+    storage.action_masks[[0, 3]] = 1.0
+
+    advantages = storage.training_batch(discount=0.9, gae_lambda=0.5)[3]
+
+    second = 1 + 0.9
+    first = 1 + 0.9 + 0.9**2 + 0.9**3 * 0.5 * second
+    torch.testing.assert_close(advantages[[0, 3]], torch.tensor([first, second]))

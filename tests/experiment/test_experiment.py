@@ -1,7 +1,7 @@
 """Tests for the experiment's front file, with tiny runs on the CPU.
 
 The main test trains and evaluates a run shaped like the oscillators'
-pilots (model v5 with model B's curves held for each leg's turn, the heart,
+pilots (model v5 with model B's curves held for each segment's turn, the heart,
 the feet's physics, the neighbours' tempos, the step value and the tempo
 chain, the head's task critic, the circle curriculum), so that the path
 every training takes is run before any launch. The others cover the

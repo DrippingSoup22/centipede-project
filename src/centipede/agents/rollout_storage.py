@@ -106,7 +106,18 @@ class RolloutStorage:
         column is its own sequence of episodes, so a window cut needs no
         special case: its last row bootstraps from the next observation's
         value.
+
+        With action masks, a step on which every action takes effect starts
+        a new decision, and the steps until the next one hold it: there
+        ``gae_lambda`` applies only from one decision to the next, and 1
+        inside, so that each decision is judged on its whole turn.
         """
+        lambdas = gae_lambda
+        if self.action_masks is not None:
+            starts_decision = self.action_masks.all(dim=-1)
+            lambdas = torch.ones_like(self.log_probabilities)
+            lambdas[:-1].masked_fill_(starts_decision[1:], gae_lambda)
+            lambdas[-1] = gae_lambda
         advantages, return_targets = generalized_advantage_estimates(
             self.rewards,
             self.values,
@@ -114,7 +125,7 @@ class RolloutStorage:
             terminated=self.terminated,
             episode_ended=self.episode_ended,
             discount=discount,
-            gae_lambda=gae_lambda,
+            gae_lambda=lambdas,
         )
         observation_size = self.observations.shape[-1]
         action_size = self.policy_actions.shape[-1]

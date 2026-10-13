@@ -17,8 +17,9 @@ only for what it can see and cause. Every segment's step is judged by the
 [step value](#2-the-step-value), in one physical unit; the followers learn
 their step and the [tempo chain](#tempo-chain), nothing from the target; the
 head learns its step and the [task](#1-task-terms), each with a [critic of
-its own](#a-task-critic-for-the-head). Each leg's curve is [held for a whole
-turn](#curves-held-for-a-turn) of its clock. Model v5, model B, the circle
+its own](#a-task-critic-for-the-head). Each segment decides its legs' curves
+and its tempo once per turn and [holds them for the whole
+turn](#curves-held-for-a-turn), and learns from each turn as a whole. Model v5, model B, the circle
 task from 10 cm, pink noise, no CAPS. Before it, runs 51 to 56 paid every
 segment the head's task and charged the [retired](#retired-reward-terms)
 health costs (foot hold, carry, leg pushing): the followers' critics
@@ -303,7 +304,8 @@ The version in use is the **distance**: a longer stride earns more, so at
 one tempo a faster walk earns more. The **share** version, the step value
 divided by the distance the segment moved, would make it speed-neutral and
 leave the speed to the head; it is defined only over a whole cycle (a still
-segment has no share), so it needs the step value summed over each leg's turn.
+segment has no share), so it needs the step value summed over each segment's
+turn.
 The user's choice: test both, distance first.
 
 ### 3. Rhythm terms
@@ -433,8 +435,8 @@ Stance is `φ` from 0 to π, swing from π to 2π.
 two waves, at once and twice the heartbeat, a Fourier series. The network
 sets the curve's 5 amounts per joint; the clock plays it. Until run 56 it
 set them every 20 ms, so a walking leg played about 25 curves stitched
-together per turn; from run 57 each leg's curve is [held for a whole
-turn](#curves-held-for-a-turn). 41 actions per follower (the heart and 8
+together per turn; from run 57 the curves are [held for a whole
+turn](#curves-held-for-a-turn) of their segment. 41 actions per follower (the heart and 8
 joints × 5), 42 for the head.
 
 <details>
@@ -458,7 +460,8 @@ freedom (the user's choice).
 
 ✅ **Idea.** Each segment has one tempo, its heartbeat, shared by its two
 legs. The segment's first action does not set the tempo, it changes it: at
-most doubling or halving it per second, so the tempo cannot jump. Each
+most doubling or halving it per second, so the tempo cannot jump; with
+held curves, the change comes at once as each turn starts. Each
 episode every segment starts at its own random tempo between 1 and 4 Hz, and
 each leg's hand at its own random place: nothing about the rhythm or the
 phases between legs is given. Since run 35 the tempo has a ceiling of
@@ -492,28 +495,51 @@ staircase of 50 jumps a second.
 
 #### Curves held for a turn
 
-✅ **Idea.** The user's rule (2026-10-13): a leg's curve is judged as a
-whole, so it must be played whole. Each leg takes its curve's 20 values from
-the segment's actions only on the step its clock starts a turn, and plays it
-unchanged until the turn ends; the segment takes its tempo action whenever
-either leg starts a turn. One decision, one step, one judgement, and
-exploration that tries one whole curve against another. The two legs' clocks
-start at random hands, so each leg decides at its own moments, and nothing
-fixes a phase: where the stance falls in the turn is the curve's to choose.
-Each segment sees the 41 values it holds, last in its observation (the
-user's "they see their own curve"). A new curve may start away from where
-the leg is; no rule stops it, since the lurch costs sliding or support.
+✅ **Idea.** The user's rule (2026-10-13), made per segment (2026-10-14): a
+step is judged as a whole, so it must be played whole. Each segment has a
+turn hand that starts at 0 when its world restarts and turns at its tempo.
+On the step its turn starts, the segment takes both legs' curves (40
+values) and its tempo action from its actions, and plays them unchanged for
+the whole turn. One decision, one turn, one judgement, and exploration that
+tries one whole step against another. The tempo is the only thing the two
+legs share: each leg's hand keeps its own random place, so each leg switches
+curves at its own point of its cycle, and nothing fixes a phase. Where each
+leg's stance falls in the turn is its curve's to choose, since a curve of
+two waves shifted in time is another curve of two waves. Each segment sees
+the 41 values it holds, last in its observation (the user's "they see their
+own curve"). A new curve may start away from where the leg is; no rule stops
+it, since the lurch costs sliding or support.
+
+The tempo action moves the [heart](#the-heart) only as a turn
+starts, by as much as the heart would over one turn at the tempo it had
+(action × 1 octave/s × the turn's length), so that every turn is played at
+one tempo and both legs' hands turn alike; the clocks' load feedback and
+follow nudge, which would turn one hand faster than the other, must be off.
 
 <details>
 <summary>How the agents learn from it</summary>
 
 The network still acts every 20 ms, so that its critic sees every step,
 but only the actions that took effect count: the environment's
-`action_mask` marks, for each step, the deciding legs' values, the tempo
-when either leg decides, and the head's neck command, which acts every step.
-PPO leaves the other actions out of each sample's probability and entropy,
-and a sample that decided nothing teaches only the critic (RL_lib's action
-masks). About one step in twelve is a decision at 2 Hz.
+`action_mask` marks all of a deciding segment's actions, and otherwise only
+the head's neck command, which acts every step. PPO leaves the other actions
+out of each sample's probability and entropy, and a sample that decided
+nothing teaches only the critic (RL_lib's action masks). About one step in
+25 is a decision at 2 Hz.
+
+The rewards are still paid every step: the step value and the tempo chain
+are sums over time, so a turn's steps add up to the turn's judgement. What
+must match the turn is how the learning adds them up. With GAE's λ = 0.95
+counted per step, a reward one turn after a decision (25 steps at 2 Hz)
+would count only 0.27 directly, the rest left to the critic's guesses, so a
+weak critic would judge a step mostly on its first 0.4 s. So λ is 1 inside
+a turn and 0.95 only from one turn's start to the next: each decision's
+advantage holds all its turn's discounted rewards plus the value where the
+next turn starts, and turns are mixed with λ as steps were (variable λ,
+Sutton and Barto, 2nd ed., 2018, section 12.8; a turn is one step of a
+semi-Markov decision process, Sutton, Precup and Singh, 1999). The agents
+find the turns' starts from the masks: the steps on which every action took
+effect.
 </details>
 
 #### A clock per leg
