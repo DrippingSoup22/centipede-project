@@ -47,6 +47,7 @@ class PhysicsSimulation:
         settings: SimulationSettings,
         average_floor_forces: bool = False,
         measure_leg_power: bool = False,
+        measure_carrying: bool = False,
     ) -> None:
         """Load and check the model, then create the chosen backend.
 
@@ -57,11 +58,23 @@ class PhysicsSimulation:
         on average in run 28's walk (CentipedeTraining, foot_step.py). With
         ``measure_leg_power`` every step also measures each segment's leg
         motors' positive power, averaged over its physics steps
-        (``leg_motor_power``), which the energy cost reads.
+        (``leg_motor_power``), which the energy cost reads. With
+        ``measure_carrying`` every physics step also adds how much of each
+        segment's own weight its feet carried and how far its loaded feet
+        slid (``carried_share``, ``loaded_sliding_m``), which the step value
+        reads: inside the step, so that a foot that lands and lifts again
+        between two readings still counts, and a landing foot's flight never
+        counts as sliding.
         """
         model = mujoco.MjModel.from_xml_path(str(settings.model_path))
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
+        # Each segment's own weight, (N,) newtons: its body and legs, the mass
+        # of its tree less the next segment's, which hangs from it.
+        subtree_mass = model.body_subtreemass[mapping.body_ids]
+        own_mass = subtree_mass - np.append(subtree_mass[1:], 0.0)
+        own_weight_n = own_mass * np.linalg.norm(model.opt.gravity)
+        carrying_weight_n = own_weight_n if measure_carrying else None
 
         start_heading_range_rad = math.radians(settings.start_heading_range_deg)
         if settings.backend == "cpu":
@@ -73,6 +86,7 @@ class PhysicsSimulation:
                 start_heading_range_rad,
                 average_floor_forces,
                 measure_leg_power,
+                carrying_weight_n,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -90,6 +104,7 @@ class PhysicsSimulation:
                 start_heading_range_rad,
                 average_floor_forces,
                 measure_leg_power,
+                carrying_weight_n,
             )
 
         self.segment_count = mapping.segment_count
@@ -103,12 +118,8 @@ class PhysicsSimulation:
             model.body_subtreemass[mapping.body_ids[0]]
             * np.linalg.norm(model.opt.gravity)
         )
-        # Each segment's own weight, (N,) newtons: its body and legs, the mass
-        # of its tree less the next segment's, which hangs from it.
-        subtree_mass = model.body_subtreemass[mapping.body_ids]
-        own_mass = subtree_mass - np.append(subtree_mass[1:], 0.0)
         self.own_weight_n = torch.as_tensor(
-            own_mass * np.linalg.norm(model.opt.gravity),
+            own_weight_n,
             dtype=torch.float32,
             device=self._backend.physical_state.body_height.device,
         )

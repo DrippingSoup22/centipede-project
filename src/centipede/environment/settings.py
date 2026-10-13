@@ -272,6 +272,18 @@ PROPORTION_KEYS = (
     "foot_hold_cost_parts",
     "foot_hold_looks_ahead",
     "carry_every_step",
+    "step_value_scale",
+    "carried_forward_weight",
+    "foot_sliding_weight",
+    "carried_by_others_weight",
+    "leg_pressing_weight",
+)
+# The weights of the step value's four checks, each named after its term.
+STEP_VALUE_CHECK_KEYS = (
+    "carried_forward_weight",
+    "foot_sliding_weight",
+    "carried_by_others_weight",
+    "leg_pressing_weight",
 )
 # The costs that need clocks; legs off tempo needs a clock per segment, and
 # the terms that compare the legs' clocks in use need clocks per leg.
@@ -400,6 +412,17 @@ class RewardSettings:
     carry less than its weight, so hanging from its neighbours between short,
     heavy stances is no longer free.
 
+    Cycle 3 also adds the step value, off by default: with
+    ``step_value_scale`` above 0, the reward per segment weight carried one
+    millimetre, four checks judge each segment's step in that one unit
+    (``reward_function``): it carried itself forward (C1, paid), its loaded
+    feet slid (C2), others carried it (C3), and its legs pressed on other
+    legs (C4), each charged. Each check's weight, ``carried_forward_weight``,
+    ``foot_sliding_weight``, ``carried_by_others_weight`` and
+    ``leg_pressing_weight``, multiplies the scale; all start at 1, so that
+    the physics, not our choice, sets the balance between them. The step
+    value lies outside the cost budget.
+
     ``follower_progress_ratio`` pays each follower, as an earlier form of the
     reward did, for halving its own distance to the spot where the segment
     ahead had been; it is None unless a file sets it, and in such a file
@@ -459,6 +482,11 @@ class RewardSettings:
     foot_hold_cost_parts: float = 0.0
     foot_hold_looks_ahead: bool = False
     carry_every_step: bool = False
+    step_value_scale: float = 0.0
+    carried_forward_weight: float = 1.0
+    foot_sliding_weight: float = 1.0
+    carried_by_others_weight: float = 1.0
+    leg_pressing_weight: float = 1.0
 
     @classmethod
     def from_section(cls, values: dict, coupling: str = "both") -> "RewardSettings":
@@ -657,6 +685,13 @@ class RewardSettings:
                     "foot_hold_looks_ahead", default=False
                 ),
                 carry_every_step=section.boolean("carry_every_step", default=False),
+                step_value_scale=section.number(
+                    "step_value_scale", default=0.0, minimum=0.0
+                ),
+                **{
+                    key: section.number(key, default=1.0, minimum=0.0)
+                    for key in STEP_VALUE_CHECK_KEYS
+                },
             )
         section.reject_unknown_keys()
         return settings
@@ -738,6 +773,14 @@ class RewardSettings:
             "progress": progress_parts * part * arrival,
             **{name: share * arrival / steps for name, share in shares.items()},
         }
+        # The step value's checks, in segment weights × mm, outside the budget.
+        if self.step_value_scale:
+            for key in STEP_VALUE_CHECK_KEYS:
+                weight = getattr(self, key)
+                if weight:
+                    per_step[key.removesuffix("_weight")] = (
+                        self.step_value_scale * weight
+                    )
         # Outside the budget, so not among the episode shares.
         if self.command_cost_ratio:
             per_step["command"] = (
@@ -785,7 +828,13 @@ class EnvironmentSettings:
 
     Cycle 3 (2026-10-13): with ``neighbour_tempos`` (off by default), a
     segment also hears the tempo of each neighbour it sees, relative to its
-    own; it needs clocks per leg.
+    own; it needs clocks per leg. With ``hold_curves`` (off by default; the
+    user's rule, 2026-10-13), each leg's curve is chosen once per turn of its
+    clock instead of every 20 ms: the leg's curve's values are taken from
+    the actions on the step its clock starts a turn, and held until it ends
+    it, so that the curve judged is the curve drawn; the segment's tempo
+    action is taken whenever either of its legs starts a turn. Each segment
+    observes the actions it holds, last. It needs ``leg_drive = "waves"``.
     """
 
     max_episode_steps: int
@@ -805,6 +854,7 @@ class EnvironmentSettings:
     feet_physics: bool = False
     tilt: bool = False
     neighbour_tempos: bool = False
+    hold_curves: bool = False
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -844,6 +894,7 @@ class EnvironmentSettings:
             feet_physics=section.boolean("feet_physics", default=False),
             tilt=section.boolean("tilt", default=False),
             neighbour_tempos=section.boolean("neighbour_tempos", default=False),
+            hold_curves=section.boolean("hold_curves", default=False),
         )
         section.reject_unknown_keys()
         feet_costs = [
@@ -877,6 +928,11 @@ class EnvironmentSettings:
                 f'[environment] leg_drive = "{settings.leg_drive}" moves the legs'
                 " with their clocks at their segment's one tempo: set leg_clocks ="
                 " true and [environment.clock] segment_tempo = true"
+            )
+        if settings.hold_curves and settings.leg_drive != "waves":
+            raise SettingsError(
+                "[environment] hold_curves holds model B's curves: set leg_drive ="
+                ' "waves"'
             )
         if settings.passive_follower_spine and not settings.spine_control:
             raise SettingsError(

@@ -35,6 +35,7 @@ class Agents:
         motor_columns: list[list[int]] | None = None,
         shape_columns: list[list[int]] | None = None,
         tempo_gap_ahead_column: int | None = None,
+        masked: bool = False,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -49,7 +50,11 @@ class Agents:
         legs' curves (none when not given). ``tempo_gap_ahead_column``, the
         environment's, is the observation that holds a segment's tempo gap to
         the segment ahead; with ``follower_tempo_noise_gap_octaves`` every
-        follower's tempo noise follows it, and the head's never does.
+        follower's tempo noise follows it, and the head's never does. With
+        ``masked`` (the environment's ``hold_curves``), ``act`` takes the
+        environment's action mask, and the agents learn only from the
+        actions that took effect. With ``head_task_critic_weight``, the head
+        learns the task with a critic of its own.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
@@ -78,6 +83,10 @@ class Agents:
                 tempo_gap_column=tempo_gap_ahead_column
                 if gap_scaled and segment_index > 0
                 else None,
+                task_critic_weight=settings.head_task_critic_weight
+                if segment_index == 0
+                else 0.0,
+                masked=masked,
             )
             for segment_index in range(segment_count)
         ]
@@ -89,15 +98,28 @@ class Agents:
             device=self.settings.device,
         )
 
-    def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
+    def act(
+        self,
+        observations: torch.Tensor,
+        training: bool,
+        action_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.
 
         A segment with fewer actions than the widest gets zeros after its own,
-        as padding the environment does not use.
+        as padding the environment does not use. ``action_mask``, the
+        environment's ``(W, N, action_size)``, gives each agent its own slice.
         """
         actions: list[torch.Tensor] = []
         for segment_index, agent in enumerate(self.segment_agents):
-            segment_actions = agent.act(observations[:, segment_index], training)
+            segment_mask = (
+                None
+                if action_mask is None
+                else action_mask[:, segment_index, : agent.action_size]
+            )
+            segment_actions = agent.act(
+                observations[:, segment_index], training, segment_mask
+            )
             padding = self.action_size - agent.action_size
             actions.append(torch.nn.functional.pad(segment_actions, (0, padding)))
         return torch.stack(actions, dim=1)
@@ -111,8 +133,9 @@ class Agents:
     ) -> None:
         """Give each agent its segment's rewards and final observations.
 
-        The episode ends ``(W,)`` belong to the whole body, so every agent gets
-        them in full.
+        ``rewards`` is ``(W, N, 2)``, each segment's for its walk and for the
+        task. The episode ends ``(W,)`` belong to the whole body, so every
+        agent gets them in full.
         """
         for segment_index, agent in enumerate(self.segment_agents):
             agent.record(

@@ -102,6 +102,7 @@ def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():
 
     assert terminated.tolist() == [True, False, False, False]  # arrival wins
     assert truncated.tolist() == [False, True, True, False]
+    rewards = rewards.sum(dim=-1)  # the walk's and the task's
     assert torch.all(rewards[0] > 0) and torch.all(rewards[1:] < 0)
     assert env.episode_steps.tolist() == [0, 0, 0, 1]
     target_moved = (env.target_position != targets_before).any(dim=-1)
@@ -493,3 +494,63 @@ def test_with_an_energy_cost_the_simulation_measures_the_leg_motors_power():
     env.step(moving)
     assert (power[0] < 1e-6).all()
     assert (power[1] > 1e-4).all()
+
+
+def test_the_carrying_is_measured_on_every_physics_step():
+    """Model v5 standing still: each segment's carried share is its feet's
+    floor force over its own weight, at most 1, and its loaded feet barely
+    slide; kicked legs drag their loaded feet."""
+    env = environment(
+        world_count=2,
+        model_path="models/assembly_v5.xml",
+        feet_physics=True,
+        rewards={"step_value_scale": 0.01},
+    )
+    env.reset(seed=0)
+    still = torch.zeros(2, env.segment_count, env.action_size)
+    for _ in range(12):
+        env.step(still)
+    state = env.simulation.physical_state
+    carried = (state.foot_floor_force.sum(dim=-1) / env.own_weight_n).clamp(max=1.0)
+    assert torch.allclose(state.carried_share, carried, atol=0.01)
+    assert state.loaded_sliding_m.max() < 5e-6  # weights x m on a 20 ms step
+
+    kicked = still.clone()
+    kicked[1] = 1.0
+    env.step(kicked)
+    assert state.loaded_sliding_m[1].min() > 10 * state.loaded_sliding_m[0].max()
+
+
+def test_held_curves_change_only_when_their_legs_clock_starts_a_turn():
+    """Model B with held curves: after a restart every leg takes its curve
+    from the first action; then only the leg whose clock started a turn
+    takes the next action's curve, and the segment its tempo. The mask
+    marks those actions, and each segment sees what it holds, last."""
+    env = environment(
+        world_count=1,
+        model_path="models/assembly_v5.xml",
+        leg_clocks=True,
+        leg_drive="waves",
+        hold_curves=True,
+        clock={"segment_tempo": True, "clock_time_constant_s": 0.0},
+    )
+    held = env.leg_action_count
+    leg_values = (held - 1) // 2
+    env.reset(seed=1)
+    assert torch.all(env.action_mask == 1)
+    # Each left hand starts a turn during the first step; no right hand does.
+    env.clocks.clock_phase[..., 0] = 2 * math.pi - 0.01
+    env.clocks.clock_phase[..., 1] = 0.5
+    first = torch.full((1, env.segment_count, env.action_size), 0.1)
+    second = torch.full_like(first, -0.2)
+
+    observations, *_ = env.step(first)
+    torch.testing.assert_close(observations[..., -held:], first[..., :held])
+    left = slice(1, 1 + leg_values)
+    assert torch.all(env.action_mask[..., : 1 + leg_values] == 1)
+    assert torch.all(env.action_mask[..., 1 + leg_values :] == 0)
+
+    env.step(second)
+    assert torch.all(env.held_actions[..., 0] == -0.2)
+    assert torch.all(env.held_actions[..., left] == -0.2)
+    assert torch.all(env.held_actions[..., 1 + leg_values :] == 0.1)

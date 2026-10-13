@@ -572,3 +572,41 @@ def test_foot_hold_charges_loaded_feet_that_slide_or_lift():
         foot_lift_load=lift,
     )
     assert parts["foot_hold"][1, 2].item() == pytest.approx(-1.1 * weights["foot_hold"])
+
+
+def test_the_step_value_judges_each_segment_in_weights_carried_a_millimetre():
+    """World 1: the head moves 1 mm forward on feet that carry 0.8 of its
+    weight, sliding 0.2 weight-mm; segment 1 moves 1 mm backward on its
+    full weight; segment 2 moves 2 mm sideways carrying a quarter of its
+    weight, its legs pressing on others with half a segment's weight. Each
+    check is in weight-mm, times the scale and its own weight. The rewards
+    split into the walk's and the task's."""
+    settings = RewardSettings.from_section(
+        {"step_value_scale": 0.01, "leg_pressing_weight": 2.0}
+    )
+    state = unchanged_state()
+    state.body_planar_position[1] += torch.tensor(
+        [[0.001, 0.0], [-0.001, 0.0], [0.0, 0.002]]
+    )
+    state.carried_share[:] = 1.0
+    state.carried_share[1] = torch.tensor([0.8, 1.0, 0.25])
+    state.loaded_sliding_m[1, 0] = 0.0002
+    state.leg_leg_force[1, 2] = 0.5 * SEGMENT_WEIGHT_N
+
+    step, parts, weights = rewards_for(state, settings=settings)
+
+    assert weights["carried_forward"] == 0.01 and weights["leg_pressing"] == 0.02
+    expected = {
+        "carried_forward": [0.8, -1.0, 0.0],
+        "foot_sliding": [-0.2, 0.0, 0.0],
+        "carried_by_others": [-0.2, 0.0, -1.5],
+        "leg_pressing": [0.0, 0.0, -1.0],
+    }
+    for name, values in expected.items():
+        assert parts[name][1].tolist() == pytest.approx(
+            [value * weights[name] for value in values], abs=1e-7
+        )
+        assert parts[name][0].abs().max() < 1e-9
+    task = parts["arrival"] + parts["progress"] + parts["step_cost"]
+    torch.testing.assert_close(step.channel_rewards[..., 1], task)
+    torch.testing.assert_close(step.channel_rewards.sum(dim=-1), step.rewards)

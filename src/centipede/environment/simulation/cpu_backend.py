@@ -35,6 +35,7 @@ class CPUBackend:
         start_heading_range_rad: float = 0.0,
         average_floor_forces: bool = False,
         measure_leg_power: bool = False,
+        carrying_weight_n: np.ndarray | None = None,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
@@ -43,7 +44,10 @@ class CPUBackend:
         turn the body about the vertical. With ``average_floor_forces`` every
         step also measures each foot's floor force, averaged over its physics
         steps, and with ``measure_leg_power`` each segment's leg motors'
-        positive power, averaged likewise. The generators start from seed 0
+        positive power, averaged likewise. With ``carrying_weight_n``, each
+        segment's own weight (N,) in newtons, every physics step also adds
+        how much of it the segment's feet carried and how far its loaded feet
+        slid (``_add_carrying``). The generators start from seed 0
         until ``reset`` is given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
@@ -55,6 +59,7 @@ class CPUBackend:
         self.start_heading_range_rad = start_heading_range_rad
         self.average_floor_forces = average_floor_forces
         self.measure_leg_power = measure_leg_power
+        self.carrying_weight_n = carrying_weight_n
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -88,6 +93,15 @@ class CPUBackend:
         self._leg_leg_force = self.physical_state.leg_leg_force.numpy()
         self._foot_floor_force = self.physical_state.foot_floor_force.numpy()
         self._leg_motor_power = self.physical_state.leg_motor_power.numpy()
+        self._carried_share = self.physical_state.carried_share.numpy()
+        self._loaded_sliding = self.physical_state.loaded_sliding_m.numpy()
+        # Where each foot was, flat, and the load it bore at the last physics
+        # step measured: the sliding of the next is that load times how far
+        # the foot moved.
+        self._previous_foot_position = np.zeros(
+            (world_count, mapping.segment_count, 2, 2)
+        )
+        self._previous_foot_load = np.zeros((world_count, mapping.segment_count, 2))
         # Each shape's foot side, 0 left or 1 right, or -1 for any other shape.
         self._foot_side = np.full(len(mapping.geom_categories), -1)
         self._foot_side[mapping.geom_categories == LEFT_FOOT_CATEGORY] = 0
@@ -153,6 +167,14 @@ class CPUBackend:
             self._foot_floor_force[world_index] = 0.0
             if self.average_floor_forces:
                 self._add_floor_forces(data, self._foot_floor_force[world_index], 1.0)
+            if self.carrying_weight_n is not None:
+                # The starting pose's carrying; its feet have not slid.
+                self._previous_foot_position[world_index] = data.geom_xpos[
+                    self.mapping.foot_geom_ids, :2
+                ]
+                self._carried_share[world_index] = 0.0
+                self._add_carrying(data, world_index, 1.0)
+                self._loaded_sliding[world_index] = 0.0
         self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(
@@ -186,6 +208,8 @@ class CPUBackend:
             floor_force[:] = 0.0
             leg_power = self._leg_motor_power[world_index]
             leg_power[:] = 0.0
+            self._carried_share[world_index] = 0.0
+            self._loaded_sliding[world_index] = 0.0
             for physics_step in range(steps):
                 share = (physics_step + 1) / steps
                 data.ctrl[self.mapping.leg_actuator_ids] = start[
@@ -199,9 +223,14 @@ class CPUBackend:
                     ids = self.mapping.leg_actuator_ids
                     power = data.actuator_force[ids] * data.actuator_velocity[ids]
                     leg_power += np.maximum(power, 0.0).sum(axis=-1) / steps
+                if self.carrying_weight_n is not None:
+                    self._add_carrying(data, world_index, 1 / steps)
             self._check_world(world_index)
 
             mujoco.mj_forward(self.model, data)
+            if self.carrying_weight_n is not None:
+                # The last physics step's sliding, now that its end is known.
+                self._add_carrying(data, world_index, 0.0)
             self._read_world(world_index)
         self.diagnostics.fill_from_cpu(self.world_data)
 
@@ -329,6 +358,31 @@ class CPUBackend:
             floor_force[self.mapping.geom_owner_indices[other[index]], side[index]] += (
                 scale * data.efc_force[address : address + rows].sum()
             )
+
+    def _add_carrying(
+        self, data: mujoco.MjData, world_index: int, scale: float
+    ) -> None:
+        """Add one physics step's carrying to the world's measures.
+
+        After ``mj_step``, the positions and contact forces in ``data`` are
+        those the step started from (it integrates them only afterwards); so
+        each foot's movement since the last call is the last physics step's,
+        and the load it bore then, kept from the last call, is charged for
+        it. ``scale`` times the share of each segment's own weight its feet
+        carry now, at most 1, adds to its carried share.
+        """
+        load = np.zeros((self.mapping.segment_count, 2))
+        self._add_floor_forces(data, load, 1.0)
+        load /= self.carrying_weight_n[:, None]
+        position = data.geom_xpos[self.mapping.foot_geom_ids, :2]
+        previous_position = self._previous_foot_position[world_index]
+        moved = np.linalg.norm(position - previous_position, axis=-1)
+        self._loaded_sliding[world_index] += (
+            self._previous_foot_load[world_index] * moved
+        ).sum(axis=-1)
+        previous_position[:] = position
+        self._previous_foot_load[world_index] = load
+        self._carried_share[world_index] += scale * np.minimum(load.sum(axis=-1), 1.0)
 
     def _read_foot_normal_forces(self, world_index: int) -> None:
         """Sum the normal force of every contact of each foot, in newtons.

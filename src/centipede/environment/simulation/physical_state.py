@@ -19,7 +19,13 @@ class PhysicalState:
     it stays zero unless the simulation was asked to measure it. So does
     ``leg_motor_power``, each segment's leg motors' positive power averaged
     over the step: every motor's force times its joint's speed where the two
-    agree in sign, summed over the segment's leg motors.
+    agree in sign, summed over the segment's leg motors. ``carried_share`` is
+    the share of its own weight a segment's feet carried from the floor, each
+    physics step's at most 1, averaged over the step; ``loaded_sliding_m``
+    each foot's load (its floor force over its segment's own weight) times
+    how far it slid on the ground, metres, added up over the step's physics
+    steps and the segment's two feet. Both stay zero unless the simulation
+    was asked to measure the carrying.
 
     The tensors are created once and overwritten in place by every ``step()``
     and ``reset()``. After either returns, they describe the current state of
@@ -48,6 +54,8 @@ class PhysicalState:
     leg_leg_force: torch.Tensor
     foot_floor_force: torch.Tensor  # (W, N, 2), left and right, N
     leg_motor_power: torch.Tensor  # (W, N), W
+    carried_share: torch.Tensor  # (W, N), 0 to 1
+    loaded_sliding_m: torch.Tensor  # (W, N), segment weights × m
 
     @classmethod
     def allocate(
@@ -84,4 +92,6 @@ class PhysicalState:
             leg_leg_force=zeros(n),
             foot_floor_force=zeros(n, 2),
             leg_motor_power=zeros(n),
+            carried_share=zeros(n),
+            loaded_sliding_m=zeros(n),
         )

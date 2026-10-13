@@ -144,6 +144,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         environment.motor_columns,
         environment.shape_columns,
         environment.tempo_gap_ahead_column,
+        masked=environment.action_mask is not None,
     )
     completed_cycles = 0
     saved_level = (

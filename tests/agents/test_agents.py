@@ -42,3 +42,30 @@ def test_a_follower_explores_its_tempo_in_proportion_to_its_gap_ahead():
         follower.noise_scales[0, :, 0], torch.tensor([0.03, 0.5, 1.0])
     )
     assert torch.all(follower.noise_scales[0, :, 1:] == 1)
+
+
+def test_the_head_learns_the_task_with_a_critic_of_its_own():
+    """With a task critic, the head keeps its walk's and the task's rewards
+    apart and the followers learn their sum; masked agents store each step's
+    mask, and learn from the actions that took effect."""
+    settings = AgentSettings.from_section(
+        {"head_task_critic_weight": 0.2, "ppo": {"minibatch_size": 4}}
+    )
+    agents = Agents(2, 5, 3, 2, settings, 0, masked=True)
+    head, follower = agents.segment_agents
+    assert (head.critic_count, follower.critic_count) == (2, 1)
+    mask = torch.zeros(3, 2, 6)
+    mask[:, :, 0] = 1.0
+    rewards = torch.tensor([1.0, 0.5]).expand(3, 2, 2)
+    for _ in range(2):
+        agents.act(torch.randn(3, 2, 5), training=True, action_mask=mask)
+        ended = torch.zeros(3, dtype=torch.bool)
+        agents.record(rewards, ended, ended, torch.zeros(3, 2, 5))
+
+    assert torch.equal(head.rollout_storage.rewards[0], torch.tensor([[1.0, 0.5]] * 3))
+    assert torch.equal(follower.rollout_storage.rewards[0], torch.full((3,), 1.5))
+    assert torch.equal(follower.rollout_storage.action_masks[1], mask[:, 1])
+    agents.update()
+    learning = agents.diagnostics.learning
+    assert not learning.task_explained_variance[0].isnan()
+    assert learning.task_explained_variance[1].isnan()

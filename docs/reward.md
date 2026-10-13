@@ -8,27 +8,24 @@ This page describes the workspace branch `oscillators` as it trains today.
 
 - **Part 1, the reward:** only the terms in use, grouped by kind, each with its
   idea, its math, and what to expect from it.
-- **Part 2, the tools:** everything that is not a reward term, in use or
-  tried before, so that any of them can be tried again.
+- **Part 2, the tools:** everything that is not a reward term in use, in use
+  or tried before, so that any of them can be tried again.
 
-**Current as of:** cycle 3's foot-hold runs (`configs/oscillators/51_...`
-to `54_...` in CentipedeTraining), on model v5 with model B: the whole
-cycle-3 design from the first step, the [tempo chain](#tempo-chain), the
-[circle task](#curriculum) from 10 cm, [tempo noise that follows the
-gap](#tempo-noise-that-follows-the-gap), [foot hold](#foot-hold) in grip's
-place, the [health](#2-health-terms) costs foot hold 6, carry 4, leg pushing
-4 parts with the hardening from 0.45, no CAPS, red (51) or pink (52) noise.
-Runs 53 and 54 are 51 and 52 from scratch with foot hold looking ahead.
-Run 55 is run 54 (pink) on model v6, whose floor grips like a claw
-(friction 2.2, impratio 10: in v5 a leg dragged its own loaded foot), with
-the same reward; it ran twice as slowly (impratio's solver cost) and was
-stopped. Run 56 is run 54 (pink, model v5) with [carry](#carry) judged on
-every step instead of over the stride, at 6 parts, foot hold's weight: the
-user's call that balance must not depend on the floor's friction. Before
-them, runs 49 and 50 (CAPS 1, grip; 50 with the
-health costs tripled) and cycle 3's pilot (runs 41 to 47, from run 39). The
-values marked *measured* come from checks on the laptop's CPU, not from
-training.
+**Current as of:** cycle 3's step-value run (`configs/oscillators/57_...` in
+CentipedeTraining), the user's redesign of 2026-10-13: each agent is paid
+only for what it can see and cause. Every segment's step is judged by the
+[step value](#2-the-step-value), in one physical unit; the followers learn
+their step and the [tempo chain](#tempo-chain), nothing from the target; the
+head learns its step and the [task](#1-task-terms), each with a [critic of
+its own](#a-task-critic-for-the-head). Each leg's curve is [held for a whole
+turn](#curves-held-for-a-turn) of its clock. Model v5, model B, the circle
+task from 10 cm, pink noise, no CAPS. Before it, runs 51 to 56 paid every
+segment the head's task and charged the [retired](#retired-reward-terms)
+health costs (foot hold, carry, leg pushing): the followers' critics
+explained none of their returns, because the shared task they could neither
+see nor cause drowned their own signal (the study notes, "Why the followers
+do not learn their legs"). The values marked *measured* come from checks on
+the laptop's CPU, not from training.
 
 > **Kept current.** Each cycle has a **theory phase** (design the reward or
 > another part, implement and test it) and an **experiment phase** (train and
@@ -44,127 +41,121 @@ training.
 
 Twelve agents on model v5, one per segment: the **head** (segment 0) and
 eleven **followers** (segments 1 to 11). Every term is computed on every
-20 ms step, for every segment. Numbers are in units of one arrival reward.
+20 ms step, for every segment.
 
-**The anchor rule** (the user's, 2026-10-12): a perfect walk earns about 1,
-a walk that does everything wrong about 0, and standing still a little below
-0. The task is the team's: every segment earns the head's arrival and
-progress, though only the head sees the target. The costs judge how each
-segment walks, and the health costs harden as the curriculum's targets get
-harder, so that early on the agents may walk badly before they walk well.
+**The principle** (the user's, 2026-10-13): an agent is paid only for what
+it can see and cause, or its critic cannot learn what its actions are worth.
+A follower sees its own body and feet and its neighbours', never the target:
+it is paid for its step and for keeping the tempo of the segment ahead. The
+head is a follower that sees the target: the same step value, plus the task.
 
-| Group | Term | Head | Followers | Weight | Most per step |
-| --- | --- | :---: | :---: | --- | --- |
-| 1. Task | [Arrival](#arrival) | ✔ | ✔ (shared) | P: 0.5, T: 1 per arrival | the weight, on the arrival step |
-| 1. Task | [Progress](#progress) | ✔ | ✔ (shared) | P: 0.100 per halving, T: none | about 0.0005 while walking |
-| 1. Task | [Time](#time) | ✔ | ✔ | 1 part | −0.00047 |
-| 2. Health | [Carry](#carry) (every step from run 56) | ✔ | ✔ (half) | 6 parts × h (4 to run 55, 3 to run 50) | −0.00280 × h |
-| 2. Health | [Grip](#grip) (to run 50) | ✔ | ✔ (half) | 2 parts × h | −0.00093 × h |
-| 2. Health | [Foot hold](#foot-hold) (from run 51; looking ahead from 53) | ✔ | ✔ (half) | 6 parts × h | −0.00280 × h |
-| 2. Health | [Leg pushing](#leg-pushing) | ✔ | ✔ (half) | 4 parts × h (2 to run 50) | −0.00187 × h |
-| 3. Rhythm | [Tempo ahead](#tempo-ahead) (runs 41, 43) | – | ✔ | 3.5 parts | −0.00164 |
-| 3. Rhythm | [Tempo chain](#tempo-chain), ahead (run 44) | – | ✔ | 3.5 parts | −0.00164 |
-| 3. Rhythm | [Tempo chain](#tempo-chain), behind (run 44) | ✔ | ✔ (not the rear) | 7 parts | −0.00327 |
-| 4. Energy | [Energy](#energy) (run 43) | ✔ | ✔ | 2 parts | −0.00093 |
+| Group | Term | Head | Followers | Weight |
+| --- | --- | :---: | :---: | --- |
+| 1. Task | [Arrival](#arrival) | ✔ (task critic) | – | 0.5 per arrival |
+| 1. Task | [Progress](#progress) | ✔ (task critic) | – | 0.100 per halving |
+| 2. Step value | [Carried forward](#the-four-checks) (C1) | ✔ | ✔ | +s per segment weight × mm |
+| 2. Step value | [Foot sliding](#the-four-checks) (C2) | ✔ | ✔ | −s |
+| 2. Step value | [Carried by others](#the-four-checks) (C3) | ✔ | ✔ | −s |
+| 2. Step value | [Leg pressing](#the-four-checks) (C4) | ✔ | ✔ | −s |
+| 3. Rhythm | [Tempo chain](#tempo-chain), ahead | – | ✔ | 3.5 parts, −0.00164 at most |
+| 3. Rhythm | [Tempo chain](#tempo-chain), behind | ✔ | ✔ (not the rear) | 7 parts, −0.00327 at most |
 
-`h` is the [health hardening](#health-hardening), from 0.45 at the first
-targets to 1 at the final ones (0.3 to run 50; with 10 cm targets the level
-stays at 0 through the early stage, so 0.45 gives run 50's early health,
-6.3 parts, the strongest known to still learn to walk). The two task versions, **P** (arrival 0.5 and
-progress) and **T** (arrival 1 alone), are both in the pilot:
+`s = 0.0015` per segment weight carried one millimetre (`step_value_scale`).
+Each segment's reward has two parts, its walk's and the task's:
 
 ```math
-r_i \;=\; \underbrace{w_A\,\mathbf{1}[\text{arrived}] \;+\; w_P\,P}_{\text{task, every segment}} \;-\; \underbrace{0.00047}_{\text{time}} \;-\; h_i\,\underbrace{\big(0.00280\,K_i \;+\; 0.00280\,H_i \;+\; 0.00187\,F_i\big)}_{\text{health}} \;-\; \underbrace{0.00164\,D_i}_{\text{rhythm, followers}}
+r_i^{\text{walk}} \;=\; s\,\big(C_{1,i} - C_{2,i} - C_{3,i} - C_{4,i}\big) \;-\; 0.00164\,A_i \;-\; 0.00327\,B_i, \qquad
+r_0^{\text{task}} \;=\; 0.5\,\mathbf{1}[\text{arrived}] \;+\; 0.100\,P
 ```
 
-with `w_A = 0.5`, `w_P = 0.100` in version P and `w_A = 1`, `w_P = 0` in
-version T. `P` is the head's progress, `K` the share of its weight a segment's
-feet did not carry on the step, `H` its foot hold (its loaded feet's
-sliding and lifts), `F` the force between its legs and others, and `D` its
-tempo's distance from the segment ahead's, defined below; the tempo chain
-behind adds its own term. The weights are run 56's. `h_0 = 0.45 + 0.55ℓ`
-for the head and half of it for the followers, at the curriculum's level `ℓ`.
+with `r^task = 0` for the followers. A follower learns its walk with one
+critic. The head learns its walk with one critic and the task with another,
+and its policy learns from
+
+```math
+\hat A_0 \;=\; \operatorname{norm}\big(A^{\text{walk}}_0\big) \;+\; 0.2\,\operatorname{norm}\big(A^{\text{task}}_0\big)
+```
+
+each advantage normalised over the batch on its own: the task counts a fifth
+of the walk, whatever the distance to the target or the arrivals' rarity
+(`head_task_critic_weight = 0.2`, the user's balance: walking first,
+progress about a fifth to a tenth of it).
 
 <details>
-<summary><b>How the weights are set</b>: the cost budget, in parts</summary>
+<summary><b>How the weights are set</b></summary>
 
-No weight is tuned by hand: each follows from a few rules and a number of
-**parts**.
+- **The step value has a physical unit:** one segment's own weight carried
+  one millimetre. All four checks are measured in it and all weigh 1 in it,
+  so the physics, not our choice, sets the balance between them; each can
+  still be weighed on its own (`carried_forward_weight` and the others).
+- **Its scale** sets it against the tempo chain, the followers' only other
+  term. It is 0.0015, from the pricing below: run 56's followers' walk,
+  judged by the step value, then costs about what its health costs charged
+  it (−0.00074 per step at cycle 64), so the tempo chain keeps the weight
+  beside the step that it had beside the health costs, where it worked. A
+  decent walk then earns about +0.00008 per step; the chain costs about
+  0.00027 at an episode's start and 0.00002 to 0.00005 once settled.
+- **The task's weights** follow the cost budget as before. With episodes of
+  `T = 512` steps the agents discount by γ = 2^(−1/T) = 0.998647; over a cost
+  horizon of `H = 256` steps the budget, split into `cost_budget_parts = 7`,
+  makes **one part 0.000467 per step**. One halving of the head's distance is
+  worth `progress_parts = 0.84` parts of the horizon, 0.100; an arrival
+  pays `arrival_payout = 0.5`. The tempo chain takes 3.5 and 7 parts.
+- **The head's balance is set by the advantage weight, not the reward
+  scales.** With one critic, a reward's share of the learning signal is its
+  share of the return's variation, which nothing fixes: progress per
+  millimetre grows as the target nears (0.00144 per mm at 10 cm, three times
+  that at 3 cm), and once arrivals start they multiplied the return's
+  variation 70 to 88 times (measured on run 54, cycle 288), so they would
+  drown the step as they drowned the followers'. Normalised on their own, the
+  two advantages keep the ratio the weight sets (van Seijen et al., NeurIPS
+  2017, learn one value function per reward component; Mysore et al., ICLR
+  2022, one critic per task).
 
-- **The discount fits the episode.** With episodes of `T = 512` steps, the
-  agents discount by γ = 2^(−1/T) = 0.998647: an arrival on the last
-  step of an episode is worth half as much, seen from its first.
-- **The worst arrival balances to zero.** Over a **cost horizon** of
-  `H = 256` steps (a typical approach, not the time limit), an approach that
-  pays *every* cost on every step and arrives on its last step adds up to zero,
-  seen from its start. The per-step cost `c` of all the costs together is
-  then
-
-```math
-\sum_{t=0}^{H-1} \gamma^{t}\, c \;=\; \gamma^{H-1} A
-\quad\Longrightarrow\quad
-c \;=\; \frac{\gamma^{H-1}\,(1-\gamma)}{1-\gamma^{H}} \;=\; 0.003271 \text{ per step}
-```
-
-  with `A = 1`, the arrival reward. Over the horizon this budget is
-  H·c = 0.837 arrivals.
-- **The budget is split into parts.** `cost_budget_parts = 7`, so **one part
-  costs 0.000467 per step** (0.120 over the horizon). A cost with `p` parts
-  weighs
-
-```math
-w \;=\; p \cdot \frac{c}{7} \;=\; p \times 0.000467 \text{ per step}
-```
-
-- **Each segment's worst costs one arrival.** The head's health costs take
-  3 + 2 + 2 = 7 parts; a follower's, at half strength, 3.5, and its tempo
-  cost 3.5 more: 7 parts each. The time cost adds 1 part for everyone. So a
-  segment that does everything wrong on every step, at the final targets,
-  ends near zero even when the head arrives: the anchor rule's "about 0".
-- **Progress is counted in parts too** (version P). One halving of the
-  head's distance is worth `progress_parts = 0.84` parts of the whole
-  horizon: 0.84 × H·c / 7 = 0.100. An approach from 30 mm is worth 2.9
-  halvings, 0.29; from 200 mm, the curriculum's farthest, 5.6 halvings, 0.56.
-  With the arrival's 0.5, a perfect approach earns 0.8 to 1.06, the anchor
-  rule's "about 1".
-
-Settings: `[environment.rewards]` in the run's file; the program prints every
-weight under the settings when a run starts. Code:
-`src/centipede/environment/settings.py`, `RewardSettings.weights`.
+Settings: `[environment.rewards]` and `[agents] head_task_critic_weight` in
+the run's file; the program prints every weight under the settings when a run
+starts. Code: `src/centipede/environment/settings.py`,
+`RewardSettings.weights`; RL_lib's PPO for the critics.
 </details>
 
 <details>
-<summary><b>What to expect</b>: two open-loop checks (measured)</summary>
+<summary><b>What to expect</b>: the pricing (measured)</summary>
 
-On the laptop's CPU, 8 worlds, 256 steps, the pilot's settings, the first
-targets (1.5 to 3 cm within ±45°); per step, in hundred-thousandths.
-`scratchpad` checks of 2026-10-12, not training results.
+On the laptop's CPU, model v5, 8 worlds, 2 s to settle and 8 s measured,
+each check at weight 1 (`scratchpad` check of 2026-10-14, not a training
+result). Per segment, in segment weights × mm per second; the last column
+is the step value per step at `s = 0.0015`, in hundred-thousandths. The
+speed is the segment centres' path, in any direction.
 
-| Term | Still body (model B, every amount 0), head / followers | Model A's default step (every action 0), head / followers |
-| --- | ---: | ---: |
-| Arrival (P) | 0 / 0 | +97.7 / +97.7 |
-| Progress (P) | 0 / 0 | +23.1 / +23.1 |
-| Time | −46.7 / −46.7 | −46.7 / −46.7 |
-| Carry, h at level 0 → 1 | −0.7 → −2.4 / −0.9 → −3.0 | −3.4 → −11.3 / −2.1 → −6.9 |
-| Grip, level 0 → 1 | −0.1 → −0.4 / 0 → −0.1 | −5.8 → −19.5 / −3.1 → −10.3 |
-| Leg pushing, level 0 → 1 | 0 / 0 | −0.9 → −2.9 / −1.1 → −3.7 |
-| Tempo ahead | 0 / −100.3 | 0 / −100.3 |
-| **Over 256 steps** | **−0.12 / −0.38** | **+0.16 → +0.10 / −0.08 → −0.12** |
+| Walk | Speed (mm/s) | C1 | C2 | C3 | C4 | Step value | Per step | Carried itself |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Hand-made wave: the default 15° step at 2 Hz, load feedback 3, follow nudge 8 rad/s | 13.0 | +10.3 | −5.1 | −2.5 | −0.01 | **+2.7** | +8 | 0.75 to 0.91 |
+| The same legs at random phases, no reflexes | 11.4 | +7.5 | −5.2 | −3.7 | −1.4 | **−2.8** | −8 | 0.60 to 0.76 |
+| Standing still | 0 | 0 | 0 | 0 | 0 | **0.00** | 0 | 0.95 to 1 |
+| Run 56's agents, cycle 128 (mean action) | 20.4 | +0.3 | −14.9 | −9.2 | −1.4 | **−25** | −76 | 0.29 to 0.76 |
+| Run 54's agents, cycle 288 (mean action) | 42.4 | +6.6 | −38.8 | −26.4 | −17.9 | **−77** | −230 | 0.34 to 0.43 |
 
-Standing still costs a follower −0.38 over the horizon, two thirds of it its
-tempo's distance from the random tempo ahead, which it can close; the head
-pays only time. The default step walks the head to some of the first,
-nearest targets by chance. In every case the time and tempo costs are the
-largest at the start, and the health costs grow with the level.
+The step value ranks the walks as wanted: the coordinated wave above
+standing still, and standing still above the same legs at random phases,
+almost as fast but colliding (C4) and less supported (C3). So the wave is
+paid without being named. The trained agents score far below 0: their
+bodies move a lot (run 54's path, 42 mm/s, against a closing speed of 2 to 4)
+on feet that slide and segments that hang, which is what the user saw. Even
+the hand-made wave's loaded feet slide half as far as they carry (C2 against
+C1): on v5's floor (friction 0.8) a sweeping leg drags its own loaded foot,
+so a better step has to push less hard or keep its feet lighter.
 </details>
 
 ### 1. Task terms
 
 What the centipede is for: reaching targets. Only the head sees the target,
-but the whole team is paid for it (`follower_arrival_share = 1`,
-`follower_progress_share = 1`): a follower that helps the head arrive earns
-what the head earns. Before cycle 2 only the head earned, and standing still
-was the followers' best choice (run 27; the cycle-2 design notes).
+so only the head is paid for it, with a critic of its own
+([below](#a-task-critic-for-the-head)). Until run 56 every follower earned
+the head's arrival and progress too (`follower_arrival_share` and
+`follower_progress_share` at 1): a follower could neither see nor change
+them, and they made up 82 to 98% of its return's variation (measured, runs 54
+and 56), so its critic learned nothing (explained variance near 0 from cycle
+64). Now both shares are 0.
 
 #### Arrival
 
@@ -174,12 +165,12 @@ was the followers' best choice (run 27; the cycle-2 design notes).
 <summary>Math, and what to expect</summary>
 
 ```math
-\text{arrival} = \mathbf{1}[\text{the target lies under the head's outline, seen from above}], \qquad w_A = 0.5 \text{ (P) or } 1 \text{ (T)}
+\text{arrival} = \mathbf{1}[\text{the target lies under the head's outline, seen from above}], \qquad w_A = 0.5
 ```
 
-Paid once, on the step it happens, to every segment; that step ends the
-episode for learning, and the body walks on to a new target with its clocks
-still running.
+Paid once, on the step it happens, to the head; that step ends the episode
+for learning, and the body walks on to a new target with its clocks still
+running.
 
 **What to expect.** Its part per step is `w_A` times the arrivals per step:
 it grows with the targets reached per minute. While the curriculum climbs,
@@ -189,11 +180,11 @@ it grows faster only once the targets stop getting farther.
 
 #### Progress
 
-**Idea.** Version P only. Every step that brings the head closer pays, in
-**halvings** of its distance: ending closer is better than not trying,
-wiggling earns nothing, and walking past the target gives back what was
-earned. Version T leaves it out (`progress_parts = 0`), so that only arriving
-pays; the pilot tests whether the hint is needed.
+**Idea.** Every step that brings the head closer pays, in **halvings** of its
+distance: ending closer is better than not trying, wiggling earns nothing,
+and walking past the target gives back what was earned. With arrival and
+discounting, it also makes an early arrival worth more, so the head needs no
+time cost (the user's, 2026-10-13).
 
 <details>
 <summary>Math, and what to expect</summary>
@@ -218,260 +209,112 @@ stands still, negative when it walks away; a fifth to a half of an arrival's
 worth per approach.
 </details>
 
-#### Time
+### 2. The step value
 
-**Idea.** Every step costs a little, for every segment: a body that stands
-still slowly loses, and a quick arrival keeps more. It is the only cost that
-does not depend on how the segment moves.
+**Idea.** The user's design (2026-10-13): judge each segment's own step, the
+one thing a follower sees and causes, in one number with no template and no
+hand-chosen penalty. A good step **carries the segment's weight, holds the
+ground while it pushes the body forward, and returns through the air**. In
+one physical currency, a segment's weight times millimetres:
 
-<details>
-<summary>Math, and what to expect</summary>
+> **step value = how far the segment carried itself forward on feet that
+> held − how far others carried it**
 
-```math
--1 \text{ on every step}, \qquad w = 1 \times 0.000467
-```
+Zero means not walking, positive walking well, negative walking badly. The
+only modelling choice is the cap at one body weight, so that the segments
+cooperate with neither greed nor laziness (the user's).
 
-**What to expect.** −0.00047 per step on every segment, always: −0.12 over
-the 256-step horizon.
-</details>
-
-### 2. Health terms
-
-How each segment walks: does it carry itself, do its feet grip, do its legs
-stay clear of the others'. The followers pay half (`follower_health_scale =
-0.5`), so that their tempo matters as much as their health. All three grow
-with the curriculum's level.
-
-#### Health hardening
-
-**Idea.** A beginner may walk clumsily: the health costs start at 30% of
-their weight and grow with the curriculum's level to the full weight at the
-final targets (`health_ramp_start = 0.3`). The same idea as Hwangbo et al.'s
-cost curriculum (Science Robotics 2019, which starts at 0.3), tied to the
-level instead of the training time, so that the costs harden only as the
-walk improves. The time and tempo costs are at full weight from the start.
+#### The four checks
 
 <details>
 <summary>Math</summary>
 
+On every physics step `k` of a 20 ms step (134 on v5), each foot's load is
+its floor force over the segment's own weight, `N_f = F_f / (m_i g)`, and
+the segment's carried share is
+
 ```math
-h_0 \;=\; 0.3 + 0.7\,\ell, \qquad h_{i \ge 1} \;=\; 0.5\,h_0
+c_i \;=\; \frac{1}{134}\sum_{k} \min\!\big(1,\ N_{\text{left},k} + N_{\text{right},k}\big)
 ```
 
-with `ℓ` the curriculum's level, 0 to 1, set after every update cycle.
+With `Δx` the segment centre's movement on the step in mm and `h` its
+forward direction:
+
+```math
+C_1 = c_i\,(\Delta x \cdot h), \qquad
+C_2 = \sum_{k}\sum_{\text{feet}} N_{f,k}\,\lVert \Delta p_{f,k} \rVert, \qquad
+C_3 = (1 - c_i)\,\lVert \Delta x \rVert, \qquad
+C_4 = \frac{F^{\text{legs}}_i}{m g / N}\,\lVert \Delta x \rVert
+```
+
+- **C1, carried forward** (paid): the share of its own weight its feet
+  carried, times how far it moved forward. Backward counts negative, so
+  rocking cancels out.
+- **C2, foot sliding** (charged): each foot's load times how far it slid on
+  each physics step, `Δp` in mm. A loaded foot dragged by the body or
+  slipping back under too hard a push wastes the stride; a foot in the air
+  bears nothing.
+- **C3, carried by others** (charged): the share of its weight no foot
+  carried, times how far it moved: taps, both feet up, a loaded foot lifted
+  before its weight passed to the other.
+- **C4, leg pressing** (charged): the force between its legs and other legs,
+  in segment weights (`m g / N`, 0.86 mN on v5), times how far it moved.
+  The one thing the others cannot see: a leg can hold the ground while it
+  shoves its neighbour's. Both segments of a contact pay.
+
+Everything is counted inside the physics steps (`PhysicalState`'s
+`carried_share` and `loaded_sliding_m`), so a foot that lands and lifts
+between two 20 ms readings still counts, and a landing foot's flight never
+counts as sliding. The body's own movement is read per 20 ms step.
 </details>
 
-#### Carry
+#### What it covers without a term
 
-**Idea.** Each segment carries its own weight on its own feet. A segment held
-up by its neighbours, legs in the air, pays for the weight its feet did not
-carry; one that carries more than its own pays nothing (that is its
-neighbours' business).
+| A good step… | Why it follows |
+| --- | --- |
+| makes one long contact per cycle, no taps | a tap carries almost nothing (C1) and leaves the segment carried by others (C3) |
+| spends about half the cycle on the ground | it follows from needing support; 0.5 is not imposed |
+| alternates left and right | otherwise both feet are up and others carry it (C3) |
+| sweeps back at the body's speed | any mismatch is sliding (C2) |
+| lands in front | a longer stance carries the body farther (C1) |
+| lifts only once its weight has moved off | lifting a loaded foot leaves the weight unsupported (C3) |
 
-**Every step** (the user's, 2026-10-13, from run 56). Judged over the
-stride, carry let a segment hang between short, heavy stances: in runs 53
-and 54 the followers had no foot down on 42 to 54% of their steps, about as
-often as two feet moving at random would, while their stride support stayed
-near 1 (stances bore about twice the weight). A hanging segment does not
-sink (4.5 mm high with no foot down or one, measured): the spine holds it,
-and its weight goes to the neighbours. Other walkers judge balance on the
-whole body instead (legged_gym, Rudin et al. 2022: the trunk's vertical and
-turning speeds, the episode ends when it touches the ground; Gymnasium's
-Ant: the torso's height); a centipede's body never touches down, so the
-charge goes where the weight goes. Walknet's insects keep a loaded leg in
-stance (Schilling et al., Biol Cybern 2013), which carry every step, with
-foot hold's lift charge, asks for: a segment must shift its weight to its
-other foot before it lifts one. It also rules out a segment ever being
-airborne, which only fast running needs.
+A travelling wave is not named either. Physics gives two reasons for one:
+the body cannot roll, so the legs of one side must not all lift together
+(C2, C3), and neighbours alternating exactly sweep into each other once their
+strokes are long (C4), Kuroda's leg-crossing argument (Kuroda et al.,
+bioRxiv 2018). Whether it is enough is measured at every check.
 
-**The weight: 6 parts, foot hold's** (from run 56). A foot dragged at the
-grip unit or faster under the segment's whole weight costs foot hold's full
-weight per step; a segment that hangs instead costs carry's. With the two
-equal, standing on a foot never costs more than hanging, and costs less
-whenever the foot slides slower than 16 mm/s: putting weight on a foot is
-always worth it unless it is dragged. At 4 parts hanging was the cheaper
-escape from a dragged foot, the trap run 08 fell into ("being carried was
-cheaper than standing").
+#### Shortcuts checked
 
-<details>
-<summary>Math, and what to expect</summary>
+- **Standing still** is worth 0; but when the head moves the body, a follower
+  that stands is dragged (C2) or hangs (C3).
+- **Rocking, or walking backward**: forward counts positive and backward
+  negative.
+- **Carrying a neighbour** earns nothing past one body weight.
+- **Jerking when a curve is switched** costs sliding or lost support.
+- **Riding passively while others push** is allowed for now; the diagnostics'
+  `carried_movement` over `segment_moved` gives each segment's share of its
+  movement it carried itself, which shows it.
 
-```math
-K_i \;=\; \max\!\big(0,\ 1 - S_i\big), \qquad w = 6 \times 0.000467 = 0.00280
-```
+#### Distance or share
 
-`S` is the segment's support: its feet's floor force over its own weight,
-averaged over the step's physics steps (from run 56), or the [stride
-support](#the-feets-physics), averaged over its last stride (to run 55).
-
-**What to expect.** Over the stride: small for a body that stands or steps
-evenly (measured: −0.000007 to −0.00011 per step); large for a segment that
-hangs from its neighbours, as the anchored followers of runs 08 to 13 did.
-Every step, on the checkpoints of runs 53 and 54 (mean action, 8 worlds):
-a follower's shortfall is 0.41 to 0.51 per step against 0.06 to 0.09 over
-the stride, 2.5 to 3.0 parts at 6, beside foot hold's 3.0 to 4.4; 0.81 to
-0.90 on the steps with no foot down, 0.08 to 0.13 with one.
-</details>
-
-#### Grip
-
-**Idea.** A foot that carries weight should not slide: a loaded foot dragged
-along the ground wastes the push. A foot that slides while bearing nothing,
-brushing the floor in its swing, costs nothing.
-
-<details>
-<summary>Math, and what to expect</summary>
-
-```math
-G_i \;=\; \min\!\Big(1,\ \frac{\sum_{\text{feet}} N_f\, v_f}{16\ \text{mm/s}}\Big), \qquad w = 2 \times 0.000467 = 0.00093
-```
-
-`N` is each foot's load (its floor force over the segment's own weight) and
-`v` its sliding speed, for a foot on the ground at both ends of the step.
-16 mm/s is about a default stroke's foot speed.
-
-**What to expect.** Near 0 for a still body; for the default step a few
-hundred-thousandths at the first targets, three times more at the final ones
-(measured). It falls as the stance foot learns to stay planted.
-</details>
-
-#### Foot hold
-
-**Idea.** The user's load rule (2026-10-13), grip generalised: a foot that
-bears weight must not move, neither slide nor lift. A foot lifts free once
-its weight has passed to other feet, its sibling's or its neighbours', so
-the cheapest walk lifts each leg while the legs around it stand. That is the
-load feedback of Owaki and Ishiguro (2017), here judged on the outcome
-instead of acting on the clocks; in arthropods, load signals keep a leg in
-stance until it is unloaded (Duysens, Clarac and Cruse, Physiol Rev 2000).
-No term names a phase: the timing between legs is left to the agents. Our
-open-loop sweep of 2026-10-12 found that load feedback makes each segment's
-two legs alternate, but alone never made a head-to-tail wave (0 of 10
-cases): the shared weight pushes neighbours apart in time the same way ahead
-and behind, so it picks no direction. The wave came from the follow nudge,
-which held a follower's leg while the same-side foot ahead was down (10 of
-10 cases).
-
-**Carry stays beside it** (checked 2026-10-13): foot hold charges a foot
-for moving while it carries weight, so its cheapest escape is to carry none
-and be carried; progress, shared by the team, does not care which segment
-carries, and run 08 learned exactly that. [Carry](#carry) charges it.
-
-**Looking ahead** (the user's, 2026-10-13, from run 53): so a lifting foot
-also answers for the load still on the same-side feet ahead that its segment
-sees, within the observation radius, each divided by its distance in
-segments. A leg then lifts free only once the legs ahead have: the follow
-nudge's head-to-tail order, judged on the outcome. The nearest foot ahead
-counts fully, as the nudge read it; with radius 2 the next counts half, a
-warning of the wave coming. The head has no foot ahead; its cost is
-unchanged.
-
-<details>
-<summary>Math, and what to expect</summary>
-
-```math
-H_i \;=\; \min\!\Big(1,\ \sum_{\text{feet}} \Big(\frac{N_f\, v_f}{16\ \text{mm/s}} \;+\; N_f^{\text{before}}\, \mathbf{1}[\text{the foot left the ground}]\Big)\Big), \qquad w = 6 \times 0.000467 = 0.00280
-```
-
-The first part is [grip](#grip)'s; `N^before` is the load the foot bore on
-the step before it lifted, in units of the segment's own weight. Looking
-ahead, it becomes
-
-```math
-N_f^{\text{before}} \;+\; \sum_{d=1}^{R} \frac{N_{f,\,d\ \text{ahead}}^{\text{before}}}{d}
-```
-
-over the same-side feet `d` segments ahead, up to the observation radius
-`R` (0 where no segment is). Looking ahead, only the sliding is capped at 1
-and a lift pays its whole load:
-
-```math
-H_i \;=\; \min\!\Big(1,\ \sum_{\text{feet}} \frac{N_f\, v_f}{16\ \text{mm/s}}\Big) \;+\; \sum_{\text{feet}} \Big(N_f^{\text{before}} + \sum_{d=1}^{R} \frac{N_{f,\,d\ \text{ahead}}^{\text{before}}}{d}\Big)\,\mathbf{1}[\text{the foot left the ground}]
-```
-
-With one cap over both, a loaded lift alone (about 1.27 of the segment's
-weight) reached it in 67% of the followers' lift-offs (run 51, cycle 80,
-mean action, 8 worlds): the feet ahead added 0.012 per step of their 0.069.
-Uncapped, foot hold is 0.587 per segment and step instead of 0.435; one step
-in eight passes 1, the largest 6.5 (both feet lifting under full load),
-under 1% of an arrival's pay.
-
-**What to expect, looking ahead.** In a head-to-tail wave the foot ahead has
-already lifted when a follower's foot lifts, so the added part falls to 0.
-With radius 2, lifting free also asks the foot two ahead to be in the air,
-which favours waves of more than about 4 legs when half a step is in the
-air; the sweep's reflex waves were 6 to 12 legs, run 28's about 5.
-
-**What to expect.** Measured on run 49's walk (cycle 128, mean action, 8
-worlds): 94% of its feet left the ground still loaded, on average with 1.27
-times their segment's weight, so the lift part would charge 0.16 per segment
-and step against grip's 0.28. The lift part should shrink as the legs learn
-to hand their weight over before lifting; the dashboard's left–right step
-should rise above chance first.
-</details>
-
-#### Leg pushing
-
-**Idea.** In the real animal legs touching is no problem; legs that push on
-each other are, since they block the stride. So the cost is the force
-between legs, not the touch: both segments of a contact pay, in proportion
-to how hard they press, and legs that brush past each other pay almost
-nothing.
-
-<details>
-<summary>Math, and what to expect</summary>
-
-```math
-F_i = \min\!\Big(1,\ \frac{\sum \text{normal force of the contacts between one of segment } i\text{'s legs and another leg}}{m g / N}\Big), \qquad w = 2 \times 0.000467 = 0.00093
-```
-
-`m g / N` is the weight one segment carries, 0.86 mN on v5, about the
-strongest push a leg's sweep motor makes at its foot.
-
-**What to expect.** Model B's random first curves and its exploration noise
-make the legs touch in about 35% of segment-steps at the start (the GPU
-check's first cycles; 3% with the mean action alone), so this term should
-shrink early as the curves sort themselves out.
-</details>
+The version in use is the **distance**: a longer stride earns more, so at
+one tempo a faster walk earns more. The **share** version, the step value
+divided by the distance the segment moved, would make it speed-neutral and
+leave the speed to the head; it is defined only over a whole cycle (a still
+segment has no share), so it needs the step value summed over each leg's turn.
+The user's choice: test both, distance first.
 
 ### 3. Rhythm terms
 
-#### Tempo ahead
-
-**Idea.** Each follower keeps the tempo of the segment ahead, and so, down
-the chain, the head's: the one rule about rhythm, and mandatory (the user's
-decision, 2026-10-12). It judges only the tempo, never the phase or the step,
-so the wave and the step's shape stay free to emerge. The head, with nothing
-ahead, sets the tempo.
-
-<details>
-<summary>Math, and what to expect</summary>
-
-```math
-D_i \;=\; \min\!\Big(1,\ \big\lvert \log_2 f_i - \log_2 f_{i-1} \big\rvert\Big), \qquad D_0 = 0, \qquad w = 3.5 \times 0.000467 = 0.00164
-```
-
-`f` is a segment's tempo, its heartbeat: one octave apart (one tempo twice
-the other) costs the whole weight. The absolute form keeps small gaps costly
-(the squared form left them nearly free, run 24).
-
-**What to expect.** The largest cost at the start: every segment starts at
-its own random tempo between 1 and 4 Hz, so a follower pays about −0.0010
-per step (measured, two thirds of an octave on average) until it matches. It
-should fall within the first cycles; the [heart](#the-heart) lets a tempo
-change by at most an octave per second.
-
-**What it did** (runs 31 to 39). The followers learned to match each other
-from the legs alone, but the head, which pays nothing, raced to the ceiling
-(11 Hz in run 39, against its followers' 2): segment 1, more than an octave
-away, paid the whole cost whatever it did, so nothing pulled it toward the
-head, nor the head toward it.
-</details>
-
 #### Tempo chain
 
-**Idea.** The user's rule (2026-10-13), in place of tempo ahead: each
-segment copies the tempo of the segment ahead and minds the segment behind.
+**Idea.** The user's rule (2026-10-13), in place of [tempo
+ahead](#retired-reward-terms): each segment copies the tempo of the segment
+ahead and minds the segment behind. It is fair to the followers: it compares
+their tempo with their neighbours', which they hear, so their critic can
+predict it; it is the one mechanism that worked in every run.
 The gap ahead costs in proportion, so that even a small gap is worth
 closing; the gap behind costs its square, so that a small lead is almost
 free and a large one dear. With the behind weight twice the ahead weight, a
@@ -513,50 +356,22 @@ comes down; segment 1 −0.00094 ahead. A head leading by a quarter octave
 pays −0.00001.
 </details>
 
-### 4. Energy
-
-#### Energy
-
-**Idea.** In run 43: what the leg motors put into the legs costs, as a real
-animal pays for every contraction. Our motors had limits but no price, and
-fast movement was free; Fu et al. (CoRL 2021) charged their robots the
-motors' power, and without it their legs tapped at high frequency. Only the
-work the motors put in counts: a motor holding a pose, or pushed back,
-spends nothing.
-
-<details>
-<summary>Math, and what to expect</summary>
-
-```math
-E_i \;=\; \min\!\Big(1,\ \frac{1}{1\ \text{mW}} \cdot \frac{1}{S} \sum_{s=1}^{S} \sum_{\text{leg motors of } i} \max\big(0,\ \tau\,\dot q\big)\Big), \qquad w = 2 \times 0.000467 = 0.00093
-```
-
-`τ` is a motor's force and `q̇` its joint's speed, as MuJoCo computes them on
-each of the step's `S` physics steps (134). 1 mW is twice the most any
-segment of run 39 spent, so the cost stays in proportion over the range
-seen. The budget stays 7 parts, so the energy's 2 come on top.
-
-**What to expect** (*measured*). Model A's default step spends 9.8 µW per
-segment at 2 Hz and 114 µW at 12 Hz, without walking faster. Run 39's head
-spent 490 µW and its followers 150 to 490 µW, about 30 times the default
-step at the same tempo: they would pay −0.00014 to −0.00046 per step.
-</details>
-
 ---
 
 ## Part 2. The tools
 
 Everything around the reward: how the legs are driven, what each segment
 sees, how the agents explore, and how training is scheduled.
-✅ is in cycle 2's pilot; ⬜ is not in use now. The runs are those of the
-study notes (`results/oscillators/README.md` in CentipedeTraining).
+✅ is in use now (run 57); ⬜ is not. The runs are those of the study notes
+(`results/oscillators/README.md` in CentipedeTraining).
 
 | | Tool | Kind | Setting | Runs |
 | :---: | --- | --- | --- | --- |
-| ✅ | [Model A, the network draws](#model-a-the-network-draws) | Leg control | `leg_drive = "swing"` | pilot |
+| ⬜ | [Model A, the network draws](#model-a-the-network-draws) | Leg control | `leg_drive = "swing"` | pilot |
 | ✅ | [Model B, the clock is the engine](#model-b-the-clock-is-the-engine) | Leg control | `leg_drive = "waves"`, `waves = 2` | 31– |
 | ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]`, `max_tempo_hz = 12.5` | 31– (ceiling 35–) |
 | ✅ | [Targets along the curve](#targets-along-the-curve) | Leg control | always with models A and B | 31– |
+| ✅ | [Curves held for a turn](#curves-held-for-a-turn) | Leg control | `hold_curves = true` | 57– |
 | ✅ | [A clock per leg](#a-clock-per-leg) | Leg control | `leg_clocks = true`, `segment_tempo = true` | 08– |
 | ✅ | [Passive follower spine](#passive-follower-spine) | Leg control | `passive_follower_spine = true` | all |
 | ⬜ | [The step shape](#the-step-shape) | Leg control | `leg_drive = "step_shape"` | 08–28 |
@@ -570,14 +385,16 @@ study notes (`results/oscillators/README.md` in CentipedeTraining).
 | ✅ | [Leg accelerations](#leg-accelerations) | What a segment sees | `leg_accelerations = true` | 15– |
 | ⬜ | [Neighbours' clocks](#neighbours-clocks) | What a segment sees | `neighbour_clocks = true` | 08–14, 17 |
 | ✅ | [Neighbours' tempos](#neighbours-tempos) | What a segment sees | `neighbour_tempos = true` | 41– |
-| ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 2` | 2: 31–; 1: 02, 04, 08, 09, 13; 0.5: 10–12, 14–28 |
-| ✅ | [Tempo noise that follows the gap](#tempo-noise-that-follows-the-gap) | Exploration | `[agents] follower_tempo_noise_gap_octaves = 0.17` | next run |
-| ✅ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34 |
+| ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 1` | 1: 52, 54–57 (and 02, 04, 08, 09, 13); 2: 31–51, 53; 0.5: 10–12, 14–28 |
+| ✅ | [Tempo noise that follows the gap](#tempo-noise-that-follows-the-gap) | Exploration | `[agents] follower_tempo_noise_gap_octaves = 0.17` | 51– |
+| ⬜ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34; 1: 44–50 |
+| ✅ | [A task critic for the head](#a-task-critic-for-the-head) | Learning | `[agents] head_task_critic_weight = 0.2` | 57– |
 | ✅ | [A random first guess](#a-random-first-guess) | Learning | `initial_action_offset_spread = 0.2` | 31– |
 | ✅ | [Curriculum](#curriculum) | Training | `[curriculum]`; `level_bonus = 0.05` (39–); the circle task (41–) | all |
 | ✅ | [Plateau stop](#plateau-stop) | Training | `plateau_cycles = 48` | all |
 | ✅ | [Range circle](#range-circle) | Task | `range_circle_ratio = 2.5` | all |
 | ✅ | [Walking on after an arrival](#walking-on-after-an-arrival) | Task | `after_arrival = "new_target"` | all |
+| ⬜ | [Retired reward terms](#retired-reward-terms) | Reward | each its own `_parts` | to 56 |
 
 ### Leg control
 
@@ -614,10 +431,11 @@ Stance is `φ` from 0 to π, swing from π to 2π.
 
 ✅ **Idea.** Each joint's angle is a curve of its leg's hand: a centre plus
 two waves, at once and twice the heartbeat, a Fourier series. The network
-sets the curve's 5 amounts per joint every 20 ms; the clock plays it. To
-walk, the network must draw a curve and keep it long enough to be played
-whole, which [CAPS](#caps-smooth-mean-actions) teaches. 41 actions per
-follower (the heart and 8 joints × 5), 42 for the head.
+sets the curve's 5 amounts per joint; the clock plays it. Until run 56 it
+set them every 20 ms, so a walking leg played about 25 curves stitched
+together per turn; from run 57 each leg's curve is [held for a whole
+turn](#curves-held-for-a-turn). 41 actions per follower (the heart and 8
+joints × 5), 42 for the head.
 
 <details>
 <summary>Math, and why two waves</summary>
@@ -671,6 +489,32 @@ instead of holding the step's first value: every physics step (134 per
 action) sets the target a share of the way from the curve at the hand's
 start to the curve at its end. The motors then follow a smooth line, not a
 staircase of 50 jumps a second.
+
+#### Curves held for a turn
+
+✅ **Idea.** The user's rule (2026-10-13): a leg's curve is judged as a
+whole, so it must be played whole. Each leg takes its curve's 20 values from
+the segment's actions only on the step its clock starts a turn, and plays it
+unchanged until the turn ends; the segment takes its tempo action whenever
+either leg starts a turn. One decision, one step, one judgement, and
+exploration that tries one whole curve against another. The two legs' clocks
+start at random hands, so each leg decides at its own moments, and nothing
+fixes a phase: where the stance falls in the turn is the curve's to choose.
+Each segment sees the 41 values it holds, last in its observation (the
+user's "they see their own curve"). A new curve may start away from where
+the leg is; no rule stops it, since the lurch costs sliding or support.
+
+<details>
+<summary>How the agents learn from it</summary>
+
+The network still acts every 20 ms, so that its critic sees every step,
+but only the actions that took effect count: the environment's
+`action_mask` marks, for each step, the deciding legs' values, the tempo
+when either leg decides, and the head's neck command, which acts every step.
+PPO leaves the other actions out of each sample's probability and entropy,
+and a sample that decided nothing teaches only the critic (RL_lib's action
+masks). About one step in twelve is a decision at 2 Hz.
+</details>
 
 #### A clock per leg
 
@@ -927,6 +771,30 @@ something only once the network has learned. Code: RL_lib,
 `docs/action-smoothness.md`.
 </details>
 
+#### A task critic for the head
+
+✅ **Idea.** The user's (2026-10-13): the head has two rewards from two
+jobs, its step and the task, so it learns each with a critic of its own.
+The walk's critic predicts the step value and the tempo chain behind; the
+task's predicts the arrivals and the progress. Each critic's advantage is
+normalised over the batch on its own, and the policy learns from the walk's
+plus 0.2 times the task's, so the weight alone sets the balance, whatever
+the rewards' scales (van Seijen et al., NeurIPS 2017; Mysore et al., ICLR
+2022). The followers have no task reward, so one critic each.
+
+<details>
+<summary>Math</summary>
+
+```math
+\hat A \;=\; \frac{A^{\text{walk}} - \mu^{\text{walk}}}{\sigma^{\text{walk}}} \;+\; 0.2\,\frac{A^{\text{task}} - \mu^{\text{task}}}{\sigma^{\text{task}}}
+```
+
+with each `A` from generalized advantage estimation of its own reward and
+critic, and the means and spreads over the samples that decided something.
+The learning log reports both critics' explained variance
+(`explained_variance`, `task_explained_variance`).
+</details>
+
 #### A random first guess
 
 ✅ **Idea.** Model B's network starts with a curve of its own: each wave
@@ -1016,6 +884,22 @@ R \;=\; 2.5\, d_{\text{start}} + 35\ \text{mm}
 
 around the target.
 </details>
+
+#### Retired reward terms
+
+⬜ Still in the code, each off unless its setting gives it parts; their
+history is in the study notes.
+
+| Term | Setting | Runs | What it charged |
+| --- | --- | --- | --- |
+| Time | `step_cost_parts` | to 56 | 1 part per step, every segment: the price of time; progress and arrival already make an early arrival worth more |
+| Health hardening | `health_ramp_start`, `follower_health_scale` | 31–56 | the health costs grew from a share of their weight with the curriculum's level |
+| Carry | `carry_cost_parts`, `carry_every_step` | 31–56 | the share of a segment's weight its feet did not carry; now C3 |
+| Grip | `grip_cost_parts` | 31–50 | a loaded foot's sliding speed; now C2 |
+| Foot hold | `foot_hold_cost_parts`, `foot_hold_looks_ahead` | 51–56 | grip plus the load a foot bore when it lifted, and with the look-ahead the load still on the feet ahead; the look-ahead decided an order between neighbours, so it was dropped |
+| Leg pushing | `leg_pushing_cost_parts` | to 56 | the force between legs, in segment weights; now C4 |
+| Tempo ahead | `tempo_ahead_cost_parts` | 31–39, 41, 43 | a follower's tempo gap to the segment ahead, an octave costing all; replaced by the tempo chain |
+| Energy | `energy_cost_parts` | 43 | the leg motors' positive power, in mW; it changed nothing |
 
 #### Walking on after an arrival
 

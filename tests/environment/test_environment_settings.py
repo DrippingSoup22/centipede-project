@@ -190,6 +190,7 @@ def test_nested_sections_are_read_by_their_own_classes():
             'arrival_radius_m belongs to arrival = "tip"',
         ),
         ({"target": {"arrival_radius": 0.001}}, r"\[environment.target\] has unknown"),
+        ({"hold_curves": True}, "hold_curves holds model B's curves"),
         ({"reward": {}}, r"\[environment\] has unknown settings: reward"),
     ],
 )

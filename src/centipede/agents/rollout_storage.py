@@ -24,10 +24,15 @@ class RolloutStorage:
         device: torch.device | str,
         action_size: int = 6,
         noise_scaled: bool = False,
+        critic_count: int = 1,
+        masked: bool = False,
     ) -> None:
         """Allocate every tensor once, filled with zeros; with ``noise_scaled``,
-        also each step's noise scales, which PPO needs again when learning."""
+        also each step's noise scales, which PPO needs again when learning,
+        and with ``masked`` each step's action mask. With several critics,
+        ``critic_count``, the rewards and values end with one column each."""
         step_rows = (rollout_window_steps, world_count)
+        value_rows = step_rows if critic_count == 1 else (*step_rows, critic_count)
         self.observations = torch.zeros(
             (*step_rows, observation_size), dtype=torch.float32, device=device
         )
@@ -38,14 +43,15 @@ class RolloutStorage:
         self.noise_scales = (
             torch.ones_like(self.policy_actions) if noise_scaled else None
         )
+        self.action_masks = torch.ones_like(self.policy_actions) if masked else None
         self.log_probabilities = torch.zeros(
             step_rows, dtype=torch.float32, device=device
         )
-        self.values = torch.zeros_like(self.log_probabilities)
-        self.rewards = torch.zeros_like(self.log_probabilities)
+        self.values = torch.zeros(value_rows, dtype=torch.float32, device=device)
+        self.rewards = torch.zeros_like(self.values)
         # The observation right after each step, normalised, and its value.
         self.next_observations = torch.zeros_like(self.observations)
-        self.next_values = torch.zeros_like(self.log_probabilities)
+        self.next_values = torch.zeros_like(self.values)
         self.terminated = torch.zeros(step_rows, dtype=torch.bool, device=device)
         # Terminated or truncated: the next row starts a new episode.
         self.episode_ended = torch.zeros_like(self.terminated)
@@ -57,9 +63,10 @@ class RolloutStorage:
         normalised_observations: torch.Tensor,
         sample: PPOActionSample,
         noise_scales: torch.Tensor | None = None,
+        action_mask: torch.Tensor | None = None,
     ) -> None:
         """Write the action side of the current step: what the agent saw and did,
-        and the noise scales it was drawn with, if any."""
+        and the noise scales and action mask it was drawn with, if any."""
         row = self.step_index
         self.observations[row].copy_(normalised_observations)
         self.policy_actions[row].copy_(sample.policy_action)
@@ -67,6 +74,8 @@ class RolloutStorage:
         self.values[row].copy_(sample.value)
         if noise_scales is not None:
             self.noise_scales[row].copy_(noise_scales)
+        if action_mask is not None:
+            self.action_masks[row].copy_(action_mask)
 
     def store_outcome(
         self,
@@ -92,9 +101,11 @@ class RolloutStorage:
 
         Returns the observations, policy actions, log-probabilities,
         advantages, and return targets, each with steps and worlds flattened
-        into one dimension of ``T * W`` samples. Each world's column is its own
-        sequence of episodes, so a window cut needs no special case: its last
-        row bootstraps from the next observation's value.
+        into one dimension of ``T * W`` samples; with several critics, the
+        advantages and return targets keep one column each. Each world's
+        column is its own sequence of episodes, so a window cut needs no
+        special case: its last row bootstraps from the next observation's
+        value.
         """
         advantages, return_targets = generalized_advantage_estimates(
             self.rewards,
@@ -107,12 +118,13 @@ class RolloutStorage:
         )
         observation_size = self.observations.shape[-1]
         action_size = self.policy_actions.shape[-1]
+        samples = self.log_probabilities.numel()
         return (
             self.observations.reshape(-1, observation_size),
             self.policy_actions.reshape(-1, action_size),
             self.log_probabilities.reshape(-1),
-            advantages.reshape(-1),
-            return_targets.reshape(-1),
+            advantages.reshape(samples, *advantages.shape[2:]),
+            return_targets.reshape(samples, *return_targets.shape[2:]),
         )
 
     def noise_scale_batch(self) -> torch.Tensor | None:
@@ -120,6 +132,12 @@ class RolloutStorage:
         if self.noise_scales is None:
             return None
         return self.noise_scales.reshape(-1, self.noise_scales.shape[-1])
+
+    def action_mask_batch(self) -> torch.Tensor | None:
+        """The window's action masks in ``training_batch``'s sample order, or None."""
+        if self.action_masks is None:
+            return None
+        return self.action_masks.reshape(-1, self.action_masks.shape[-1])
 
     def clear(self) -> None:
         """Start a new window; the next steps overwrite the old rows."""

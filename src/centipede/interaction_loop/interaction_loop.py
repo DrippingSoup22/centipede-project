@@ -48,7 +48,11 @@ class InteractionLoop:
         for cycle_index in range(self.settings.update_cycles):
             with self.diagnostics.collecting():
                 for _ in range(self.settings.rollout_window_steps):
-                    actions = self.agents.act(observations, training=True)
+                    actions = self.agents.act(
+                        observations,
+                        training=True,
+                        action_mask=self.environment.action_mask,
+                    )
                     observations, rewards, terminated, truncated, final_observations = (
                         self.environment.step(actions)
                     )

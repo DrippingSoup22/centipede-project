@@ -85,6 +85,12 @@ class StepFacts:
     segment_moved: torch.Tensor = measure(
         "Flat distance the segment's centre moved, (W, N)", "m"
     )
+    carried_movement: torch.Tensor = measure(
+        "Flat distance the segment's centre moved, times the share of its own"
+        " weight its feet carried (with the step value; else 0), (W, N): over"
+        " segment_moved, the share of its movement the segment carried itself",
+        "m",
+    )
     joint_movement: torch.Tensor = measure(
         "How far the joints the segment commands moved on the step, as the root"
         " of their mean squared movement, (W, N)",
@@ -355,6 +361,7 @@ class EnvironmentDiagnostics:
             contact_flags=zeros(segment_count, 4, dtype=torch.bool),
             head_progress=zeros(),
             segment_moved=zeros(segment_count),
+            carried_movement=zeros(segment_count),
             joint_movement=zeros(segment_count),
             spine_bend=zeros(segment_count),
             body_height=zeros(segment_count),
@@ -518,6 +525,11 @@ class EnvironmentDiagnostics:
             (physical_state.body_planar_position - previous_body_planar_position).norm(
                 dim=-1
             )
+        )
+        torch.mul(
+            step.segment_moved,
+            physical_state.carried_share,
+            out=step.carried_movement,
         )
         step.joint_movement.copy_(step_rewards.joint_movement.sqrt())
         step.spine_bend.copy_(physical_state.spine_yaw_position.abs())

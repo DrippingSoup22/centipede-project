@@ -36,7 +36,12 @@ class LearningSummary:
     )
     explained_variance: torch.Tensor = measure(
         "How much of the returns' variation the critic predicted before the "
-        "update: 1 exactly, 0 nothing, (N,)"
+        "update: 1 exactly, 0 nothing; with a task critic, the walk's critic's,"
+        " (N,)"
+    )
+    task_explained_variance: torch.Tensor = measure(
+        "The same for the task's critic, with head_task_critic_weight; NaN for"
+        " an agent without one, (N,)"
     )
     learning_rate: torch.Tensor = measure(
         "The optimizers' learning rate in the update, the same for every agent"
@@ -69,8 +74,11 @@ class LearningSummary:
     )
 
 
-# The values copied straight from RL_lib's update summary, in its order.
-SUMMARY_NAMES = tuple(item.name for item in fields(PPOUpdateSummary))
+# The values copied straight from RL_lib's update summary, in its order; every
+# critic's explained variance is read on its own.
+SUMMARY_NAMES = tuple(
+    item.name for item in fields(PPOUpdateSummary) if item.name != "explained_variances"
+)
 
 
 class AgentDiagnostics:
@@ -96,6 +104,9 @@ class AgentDiagnostics:
                 name: torch.zeros(segment_count, device=device)
                 for name in SUMMARY_NAMES
             },
+            task_explained_variance=torch.full(
+                (segment_count,), float("nan"), device=device
+            ),
             learning_rate=torch.zeros((), device=device),
             action_std=torch.zeros((segment_count, LEG_ACTION_COUNT), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
@@ -120,6 +131,16 @@ class AgentDiagnostics:
         )
         for column, name in enumerate(SUMMARY_NAMES):
             getattr(self.learning, name).copy_(summary_rows[:, column])
+        self.learning.task_explained_variance.copy_(
+            torch.tensor(
+                [
+                    summary.explained_variances[1]
+                    if len(summary.explained_variances) > 1
+                    else float("nan")
+                    for summary in summaries
+                ]
+            )
+        )
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
                 # The policy clamps the log spread to [-20, 2] before using it.

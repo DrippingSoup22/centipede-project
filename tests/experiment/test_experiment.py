@@ -1,10 +1,11 @@
 """Tests for the experiment's front file, with tiny runs on the CPU.
 
 The main test trains and evaluates a run shaped like the oscillators'
-pilots (model v5 with model B's curves, the heart, the feet's physics, the
-neighbours' tempos, the tempo chain and the energy cost, the circle
-curriculum), so that the path every training takes is run before any
-launch. The others cover the plateau stop.
+pilots (model v5 with model B's curves held for each leg's turn, the heart,
+the feet's physics, the neighbours' tempos, the step value and the tempo
+chain, the head's task critic, the circle curriculum), so that the path
+every training takes is run before any launch. The others cover the
+plateau stop.
 """
 
 import json
@@ -14,8 +15,8 @@ from types import SimpleNamespace
 from centipede.experiment.experiment import _plateau_readings, recorded_blocks, run
 from centipede.experiment.plateau import Plateau
 
-# Cycle 3's pilot settings (2026-10-13), made tiny: 2 worlds, 4-step
-# episodes, 4 cycles, with both new costs at once.
+# Cycle 3's step-value settings (2026-10-14), made tiny: 2 worlds, 4-step
+# episodes, 4 cycles, with red noise and CAPS on as well.
 BASELINE_FILE = """
 [run]
 mode = "train"
@@ -37,6 +38,7 @@ waves = 2
 feet_physics = true
 tilt = true
 neighbour_tempos = true
+hold_curves = true
 
 [environment.simulation]
 model_path = "models/assembly_v5.xml"
@@ -64,22 +66,17 @@ max_tempo_hz = 12.5
 
 [environment.rewards]
 arrival_payout = 0.5
+follower_arrival_share = 0
+follower_progress_share = 0
 progress_parts = 0.84
 cost_horizon_steps = 256
 cost_budget_parts = 7
-step_cost_parts = 1
+step_cost_parts = 0
 body_contact_cost_parts = 0
 leg_contact_cost_parts = 0
-leg_pushing_cost_parts = 4
-carry_cost_parts = 6
-carry_every_step = true
-foot_hold_cost_parts = 6
-foot_hold_looks_ahead = true
-tempo_chain_ahead_cost_parts = 1.75
-tempo_chain_behind_cost_parts = 1.75
-energy_cost_parts = 2
-health_ramp_start = 1.0
-follower_health_scale = 0.5
+tempo_chain_ahead_cost_parts = 3.5
+tempo_chain_behind_cost_parts = 7
+step_value_scale = 0.007
 
 [agents]
 hidden_layers = [8]
@@ -88,6 +85,7 @@ initial_action_std = 0.29
 initial_action_offset_spread = 0.2
 exploration_noise_beta = 2.0
 follower_tempo_noise_gap_octaves = 0.17
+head_task_critic_weight = 0.2
 
 [agents.ppo]
 minibatch_size = 4
@@ -163,9 +161,9 @@ def test_a_run_shaped_like_the_baseline_trains_and_is_evaluated(tmp_path):
     assert records[0]["curriculum"]["level"] == 0.4
     for record in records:
         for segment_parts in record["step_facts"]["reward_parts"]:
-            # Arrival, progress, time, leg pushing, carry, grip, the tempo
-            # chain ahead and behind, energy.
-            assert len(segment_parts) == 9
+            # Arrival, progress, the tempo chain ahead and behind, and the
+            # step value's four checks.
+            assert len(segment_parts) == 8
             assert all(math.isfinite(part) for part in segment_parts)
     checkpoints = sorted(path.name for path in (folder / "checkpoints").iterdir())
     assert checkpoints == ["cycle_0002.pt", "cycle_0004.pt"]

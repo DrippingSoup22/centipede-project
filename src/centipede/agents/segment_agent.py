@@ -41,6 +41,8 @@ class SegmentAgent:
         shape_columns: list[int] | None = None,
         tempo_columns: list[int] | None = None,
         tempo_gap_column: int | None = None,
+        task_critic_weight: float = 0.0,
+        masked: bool = False,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
@@ -52,7 +54,12 @@ class SegmentAgent:
         ``tempo_gap_column``, the observation that holds the segment's tempo
         gap to the segment ahead in octaves, the noise on its
         ``tempo_columns`` follows that gap
-        (``follower_tempo_noise_gap_octaves``).
+        (``follower_tempo_noise_gap_octaves``). With ``task_critic_weight``
+        above 0 the agent learns its walk's and the task's rewards with a
+        critic each, the task's advantage weighing this much against the
+        walk's 1 (``head_task_critic_weight``); otherwise their sum, with one.
+        With ``masked``, ``act`` takes the environment's action mask, and the
+        agent learns only from the actions that took effect.
         """
         self.segment_index = segment_index
         self.settings = settings
@@ -77,11 +84,14 @@ class SegmentAgent:
                 activation=settings.hidden_activation,
                 mean_output_scale=settings.actor_last_layer_scale,
             )
-            critic_network = StateValueNetwork(
-                observation_size=observation_size,
-                hidden_sizes=settings.hidden_layers,
-                activation=settings.hidden_activation,
-            )
+            critic_networks = [
+                StateValueNetwork(
+                    observation_size=observation_size,
+                    hidden_sizes=settings.hidden_layers,
+                    activation=settings.hidden_activation,
+                )
+                for _ in range(2 if task_critic_weight else 1)
+            ]
             spread = settings.initial_action_offset_spread
             if spread and shape_columns:
                 # The actor's mean passes through tanh into the action's
@@ -94,13 +104,14 @@ class SegmentAgent:
         # Optimizers keep references to the parameters, so they are created
         # after the networks have moved to the device.
         actor_network.to(device)
-        critic_network.to(device)
+        critic = torch.nn.ModuleList(critic_networks).to(device)
+        self.critic_count = len(critic_networks)
 
         self.ppo = PPO(
             actor_network,
             _optimizer(actor_network, settings),
-            critic_network,
-            _optimizer(critic_network, settings),
+            critic_networks if self.critic_count > 1 else critic_networks[0],
+            _optimizer(critic, settings),
             clip_ratio=settings.ppo.clip_ratio,
             entropy_coefficient=settings.ppo.entropy_coefficient,
             seed=seed,
@@ -110,6 +121,9 @@ class SegmentAgent:
             noise_beta=settings.exploration_noise_beta,
             noise_sequence_steps=settings.exploration_noise_sequence_steps,
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
+            advantage_weights=[1.0, task_critic_weight]
+            if self.critic_count > 1
+            else None,
         )
         # Scheduled spreads are set by the experiment, never learned.
         if settings.action_std_schedule != "learned":
@@ -128,6 +142,8 @@ class SegmentAgent:
             device=device,
             action_size=action_size,
             noise_scaled=tempo_gap_column is not None,
+            critic_count=self.critic_count,
+            masked=masked,
         )
         # Each world's noise scales for the step being taken, 1 but for the
         # tempo actions.
@@ -139,12 +155,18 @@ class SegmentAgent:
         # Completed updates, saved with the agent's state.
         self.update_count = 0
 
-    def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
+    def act(
+        self,
+        observations: torch.Tensor,
+        training: bool,
+        action_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """This segment's ``(W, action_size)`` actions for its observation slice.
 
         In training the observations first update the normaliser, and the step's
-        action side is stored for learning. Otherwise nothing changes, and each
-        world gets the policy's mean action.
+        action side is stored for learning, with ``action_mask``, its slice of
+        the environment's, when the agent is masked. Otherwise nothing
+        changes, and each world gets the policy's mean action.
         """
         normalised_observations = self.observation_normaliser.normalize(
             observations, update_statistics=training
@@ -159,9 +181,11 @@ class SegmentAgent:
                 MIN_TEMPO_NOISE_SCALE, 1.0
             )
             self.noise_scales[:, self.tempo_columns] = scale[:, None]
-        sample = self.ppo.sample_action(normalised_observations, self.noise_scales)
+        sample = self.ppo.sample_action(
+            normalised_observations, self.noise_scales, action_mask
+        )
         self.rollout_storage.store_action(
-            normalised_observations, sample, self.noise_scales
+            normalised_observations, sample, self.noise_scales, action_mask
         )
         return sample.environment_action
 
@@ -174,13 +198,17 @@ class SegmentAgent:
     ) -> None:
         """Store the outcome side of the step just taken, each tensor ``(W, ...)``.
 
-        The critic's value of the observation right after the step serves every
-        way a stretch can end; see docs/agents.md.
+        ``rewards`` ``(W, 2)`` holds the walk's and the task's: learned each
+        with its own critic, or their sum with one. The critic's value of the
+        observation right after the step serves every way a stretch can end;
+        see docs/agents.md.
         """
         normalised_observations = self.observation_normaliser.normalize(
             final_observations, update_statistics=False
         )
         next_values = self.ppo.state_value(normalised_observations)
+        if self.critic_count == 1:
+            rewards = rewards.sum(dim=-1)
         self.rollout_storage.store_outcome(
             rewards, terminated, truncated, next_values, normalised_observations
         )
@@ -212,6 +240,7 @@ class SegmentAgent:
             if ppo_settings.temporal_smoothness_coefficient
             else None,
             noise_scales=storage.noise_scale_batch(),
+            action_masks=storage.action_mask_batch(),
         )
         if storage.noise_scales is not None:
             self.tempo_noise_scale = storage.noise_scales[
@@ -247,18 +276,27 @@ class SegmentAgent:
         ppo_state = state["ppo"]
         normaliser_state = state["observation_normaliser"]
         fresh_state = self.ppo.state_dict()
+        # The networks' saved and fresh states, several critics' each.
+        networks = [(ppo_state["actor_network"], fresh_state["actor_network"])] + list(
+            zip(
+                _as_list(ppo_state["critic_network"]),
+                _as_list(fresh_state["critic_network"]),
+                strict=True,
+            )
+        )
         if widen and any(
             saved.shape != fresh.shape
-            for part in ("actor_network", "critic_network")
+            for saved_state, fresh_state_part in networks
             for saved, fresh in zip(
-                ppo_state[part].values(), fresh_state[part].values(), strict=True
+                saved_state.values(), fresh_state_part.values(), strict=True
             )
         ):
-            for part, network in (
-                ("actor_network", self.ppo.actor_network),
-                ("critic_network", self.ppo.critic_network),
+            for network, (saved_state, fresh_state_part) in zip(
+                [self.ppo.actor_network, *self.ppo.critic_networks],
+                networks,
+                strict=True,
             ):
-                network.load_state_dict(_widened(ppo_state[part], fresh_state[part]))
+                network.load_state_dict(_widened(saved_state, fresh_state_part))
             normaliser_state = _widened_normaliser(
                 normaliser_state, self.observation_normaliser.observation_size
             )
@@ -274,6 +312,11 @@ class SegmentAgent:
 
     def _optimizers(self) -> tuple[torch.optim.Optimizer, torch.optim.Optimizer]:
         return self.ppo.actor_optimizer, self.ppo.critic_optimizer
+
+
+def _as_list(critic_state: Any) -> list:
+    """A saved critic state as a list: several critics' already are one."""
+    return critic_state if isinstance(critic_state, list) else [critic_state]
 
 
 def _widened(

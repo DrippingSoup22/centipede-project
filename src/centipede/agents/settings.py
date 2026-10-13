@@ -102,6 +102,14 @@ class AgentSettings:
     0.17 octaves, with a spread near today's 0.35, the noise cannot move a
     follower's tempo by more than its gap within one stride (about 0.5 s at
     2 Hz), and at the wave's 0.006 it is 3-4% of the whole.
+
+    ``head_task_critic_weight`` (cycle 3, the user's idea, 0 off by default)
+    gives the head two critics: one for its walk's rewards and one for the
+    task's, the arrival and the progress (the environment's two reward
+    channels), each advantage normalised on its own; the task's then counts
+    this much against the walk's 1, whatever the two rewards' scales (RL_lib's
+    PPO; van Seijen et al., NeurIPS 2017). The followers, and the head when
+    it is 0, learn the two channels' sum with one critic.
     """
 
     device: str
@@ -124,6 +132,7 @@ class AgentSettings:
     ppo: PPOSettings
     initial_action_offset_spread: float = 0.0
     follower_tempo_noise_gap_octaves: float = 0.0
+    head_task_critic_weight: float = 0.0
 
     def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
         """The learning rate of the update in ``cycle``, counted from 1 to
@@ -205,6 +214,9 @@ class AgentSettings:
             ),
             follower_tempo_noise_gap_octaves=section.number(
                 "follower_tempo_noise_gap_octaves", default=0.0, minimum=0.0
+            ),
+            head_task_critic_weight=section.number(
+                "head_task_critic_weight", default=0.0, minimum=0.0
             ),
         )
         section.reject_unknown_keys()

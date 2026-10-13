@@ -757,7 +757,9 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 // arrival green, progress blue, the step cost grey; the health costs red (leg
 // pushing), orange (foot hold, and grip, which it replaced) and brown (carry);
 // the tempo chain purple (ahead) and cyan (behind); tempo ahead pink, energy
-// olive. Earlier rewards' terms
+// olive. The step value's checks take the colours of the costs they replaced:
+// foot sliding orange (foot hold's), carried by others brown (carry's), leg
+// pressing red (leg pushing's), and carried forward olive. Earlier rewards' terms
 // keep theirs: the posture costs warm, the movement cost its own, the walking
 // costs amber, violet, brown, magenta and teal, the clock costs slate and
 // cyan, head synchrony lavender; efficiency held the step cost and progress
@@ -765,6 +767,7 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 const PART_COLORS = { arrival: "#2ca02c", progress: "#1f77b4", step_cost: "var(--baseline-1)",
   leg_pushing: "#d62728", foot_hold: "#ff7f0e", grip: "#ff7f0e", carry: "#8c564b",
   tempo_chain_ahead: "#9467bd", tempo_chain_behind: "#17becf", tempo_ahead: "#e377c2", energy: "#bcbd22",
+  carried_forward: "#bcbd22", foot_sliding: "#ff7f0e", carried_by_others: "#8c564b", leg_pressing: "#d62728",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
   movement: "var(--series-6)", foot_slip: "var(--series-4)", legs_off_tempo: "#8e6bd1", out_of_tempo: "#a0703c",
   no_support: "#c2569b", both_feet_down: "#2a9d8f", clock_tracking: "#5b6fa8", clock_change: "#17a2c4",

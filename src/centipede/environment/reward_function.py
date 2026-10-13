@@ -4,8 +4,13 @@ from dataclasses import dataclass
 import torch
 
 from centipede.environment.clocks import ClockStep
+from centipede.environment.observation_builder import head_forward_direction
 from centipede.environment.settings import RewardSettings
 from centipede.environment.simulation import PhysicalState
+
+# The terms of the task, which the head may learn with a critic of its own
+# (``StepRewards.channel_rewards``); every other term judges the walk.
+TASK_TERMS = ("arrival", "progress", "step_cost", "efficiency")
 
 
 @dataclass(frozen=True)
@@ -41,6 +46,11 @@ class RewardContext:
     plus the load on the same-side feet ahead (0 for the others).
     ``health_scale`` ``(N,)`` multiplies each segment's health costs: the
     curriculum's ramp, times the followers' scale.
+
+    For the step value (cycle 3), ``forward_movement_mm`` ``(W, N)`` is how
+    far each segment's centre moved along its own forward direction on the
+    step, in mm, negative backward, and ``movement_mm`` how far it moved in
+    any direction on the ground.
     """
 
     physical_state: PhysicalState
@@ -57,6 +67,8 @@ class RewardContext:
     stride_support: torch.Tensor | None = None
     health_scale: torch.Tensor | float = 1.0
     foot_lift_load: torch.Tensor | None = None
+    forward_movement_mm: torch.Tensor | None = None
+    movement_mm: torch.Tensor | None = None
 
     @classmethod
     def from_step(
@@ -103,6 +115,13 @@ class RewardContext:
         goal[:, 0] = target_position
         goal[:, 1:] = previous_body_planar_position[:, :-1]
 
+        # Each segment's centre's movement on the ground, in mm, and its part
+        # along the segment's own forward direction after the step.
+        centre_movement = 1000 * (
+            physical_state.body_planar_position - previous_body_planar_position
+        )
+        forward = head_forward_direction(physical_state.body_quaternion)
+
         squared_movement = (
             joint_angles(physical_state) - previous_joint_position
         ).square() * commanded_joints
@@ -126,6 +145,8 @@ class RewardContext:
             stride_support=stride_support,
             health_scale=health_scale,
             foot_lift_load=foot_lift_load,
+            forward_movement_mm=(centre_movement * forward).sum(dim=-1),
+            movement_mm=centre_movement.norm(dim=-1),
         )
 
 
@@ -500,6 +521,62 @@ def command(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
     return -context.command_size
 
 
+# The step value (cycle 3, the user's design, 2026-10-13): how far a segment
+# carried itself forward on feet that held, less how far others carried it.
+# Four checks, each in the same unit, its own weight times millimetres (one
+# segment weight carried 1 mm forward is 1), so that each starts at the same
+# weight and none is worth more than another by our choice. Each judges what
+# the segment did on the step's physics steps (``PhysicalState``'s carried
+# share and loaded sliding), so that a foot that taps between two readings
+# counts, and a landing foot's flight never counts as sliding.
+
+
+def carried_forward(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """+the share of its own weight a segment's feet carried × how far it moved
+    forward, segment weights × mm (check C1).
+
+    The feet are credited for at most the segment's whole weight on each
+    physics step: carrying a neighbour earns nothing more, so that the
+    segments cooperate with neither greed nor laziness (the user's choice).
+    Moving backward counts negative, so that rocking cancels out.
+    """
+    return context.physical_state.carried_share * context.forward_movement_mm
+
+
+def foot_sliding(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−each foot's load × how far it slid on the ground, segment weights × mm,
+    added up over the segment's two feet (check C2).
+
+    A foot that bears weight must hold the ground: a loaded foot dragged
+    along by the body, or slipping back under too hard a push, wastes the
+    stride. A foot in the air bears nothing and costs nothing.
+    """
+    return -1000 * context.physical_state.loaded_sliding_m
+
+
+def carried_by_others(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−the share of its own weight a segment's feet did not carry × how far it
+    moved, segment weights × mm (check C3).
+
+    A segment whose feet are up while the body moves is carried by its
+    neighbours: taps, both feet in the air, and lifting a loaded foot all
+    cost here. A segment that stands still costs nothing.
+    """
+    carried = context.physical_state.carried_share
+    return -(1 - carried) * context.movement_mm
+
+
+def leg_pressing(context: RewardContext, settings: RewardSettings) -> torch.Tensor:
+    """−how hard the segment's legs press on other legs, in segment weights, ×
+    how far it moved, segment weights × mm (check C4).
+
+    The one check the others cannot see: a leg can hold the ground perfectly
+    while it shoves its neighbour's leg. Both segments of a contact pay.
+    """
+    force = context.physical_state.leg_leg_force / context.leg_push_unit_n
+    return -force * context.movement_mm
+
+
 @dataclass(frozen=True)
 class StepRewards:
     """What the reward function returns for one step; created anew every step.
@@ -507,6 +584,9 @@ class StepRewards:
     ``rewards`` is ``(W, N)``. ``reward_parts`` is ``(W, N, T)``, one weighted
     term per position along the last dimension, in the order of the reward
     function's term names; the parts add up to ``rewards``.
+    ``channel_rewards`` ``(W, N, 2)`` splits ``rewards`` into the walk's
+    terms and the task's (``TASK_TERMS``), for agents that learn each with a
+    critic of its own.
     ``segment_progress`` is ``(W, N)``: metres each segment came closer to its
     goal on this step; ``joint_movement`` is the context's, in rad².
     ``foot_slip`` and ``legs_off_tempo`` are ``(W, N)``: the two walking costs
@@ -521,6 +601,7 @@ class StepRewards:
     joint_movement: torch.Tensor
     foot_slip: torch.Tensor | None = None
     legs_off_tempo: torch.Tensor | None = None
+    channel_rewards: torch.Tensor | None = None
 
 
 # The terms of each reward, in order: the current one, built from its rules,
@@ -550,6 +631,10 @@ TERMS = {
     "tempo_chain_ahead": tempo_chain_ahead,
     "tempo_chain_behind": tempo_chain_behind,
     "energy": energy,
+    "carried_forward": carried_forward,
+    "foot_sliding": foot_sliding,
+    "carried_by_others": carried_by_others,
+    "leg_pressing": leg_pressing,
 }
 
 
@@ -591,6 +676,11 @@ class RewardFunction:
             for name, weight in self.weights.per_step.items()
         ]
         self.term_names = [name for name, _, _ in self.reward_terms]
+        # 1 for each term of the task, in the order of the terms.
+        self.task_terms = torch.tensor(
+            [float(name in TASK_TERMS) for name in self.term_names],
+            device=commanded_joints.device,
+        )
 
     def set_level(self, level: float) -> None:
         """Harden the health costs to the curriculum's ``level``, 0 to 1:
@@ -645,11 +735,14 @@ class RewardFunction:
         )
         rules = not self.settings.uses_per_step_weights
         compares_legs = clock is not None and clock.leg_difference_known is not None
+        rewards = reward_parts.sum(dim=-1)
+        task = reward_parts @ self.task_terms
         return StepRewards(
-            rewards=reward_parts.sum(dim=-1),
+            rewards=rewards,
             reward_parts=reward_parts,
             segment_progress=context.distance_before - context.distance_after,
             joint_movement=context.joint_movement,
+            channel_rewards=torch.stack((rewards - task, task), dim=-1),
             foot_slip=-foot_slip(context, self.settings) if rules else None,
             legs_off_tempo=(
                 -legs_off_tempo(context, self.settings)

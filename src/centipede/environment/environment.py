@@ -59,6 +59,16 @@ class Environment:
     for each segment, the actions that draw its legs' curves (model B's
     amounts; empty otherwise), whose starting values the agents may draw at
     random.
+
+    With ``hold_curves`` (cycle 3), each leg's curve is held for a whole turn
+    of its clock: the leg takes its curve's values from the actions only on
+    the step its clock starts a turn, and the segment its tempo action only
+    when either leg does. ``action_mask`` ``(W, N, action_size)`` marks, for
+    the next step, the actions that will take effect: 1 for the deciding
+    legs' values, the tempo when either leg decides, and the spine command,
+    which acts every step; 0 for the rest, which the step ignores, so that
+    the agents learn only from the actions that acted. None without
+    ``hold_curves``, when every action acts.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -68,6 +78,7 @@ class Environment:
             settings.simulation,
             average_floor_forces=settings.feet_physics,
             measure_leg_power=settings.rewards.energy_cost_parts > 0,
+            measure_carrying=settings.rewards.step_value_scale > 0,
         )
         self.world_count = self.simulation.world_count
         self.segment_count = self.simulation.segment_count
@@ -107,6 +118,13 @@ class Environment:
                 per_leg=settings.leg_clocks,
                 leg_joint_count=leg_joint_count,
             )
+        # With held curves, each segment holds its tempo action and its legs'
+        # curves: model B's leg actions.
+        held_action_count = (
+            1 + leg_motor_count * (1 + 2 * settings.waves)
+            if settings.hold_curves
+            else 0
+        )
         self.observation_builder = ObservationBuilder(
             self.segment_count,
             settings.observation_radius,
@@ -122,12 +140,14 @@ class Environment:
             feet_physics_observed=settings.feet_physics,
             tilt_observed=settings.tilt,
             neighbour_tempo_observed=settings.neighbour_tempos,
+            held_action_count=held_action_count,
         )
         self.observation_size = self.observation_builder.observation_size
-        # With the neighbours' tempos, observed last, the first of them is a
-        # segment's tempo gap to the segment just ahead, in octaves.
+        # With the neighbours' tempos, observed last but for the held
+        # actions, the first of them is a segment's tempo gap to the segment
+        # just ahead, in octaves.
         self.tempo_gap_ahead_column = (
-            self.observation_size - 2 * settings.observation_radius
+            self.observation_size - 2 * settings.observation_radius - held_action_count
             if settings.neighbour_tempos
             else None
         )
@@ -346,6 +366,35 @@ class Environment:
         self.foot_slip_speed = torch.zeros(
             (self.world_count, self.segment_count, 2), device=self.device
         )
+        self.action_mask = None
+        if settings.hold_curves:
+            # The actions each segment holds, and which legs start a turn of
+            # their clocks on the next step: every leg, after a restart.
+            self.held_actions = torch.zeros(
+                (self.world_count, self.segment_count, held_action_count),
+                device=self.device,
+            )
+            self.deciding = torch.ones(
+                (self.world_count, self.segment_count, 2),
+                dtype=torch.bool,
+                device=self.device,
+            )
+            # The actions each choice sets: the tempo, the left leg's curve,
+            # the right leg's; and those that act on every step, the spine
+            # command after the legs' actions.
+            leg_values = (held_action_count - 1) // 2
+            self.decision_columns = torch.zeros(
+                (3, self.action_size), device=self.device
+            )
+            self.decision_columns[0, 0] = 1.0
+            self.decision_columns[1, 1 : 1 + leg_values] = 1.0
+            self.decision_columns[2, 1 + leg_values : held_action_count] = 1.0
+            self.always_acting = torch.zeros(self.action_size, device=self.device)
+            self.always_acting[held_action_count:] = 1.0
+            self.action_mask = torch.ones(
+                (self.world_count, self.segment_count, self.action_size),
+                device=self.device,
+            )
 
         # Targets have their own random sequence, separate from the starting
         # poses, so changing how targets are drawn never changes the poses.
@@ -390,6 +439,8 @@ class Environment:
         self.episode_steps.zero_()
         self.leg_joint_acceleration.zero_()
         self._start_feet(every_world)
+        if self.settings.hold_curves:
+            self._restart_held_curves(every_world)
         state = self.simulation.physical_state
         self.diagnostics.start_episodes(
             every_world, state, self.target_position, self.range_radius
@@ -401,11 +452,12 @@ class Environment:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Apply the ``(W, N, action_size)`` joint action for one 20 ms step.
 
-        Returns the observations, the rewards ``(W, N)``, terminated and
-        truncated ``(W,)``, and the final observations. Worlds whose episode
-        ended have already started a new one: their observations start the new
-        episode, and their final observations are the ones the old episode
-        ended with.
+        Returns the observations, the rewards ``(W, N, 2)``, each segment's
+        for its walk and for the task (``StepRewards.channel_rewards``),
+        terminated and truncated ``(W,)``, and the final observations. Worlds
+        whose episode ended have already started a new one: their
+        observations start the new episode, and their final observations are
+        the ones the old episode ended with.
         """
         state = self.simulation.physical_state
 
@@ -441,8 +493,14 @@ class Environment:
         if self.leg_drive != "step_shape":
             # Models A and B: the tempo action moves the heart, the hands turn,
             # and each leg's targets follow its curve from the hand's place
-            # before the step to its place after it.
-            tempo = joint_action[..., :1].expand(-1, -1, 2)
+            # before the step to its place after it. With held curves, the
+            # actions held, and the legs whose hands start a turn decide next.
+            drive_action = (
+                self._hold_curves(joint_action)
+                if self.settings.hold_curves
+                else joint_action
+            )
+            tempo = drive_action[..., :1].expand(-1, -1, 2)
             clock_actions = torch.zeros(
                 (*tempo.shape, self.leg_clock_value_count), device=self.device
             )
@@ -452,9 +510,11 @@ class Environment:
             clock_step = self.clocks.step(
                 foot_load=self.previous_foot_load, foot_down=self.previous_foot_contact
             )
-            leg_phase, leg_amplitudes = self._leg_rhythm(joint_action)
-            leg_actions = self._drive_targets(joint_action, phase_before)
-            leg_actions_end = self._drive_targets(joint_action, self.clocks.clock_phase)
+            leg_phase, leg_amplitudes = self._leg_rhythm(drive_action)
+            leg_actions = self._drive_targets(drive_action, phase_before)
+            leg_actions_end = self._drive_targets(drive_action, self.clocks.clock_phase)
+            if self.settings.hold_curves:
+                torch.lt(self.clocks.clock_phase, phase_before, out=self.deciding)
         elif self.settings.leg_clocks:
             self.clocks.follow_actions(
                 self._leg_clock_actions(joint_action) + self.default_step
@@ -585,19 +645,53 @@ class Environment:
                 self.clocks.reset(restarted)
             self.leg_joint_acceleration.masked_fill_(restarted[:, None, None], 0.0)
             self._start_feet(restarted)
+            if self.settings.hold_curves:
+                self._restart_held_curves(restarted)
             self._place_targets(ended)
             self.episode_steps.masked_fill_(ended, 0)
             self.diagnostics.start_episodes(
                 ended, state, self.target_position, self.range_radius
             )
             observations = self._observations()
+        if self.settings.hold_curves:
+            self._update_action_mask()
 
         return (
             observations,
-            step_rewards.rewards,
+            step_rewards.channel_rewards,
             terminated,
             truncated,
             final_observations,
+        )
+
+    def _hold_curves(self, joint_action: torch.Tensor) -> torch.Tensor:
+        """The joint action with each segment's held leg actions in place of
+        its own, after the deciding legs took their curves from it, and the
+        segment its tempo if either leg decides."""
+        deciding = self.deciding
+        held = self.held_actions
+        held[..., 0] = torch.where(
+            deciding.any(dim=-1), joint_action[..., 0], held[..., 0]
+        )
+        curves = held[..., 1:].unflatten(-1, (2, -1))
+        chosen = joint_action[..., 1 : held.shape[-1]].unflatten(-1, (2, -1))
+        curves.copy_(torch.where(deciding[..., None], chosen, curves))
+        drive_action = joint_action.clone()
+        drive_action[..., : held.shape[-1]] = held
+        return drive_action
+
+    def _restart_held_curves(self, world_mask: torch.Tensor) -> None:
+        """The masked worlds hold nothing, and every leg decides next."""
+        self.held_actions.masked_fill_(world_mask[:, None, None], 0.0)
+        self.deciding.logical_or_(world_mask[:, None, None])
+        self._update_action_mask()
+
+    def _update_action_mask(self) -> None:
+        """``action_mask`` for the next step, from the deciding legs."""
+        deciding = self.deciding.float()
+        choices = torch.cat((deciding.amax(dim=-1, keepdim=True), deciding), dim=-1)
+        torch.add(
+            choices @ self.decision_columns, self.always_acting, out=self.action_mask
         )
 
     def _drive_targets(
@@ -688,6 +782,7 @@ class Environment:
             self.leg_joint_acceleration,
             self._feet_values() if self.settings.feet_physics else None,
             clocks.neighbour_tempos() if self.settings.neighbour_tempos else None,
+            self.held_actions if self.settings.hold_curves else None,
         )
 
     def _feet_values(self) -> torch.Tensor:

@@ -140,6 +140,75 @@ def _add_floor_forces(
 
 
 @wp.kernel
+def _clear_carrying(
+    # In
+    world_mask: wp.array1d[bool],
+    # Out
+    carried_share: wp.array2d[float],
+    loaded_sliding: wp.array2d[float],
+) -> None:
+    """Zero the masked worlds' carrying measures; one thread per (world,
+    segment)."""
+    world_index, segment_index = wp.tid()
+    if world_mask[world_index]:
+        carried_share[world_index, segment_index] = 0.0
+        loaded_sliding[world_index, segment_index] = 0.0
+
+
+@wp.kernel
+def _add_carrying(
+    # In: data
+    geom_xpos: wp.array2d[wp.vec3],
+    # In: tables
+    foot_geom_ids: wp.array2d[int],
+    own_weight_n: wp.array1d[float],
+    floor_force: wp.array3d[float],
+    world_mask: wp.array1d[bool],
+    scale: float,
+    restart: bool,
+    # In and out
+    previous_foot_position: wp.array3d[wp.vec2],
+    previous_foot_load: wp.array3d[float],
+    carried_share: wp.array2d[float],
+    loaded_sliding: wp.array2d[float],
+) -> None:
+    """Add one physics step's carrying to the masked worlds' measures; one
+    thread per (world, segment), which owns its segment's values.
+
+    The CPU backend's ``_add_carrying``: each foot's flat movement since the
+    last launch times the load it bore then, its floor force in
+    ``floor_force`` over the segment's own weight, adds to the sliding;
+    ``scale`` times the share of the own weight both feet carry now, at most
+    1, to the carried share. With ``restart`` the feet start where they are,
+    having moved nothing.
+    """
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    carried = 0.0
+    sliding = loaded_sliding[world_index, segment_index]
+    for side in range(2):
+        position = geom_xpos[world_index, foot_geom_ids[segment_index, side]]
+        planar = wp.vec2(position[0], position[1])
+        if restart:
+            previous_foot_position[world_index, segment_index, side] = planar
+        moved = wp.length(
+            planar - previous_foot_position[world_index, segment_index, side]
+        )
+        sliding = sliding + previous_foot_load[world_index, segment_index, side] * moved
+        previous_foot_position[world_index, segment_index, side] = planar
+        load = (
+            floor_force[world_index, segment_index, side] / own_weight_n[segment_index]
+        )
+        previous_foot_load[world_index, segment_index, side] = load
+        carried = carried + load
+    loaded_sliding[world_index, segment_index] = sliding
+    carried_share[world_index, segment_index] = carried_share[
+        world_index, segment_index
+    ] + scale * wp.min(carried, 1.0)
+
+
+@wp.kernel
 def _clear_leg_motor_power(
     # Out
     leg_motor_power: wp.array2d[float],
@@ -527,6 +596,7 @@ class GPUBackend:
         start_heading_range_rad: float = 0.0,
         average_floor_forces: bool = False,
         measure_leg_power: bool = False,
+        carrying_weight_n: np.ndarray | None = None,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -535,7 +605,10 @@ class GPUBackend:
         turn the body about the vertical. With ``average_floor_forces`` every
         step also measures each foot's floor force, averaged over its physics
         steps, and with ``measure_leg_power`` each segment's leg motors'
-        positive power, averaged likewise. ``solver`` is "newton" or "cg"; it is
+        positive power, averaged likewise. With ``carrying_weight_n``, each
+        segment's own weight (N,) in newtons, every physics step also adds
+        how much of it the segment's feet carried and how far its loaded feet
+        slid (``_add_carrying``). ``solver`` is "newton" or "cg"; it is
         set on the host model before the copy, because MuJoCo Warp reads it
         while building the GPU model. The contact and constraint capacities are
         reserved here once: contacts in one pool shared by all worlds,
@@ -613,6 +686,26 @@ class GPUBackend:
         self.measure_leg_power = measure_leg_power
         self.pyramidal_cone = model.opt.cone == mujoco.mjtCone.mjCONE_PYRAMIDAL
         self.average_floor_forces = average_floor_forces
+        self.measure_carrying = carrying_weight_n is not None
+        self._carried_share = wp.from_torch(state.carried_share)
+        self._loaded_sliding = wp.from_torch(state.loaded_sliding_m)
+        feet_shape = (world_count, self.segment_count, 2)
+        # Each foot's floor force at the physics step just taken, and where
+        # each foot was and the load it bore at the last one measured.
+        self._instant_floor_force = wp.zeros(
+            feet_shape, dtype=float, device=self.device
+        )
+        self._previous_foot_position = wp.zeros(
+            feet_shape, dtype=wp.vec2, device=self.device
+        )
+        self._previous_foot_load = wp.zeros(feet_shape, dtype=float, device=self.device)
+        self._own_weight_n = wp.array(
+            np.zeros(self.segment_count)
+            if carrying_weight_n is None
+            else carrying_weight_n,
+            dtype=float,
+            device=self.device,
+        )
         # The leg actions at the start and the end of an action, which the
         # recorded physics steps read; ``step`` writes them before each replay.
         leg_shape = (world_count, self.segment_count, self.leg_motor_count)
@@ -702,6 +795,9 @@ class GPUBackend:
             wp.capture_launch(self._physics_graph)
         self._check_worlds()
         mjw.forward(self.gpu_model, self.gpu_data)
+        if self.measure_carrying:
+            # The last physics step's sliding, now that its end is known.
+            self._add_carrying(self._every_world, 0.0)
         self._read_state()
 
     def reset(
@@ -771,15 +867,23 @@ class GPUBackend:
         self._clear_floor_forces(mask_view)
         if self.average_floor_forces:
             self._add_floor_forces(mask_view, 1.0)
+        if self.measure_carrying:
+            # The starting pose's carrying; its feet have not slid.
+            self._clear_carrying(mask_view)
+            self._measure_instant_floor_forces(mask_view)
+            self._add_carrying(mask_view, 1.0, restart=True)
 
     def _run_physics_steps(self) -> None:
         """The physics steps of one action, launched from Python: each writes
         its leg actions, then, with ``average_floor_forces``, adds its share
-        of the feet's floor forces, and with ``measure_leg_power`` its share
-        of the leg motors' power."""
+        of the feet's floor forces, with ``measure_leg_power`` its share
+        of the leg motors' power, and with the carrying measured its
+        carrying."""
         steps = self.physics_steps_per_action
         if self.average_floor_forces:
             self._clear_floor_forces(self._every_world)
+        if self.measure_carrying:
+            self._clear_carrying(self._every_world)
         if self.measure_leg_power:
             wp.launch(
                 _clear_leg_motor_power,
@@ -816,19 +920,69 @@ class GPUBackend:
                     outputs=[self._leg_motor_power],
                     device=self.device,
                 )
+            if self.measure_carrying:
+                self._measure_instant_floor_forces(self._every_world)
+                self._add_carrying(self._every_world, 1 / steps)
 
-    def _clear_floor_forces(self, world_mask: wp.array) -> None:
-        """Zero the masked worlds' feet's floor forces."""
+    def _clear_carrying(self, world_mask: wp.array) -> None:
+        """Zero the masked worlds' carrying measures."""
+        wp.launch(
+            _clear_carrying,
+            dim=(self.world_count, self.segment_count),
+            inputs=[world_mask],
+            outputs=[self._carried_share, self._loaded_sliding],
+            device=self.device,
+        )
+
+    def _measure_instant_floor_forces(self, world_mask: wp.array) -> None:
+        """The masked worlds' feet's floor forces now, in
+        ``_instant_floor_force``."""
+        self._clear_floor_forces(world_mask, self._instant_floor_force)
+        self._add_floor_forces(world_mask, 1.0, self._instant_floor_force)
+
+    def _add_carrying(
+        self, world_mask: wp.array, scale: float, restart: bool = False
+    ) -> None:
+        """Add the masked worlds' carrying since the last call (the kernel
+        ``_add_carrying``), from the floor forces last measured."""
+        wp.launch(
+            _add_carrying,
+            dim=(self.world_count, self.segment_count),
+            inputs=[
+                self.gpu_data.geom_xpos,
+                self.foot_geom_ids,
+                self._own_weight_n,
+                self._instant_floor_force,
+                world_mask,
+                scale,
+                restart,
+            ],
+            outputs=[
+                self._previous_foot_position,
+                self._previous_foot_load,
+                self._carried_share,
+                self._loaded_sliding,
+            ],
+            device=self.device,
+        )
+
+    def _clear_floor_forces(
+        self, world_mask: wp.array, floor_force: wp.array | None = None
+    ) -> None:
+        """Zero the masked worlds' feet's floor forces, or ``floor_force``."""
         wp.launch(
             _clear_floor_forces,
             dim=(self.world_count, self.segment_count, 2),
             inputs=[world_mask],
-            outputs=[self._foot_floor_force],
+            outputs=[self._foot_floor_force if floor_force is None else floor_force],
             device=self.device,
         )
 
-    def _add_floor_forces(self, world_mask: wp.array, scale: float) -> None:
-        """Add ``scale`` times the masked worlds' feet's current floor forces."""
+    def _add_floor_forces(
+        self, world_mask: wp.array, scale: float, floor_force: wp.array | None = None
+    ) -> None:
+        """Add ``scale`` times the masked worlds' feet's current floor forces,
+        to their averages or to ``floor_force``."""
         wp.launch(
             _add_floor_forces,
             dim=self.gpu_data.naconmax,
@@ -845,7 +999,7 @@ class GPUBackend:
                 world_mask,
                 scale,
             ],
-            outputs=[self._foot_floor_force],
+            outputs=[self._foot_floor_force if floor_force is None else floor_force],
             device=self.device,
         )
 

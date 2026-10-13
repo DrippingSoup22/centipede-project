@@ -59,6 +59,10 @@ class ObservationBuilder:
     head); with ``feet_physics_observed`` its four contact flags become its
     feet's physics: each foot's load, each foot's sliding and its support
     over the stride (``Environment._feet_values``).
+
+    Cycle 3 (2026-10-13): with ``held_action_count`` above 0, each segment
+    also sees, last, the actions it holds (``hold_curves``): its tempo action
+    and its legs' curves, which it chose when each leg started its turn.
     """
 
     def __init__(
@@ -76,6 +80,7 @@ class ObservationBuilder:
         feet_physics_observed: bool = False,
         tilt_observed: bool = False,
         neighbour_tempo_observed: bool = False,
+        held_action_count: int = 0,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
 
@@ -146,6 +151,7 @@ class ObservationBuilder:
             )
             + (2 * (2 + leg_joint_count) if step_shape_observed else 0)
             + (2 * observation_radius if neighbour_tempo_observed else 0)
+            + held_action_count
         )
 
     def build(
@@ -158,6 +164,7 @@ class ObservationBuilder:
         leg_acceleration: torch.Tensor | None = None,
         feet_values: torch.Tensor | None = None,
         neighbour_tempos: torch.Tensor | None = None,
+        held_actions: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
@@ -172,7 +179,8 @@ class ObservationBuilder:
         ``leg_acceleration_observed``; ``feet_values`` ``(W, N, 5)`` its feet's
         physics, needed only with ``feet_physics_observed``;
         ``neighbour_tempos`` ``(W, N, 2k)`` its neighbours' tempos, needed only
-        with ``neighbour_tempo_observed``.
+        with ``neighbour_tempo_observed``; ``held_actions`` ``(W, N, h)`` the
+        actions each segment holds, needed only with ``held_action_count``.
         The blocks are refilled in place, then gathered in neighbour-table
         order and laid end to end; the gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
@@ -247,4 +255,6 @@ class ObservationBuilder:
             parts.append(step_shape.flatten(start_dim=2))
         if self.neighbour_tempo_observed:
             parts.append(neighbour_tempos)
+        if held_actions is not None:
+            parts.append(held_actions)
         return torch.cat(parts, dim=-1)
