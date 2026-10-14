@@ -1,8 +1,7 @@
 # Reward
 
-**Status (2026-10-14): the structure and its ratios are agreed in ideas;
-progress in millimetres and the arrival's worth are proposed; no term has a
-formula or a number yet.**
+**Status (2026-10-14): agreed with the user, structure and ratios; the
+formulas are written at implementation.**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -51,7 +50,7 @@ it: progress, step by step, as its distance to the target shrinks, and
 arrival, when the target comes under the head. The head decides where the
 body goes.
 
-**One logic for every segment** (proposed, 2026-10-14). Every segment is
+**One logic for every segment** (agreed, 2026-10-14). Every segment is
 paid the distance it gains toward its own target in millimetres; the head's
 target is the target, a follower's the trail of the segment ahead
 ([Path](#path-the-task-as-a-follower-sees-it)). The head alone can reach
@@ -63,7 +62,7 @@ walking costs the same energy. A farther target therefore pays more
 progress in all, in proportion to the walk it asks for: the user's idea of
 an arrival scaled by distance, carried by the progress itself.
 
-**The arrival is worth one average approach** (proposed): reaching a
+**The arrival is worth one average approach** (agreed): reaching a
 target is worth as much as the progress of walking the middle distance of
 the current level's range, so an average approach earns half its worth
 walking and half arriving, at every level. It makes finishing better than stopping
@@ -350,7 +349,7 @@ force is worth.
 | Pushing : braking work | About 4 : 1, proposed from muscle data |
 | Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
 | Pain : energy | 1 : 1 in activation, agreed |
-| Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach, proposed |
+| Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
 
 ## Left out
 
