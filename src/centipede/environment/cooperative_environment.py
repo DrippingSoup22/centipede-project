@@ -142,19 +142,19 @@ class CooperativeEnvironment:
 
         A ``seed`` restarts the starting poses' and the targets' random
         sequences. With ``stagger_first_episodes`` every world starts its
-        episode at a random step of it, drawn after the targets.
+        episode at a random step of it, drawn before the targets.
         """
         self.simulation.reset(seed=seed)
         if seed is not None:
             self.task.generator.manual_seed(seed)
         state = self.simulation.physical_state
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
-        self.task.place_targets(every_world, state)
         self.episode_steps.zero_()
         if self.settings.cooperators.stagger_first_episodes:
             self.episode_steps.random_(
                 0, self.settings.max_episode_steps, generator=self.task.generator
             )
+        self.task.place_targets(every_world, state, self._steps_left())
         self.last_action.zero_()
         self.diagnostics.new_targets(
             every_world, every_world, state, self.task.target_position
@@ -211,12 +211,12 @@ class CooperativeEnvironment:
 
         # Walking on: a reached target is replaced where the head stands.
         self.last_action.copy_(joint_action)
-        task.place_targets(arrived & ~truncated, state)
+        task.place_targets(arrived & ~truncated, state, self._steps_left())
         final_observations = observations = self._observations()
         if truncated.any():
             self.simulation.reset(truncated)
-            task.place_targets(truncated, state)
             self.episode_steps.masked_fill_(truncated, 0)
+            task.place_targets(truncated, state, self._steps_left())
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
             observations = self._observations()
         self.diagnostics.new_targets(
@@ -224,6 +224,10 @@ class CooperativeEnvironment:
         )
         never = torch.zeros_like(truncated)
         return observations, rewards, never, truncated, final_observations
+
+    def _steps_left(self) -> torch.Tensor:
+        """Each world's steps until its episode's time limit."""
+        return self.settings.max_episode_steps - self.episode_steps
 
     def _observations(self) -> torch.Tensor:
         return self.observation_builder.build(

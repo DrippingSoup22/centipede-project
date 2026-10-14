@@ -55,7 +55,7 @@ def test_targets_follow_the_level_and_the_stopwatch_moves_it():
     assert task.full_circle_level == pytest.approx((0.08 - 0.02) / (final_near - 0.02))
     for level, near, half_bearing in ((0.0, 0.02, 45.0), (1.0, final_near, 180.0)):
         task.level = level
-        task.place_targets(every_world, state)
+        task.place_targets(every_world, state, torch.full((4096,), 400))
         offset = task.target_position - state.head_tip_position[:, :2]
         distance = offset.norm(dim=-1)
         bearing = torch.rad2deg(torch.atan2(offset[:, 1], offset[:, 0])).abs()
@@ -63,18 +63,22 @@ def test_targets_follow_the_level_and_the_stopwatch_moves_it():
         assert bearing.max() <= half_bearing + 1e-3
         assert bearing.max() > 0.95 * half_bearing
 
-    # Over one episode length, a quarter of the targets reached within their
-    # stopwatch of 350 steps: the level rises by 0.02 x (0.25 - 0.10).
+    # Over one episode length, a third of the timed targets reached within
+    # their stopwatch of 350 steps: the level rises by 0.02 x (1/3 - 0.10).
+    # The last quarter of the worlds restart in 100 steps, too soon for a
+    # stopwatch to run out: their targets are not counted.
     task.level = 0.5
-    task.place_targets(every_world, state)
-    reached = torch.arange(4096) < 1024
+    worlds = torch.arange(4096)
+    task.place_targets(every_world, state, torch.where(worlds < 3072, 400, 100))
+    reached = worlds < 1024
     for step in range(400):
         arrived = reached & (step == 100)
         task.time_step(arrived)
-        task.place_targets(arrived, state)  # as the environment walks on
+        # As the environment walks on: these targets come too late to count.
+        task.place_targets(arrived, state, torch.full((4096,), 399 - step))
     task.adjust_level()
-    assert task.in_time_share == pytest.approx(0.25)
-    assert task.level == pytest.approx(0.5 + 0.02 * 0.15)
+    assert task.in_time_share == pytest.approx(1 / 3)
+    assert task.level == pytest.approx(0.5 + 0.02 * (1 / 3 - 0.1))
 
 
 def test_energy_is_shared_with_the_neighbours_seen_and_pain_stays_with_the_pressed():

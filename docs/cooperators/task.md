@@ -148,7 +148,10 @@ and a walk of metres loses nothing in precision.
 **A stopwatch per target.** The level needs a share of targets reached in
 time, so each target's time is measured from its appearance: reached
 within 7 s is a success, otherwise a miss, counted when the 7 s pass.
-The target stays either way (above). A fixed time is the user's earlier
+The target stays either way (above). A target whose 7 s cannot pass before
+its world restarts is not counted at all, reached or not: a restart cuts
+its stopwatch, and counting only the ones reached before the cut would
+leave out the hard cases and read too high (as built, 2026-10-14). A fixed time is the user's earlier
 idea (a fixed length asks a farther target for a faster walk), moved from
 the episode to each target; it acts through the level, which rises only
 while one target in ten is reached within it. The oscillators' circle task
@@ -257,9 +260,11 @@ not set.
 - **Staggered first episodes**: after a full reset each world starts at a
   random step of its episode. Evaluations turn it off
   (`stagger_first_episodes = false`), to judge whole episodes.
-- **What the logs call an episode** is a target: it ends when reached or
-  when its world restarts, so the episode tables read per target (arrived,
-  time taken, distance closed); the stopwatch's share is the `task` log's.
+- **What the logs call an episode** is the 20 s between two restarts (the
+  user's view: an episode is a time, not a target): the targets reached in
+  it and within their stopwatch, how far the head walked, and what it
+  spent (`environment/cooperative_diagnostics.py`); the stopwatch's share
+  is the `task` log's.
 - The settings are `[environment.cooperators]`, with the values above as
   defaults; the episode is main's `max_episode_steps`, 1,000.
 

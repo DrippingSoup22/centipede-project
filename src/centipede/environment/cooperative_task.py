@@ -53,6 +53,8 @@ class CooperativeTask:
             (world_count, 2), dtype=torch.float32, device=device
         )
         self.target_steps = torch.zeros(world_count, dtype=torch.int32, device=device)
+        # Whether each target's stopwatch can run out before its world restarts.
+        self.timed = torch.zeros(world_count, dtype=torch.bool, device=device)
         self.generator = torch.Generator(device=device)
         # For each of the last episode length of steps: the targets whose
         # stopwatch ended on it reached in time, and all of them.
@@ -72,12 +74,19 @@ class CooperativeTask:
         return math.radians(start + opening * (180.0 - start))
 
     def place_targets(
-        self, world_mask: torch.Tensor, physical_state: PhysicalState
+        self,
+        world_mask: torch.Tensor,
+        physical_state: PhysicalState,
+        steps_left: torch.Tensor,
     ) -> None:
         """Give the masked worlds a new target from the head's tip, at a
         distance and a bearing drawn uniformly from the level's ranges, and
         start its stopwatch. Values are drawn for every world and kept only
-        where the mask is set, which avoids asking the GPU how many there are."""
+        where the mask is set, which avoids asking the GPU how many there are.
+
+        ``steps_left`` is each world's steps until it restarts: a target
+        whose stopwatch cannot run out before then is never counted, reached
+        or not, since only the reached ones would be (a cut stopwatch)."""
         world_count = world_mask.shape[0]
         near, far = self.distance_range_m()
         half_bearing = self.half_bearing_rad()
@@ -96,18 +105,21 @@ class CooperativeTask:
             torch.where(world_mask[:, None], target, self.target_position)
         )
         self.target_steps.masked_fill_(world_mask, 0)
+        self.timed.copy_(
+            torch.where(world_mask, steps_left >= self.stopwatch_steps, self.timed)
+        )
 
     def time_step(self, arrived: torch.Tensor) -> torch.Tensor:
-        """Advance every target's stopwatch by a step and record the targets
-        whose stopwatch ends: reached within it, or not reached when it runs
-        out. A target reached later is not counted again. Returns the worlds
-        whose target was reached in time."""
+        """Advance every target's stopwatch by a step and record the timed
+        targets whose stopwatch ends: reached within it, or not reached when
+        it runs out. A target reached later is not counted again. Returns the
+        worlds whose target was reached in time, timed or not."""
         self.target_steps += 1
         in_time = arrived & (self.target_steps <= self.stopwatch_steps)
         missed = ~arrived & (self.target_steps == self.stopwatch_steps)
         row = self._recorded_steps % self._stopwatches.shape[0]
-        self._stopwatches[row, 0] = in_time.sum()
-        self._stopwatches[row, 1] = (in_time | missed).sum()
+        self._stopwatches[row, 0] = (in_time & self.timed).sum()
+        self._stopwatches[row, 1] = ((in_time | missed) & self.timed).sum()
         self._recorded_steps += 1
         return in_time
 
