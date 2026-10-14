@@ -2,8 +2,9 @@
 
 Every tensor has the window's steps as rows and the worlds as columns, the
 layout RL_lib's advantage estimation works on. The storage is allocated once
-and filled in place, one row per step: the action side when the agent acts, the
-outcome side when the step's results are recorded. See docs/agents.md.
+and filled in place, one row per step: the action side when the agent acts,
+the critics' extra inputs once every agent has acted, and the outcome side
+when the step's results are recorded. See docs/agents.md.
 """
 
 import torch
@@ -14,7 +15,12 @@ from rl_lib.algorithms.policy_gradient import (
 
 
 class RolloutStorage:
-    """Rows of ``(W, ...)`` values for ``rollout_window_steps`` steps."""
+    """Rows of ``(W, ...)`` values for ``rollout_window_steps`` steps.
+
+    With several reward channels, rewards and values end with one column per
+    channel, ``K``; with one, they have none, as RL_lib's PPO takes them. With
+    ``baseline_input_size`` the baselines' extra inputs are kept for each step.
+    """
 
     def __init__(
         self,
@@ -23,6 +29,8 @@ class RolloutStorage:
         observation_size: int,
         device: torch.device | str,
         action_size: int = 6,
+        reward_channel_count: int = 1,
+        baseline_input_size: int = 0,
     ) -> None:
         """Allocate every tensor once, filled with zeros."""
         step_rows = (rollout_window_steps, world_count)
@@ -36,14 +44,24 @@ class RolloutStorage:
         self.log_probabilities = torch.zeros(
             step_rows, dtype=torch.float32, device=device
         )
-        self.values = torch.zeros_like(self.log_probabilities)
-        self.rewards = torch.zeros_like(self.log_probabilities)
-        # The observation right after each step, normalised, and its value.
+        channels = (reward_channel_count,) if reward_channel_count > 1 else ()
+        self.values = torch.zeros(
+            (*step_rows, *channels), dtype=torch.float32, device=device
+        )
+        self.rewards = torch.zeros_like(self.values)
+        # The observation right after each step, normalised, and its values.
         self.next_observations = torch.zeros_like(self.observations)
-        self.next_values = torch.zeros_like(self.log_probabilities)
+        self.next_values = torch.zeros_like(self.values)
         self.terminated = torch.zeros(step_rows, dtype=torch.bool, device=device)
         # Terminated or truncated: the next row starts a new episode.
         self.episode_ended = torch.zeros_like(self.terminated)
+        self.baseline_inputs = (
+            torch.zeros(
+                (*step_rows, baseline_input_size), dtype=torch.float32, device=device
+            )
+            if baseline_input_size
+            else None
+        )
         # The row the current step is written to.
         self.step_index = 0
 
@@ -56,6 +74,11 @@ class RolloutStorage:
         self.policy_actions[row].copy_(sample.policy_action)
         self.log_probabilities[row].copy_(sample.log_probability)
         self.values[row].copy_(sample.value)
+
+    def store_baseline_inputs(self, baseline_inputs: torch.Tensor) -> None:
+        """Write the current step's extra inputs of the baselines."""
+        assert self.baseline_inputs is not None
+        self.baseline_inputs[self.step_index].copy_(baseline_inputs)
 
     def store_outcome(
         self,
@@ -94,14 +117,14 @@ class RolloutStorage:
             discount=discount,
             gae_lambda=gae_lambda,
         )
-        observation_size = self.observations.shape[-1]
-        action_size = self.policy_actions.shape[-1]
+        samples = self.terminated.numel()
+        channels = self.values.shape[2:]
         return (
-            self.observations.reshape(-1, observation_size),
-            self.policy_actions.reshape(-1, action_size),
-            self.log_probabilities.reshape(-1),
-            advantages.reshape(-1),
-            return_targets.reshape(-1),
+            self.observations.reshape(samples, -1),
+            self.policy_actions.reshape(samples, -1),
+            self.log_probabilities.reshape(samples),
+            advantages.reshape(samples, *channels),
+            return_targets.reshape(samples, *channels),
         )
 
     def clear(self) -> None:

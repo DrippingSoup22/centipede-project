@@ -36,7 +36,14 @@ class LearningSummary:
     )
     explained_variance: torch.Tensor = measure(
         "How much of the returns' variation the critic predicted before the "
-        "update: 1 exactly, 0 nothing, (N,)"
+        "update: 1 exactly, 0 nothing, (N,); with several critics, the first's"
+    )
+    critic_explained_variances: torch.Tensor = measure(
+        "The same for each critic, one per reward channel, (N, K)"
+    )
+    baseline_explained_variances: torch.Tensor = measure(
+        "The same for each critic's baseline, which also sees the neighbours'"
+        " actions; NaN without baselines, (N, K)"
     )
     learning_rate: torch.Tensor = measure(
         "The optimizers' learning rate in the update, the same for every agent"
@@ -52,15 +59,22 @@ class LearningSummary:
     )
 
 
-# The values copied straight from RL_lib's update summary, in its order.
-SUMMARY_NAMES = tuple(item.name for item in fields(PPOUpdateSummary))
+# The single values copied straight from RL_lib's update summary, in its
+# order; the per-critic tuples that follow them are copied apart.
+SUMMARY_NAMES = tuple(
+    item.name for item in fields(PPOUpdateSummary) if item.type is float
+)
 
 
 class AgentDiagnostics:
     """Fills the agents' learning category, ``learning``, which the experiment reads."""
 
     def __init__(
-        self, segment_count: int, leg_motor_count: int, device: torch.device | str
+        self,
+        segment_count: int,
+        leg_motor_count: int,
+        device: torch.device | str,
+        reward_channel_count: int = 1,
     ) -> None:
         """Allocate the category, all zero, for agents whose first
         ``leg_motor_count`` actions drive their legs."""
@@ -70,6 +84,12 @@ class AgentDiagnostics:
                 name: torch.zeros(segment_count, device=device)
                 for name in SUMMARY_NAMES
             },
+            critic_explained_variances=torch.zeros(
+                (segment_count, reward_channel_count), device=device
+            ),
+            baseline_explained_variances=torch.full(
+                (segment_count, reward_channel_count), torch.nan, device=device
+            ),
             learning_rate=torch.zeros((), device=device),
             action_std=torch.zeros((segment_count, leg_motor_count), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
@@ -92,6 +112,15 @@ class AgentDiagnostics:
         )
         for column, name in enumerate(SUMMARY_NAMES):
             getattr(self.learning, name).copy_(summary_rows[:, column])
+        self.learning.critic_explained_variances.copy_(
+            torch.tensor([summary.explained_variances for summary in summaries])
+        )
+        if summaries[0].baseline_explained_variances:
+            self.learning.baseline_explained_variances.copy_(
+                torch.tensor(
+                    [summary.baseline_explained_variances for summary in summaries]
+                )
+            )
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
                 # The policy clamps the log spread to [-20, 2] before using it.

@@ -17,6 +17,7 @@ from rl_lib.algorithms.policy_gradient import PPOUpdateSummary
 from centipede.agents.diagnostics import AgentDiagnostics
 from centipede.agents.segment_agent import SegmentAgent
 from centipede.agents.settings import AgentSettings
+from centipede.settings_section import SettingsError
 
 # A checkpoint saved before the spine could be commanded, by agents of legs of
 # three joints, holds no action sizes: six per segment.
@@ -36,19 +37,44 @@ class Agents:
         seed: int,
         segment_action_sizes: list[int],
         leg_motor_count: int,
+        reward_channel_count: int = 1,
+        neighbour_table: torch.Tensor | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
         Every (run seed, segment) pair gets a different agent seed.
         ``segment_action_sizes`` and ``leg_motor_count`` are the
         environment's: how many motors each segment commands, its leg motors
-        first and then, with spine control, the spine joint behind it.
+        first and then, with spine control, the spine joint behind it. So are
+        ``reward_channel_count``, one critic each, and ``neighbour_table``,
+        the segments each one sees, itself first, from which the critics'
+        baselines take the neighbours' actions.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
         self.settings = settings
         self.segment_action_sizes = segment_action_sizes
         self.action_size = max(self.segment_action_sizes)
+        if settings.advantage_weights and (
+            len(settings.advantage_weights) != reward_channel_count
+        ):
+            raise SettingsError(
+                f"[agents] advantage_weights must have one weight for each of the"
+                f" environment's {reward_channel_count} reward channels, got"
+                f" {list(settings.advantage_weights)}"
+            )
+        # Each segment's neighbours, without itself; a missing one points to
+        # the row after the last segment, which holds no action.
+        self.neighbours = (
+            neighbour_table[:, 1:].to(settings.device)
+            if settings.critic_baselines and neighbour_table is not None
+            else None
+        )
+        baseline_input_size = (
+            0
+            if self.neighbours is None
+            else self.neighbours.shape[1] * self.action_size
+        )
 
         self.segment_agents: list[SegmentAgent] = [
             SegmentAgent(
@@ -59,26 +85,39 @@ class Agents:
                 settings=settings,
                 seed=seed * segment_count + segment_index,
                 action_size=self.segment_action_sizes[segment_index],
+                reward_channel_count=reward_channel_count,
+                baseline_input_size=baseline_input_size,
             )
             for segment_index in range(segment_count)
         ]
 
         self.diagnostics = AgentDiagnostics(
-            segment_count, leg_motor_count, device=self.settings.device
+            segment_count,
+            leg_motor_count,
+            device=self.settings.device,
+            reward_channel_count=reward_channel_count,
         )
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.
 
         A segment with fewer actions than the widest gets zeros after its own,
-        as padding the environment does not use.
+        as padding the environment does not use. In training with baselines,
+        once every agent has acted, each stores its neighbours' actions,
+        nearest first as in the neighbour table, a missing one's all zeros.
         """
         actions: list[torch.Tensor] = []
         for segment_index, agent in enumerate(self.segment_agents):
             segment_actions = agent.act(observations[:, segment_index], training)
             padding = self.action_size - agent.action_size
             actions.append(torch.nn.functional.pad(segment_actions, (0, padding)))
-        return torch.stack(actions, dim=1)
+        joint_action = torch.stack(actions, dim=1)
+        if training and self.neighbours is not None:
+            with_missing = torch.nn.functional.pad(joint_action, (0, 0, 0, 1))
+            neighbour_actions = with_missing[:, self.neighbours].flatten(start_dim=2)
+            for segment_index, agent in enumerate(self.segment_agents):
+                agent.store_baseline_inputs(neighbour_actions[:, segment_index])
+        return joint_action
 
     def record(
         self,

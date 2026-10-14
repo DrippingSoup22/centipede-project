@@ -28,6 +28,9 @@ def test_an_empty_section_gives_the_agreed_first_values():
         momentum=0.9,
         normaliser_epsilon=1e-8,
         observation_clip=10.0,
+        advantage_weights=(),
+        critic_baselines=False,
+        value_normalization=False,
         ppo=PPOSettings(
             discount=0.999,
             gae_lambda=0.95,

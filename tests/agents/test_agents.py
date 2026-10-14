@@ -159,6 +159,60 @@ def test_segments_may_command_more_motors_and_a_new_run_widens_saved_agents():
     assert [agent.action_size for agent in wider.segment_agents] == [7, 7, 6]
 
 
+def test_two_reward_channels_and_baselines_that_see_the_neighbours_actions():
+    """Each critic's baseline gets the actions the segment's neighbours took
+    at the same step, a missing neighbour's as zeros; both channels teach."""
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "critic_baselines": True,
+            "value_normalization": True,
+            "ppo": {"minibatch_size": 4},
+        }
+    )
+    # Radius 1: each segment sees itself, the one ahead, then the one behind.
+    neighbour_table = torch.tensor([[0, 3, 1], [1, 0, 2], [2, 1, 3]])
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        reward_channel_count=2,
+        neighbour_table=neighbour_table,
+    )
+
+    actions = agents.act(body_tensor(0, OBSERVATION_SIZE), training=True)
+
+    middle = agents.segment_agents[1].rollout_storage.baseline_inputs[0]
+    assert torch.equal(middle, torch.cat((actions[:, 0], actions[:, 2]), dim=-1))
+    head = agents.segment_agents[0].rollout_storage.baseline_inputs[0]
+    assert not head[:, :LEG_MOTORS].any()  # nothing ahead of the head
+    assert torch.equal(head[:, LEG_MOTORS:], actions[:, 1])
+
+    agents.record(
+        body_tensor(100, 2),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(1, OBSERVATION_SIZE),
+    )
+    agents.act(body_tensor(1, OBSERVATION_SIZE), training=True)
+    agents.record(
+        body_tensor(101, 2),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(2, OBSERVATION_SIZE),
+    )
+    agents.update()
+
+    learning = agents.diagnostics.learning
+    assert learning.critic_explained_variances.shape == (SEGMENTS, 2)
+    assert torch.isfinite(learning.baseline_explained_variances).all()
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_baselines_give_zero_and_seeded_uniform_actions(device):
     observations = torch.ones(WORLDS, SEGMENTS, OBSERVATION_SIZE, device=device)
