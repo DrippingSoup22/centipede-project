@@ -136,3 +136,4 @@ batches.
 - Rudin, Hoeller, Reist & Hutter, Learning to walk in minutes using massively parallel deep reinforcement learning, CoRL 2021, [arXiv 2109.11978](https://arxiv.org/abs/2109.11978)
 - Diaz et al., Active and passive mechanics for rugose terrain traversal in centipedes, J. Exp. Biol. 226, 2023, [JEB](https://cob.silverchair.com/jeb/article/226/4/jeb244688/287689/Active-and-passive-mechanics-for-rugose-terrain)
 - legged_gym (Rudin et al.'s code): 20 s episodes, 50 Hz control, discount 0.99, random first episode lengths, [GitHub](https://github.com/leggedrobotics/legged_gym)
+- Anderson, Shultz & Jayne, Axial kinematics and muscle activity during terrestrial locomotion of the centipede Scolopendra heros, J. Exp. Biol. 198, 1995, [PDF](https://jwshultz.weebly.com/uploads/4/6/2/2/46222147/j_exp_biol-1995-anderson-1185-95.pdf)

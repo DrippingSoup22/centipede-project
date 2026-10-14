@@ -104,6 +104,18 @@ after every update, one level for all worlds moves toward 1 target in 10 reached
   target was reached in time; the reward never depends on them, so the
   head needs no clock among its inputs, and the time limit stays outside
   the task, where bootstrapping handles it (Pardo et al., 2018).
+- **A late arrival is worth less all the same, smoothly.** The discount
+  (0.998 at 50 decisions a second, a half-life of 7 s) makes an arrival
+  count less the later it comes, seen from when its target appeared, with
+  no cliff at 7 s:
+
+  | Arrival after | 2 s | 3 s | 7 s | 8 s | 14 s |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | Its worth | 82% | 74% | 50% | 45% | 25% |
+
+  The progress on the way is discounted alike, so a faster walk is worth
+  more at every moment. Scaling the bonus by the time taken as well would
+  pay speed twice, and the head would need a clock to see why.
 - **The episode's 20 s are simulated time**, not waiting time. A training
   cycle simulates the same number of steps in every world (the rollout
   window), whatever the episode's length; the length only decides when a
