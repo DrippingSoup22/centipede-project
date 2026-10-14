@@ -9,15 +9,40 @@ advantage is mostly noise and the actor learns nothing.
 
 ## The setup
 
+Every segment learns with two critics of its own (the user, 2026-10-14):
+a **goal critic** for the progress it is paid for, and a **health
+critic** for its costs ([reward.md](reward.md)).
+
 | | Head | Each follower |
 | --- | --- | --- |
 | Actor | Its own; sees itself, its neighbours within the radius, and the target | Its own; sees itself and its neighbours within the radius |
-| Walk critic | Its own; sees what its actor sees, plus those neighbours' actions | Its own; sees what its actor sees, plus those neighbours' actions |
-| Task critic | Its own; judges the target task | None |
+| Goal critic | Its own; judges the task (progress toward the target, arrivals), so it also sees the target | Its own; judges the path (progress along the trail of the segment ahead) |
+| Health critic | Its own; judges its costs and its neighbours' | The same |
+| Each critic's input | What its actor sees, plus those neighbours' actions | The same |
 | Shared with other segments | Nothing | Nothing |
 
 There is no critic of the whole body. Critics are used only in training;
-an agent acts with its actor alone.
+an agent acts with its actor alone. Head and followers differ only in what
+their goal is, and in the head's goal critic seeing the target.
+
+**How the two are combined.** Each critic's advantage is normalised over
+the batch on its own, and the two are added with one weight, the same for
+every segment: goal and health count **1 : 1** to start. The weight alone
+sets the balance, whatever the units of the two (progress is a distance,
+effort an energy), and a goal whose raw signal is small early in training
+keeps its voice (van Seijen et al., NeurIPS 2017; the oscillators' head did
+the same). The goal never counts less than health ([reward.md](reward.md),
+principle 1); in run 57, a task weight of 0.2 did not pull the body along.
+
+**Size: two hidden layers of 64** to start (the user's proposal), against
+run 57's 256 × 256. A critic now judges a local situation, five segments,
+and the hexapod's leg networks were this size (Schilling et al., 2020).
+It is not mainly a matter of speed: the physics dominates a step, and an
+update's time depends more on how many minibatches it takes than on their
+width. Whether the critics are big enough shows in their explained
+variance, measured at every update; main can already widen a run's
+networks from a checkpoint without losing what they learned
+([agents.md](../agents.md#checkpoints)).
 
 ## Why each segment has its own critic
 
@@ -73,19 +98,6 @@ its own action.
 It is the opposite of a central critic's effect: that one adds the
 teammates' actions to the target, this one subtracts them out.
 
-## The head's second critic
-
-Only the head sees the target, so it alone is paid for the task, and it
-learns that part with a critic of its own, which can see the task's cause.
-The head's two advantages are normalised over the batch each on its own and
-then added with a weight, so the weight alone sets the balance between the
-task and the rest, whatever their scales (van Seijen et al., NeurIPS 2017;
-the oscillators' head did the same).
-
-The weight is chosen with the reward. In run 57, a weight of 0.2 did not
-pull the body along, mainly because that run's walk reward made standing
-still the best choice.
-
 ## Accepted limits
 
 - **The chain is not perfectly local.** A push at the tail moves the head
@@ -94,8 +106,8 @@ still the best choice.
   they can see. Trouble caused by far segments is fixed in the reward, by
   keeping each term within the radius its critic sees, not by a larger
   critic.
-- **The head is different.** It alone sees the target, so its reward and
-  its critics differ from the followers'. Each agent has its own reward, so
+- **The head is different.** It alone sees the target, so its goal and its
+  goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.
 
 ## Not chosen

@@ -1,11 +1,14 @@
 # Reward
 
 **Status (2026-10-14): the structure is agreed in ideas; the balances are
-being set as ratios; no term has a formula or a number yet.** Agreed with
-the user: the three layers (task, path, health), energy as effort, α
-reaching every neighbour a segment sees. Proposed and awaiting the user:
-the shape of α, a goal critic and a health critic for every segment, and
-the questions on speed and health below.
+being set as ratios; no term has a formula or a number yet.**
+
+Agreed with the user: the goal layers (task for the head, path for the
+followers), effort as an energy cost, α fading with distance over every
+neighbour a segment sees, a goal critic and a health critic for every
+segment at 1 : 1, and free speed. Proposed and awaiting the user: effort
+and damage as two layers judged by one cost critic, and the list of
+damage.
 
 ## Principles
 
@@ -22,14 +25,15 @@ the questions on speed and health below.
 
 ## Structure
 
-**Every segment is paid for progress toward what it can see, and for its
-wellbeing.**
+**Every segment is paid for progress toward what it can see, and pays for
+what its moving costs.**
 
-| Layer | Who | What it pays |
-| --- | --- | --- |
-| Task | The head | Progress toward the target, and arriving |
-| Path | Each follower | Progress along the trail the segment ahead leaves |
-| Health | Every segment | Damage and effort: its own, and its neighbours' through α |
+| Layer | Who | What it says | Judged by |
+| --- | --- | --- | --- |
+| Task | The head | Progress toward the target, and arriving | Goal critic |
+| Path | Each follower | Progress along the trail the segment ahead leaves | Goal critic |
+| Effort (proposed as its own layer) | Every segment | The energy its motors spend, and its neighbours' through α | Cost critic |
+| Damage (proposed as its own layer) | Every segment | Harm to the body, its own and its neighbours' through α | Cost critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -78,131 +82,121 @@ conflict inside the head that only a weight could settle.
 A variant for later: progress along the follower's own heading. It is
 simpler and differs only in curves, where the body bends.
 
-### Health: damage and effort
+### Speed is free
 
-- **Damage outcomes**, judged as what happened: a body dragging on the
-  ground, legs colliding.
-- **Effort**: the energy the segment's motors spend. This is the general
-  rule that can replace every gait rule. Horses use each gait in the range
-  of speeds where it costs them the least energy (Hoyt and Taylor, Nature
-  1981). Quadruped robots paid for moving at a commanded speed and charged
-  for their motors' power found walk, trot and gallop by themselves, each
-  at the speed where it is cheapest (Fu et al., CoRL 2021). Energy changed
-  nothing in the oscillators' run 43, but that run was dominated by clocks
-  and step rewards.
+Progress is paid, more is better, and effort costs, so the body settles at
+the speed where more progress stops being worth its effort: the balance
+between goal and costs is the speed dial, and the gait that emerges is the
+cheapest for that speed. The speed comes from the environment, not from a
+command (the user, 2026-10-14; a commanded speed, as in Fu et al., is not
+planned). How the task's distances and the arrival's value make speed pay
+belongs to [task.md](task.md).
 
-**The cooperation dial α.** A segment's health also counts its
-neighbours' damage and effort, as far as it sees them (the user,
-2026-10-14). It is essential, not optional: if each segment paid only its
-own effort, laziness would pay, since a segment that hangs from its
-neighbours saves its own energy while they carry it. That is what the
-oscillators' followers learned (no foot down in 42 to 54% of steps). With
-α, burdening the neighbours costs the segment too. It is visible as the
-pairing rule asks: a critic sees its neighbours' state and actions, and
-with torque motors an action is the effort. The idea comes from MA2C (Chu
-et al., 2019), where each agent's reward includes its neighbours',
-discounted by distance.
+### Effort: the price of acting (proposed as its own layer)
 
-## Balances (ratios, not numbers yet)
+The energy the segment's motors spend. It is not health: nothing is
+harmed, it is what doing things costs, and it shapes how the body walks.
+It is the general rule that can replace every gait rule. Horses use each
+gait in the range of speeds where it costs them the least energy (Hoyt and
+Taylor, Nature 1981). Quadruped robots paid for moving at a commanded speed
+and charged for their motors' power found walk, trot and gallop by
+themselves, each at the speed where it is cheapest (Fu et al., CoRL 2021).
+Energy changed nothing in the oscillators' run 43, but that run was
+dominated by clocks and step rewards.
 
-| Balance | Status | Proposal |
+**What it measures: work done and force held** (proposed).
+
+| Measure | Charges | Alone, it would |
 | --- | --- | --- |
-| Goal : health, for every segment | Proposed | 1 : 1, through two critics per segment (below) |
-| α's shape | Proposed | Halving per segment of distance, as a share of the whole |
-| Damage : effort | Open | |
-| What effort measures | Open | Work done, force held, or both |
-| Progress : arrival, for the head | Open | |
+| Work done: the motors' power (Fu et al.) | Moving | Make holding a load still free: a segment holding up a hanging neighbour pays nothing, so α could not stop free-riding at rest |
+| Force held: the squared torque (Gymnasium's Ant) | Holding and moving alike | Not tell useful motion from holding still |
 
-### α: halving with distance
+Together they are closest to a muscle, which spends energy moving and also
+tires just holding a weight. With torque motors the torque is the action,
+so the cost critic sees it, its neighbours' included.
 
-A segment's health is a weighted share of its own and its neighbours'
-damage and effort. The proposal: each segment of distance halves the
-weight, and the weights are scaled to make a whole. For a middle segment
-at radius 2:
+### Damage: harm to the body (proposed as its own layer)
 
-| Whose | Weight |
+What counts as damage must be (1) an outcome, not a form of movement;
+(2) visible to the cost critic; (3) not already paid by another term; and
+(4) something that is really happening or that another term pushes toward.
+Proposed:
+
+| Candidate | Proposal | Why |
+| --- | --- | --- |
+| Body on the ground | **Kept** | Effort makes it necessary: holding the body up costs force, so with effort alone, lying on the belly would become the cheapest way to move. It is effort's counterweight. Real centipedes walk with the body raised |
+| Legs colliding | **Kept** | Two neighbours' legs hit each other only when they move out of step in space, so avoiding it asks each to take the other into account: the damage most tied to cooperation, yet an outcome, not a gait. Both segments involved pay |
+| Body turned over | Left out | Never seen in any run: the many legs keep the body stable. A term that never fires teaches nothing, and if it fired, the goal would already suffer. It returns if a recording shows it |
+| Joints pushed against their stops | Left out | Effort already charges it: torque held without motion is force held |
+| Feet slipping | Left out | A judgement of the step's quality, gamed in the oscillators; slipping also wastes work, which effort charges |
+| Hard impacts, tapping feet | Left out for now | Seen in the oscillators with other motors and clocks; added only if it appears here |
+
+The rule: a damage term enters only for harm we see, or that another term
+pushes toward.
+
+### The cooperation dial α (agreed)
+
+A segment's effort and damage also count its neighbours', as far as it
+sees them (the user, 2026-10-14). It is essential, not optional: if each
+segment paid only its own effort, laziness would pay, since a segment that
+hangs from its neighbours saves its own energy while they carry it. That
+is what the oscillators' followers learned (no foot down in 42 to 54% of
+steps). With α, burdening the neighbours costs the segment too. It is
+visible as the pairing rule asks: a critic sees its neighbours' state and
+actions. The idea comes from MA2C (Chu et al., 2019), where each agent's
+reward includes its neighbours', discounted by distance.
+
+**Fading with distance: halving per segment, as a share of the whole.**
+For a middle segment at radius 2:
+
+| Whose | Share |
 | --- | ---: |
 | Itself | 40% |
 | Each nearest neighbour | 20% |
 | Each second neighbour | 10% |
 
-Why decaying rather than equal:
+Why fading rather than equal:
 
 1. **Weight follows influence.** A segment's actions change its nearest
-   neighbours' load the most: the joints next to it carry it first. A
-   reward term that a segment cannot change is pure noise in its learning
-   signal, so each term should count as much as the segment can affect
-   it.
+   neighbours' load the most: the joints next to it carry it first. A term
+   that a segment cannot change is pure noise in its learning signal, so
+   each term counts as much as the segment can affect it.
 2. **Influence fades with distance** in locally coupled systems,
    exponentially (Qu, Wierman and Li, 2022); halving per step mirrors that.
 3. **Each reward stays mostly its own.** Neighbouring windows overlap; with
-   equal weights, two neighbours would share four fifths of their health
-   signal, and each segment would learn from the others' noise as much as
-   from its own.
+   equal weights, two neighbours would share four fifths of their signal,
+   and each segment would learn from the others' noise as much as from its
+   own actions.
 
 Why a share of a whole: the head and the rear see fewer neighbours than a
-middle segment. Scaled to a whole, every segment's health has the same
-size, so the balance between goal and health is the same along the body.
+middle segment. Scaled to a whole, every segment's costs have the same
+size, so the balance between goal and costs is the same along the body.
 
-α applies to health only. The path is already shared by the chain;
-blending it would add nothing.
+α applies to effort and damage only. The path is already shared by the
+chain; blending it would add nothing.
 
-### Goal : health, through two critics for every segment
+## Critics and balances
 
-Proposed, a change to [critic.md](critic.md): every segment learns with
-two critics, a **goal critic** (the head's task, a follower's path) and a
-**health critic**, each advantage normalised on its own and the two added
-with one weight, the same for every segment.
+| Agent | Goal critic | Cost critic |
+| --- | --- | --- |
+| Head | Task | Effort and damage |
+| Each follower | Path | Effort and damage |
 
-- **The balance becomes a pure ratio.** Progress is measured in distance,
-  effort in energy. Summed in one critic, their balance would need a
-  conversion between the two units; with normalised advantages, the weight
-  alone sets it, whatever the units.
-- **Every segment has the same structure.** Only what "goal" means differs
-  between the head and the followers.
-- **The goal keeps its voice.** A normalised advantage has the same size
-  however small its raw signal, so a goal that is small early in training
-  is never drowned by the costs (run 57's failure).
+Goal and costs count **1 : 1** (agreed), through two advantages normalised
+apart ([critic.md](critic.md)). Effort and damage share one critic
+(proposed) rather than one each: damage is rare, and a critic of a signal
+that is almost always zero would have its noise enlarged by the
+normalisation. Inside the cost critic, damage is priced in effort: how
+many steps of ordinary effort one step of damage is worth.
 
-The costs: twice as many critics (small networks next to the physics), and
-a layer whose signal is almost always zero, such as rare damage, has its
-noise enlarged by the normalisation.
-
-**1 : 1 to start** (the user's proposal). Both matter, and the goal first
-(principle 1) sets the floor: the goal never counts less than health. If
-the body learns to keep still, the goal is raised; run 57's 0.2 was too
-weak.
-
-## Speed: what is still to decide
-
-- **Free speed.** Progress is paid, more is better, and effort costs. The
-  body settles at the speed where more progress stops being worth its
-  effort, so the goal : health ratio is the speed dial. One speed, and the
-  cheapest gait for it. Nothing new to see.
-- **Commanded speed** (Fu et al.). The body is told a speed to match,
-  varied in training, and different gaits appear at different speeds. By
-  the pairing rule, every segment paid for matching the command must see
-  it: a signal for the whole body, like a brain's descending command, an
-  exception to the local view. Fu et al. also found that training on
-  random speeds collapsed to the slower gaits.
-
-Proposed: free speed now; the commanded speed a later experiment, with its
-own question about a whole-body signal.
-
-## Health: what is still to decide
-
-- **What effort measures.** Work done (the motors' power, as Fu et al.)
-  charges motion; force held (the squared torque, as Gymnasium's Ant)
-  charges holding a load still. With work alone, a segment that holds a
-  hanging neighbour still pays nothing, so α could not stop free-riding at
-  rest; a muscle also spends energy holding a force. Both together are
-  closest to a muscle.
-- **Which damage outcomes.** Each must be an outcome, visible to the
-  critic, and truly unwanted: a body on the ground, legs colliding, perhaps
-  a body turned over. In the oscillators these stayed small because bodies
-  stayed up: they guard against rare failures rather than drive learning.
-- **Damage : effort.** How many steps of ordinary effort one step of
-  damage is worth.
+| Balance | Status |
+| --- | --- |
+| Goal : costs | 1 : 1, agreed |
+| α | Halving per segment, as a share of the whole, agreed |
+| Work : force, inside effort | Open |
+| Damage : effort | Open |
+| Body on the ground : legs colliding | Open |
+| Progress : arrival, for the head | Open, with [task.md](task.md) |
 
 ## Left out
 

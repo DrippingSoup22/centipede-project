@@ -53,9 +53,10 @@ Set by the user on 2026-10-14.
 | Part | File | Status |
 | --- | --- | --- |
 | Critic | [critic.md](critic.md) | Decided |
-| Reward | [reward.md](reward.md) | Layers agreed; balances being set as ratios |
+| Reward | [reward.md](reward.md) | Layers and main balances agreed; effort and damage being settled |
 | Observations | [observations.md](observations.md) | Radius decided; contents open |
 | Actions | [actions.md](actions.md) | Open |
+| Task | [task.md](task.md) | Open: the user's ideas recorded, to discuss after the reward |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |
 
 ## The plan
