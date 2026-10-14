@@ -21,12 +21,10 @@ its own](#a-task-critic-for-the-head). Each segment decides its legs' curves
 and its tempo once per turn and [holds them for the whole
 turn](#curves-held-for-a-turn), and learns from each turn as a whole. Model v5, model B, the circle
 task from 10 cm, white noise for the turns and pink for the neck, no CAPS.
-**Run 58, the user's appendix test** (2026-10-14): the same reward at a
-[fixed tempo](#a-fixed-tempo) of 6 Hz, so without the tempo chain, the
-head's task at the walk's weight (1), and [whole
-turns](#learning-from-whole-turns): if this simpler body cannot learn to
-walk, the full one will not either; the main line returns to the heart and
-the chain afterwards. Before it, runs 51 to 56 paid every
+Two tools were built for run 58, an appendix test the user then dropped
+(2026-10-14) to rethink the reward around cooperation: a [fixed
+tempo](#a-fixed-tempo) and [learning from whole
+turns](#learning-from-whole-turns); both are off unless set. Before run 57, runs 51 to 56 paid every
 segment the head's task and charged the [retired](#retired-reward-terms)
 health costs (foot hold, carry, leg pushing): the followers' critics
 explained none of their returns, because the shared task they could neither
@@ -370,8 +368,7 @@ pays −0.00001.
 
 Everything around the reward: how the legs are driven, what each segment
 sees, how the agents explore, and how training is scheduled.
-✅ is in use now (run 57); ⬜ is not; the appendix test, run 58, differs as
-its rows say. The runs are those of the study notes
+✅ is in use now (run 57); ⬜ is not. The runs are those of the study notes
 (`results/oscillators/README.md` in CentipedeTraining).
 
 | | Tool | Kind | Setting | Runs |
@@ -379,10 +376,10 @@ its rows say. The runs are those of the study notes
 | ⬜ | [Model A, the network draws](#model-a-the-network-draws) | Leg control | `leg_drive = "swing"` | pilot |
 | ✅ | [Model B, the clock is the engine](#model-b-the-clock-is-the-engine) | Leg control | `leg_drive = "waves"`, `waves = 2` | 31– |
 | ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]`, `max_tempo_hz = 12.5` | 31–57 (ceiling 35–) |
-| ⬜ | [A fixed tempo](#a-fixed-tempo) | Leg control | `[environment.clock] fixed_tempo = true`, `middle_tempo_hz = 6` | 58 |
+| ⬜ | [A fixed tempo](#a-fixed-tempo) | Leg control | `[environment.clock] fixed_tempo = true`, `middle_tempo_hz = 6` | none (built for 58) |
 | ✅ | [Targets along the curve](#targets-along-the-curve) | Leg control | always with models A and B | 31– |
 | ✅ | [Curves held for a turn](#curves-held-for-a-turn) | Leg control | `hold_curves = true` | 57– |
-| ⬜ | [Learning from whole turns](#learning-from-whole-turns) | Leg control | `hold_spine = true` | 58 |
+| ⬜ | [Learning from whole turns](#learning-from-whole-turns) | Leg control | `hold_spine = true` | none (built for 58) |
 | ✅ | [A clock per leg](#a-clock-per-leg) | Leg control | `leg_clocks = true`, `segment_tempo = true` | 08– |
 | ✅ | [Passive follower spine](#passive-follower-spine) | Leg control | `passive_follower_spine = true` | all |
 | ⬜ | [The step shape](#the-step-shape) | Leg control | `leg_drive = "step_shape"` | 08–28 |
