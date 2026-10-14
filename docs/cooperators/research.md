@@ -126,3 +126,6 @@ batches.
 - Abbott, Bigland & Ritchie, The physiological cost of negative work, J. Physiol. 117, 1952
 - Kram & Taylor, Nature 346, 1990
 - Taylor, Heglund & Maloiy, J. Exp. Biol. 97, 1982, and Heglund, Fedak, Taylor & Cavagna, J. Exp. Biol. 97, 1982, [JEB](https://cob.silverchair.com/jeb/article/97/1/57/34676/Energetics-and-mechanics-of-terrestrial-locomotion)
+- Ackermann & van den Bogert, J. Biomech. 43, 2010, [PMC2849893](https://pmc.ncbi.nlm.nih.gov/articles/PMC2849893)
+- Biewener, Biomechanical consequences of scaling, J. Exp. Biol. 208, 2005
+- Tucker, The energetic cost of moving about, American Scientist 63, 1975

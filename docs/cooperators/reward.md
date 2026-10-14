@@ -162,11 +162,15 @@ force decides where the cheapest speed lies.
 | --- | --- | --- |
 | Pushing work | Positive work of each motor, at muscle efficiency | 1 (the unit) |
 | Braking work | Negative work: charged, never refunded, but cheaper | About 1/4 of pushing work per joule (several times cheaper) |
-| Force | Each motor's torque, squared, for every moment it is held | Set so that force is by far the larger part in a walk, as in animals of a gram; measured on our model, not guessed |
+| Force | Each motor's activation, its torque as a share of its maximum, squared, for every moment it is held | Set so that force is by far the larger part in a walk, as in animals of a gram; measured on our model, not guessed |
 
-- **Squared force.** Producing a larger force costs more per unit of force:
-  muscles recruit their costlier fast fibres last, and a motor's heat grows
-  with the square of its torque. The square also makes sharing a load
+- **Squared activation.** Producing a larger force costs more per unit of
+  force: muscles recruit their costlier fast fibres last, and a motor's
+  heat grows with the square of its torque. In simulations of human gait,
+  the sum of squared muscle activations predicted a realistic walk, while
+  energy-like costs gave stiff, straight-legged stances (Ackermann and van
+  den Bogert, J. Biomech. 2010). The maximum torques then act as muscle
+  sizes ([forces.md](forces.md)). The square also makes sharing a load
   between legs cheaper than one leg carrying it alone; a cost linear in
   force would not care how the weight is shared.
 - **Fu et al. counted braking as a gain,** which would pay legs for braking
@@ -202,6 +206,17 @@ segments pay it, the same amount, and no other segment does (the user,
 2026-10-14). This is the user's leg
 pushing of 2026-10-11 (oscillators, cycle 1), inert there (under 1% of its
 most) while clocks kept the legs apart; here nothing does.
+
+**Priced like force** (proposed). Pain is counted in the same currency as
+the force cost: the contact force as a share of the strongest push a leg's
+sweep makes at its foot (about 0.9 mN, about one unit's weight; the
+user's measure of 2026-10-11), squared, for every moment it lasts. Pain and
+energy count **1 : 1** in it: being pressed with the force of one's own
+strongest push hurts as much as pushing that hard. It is the least that
+does the job: any pain makes a leg used as a foothold costlier than the
+ground; squared, a brush costs almost nothing and a hard kick a lot; and
+harm is never cheaper than the effort it equals. It is raised only if
+recordings show legs still colliding.
 
 It is also the cost most tied to cooperation. Two same-side neighbours'
 legs touch when the rear one's sweep converges on the front one's, so how
@@ -282,7 +297,7 @@ force is worth.
 | α | Halving per segment, as a share of the whole, agreed |
 | Pushing : braking work | About 4 : 1, proposed from muscle data |
 | Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
-| Pain : energy | Open |
+| Pain : energy | 1 : 1 in activation, proposed |
 | Progress : arrival, for the head | Open, with [task.md](task.md) |
 
 ## Left out

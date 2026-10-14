@@ -56,6 +56,7 @@ Set by the user on 2026-10-14.
 | Reward | [reward.md](reward.md) | Structure agreed: goal, energy, pain; the ratios remain |
 | Observations | [observations.md](observations.md) | Radius decided; contents open |
 | Actions | [actions.md](actions.md) | Open |
+| Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
 | Task | [task.md](task.md) | Open: the user's ideas recorded, to discuss after the reward |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |
 
