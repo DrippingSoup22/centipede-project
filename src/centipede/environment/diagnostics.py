@@ -173,8 +173,11 @@ class EnvironmentDiagnostics:
     ``step`` and ``episode`` are the categories the experiment reads, and
     ``simulation`` is the physics simulation's, offered here because only the
     environment can see the simulation. ``reward_part_names`` labels the last
-    dimension of ``reward_parts``.
+    dimension of ``reward_parts``; a recording scores each world by
+    ``recording_score``, named ``score_name``.
     """
+
+    score_name = "summed reward"
 
     def __init__(
         self,
@@ -237,6 +240,10 @@ class EnvironmentDiagnostics:
         # Remaining shares of the start distance that separate the endings
         # "within a quarter", "within half", "closer", and "not closer".
         self._remaining_edges = torch.tensor([0.25, 0.5, 1.0], device=device)
+
+    def recording_score(self) -> torch.Tensor:
+        """Each world's reward for the step just taken, ``(W,)``."""
+        return self.step.reward_parts.sum(dim=(1, 2))
 
     def start_episodes(
         self,

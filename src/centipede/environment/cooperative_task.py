@@ -97,10 +97,11 @@ class CooperativeTask:
         )
         self.target_steps.masked_fill_(world_mask, 0)
 
-    def time_step(self, arrived: torch.Tensor) -> None:
+    def time_step(self, arrived: torch.Tensor) -> torch.Tensor:
         """Advance every target's stopwatch by a step and record the targets
         whose stopwatch ends: reached within it, or not reached when it runs
-        out. A target reached later is not counted again."""
+        out. A target reached later is not counted again. Returns the worlds
+        whose target was reached in time."""
         self.target_steps += 1
         in_time = arrived & (self.target_steps <= self.stopwatch_steps)
         missed = ~arrived & (self.target_steps == self.stopwatch_steps)
@@ -108,6 +109,7 @@ class CooperativeTask:
         self._stopwatches[row, 0] = in_time.sum()
         self._stopwatches[row, 1] = (in_time | missed).sum()
         self._recorded_steps += 1
+        return in_time
 
     def adjust_level(self) -> None:
         """Move the level toward the difficulty where the set-point share of

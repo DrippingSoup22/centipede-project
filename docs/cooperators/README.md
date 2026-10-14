@@ -75,6 +75,12 @@ behaviour, so main's configurations keep their meaning.
 | Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU | |
 | Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `critic_baselines`, `value_normalization` |
 | Level | `experiment/`: moved after every update cycle, logged as `task`, kept in checkpoints | |
+| Diagnostics | `environment/cooperative_diagnostics.py`: each step, each 20 s episode, and the gait read from the feet (each foot's lag behind the foot ahead and the foot opposite); the terminal's own line in `experiment/progress.py`. No report pages: the dashboard reads the log | |
+| Recordings | `interaction_loop/recording.py`, for both designs: one episode of each of the first worlds, each from its own episode start, ending by 25, 50, 75 and 100% of the update cycles; worlds ranked by targets reached | `[run] record_worlds`, 0 (nothing) by default |
+
+Recordings are the one change to main's behaviour: on the user's request
+(2026-10-14) nothing is recorded unless asked, and the earlier recording
+settings are retired.
 
 The first run's configuration is `configs/cooperators/01_baseline.toml` in
 `../CentipedeTraining`, and the energy check that set the force price is

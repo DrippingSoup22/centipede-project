@@ -12,12 +12,12 @@ from dataclasses import dataclass
 import torch
 
 from centipede.diagnostics_category import measure
+from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
-from centipede.environment.cooperative_reward import PART_NAMES, CooperativeReward
+from centipede.environment.cooperative_reward import CooperativeReward
 from centipede.environment.cooperative_task import CooperativeTask
-from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.head import target_under_head
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
@@ -45,9 +45,8 @@ class CooperativeEnvironment:
     environment with spine control. Rewards have two channels, goal and cost,
     ``(W, N, 2)``. An arrival never ends an episode: the next target appears
     at once. The only end is the time limit, a cut that the agents bootstrap
-    from; the world then restarts. ``diagnostics`` are the main environment's,
-    in which each target is an episode: it ends when reached, or when its
-    world restarts.
+    from; the world then restarts. ``diagnostics`` summarise each step and
+    each episode.
     """
 
     reward_channel_count = 2
@@ -93,10 +92,11 @@ class CooperativeEnvironment:
         self.reward = CooperativeReward(
             cooperators, segment_count, radius, body, commanded_joints
         )
-        self.diagnostics = EnvironmentDiagnostics(
+        self.diagnostics = CooperativeDiagnostics(
             self.world_count,
             segment_count,
-            list(PART_NAMES),
+            body.unit_weight_n,
+            self.head_outline,
             self.device,
             self.simulation.diagnostics.facts,
         )
@@ -119,10 +119,6 @@ class CooperativeEnvironment:
             state.head_tip_position[:, :2]
         )
         self.previous_joint_position = torch.zeros_like(self.last_action)
-        # No range circle: the diagnostics record an infinite one.
-        self.range_radius = torch.full(
-            (self.world_count,), torch.inf, device=self.device
-        )
 
     @property
     def level(self) -> float:
@@ -160,8 +156,8 @@ class CooperativeEnvironment:
                 0, self.settings.max_episode_steps, generator=self.task.generator
             )
         self.last_action.zero_()
-        self.diagnostics.start_episodes(
-            every_world, state, self.task.target_position, self.range_radius
+        self.diagnostics.new_targets(
+            every_world, every_world, state, self.task.target_position
         )
         return self._observations()
 
@@ -187,9 +183,9 @@ class CooperativeEnvironment:
         self.episode_steps += 1
 
         arrived = target_under_head(state, task.target_position, self.head_outline)
-        task.time_step(arrived)
+        in_time = task.time_step(arrived)
         near, far = task.distance_range_m()
-        rewards, step_rewards = self.reward.compute(
+        rewards, step_rewards, own_energy = self.reward.compute(
             state,
             self.previous_body_planar_position,
             self.previous_head_tip_position,
@@ -200,16 +196,17 @@ class CooperativeEnvironment:
             joint_action,
         )
         truncated = self.episode_steps >= self.settings.max_episode_steps
-        never = torch.zeros_like(truncated)
         self.diagnostics.record_step(
             state,
             self.previous_body_planar_position,
             self.previous_head_tip_position,
             task.target_position,
+            rewards,
             step_rewards,
+            own_energy,
             arrived,
-            truncated & ~arrived,
-            never,
+            in_time,
+            truncated,
         )
 
         # Walking on: a reached target is replaced where the head stands.
@@ -222,9 +219,10 @@ class CooperativeEnvironment:
             self.episode_steps.masked_fill_(truncated, 0)
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
             observations = self._observations()
-        self.diagnostics.start_episodes(
-            arrived | truncated, state, task.target_position, self.range_radius
+        self.diagnostics.new_targets(
+            arrived | truncated, truncated, state, task.target_position
         )
+        never = torch.zeros_like(truncated)
         return observations, rewards, never, truncated, final_observations
 
     def _observations(self) -> torch.Tensor:

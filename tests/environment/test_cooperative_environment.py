@@ -1,7 +1,8 @@
-"""Tests for the cooperators' environment and its task, observations and reward.
+"""Tests for the cooperators' environment and its task, observations, reward
+and diagnostics.
 
-The task, observations and reward are fed hand-made physical states; one test
-runs the whole environment on the CPU.
+The parts are fed hand-made physical states; one test runs the whole
+environment on the CPU.
 """
 
 import math
@@ -10,6 +11,8 @@ from pathlib import Path
 import pytest
 import torch
 
+from centipede.diagnostics_category import WindowSummary
+from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -20,9 +23,11 @@ from centipede.environment.cooperative_reward import (
 )
 from centipede.environment.cooperative_task import CooperativeTask
 from centipede.environment.environment import create_environment
+from centipede.environment.reward_function import StepRewards
 from centipede.environment.settings import CooperatorsSettings, EnvironmentSettings
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
+from centipede.environment.simulation.model_mapping import HeadOutline
 
 SETTINGS = CooperatorsSettings.from_section({})
 BODY = BodyMeasures(
@@ -88,7 +93,7 @@ def test_energy_is_shared_with_the_neighbours_seen_and_pain_stays_with_the_press
     action[0, 4, -1] = 1.0  # the rear's padding costs nothing
     previous = state.body_planar_position.clone()
 
-    channels, parts = reward.compute(
+    channels, parts, _ = reward.compute(
         state,
         previous,
         torch.tensor([[0.005, 0.0]]),
@@ -135,6 +140,56 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
     assert not observations[0, 1:, -2:].any()
 
 
+def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
+    """Every foot stands four steps of eight, each segment's a step behind the
+    one ahead and each right foot half a cycle behind its left: a wave from
+    head to tail of 45 degrees per segment, with the sides alternating."""
+    diagnostics = CooperativeDiagnostics(
+        2, SEGMENTS, BODY.unit_weight_n, HeadOutline(-0.002, 0.002, 0.002), "cpu", None
+    )
+    window = WindowSummary(diagnostics.step)
+    state = resting_state(2)
+    target = torch.tensor([[0.1, 0.0], [0.1, 0.0]])
+    every_world = torch.ones(2, dtype=torch.bool)
+    diagnostics.new_targets(every_world, every_world, state, target)
+    zeros = torch.zeros(2, SEGMENTS)
+    step_rewards = StepRewards(zeros, torch.zeros(2, SEGMENTS, 6), zeros, zeros)
+    delay = torch.arange(SEGMENTS)[:, None] + torch.tensor([0, 4])
+    for step in range(40):
+        standing = (step - delay) % 8 < 4
+        state.foot_normal_force.copy_(standing * BODY.unit_weight_n)
+        arrived = torch.tensor([step % 10 == 9, False])  # world 0, every 0.2 s
+        diagnostics.record_step(
+            state,
+            state.body_planar_position,
+            state.head_tip_position[:, :2],
+            target,
+            torch.zeros(2, SEGMENTS, 2),
+            step_rewards,
+            torch.zeros(2, SEGMENTS, 3),
+            arrived,
+            arrived,
+            torch.full((2,), step == 39),  # the time limit
+        )
+        window.add()
+        diagnostics.new_targets(arrived, torch.zeros_like(arrived), state, target)
+
+    gait = window.result()
+    torch.testing.assert_close(gait["foot_standing"], torch.full((SEGMENTS, 2), 0.5))
+    torch.testing.assert_close(
+        gait["neighbour_lag"], torch.full((SEGMENTS - 1, 2), math.pi / 4)
+    )
+    for name in ("neighbour_lag", "left_right_lag"):
+        assert torch.allclose(gait[f"{name}_consistency"], torch.tensor(1.0))
+        assert torch.allclose(gait[f"{name}_lock"], torch.tensor(1.0))
+    assert torch.allclose(gait["left_right_lag"].cos(), torch.tensor(-1.0))
+    episode = diagnostics.episode
+    assert episode.episode_ended.all()
+    assert episode.targets_reached.tolist() == [4.0, 0.0]
+    assert episode.targets_by_bearing[:, 0].tolist() == [4.0, 1.0]  # all ahead
+    assert episode.reached_by_bearing[:, 0].tolist() == [4.0, 0.0]
+
+
 def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit():
     settings = EnvironmentSettings.from_section(
         {
@@ -170,4 +225,3 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
     assert truncated.all() and not terminated.any()
     assert environment.episode_steps.tolist() == [0, 0]
     assert not torch.equal(final, environment._observations())
-    assert math.isinf(environment.diagnostics.step.range_radius[0])

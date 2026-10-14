@@ -70,8 +70,9 @@ class CooperativeReward:
         arrival_worth_m: float,
         previous_joint_position: torch.Tensor,
         joint_action: torch.Tensor,
-    ) -> tuple[torch.Tensor, StepRewards]:
-        """The ``(W, N, 2)`` rewards, goal then cost, and their parts.
+    ) -> tuple[torch.Tensor, StepRewards, torch.Tensor]:
+        """The ``(W, N, 2)`` rewards, goal then cost, their parts, and each
+        segment's own energy before sharing, ``(W, N, 3)`` in mJ.
 
         The goal: the millimetres each segment came closer to its target, the
         head's tip to the target, every other segment's centre to where the
@@ -123,9 +124,10 @@ class CooperativeReward:
             ),
             dim=-1,
         )
-        return channels, StepRewards(
+        step_rewards = StepRewards(
             rewards=channels.sum(dim=-1),
             reward_parts=parts,
             segment_progress=progress_m,
             joint_movement=context.joint_movement,
         )
+        return channels, step_rewards, own_energy

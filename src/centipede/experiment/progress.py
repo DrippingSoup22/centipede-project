@@ -28,6 +28,12 @@ episode, which ends at the target, out of the range circle, or at the time
 limit, so the bar fills toward the time limit and jumps to full when every
 world has finished sooner. Its results are the same values over the steps of
 those first episodes, and how they ended.
+
+The cooperators' design has its own two lines, which keep the bar and the
+times. Its episodes all last the time limit, so instead of their endings
+they show the task's level and how often its targets are reached in time,
+the targets reached per minute (in evaluation, per episode), the head's
+speeds, the gait's two lags, and the share of steps with a body down.
 """
 
 import math
@@ -50,6 +56,30 @@ TRAINING_COLUMNS = (
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
     "  |  {endings}"
+)
+# The cooperators' lines show the task and the gait instead of the endings.
+COOPERATIVE_TRAINING_COLUMNS = (
+    "{cycle}  {took:>6}  |  {level:>5}  {in_time:>7}  {targets:>7}  {speed:>9}"
+    "  {toward:>9}  {wave:>9}  {left_right:>10}  {body_down:>9}  |  {left:>6}"
+)
+COOPERATIVE_EVALUATION_COLUMNS = (
+    "{number}  {actor:<26}  {took:>6}  |  {targets:>7}  {in_time:>7}  {speed:>9}"
+    "  {toward:>9}  {wave:>9}  {left_right:>10}  {body_down:>9}"
+)
+COOPERATIVE_NAMES = {
+    "targets": "targets",
+    "speed": "speed",
+    "toward": "toward",
+    "wave": "wave",
+    "left_right": "left-right",
+    "body_down": "body down",
+}
+COOPERATIVE_LEGEND = (
+    "targets: reached per minute in each world. speed: the head's, along the"
+    " ground; toward: how fast\nit closes on its target. wave: each foot's lag"
+    " behind the same-side foot ahead, in degrees,\nthen its consistency from 0"
+    " (none) to 1; left-right: the same between a segment's two feet,\n180 when"
+    " they alternate. body down: share of steps with a body on the ground."
 )
 # Where the body-on-ground flag sits among a segment's contact flags.
 BODY_ON_GROUND = 2
@@ -222,6 +252,41 @@ def _behaviour(step: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _gait(step: dict[str, Any]) -> dict[str, str]:
+    """The cooperators' values from the step facts: targets per minute, the
+    head's speeds, the two lags, and the share of steps with a body down."""
+    return {
+        **_behaviour(step),
+        "targets": f"{step['target_reached'] * 60 / STEP_SECONDS:.1f}",
+        "wave": _lag(step["neighbour_lag"], step["neighbour_lag_consistency"]),
+        "left_right": _lag(step["left_right_lag"], step["left_right_lag_consistency"]),
+    }
+
+
+def _lag(means: Any, consistencies: Any) -> str:
+    """A lag over all the feet it was measured at: the direction of the mean of
+    their mean unit vectors, in degrees, and its length."""
+    pairs = [
+        (mean, consistency)
+        for mean, consistency in zip(_flat(means), _flat(consistencies), strict=True)
+        if mean is not None and consistency is not None
+    ]
+    if not pairs:
+        return "-"
+    x = sum(length * math.cos(angle) for angle, length in pairs) / len(pairs)
+    y = sum(length * math.sin(angle) for angle, length in pairs) / len(pairs)
+    return f"{math.degrees(math.atan2(y, x)):+.0f} {math.hypot(x, y):.2f}"
+
+
+def _flat(values: Any):
+    """The numbers of nested lists, in order."""
+    if isinstance(values, list):
+        for value in values:
+            yield from _flat(value)
+    else:
+        yield values
+
+
 def _endings(counts: list[float]) -> str:
     """Each ending's share of the counted episodes, under its column name."""
     total = sum(counts)
@@ -269,7 +334,13 @@ class _RedrawnLine:
 
 
 class TrainingProgress(_RedrawnLine):
-    """One line per window: a filling bar while it runs, then its results."""
+    """One line per window: a filling bar while it runs, then its results.
+
+    A subclass shows other results by changing ``COLUMNS``, the legend, the
+    column names, and ``_results``.
+    """
+
+    COLUMNS = TRAINING_COLUMNS
 
     def __init__(
         self, first_cycle: int, total_cycles: int, window_steps: int, episode_steps: int
@@ -288,36 +359,20 @@ class TrainingProgress(_RedrawnLine):
 
     def header(self) -> None:
         """The legend and the column names, once before the first window."""
-        span = self._recent_endings.maxlen
+        print(self._legend(), flush=True)
         print(
-            _legend(
-                f"the episodes that ended in the last {span} windows, one episode"
-                " length,\nin which every world ends at least one"
-            ),
-            flush=True,
-        )
-        print(
-            TRAINING_COLUMNS.format(
+            self.COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
                 took="took",
-                reward="reward/step",
-                speed="speed",
-                toward="toward",
-                body_down="body down",
-                episodes="episodes",
-                endings="  ".join(ENDINGS),
                 left="left",
+                **self._column_names(),
             ),
             flush=True,
         )
 
     def finish(self, record: dict[str, Any]) -> None:
         """Replace the line with the window's results."""
-        timing, step = record["timing"], record["step_facts"]
-        segments = step["reward_parts"]
-        reward_per_step = sum(sum(parts) for parts in segments) / len(segments)
-        self._recent_endings.append(record["episode_distributions"]["ending"])
-        counts = [sum(column) for column in zip(*self._recent_endings, strict=True)]
+        timing = record["timing"]
         took = timing["collecting_seconds"] + timing["learning_seconds"]
         # The training time left, at the mean time of the windows so far.
         self._seconds_taken += took
@@ -325,24 +380,80 @@ class TrainingProgress(_RedrawnLine):
         windows_left = self._total_cycles - self._cycle
         left = windows_left * self._seconds_taken / self._windows_taken
         self._end_pass(
-            TRAINING_COLUMNS.format(
+            self.COLUMNS.format(
                 cycle=self._label(),
                 took=f"{took:.1f} s",
-                reward=f"{reward_per_step:+.5f}",
-                **_behaviour(step),
-                episodes=f"{round(sum(counts))}",
-                endings=_endings(counts),
                 left=duration(left),
+                **self._results(record),
             )
         )
         self._cycle += 1
+
+    def _legend(self) -> str:
+        span = self._recent_endings.maxlen
+        return _legend(
+            f"the episodes that ended in the last {span} windows, one episode"
+            " length,\nin which every world ends at least one"
+        )
+
+    def _column_names(self) -> dict[str, str]:
+        return {
+            "reward": "reward/step",
+            "speed": "speed",
+            "toward": "toward",
+            "body_down": "body down",
+            "episodes": "episodes",
+            "endings": "  ".join(ENDINGS),
+        }
+
+    def _results(self, record: dict[str, Any]) -> dict[str, str]:
+        segments = record["step_facts"]["reward_parts"]
+        reward_per_step = sum(sum(parts) for parts in segments) / len(segments)
+        self._recent_endings.append(record["episode_distributions"]["ending"])
+        counts = [sum(column) for column in zip(*self._recent_endings, strict=True)]
+        return {
+            "reward": f"{reward_per_step:+.5f}",
+            **_behaviour(record["step_facts"]),
+            "episodes": f"{round(sum(counts))}",
+            "endings": _endings(counts),
+        }
 
     def _label(self) -> str:
         return f"{self._cycle}/{self._total_cycles}".rjust(self._cycle_width)
 
 
+class CooperativeTrainingProgress(TrainingProgress):
+    """The cooperators' line per window: the task's level and how often its
+    targets are reached, the head's speeds, and the gait."""
+
+    COLUMNS = COOPERATIVE_TRAINING_COLUMNS
+
+    def _legend(self) -> str:
+        return COOPERATIVE_LEGEND + (
+            "\nin time: share of the targets reached within their stopwatch, over"
+            " the last episode length."
+        )
+
+    def _column_names(self) -> dict[str, str]:
+        return {"level": "level", "in_time": "in time", **COOPERATIVE_NAMES}
+
+    def _results(self, record: dict[str, Any]) -> dict[str, str]:
+        task = record["task"]
+        in_time = task["in_time_share"]
+        return {
+            "level": f"{task['level']:.3f}",
+            "in_time": "-" if in_time is None else f"{in_time:.0%}",
+            **_gait(record["step_facts"]),
+        }
+
+
 class EvaluationProgress(_RedrawnLine):
-    """One line per actor and seed: a bar toward the time limit, then results."""
+    """One line per actor and seed: a bar toward the time limit, then results.
+
+    A subclass shows other results as ``TrainingProgress``'s do.
+    """
+
+    COLUMNS = EVALUATION_COLUMNS
 
     def __init__(self, total_passes: int, max_episode_steps: int) -> None:
         super().__init__(max_episode_steps)
@@ -354,16 +465,13 @@ class EvaluationProgress(_RedrawnLine):
 
     def header(self) -> None:
         """The legend and the column names, once before the first pass."""
-        print(_legend("every world's first episode"), flush=True)
+        print(self._legend(), flush=True)
         print(
-            EVALUATION_COLUMNS.format(
+            self.COLUMNS.format(
                 number="pass".rjust(self._number_width),
                 actor="actor and seed",
                 took="took",
-                speed="speed",
-                toward="toward",
-                body_down="body down",
-                endings="  ".join(ENDINGS),
+                **self._column_names(),
             ),
             flush=True,
         )
@@ -378,17 +486,55 @@ class EvaluationProgress(_RedrawnLine):
         number = self._number()
         self._done += 1
         self._end_pass(
-            EVALUATION_COLUMNS.format(
+            self.COLUMNS.format(
                 number=number,
                 actor=self._actor,
                 took=duration(took),
-                **_behaviour(record["step_facts"]),
-                endings=_endings(record["episode_distributions"]["ending"]),
+                **self._results(record),
             )
         )
+
+    def _legend(self) -> str:
+        return _legend("every world's first episode")
+
+    def _column_names(self) -> dict[str, str]:
+        return {
+            "speed": "speed",
+            "toward": "toward",
+            "body_down": "body down",
+            "endings": "  ".join(ENDINGS),
+        }
+
+    def _results(self, record: dict[str, Any]) -> dict[str, str]:
+        return {
+            **_behaviour(record["step_facts"]),
+            "endings": _endings(record["episode_distributions"]["ending"]),
+        }
 
     def _number(self) -> str:
         return f"{self._done + 1}/{self._total_passes}".rjust(self._number_width)
 
     def _label(self) -> str:
         return f"{self._number()}  {self._actor:<26}"
+
+
+class CooperativeEvaluationProgress(EvaluationProgress):
+    """The cooperators' line per actor and seed: the targets each world's
+    episode reached, the head's speeds, and the gait."""
+
+    COLUMNS = COOPERATIVE_EVALUATION_COLUMNS
+
+    def _legend(self) -> str:
+        return COOPERATIVE_LEGEND.replace("per minute in each world", "per episode")
+
+    def _column_names(self) -> dict[str, str]:
+        return {"in_time": "in time", **COOPERATIVE_NAMES}
+
+    def _results(self, record: dict[str, Any]) -> dict[str, str]:
+        episodes = record["episodes"]
+        reached, in_time = episodes["targets_reached"], episodes["targets_in_time"]
+        return {
+            **_gait(record["step_facts"]),
+            "targets": "-" if reached is None else f"{reached:.1f}",
+            "in_time": "-" if in_time is None else f"{in_time:.1f}",
+        }

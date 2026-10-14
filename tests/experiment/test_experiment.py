@@ -65,7 +65,10 @@ def saved_update_count(checkpoint_path):
 
 
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
-    folder = run_file(tmp_path, TRAINING_FILE, NAME="probe")
+    recorded = TRAINING_FILE.replace(
+        'runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1'
+    )
+    folder = run_file(tmp_path, recorded, NAME="probe")
 
     checkpoints = folder / "checkpoints"
     assert sorted(path.name for path in checkpoints.iterdir()) == [
@@ -75,36 +78,18 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert logged_cycles(folder) == [1, 2, 3]
     assert "/*REPORT_DATA*/" not in (folder / "report.html").read_text(encoding="utf-8")
 
-    # Every episode length (3 steps, so two windows of 2) is one recording of
-    # both worlds; the last is cut short where the run ends.
-    recordings = sorted(path.name for path in (folder / "recordings").iterdir())
-    assert recordings == ["cycles_0001-0002.npz", "cycles_0003-0003.npz"]
-    whole = read_recording(folder / "recordings" / "cycles_0001-0002.npz")
-    assert whole.qpos.shape == (4, 2, 69)
-    assert whole.frame_info[:, 0].tolist() == [0, 0, 1, 1]  # updates done
-    assert (whole.event_frames.tolist(), whole.event_labels) == (
-        [2, 4],
-        ("update 1", "update 2"),
-    )
-    recording = read_recording(folder / "recordings" / "cycles_0003-0003.npz")
-    assert recording.qpos.shape == (2, 2, 69)
-    assert recording.level.tolist() == [1, 3]  # 2 worlds over 4 levels
-    assert (recording.rank.tolist(), recording.ranked_worlds) == ([1, 2], 2)
-    assert recording.level_count == 4
+    # In so short a run every recording would start at the first cycle: the
+    # last, at 100%, records the first world's next episode, from its start.
+    (recording_path,) = (folder / "recordings").iterdir()
+    assert recording_path.name == "100pct_cycles_0001-0003.npz"
+    recording = read_recording(recording_path)
+    assert recording.qpos.shape == (3, 1, 69)
+    assert recording.episode_start[0, 0]
+    assert recording.score_name == "summed reward"
     # The target, and the range circle as a ring of 2.5 x the start distance.
-    assert recording.marker_names == ("target", "range")
     assert recording.marker_shapes == ("sphere", "ring")
-    assert recording.marker_positions.shape == (2, 2, 2, 3)
     ring = recording.marker_radius[..., 1]
-    assert recording.marker_radius.shape == (2, 2, 2)
     assert np.all((ring >= 2.5 * 0.030 - 1e-6) & (ring <= 2.5 * 0.060 + 1e-6))
-    assert recording.frame_info[:, 0].tolist() == [2, 2]  # updates done
-    assert recording.frame_info[:, 1].tolist() == [5, 6]  # steps per world
-    assert (recording.event_frames.tolist(), recording.event_labels) == (
-        [2],
-        ("update 3",),
-    )
-    assert recording.setup["configuration"]["run"]["record_every_episodes"] == 1
     assert "<include" not in recording.model_xml
 
     continuing = (
@@ -211,8 +196,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
         .replace("max_episode_steps = 3", "max_episode_steps = 3\nspine_control = true")
         .replace(
             'runs_folder = "RUNS"',
-            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"\n'
-            "record_every_episodes = 0",
+            f'runs_folder = "RUNS"\nstart_from = "{parent.as_posix()}"',
         )
         .replace(
             "hidden_layers = [8]",
@@ -231,7 +215,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     assert checkpoint["agents"]["segment_action_sizes"] == [7] * 7 + [6]
     assert saved_update_count(child / "checkpoints" / "cycle_0003.pt") == 6
     assert logged_cycles(child) == [1, 2, 3]
-    assert not (child / "recordings").exists()  # recording was turned off
+    assert not (child / "recordings").exists()  # nothing recorded by default
     # Its own learning rate replaced the parent's, along its own cycles.
     lines = (child / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
     rates = [json.loads(line)["learning"]["learning_rate"] for line in lines]
