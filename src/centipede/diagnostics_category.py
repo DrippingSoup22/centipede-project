@@ -6,8 +6,9 @@ with ``measure``, which records what the value means, its unit, and how it is
 summarised over worlds and steps. Logs and reports are built from these
 descriptions, so every value appears in them. ``WindowSummary`` summarises a
 category over the steps of a window and, for values declared with
-``histogram_edges``, also counts how the rows spread over those bins. See
-docs/diagnostics.md.
+``histogram_edges``, also counts how the rows spread over those bins. An angle
+is summarised by its circular mean and by how steady it is, across the worlds
+and within each world. See docs/diagnostics.md.
 
 Example, for a made-up category::
 
@@ -29,6 +30,7 @@ SUMMARIES = (
     "count",  # the number of true flags
     "maximum",  # the largest value
     "recorded",  # kept as it is for recordings; never summarised
+    "angle",  # the circular mean of an angle, in rad, with its consistency and lock
 )
 
 
@@ -40,7 +42,9 @@ class Description:
     contact flags, so that logs and reports can label them. ``histogram_edges``,
     in the value's unit, asks a window summary to also count the rows in each
     bin between consecutive edges; rows outside the edges count in the first or
-    the last bin.
+    the last bin. ``counted_where`` names a true/false value of the same
+    category and shape that picks the entries a mean counts: each entry is
+    averaged only over the worlds and steps where its flag is true.
     """
 
     meaning: str
@@ -48,6 +52,7 @@ class Description:
     summary: str
     parts: tuple[str, ...] = ()
     histogram_edges: tuple[float, ...] = ()
+    counted_where: str = ""
 
 
 def measure(
@@ -56,12 +61,15 @@ def measure(
     summary: str = "mean",
     parts: tuple[str, ...] = (),
     histogram_edges: tuple[float, ...] = (),
+    counted_where: str = "",
 ) -> Any:
     """Declare one field of a diagnostics category, with its description."""
     if summary not in SUMMARIES:
         raise ValueError(f"summary must be one of {SUMMARIES}, not {summary!r}")
     edges = tuple(float(edge) for edge in histogram_edges)
-    description = Description(meaning, unit, summary, tuple(parts), edges)
+    description = Description(
+        meaning, unit, summary, tuple(parts), edges, counted_where
+    )
     return field(metadata={"description": description})
 
 
@@ -88,25 +96,53 @@ class WindowSummary:
     rows in a window, means and shares are NaN and maxima are minus infinity.
     ``histograms`` gives the bin counts of the values that declare edges.
     Values declared ``recorded`` are not summarised and do not appear in
-    ``descriptions`` or ``result``.
+    ``descriptions`` or ``result``. A mean declared with ``counted_where``
+    counts each entry only where that flag is true, and is NaN for an entry
+    whose flag never was.
+
+    An ``angle``, in rad, is summarised by the direction of the mean of its
+    unit vectors (cos, sin), from -pi to pi, and by two lengths of such means,
+    from 0 to 1, which ``descriptions`` and ``result`` add after it under the
+    angle's name with ``_consistency`` and ``_lock``: the consistency, over
+    every counted world and step, is 1 when the angle is the same everywhere
+    and near 0 when it points every way; the lock, over the counted steps of
+    each world then averaged over the worlds, is 1 when the angle stays the
+    same within each world, whatever it is in the others. An angle declared
+    with ``counted_where`` counts each entry only where its flag is true.
     """
 
     def __init__(self, category: Any, mask_field: str | None = None) -> None:
         """Allocate the running totals, on the category's device."""
         self.category = category
         self.mask_field = mask_field
-        # Recorded values are left out of the summary entirely.
-        self.descriptions = {
-            name: description
-            for name, description in descriptions(category).items()
-            if description.summary != "recorded"
-        }
+        # Recorded values are left out of the summary entirely; an angle adds
+        # its consistency and lock after it.
+        self.descriptions = {}
+        for name, description in descriptions(category).items():
+            if description.summary == "recorded":
+                continue
+            self.descriptions[name] = description
+            if description.summary == "angle":
+                self.descriptions |= _steadiness_descriptions(name, description)
         first_value = next(iter(values(category).values()))
         self._row_count = torch.zeros((), device=first_value.device)
         self._totals = {
             name: torch.zeros(value.shape[1:], device=value.device)
             for name, value in values(category).items()
-            if name in self.descriptions
+            if name in self.descriptions and self.descriptions[name].summary != "angle"
+        }
+        # Per mean counted where a flag is true, how often each entry counted.
+        self._entry_counts = {
+            name: torch.zeros(value.shape[1:], device=value.device)
+            for name, value in values(category).items()
+            if name in self.descriptions and self.descriptions[name].counted_where
+        }
+        # Per angle, each world's sums over the window of its cosine and sine,
+        # and how many times each entry counted, after the angle's entries.
+        self._angle_sums = {
+            name: torch.zeros((*value.shape, 3), device=value.device)
+            for name, value in values(category).items()
+            if name in self.descriptions and self.descriptions[name].summary == "angle"
         }
         # Per histogram: the inner edges, the counts with the bins as the last
         # dimension, and each entry's first position in the flattened counts.
@@ -137,6 +173,10 @@ class WindowSummary:
                 total.zero_()
         for _, counts, _ in self._histograms.values():
             counts.zero_()
+        for counts in self._entry_counts.values():
+            counts.zero_()
+        for sums in self._angle_sums.values():
+            sums.zero_()
 
     def add(self, counted_worlds: torch.Tensor | None = None) -> None:
         """Fold in the category's current values of the counted ``(W,)`` worlds.
@@ -164,10 +204,26 @@ class WindowSummary:
                 if mask is not None:
                     value = torch.where(_rows(mask, value), value, -torch.inf)
                 torch.maximum(total, value.amax(dim=0), out=total)
+            elif name in self._entry_counts:
+                counted = category_values[self.descriptions[name].counted_where]
+                if mask is not None:
+                    counted = counted & _rows(mask, counted)
+                total += torch.where(counted, value, 0.0).sum(dim=0)
+                self._entry_counts[name] += counted.sum(dim=0)
             else:
                 if mask is not None:
                     value = torch.where(_rows(mask, value), value, 0.0)
                 total += value.sum(dim=0)
+
+        for name, sums in self._angle_sums.items():
+            angle = category_values[name].float()
+            flag = self.descriptions[name].counted_where
+            counted = category_values[flag].float() if flag else torch.ones_like(angle)
+            if mask is not None:
+                counted = counted * _rows(mask, counted)
+            sums += torch.stack(
+                (angle.cos() * counted, angle.sin() * counted, counted), dim=-1
+            )
 
         for name, (inner_edges, counts, entry_offsets) in self._histograms.items():
             value = category_values[name].float()
@@ -183,21 +239,67 @@ class WindowSummary:
             )
 
     def result(self) -> dict[str, torch.Tensor]:
-        """Every field's summary so far, by field name, in declaration order."""
+        """Every field's summary so far, by field name, in declaration order;
+        an angle's consistency and lock follow it."""
         summaries = {}
-        for name, total in self._totals.items():
-            summary = self.descriptions[name].summary
-            if summary in ("mean", "share"):
-                summaries[name] = total / self._row_count
-            else:
-                summaries[name] = total.clone()
+        for name, description in self.descriptions.items():
+            if name in self._angle_sums:
+                summaries |= self._angle_summary(name)
+            elif name in self._totals:
+                total = self._totals[name]
+                if name in self._entry_counts:
+                    summaries[name] = total / self._entry_counts[name]
+                elif description.summary in ("mean", "share"):
+                    summaries[name] = total / self._row_count
+                else:
+                    summaries[name] = total.clone()
         return summaries
+
+    def _angle_summary(self, name: str) -> dict[str, torch.Tensor]:
+        """An angle's circular mean, consistency, and lock; NaN without rows."""
+        sums = self._angle_sums[name]
+        totals = sums.sum(dim=0)
+        mean_vector = totals[..., :2] / totals[..., 2:]
+        world_counts = sums[..., 2:]
+        world_lengths = (sums[..., :2] / world_counts.clamp(min=1)).norm(dim=-1)
+        counted_worlds = world_counts[..., 0] > 0
+        lock = (world_lengths * counted_worlds).sum(dim=0) / counted_worlds.sum(dim=0)
+        return {
+            name: torch.atan2(mean_vector[..., 1], mean_vector[..., 0]),
+            f"{name}_consistency": mean_vector.norm(dim=-1),
+            f"{name}_lock": lock,
+        }
 
     def histograms(self) -> dict[str, torch.Tensor]:
         """Bin counts so far of the values that declare histogram edges."""
         return {
             name: counts.clone() for name, (_, counts, _) in self._histograms.items()
         }
+
+
+def _steadiness_descriptions(
+    name: str, description: Description
+) -> dict[str, Description]:
+    """The descriptions of an angle's consistency and lock."""
+    label = name.replace("_", " ")
+    return {
+        f"{name}_consistency": Description(
+            f"How alike the {label} is across every world and step: the length of"
+            " the mean of its unit vectors, from 0 (no common direction) to 1 (the"
+            " same everywhere)",
+            "",
+            "mean",
+            description.parts,
+        ),
+        f"{name}_lock": Description(
+            f"How steady the {label} stays within each world: the length of the"
+            " mean of its unit vectors over each world's steps, averaged over the"
+            " worlds, from 0 to 1 (steady)",
+            "",
+            "mean",
+            description.parts,
+        ),
+    }
 
 
 def _rows(mask: torch.Tensor, like: torch.Tensor) -> torch.Tensor:
