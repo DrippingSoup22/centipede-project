@@ -26,8 +26,10 @@ same mass and strength.
 
 ## What the legs can do
 
-In v4's pose a foot is about 8.5 mm from its shoulder, horizontally, so a
-shoulder torque of 1 µN·m makes about 0.12 mN at the foot.
+In v4's pose a foot is about 8.5 mm from its shoulder, horizontally (8.52
+mm, as the simulation reads it), so a shoulder torque of 1 µN·m makes about
+0.12 mN at the foot, and the sweep's strongest push, which prices pain, is
+0.94 mN.
 
 | Joint | Maximum torque | At the foot | In body terms |
 | --- | ---: | ---: | --- |

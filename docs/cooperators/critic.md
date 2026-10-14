@@ -1,6 +1,7 @@
 # Critic
 
-**Status: decided** (the user, 2026-10-14).
+**Status: decided** (the user, 2026-10-14) **and built**
+([As built](#as-built)).
 
 A critic estimates how good a state is, so that learning can ask after
 every action: did things go better or worse than expected? That difference,
@@ -109,6 +110,36 @@ teammates' actions to the target, this one subtracts them out.
 - **The head is different.** It alone sees the target, so its goal and its
   goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.
+
+## As built
+
+**Each critic has two networks** (the user's agreement, 2026-10-14). A
+critic that sees the neighbours' actions of the same step cannot value a
+state nobody has acted in yet: the state an episode is cut in, or the one a
+window ends on, where learning must look ahead. So each critic is:
+
+| Network | Sees | Learns | Used for |
+| --- | --- | --- | --- |
+| Value | What its actor sees | The return targets | Looking ahead: bootstrapping and the return targets (GAE) |
+| Baseline | That, and the four neighbours' actions of the same step (36 values) | The same return targets | The actor's advantage: return target minus baseline |
+
+The baseline regresses the return on the state and the neighbours' actions,
+so it learns the return's expectation over the segment's own action: Wu et
+al.'s action-dependent baseline. Every segment has four such networks, goal
+and cost, value and baseline, each 2 × 64, and an actor of 2 × 64.
+
+- **Value normalisation** (MAPPO's first advice, Yu et al., NeurIPS 2022):
+  every critic's value and baseline learn its return targets standardised
+  by their running mean and spread, so millimetres and millijoules never set
+  the scale the networks learn.
+- **The combination**: each critic's advantage normalised over the batch on
+  its own, then added 1 : 1 (`advantage_weights`).
+- **Logged**: every critic's and every baseline's explained variance after
+  each update. A baseline explaining much more than its value shows the
+  neighbours' actions at work.
+
+The PPO is RL_lib's, on its `cooperators` branch; the settings are
+`[agents] critic_baselines`, `value_normalization` and `advantage_weights`.
 
 ## Not chosen
 

@@ -1,6 +1,6 @@
 # Observations
 
-**Status (2026-10-14): agreed with the user.**
+**Status (2026-10-14): agreed with the user and built.**
 
 ## Decided
 
@@ -79,6 +79,19 @@ speed from what it sees and from its legs, and robots estimate theirs from
 an inertial sensor and leg motion. The project is a simulation, so the
 exact reading is a choice of simplicity, not of realism; legged_gym's
 policies read the simulator's body velocity the same way.
+
+## As built
+
+The block's values in order: gravity's direction (3), velocity (3), angular
+velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
+angle and speed, the feet's forces pressing down (left, right) and along the
+segment (left, right), the belly's force, the force of its legs pressed by
+others, and the last action (9; the rear's ninth is always zero). The
+forces are means over the step's 134 physics steps, in unit weights of
+0.857 mN; after a reset, the starting pose's own. The target comes last,
+forward and to the left of the head's tip, in metres, zeros for the
+followers. Each agent normalises its inputs with running statistics, as on
+main.
 
 ## Later experiments
 

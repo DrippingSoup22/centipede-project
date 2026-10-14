@@ -1,7 +1,7 @@
 # The cooperators design
 
 This folder holds the design of the `cooperators` workspace branch, one file
-per part: what is decided, what is proposed, and what is still open. The
+per part: what is decided, how it is built, and what is still open. The
 other documents in `docs/` describe the program this branch started from
 (`main` at d8b8671); where this folder decides differently, this folder
 holds on this branch.
@@ -52,13 +52,33 @@ Set by the user on 2026-10-14.
 
 | Part | File | Status |
 | --- | --- | --- |
-| Critic | [critic.md](critic.md) | Decided |
-| Reward | [reward.md](reward.md) | Agreed: goal in millimetres, energy and pain |
-| Observations | [observations.md](observations.md) | Agreed: radius 2, a 42-value block |
-| Actions | [actions.md](actions.md) | Agreed: 8 leg torques and the spine joint behind, every 20 ms |
+| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic |
+| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy and pain in millijoules; force price measured |
+| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block |
+| Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
-| Task | [task.md](task.md) | Agreed, with numbers |
+| Task | [task.md](task.md) | Built, with numbers |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |
+
+## In the code
+
+Built on 2026-10-14 (cycle 1). The configuration chooses the design with
+`[environment] design = "cooperators"`; every new setting defaults to main's
+behaviour, so main's configurations keep their meaning.
+
+| Part | Where | Settings |
+| --- | --- | --- |
+| Environment | `environment/cooperative_environment.py`, made by the front file's `create_environment` | `[environment] design`, `max_episode_steps`, `observation_radius` |
+| Task | `environment/cooperative_task.py` | `[environment.cooperators]` |
+| Observations | `environment/cooperative_observations.py` | |
+| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]` |
+| Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU | |
+| Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `critic_baselines`, `value_normalization` |
+| Level | `experiment/`: moved after every update cycle, logged as `task`, kept in checkpoints | |
+
+The first run's configuration is `configs/cooperators/01_baseline.toml` in
+`../CentipedeTraining`, and the energy check that set the force price is
+its `analysis/energy_check.py`.
 
 ## The plan
 

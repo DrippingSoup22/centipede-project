@@ -1,7 +1,7 @@
 # Reward
 
-**Status (2026-10-14): agreed with the user, structure and ratios; the
-formulas are written at implementation.**
+**Status (2026-10-14): agreed with the user and built; the force price
+measured on the model ([As built](#as-built)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -347,9 +347,73 @@ force is worth.
 | Goal : costs | 1 : 1, agreed |
 | α | Halving per segment, as a share of the whole, agreed |
 | Pushing : braking work | About 4 : 1, from muscle data, agreed |
-| Work : force, inside energy | Force dominant, as in animals of a gram, agreed; the exact ratio measured on our model |
+| Work : force, inside energy | Force dominant, as in animals of a gram, agreed: 90% of a raised walk's energy at the level-1 pace, which sets the force price at 2.19 mJ per second of one motor fully on ([As built](#as-built)) |
 | Pain : energy | 1 : 1 in activation, agreed |
 | Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
+
+## As built
+
+Every quantity is per segment and per 20 ms step; the simulation measures
+forces and work after each of the step's 134 physics steps.
+
+**The goal channel**, in millimetres. For segment *i*, with *d* its flat
+distance to its target before and after the step (the head's tip to the
+target; a follower's centre to where the segment ahead's centre was before
+the step):
+
+> goal = 1000 · (d_before − d_after) + arrival
+
+The arrival is the head's alone: when the target comes under the head, the
+middle distance of the level's targets, (near + far) / 2, in millimetres
+(`arrival_approaches` = 1 average approach).
+
+**The cost channel**, in millijoules. Each segment's own energy, over its
+leg motors and the spine motor behind it:
+
+> e = 1000 · (W⁺ + ¼ W⁻) + p · Σ a²
+
+with W⁺ and W⁻ the step's pushing and braking work in joules (torque times
+joint speed times the timestep, by its sign), a each motor's command, and
+p = 2.19 mJ/s × 0.02 s = 0.0438 mJ, the force price of one motor fully on
+for a step. A segment pays its neighbourhood's energy, shared, and its own
+pain:
+
+> cost = −Σⱼ wᵢⱼ eⱼ − p · mean(F²) / F_push²
+
+where wᵢⱼ = 0.5^|i−j| over the segments it sees, scaled to add up to one,
+F is the force with which its legs press other legs, and F_push the
+strongest push of a leg's sweep at its foot, 0.94 mN on v4. The parts are
+logged apart: progress, arrival, pushing, braking, force, pain.
+
+**The force price, measured** (`analysis/energy_check.py` in
+`../CentipedeTraining`). Scripted gaits on v4: each sweep driven along a
+sine by a feedforward command, the lifts pressing in stance and rising in
+swing, a wave over five segments. The reference is a raised walk at the
+level-1 pace, 2.5 strides a second; the price makes force 90% of its energy.
+The 90%: a 1 g animal's speed-dependent metabolic cost (Taylor, Heglund and
+Maloiy, J. Exp. Biol. 1982) and its mechanical power (Heglund et al., J.
+Exp. Biol. 1982), extrapolated to a gram at 35 mm/s, leave the work at 25%
+muscle efficiency about 12% of the cost; force takes the rest, in line with
+Kram and Taylor (1990), who found the cost of running set by the force the
+legs make. An estimate, not a measurement of centipedes.
+
+| Gait | Speed | Height | Feet carry | Energy | Per mm walked |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rest on the belly | 0 | 1.7 mm | 3% | 0 | |
+| Stand | 0 | 7.9 mm | 100% | 6.0 mJ/s | |
+| Raised walk, 2 Hz | 27 mm/s | 7.7 mm | 100% | 9.7 mJ/s | 357 µJ |
+| Raised walk, 2.5 Hz (reference) | 38 mm/s | 7.4 mm | 100% | 11.1 mJ/s | 293 µJ |
+| Raised walk, 6 Hz | 89 mm/s | 7.7 mm | 100% | 15.5 mJ/s | 173 µJ |
+| Belly drag, 2.5 Hz | 2.5 mm/s | 1.7 mm | 52% | 7.8 mJ/s | 3,119 µJ |
+| Belly drag, 6 Hz | 8.7 mm/s | 1.7 mm | 54% | 13.1 mJ/s | 1,498 µJ |
+
+The check of realism passes: walking raised costs 5 to 10 times less per
+millimetre than dragging the belly, and a still centipede saves by resting
+on its belly, as a real one does. Two lessons: the scripted walks' work is
+mostly the joints' damping (fast leg swings), not the body's motion; and
+with force dominant, a faster walk is cheaper per millimetre up to the
+fastest tried, 1.6 body lengths a second, so the preferred speed lies
+higher, and the task's distances, not energy, will set the pace at first.
 
 ## Left out
 

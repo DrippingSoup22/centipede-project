@@ -1,6 +1,6 @@
 # Actions
 
-**Status (2026-10-14): agreed with the user.**
+**Status (2026-10-14): agreed with the user and built.**
 
 ## What the constraints fix
 
@@ -57,8 +57,8 @@ learning time.
 
 ## Not part of the vector
 
-- **How actions explore** (white or coloured noise, smoothing): a choice
-  of learning, made with the agents' settings.
+- **How actions explore**: a choice of learning, made with the agents'
+  settings; white noise to start (the user, 2026-10-14), main's default.
 - **Asymmetric joints**: real muscles push harder toward the ground than
   away from it; v4's motors are symmetric, a known difference without
   centipede data ([forces.md](forces.md)).

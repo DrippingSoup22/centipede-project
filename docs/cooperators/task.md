@@ -1,6 +1,7 @@
 # Task
 
-**Status (2026-10-14): agreed with the user.** The
+**Status (2026-10-14): agreed with the user and built
+([As built](#as-built)).** The
 task is the environment's side of the problem: the targets, the episodes,
 how the difficulty grows, and what happens after an arrival.
 
@@ -241,6 +242,26 @@ level, as above, is simpler to read; this stays an option.
 reach 10%, the walk being learned from progress; middle is the level
 rising; late is the level at 1 or no longer rising. They are measured,
 not set.
+
+## As built
+
+- **The full circle from the model.** The near end must clear the body's
+  length plus its turning circle, both read from the model: on v4, 54.75 mm
+  and 32.9 mm (units 4.3 mm apart, each spine joint bent to 15°), so 87.7 mm,
+  reached at level 0.53. The estimate above said 0.55.
+- **The level** moves after every update cycle, by the stopwatches of the
+  last episode length of steps (1,000), and not before one episode length
+  is recorded, so a lucky cycle cannot move it. It is logged as `task`,
+  kept in each checkpoint, and a continued run or an evaluation starts from
+  it.
+- **Staggered first episodes**: after a full reset each world starts at a
+  random step of its episode. Evaluations turn it off
+  (`stagger_first_episodes = false`), to judge whole episodes.
+- **What the logs call an episode** is a target: it ends when reached or
+  when its world restarts, so the episode tables read per target (arrived,
+  time taken, distance closed); the stopwatch's share is the `task` log's.
+- The settings are `[environment.cooperators]`, with the values above as
+  defaults; the episode is main's `max_episode_steps`, 1,000.
 
 ## A point to weigh (answered in the reward)
 
