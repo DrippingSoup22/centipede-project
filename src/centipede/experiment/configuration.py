@@ -405,6 +405,16 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
             " through an arrival, after which the body walks on: set"
             ' [environment.target] after_arrival = "new_target"'
         )
+    if (
+        configuration.agents.ppo.temporal_smoothness_coefficient
+        and environment.hold_curves
+        and (environment.hold_spine or not environment.spine_control)
+    ):
+        raise SettingsError(
+            "[agents.ppo] temporal_smoothness_coefficient compares the mean"
+            " actions of consecutive steps; with every action held for a turn"
+            " the agents learn from whole turns: leave it at 0"
+        )
     backend = configuration.environment.simulation.backend
     if configuration.agents.device != DEVICE_FOR_BACKEND[backend]:
         raise SettingsError(

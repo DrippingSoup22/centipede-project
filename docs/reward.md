@@ -20,7 +20,13 @@ head learns its step and the [task](#1-task-terms), each with a [critic of
 its own](#a-task-critic-for-the-head). Each segment decides its legs' curves
 and its tempo once per turn and [holds them for the whole
 turn](#curves-held-for-a-turn), and learns from each turn as a whole. Model v5, model B, the circle
-task from 10 cm, white noise for the turns and pink for the neck, no CAPS. Before it, runs 51 to 56 paid every
+task from 10 cm, white noise for the turns and pink for the neck, no CAPS.
+**Run 58, the user's appendix test** (2026-10-14): the same reward at a
+[fixed tempo](#a-fixed-tempo) of 6 Hz, so without the tempo chain, the
+head's task at the walk's weight (1), and [whole
+turns](#learning-from-whole-turns): if this simpler body cannot learn to
+walk, the full one will not either; the main line returns to the heart and
+the chain afterwards. Before it, runs 51 to 56 paid every
 segment the head's task and charged the [retired](#retired-reward-terms)
 health costs (foot hold, carry, leg pushing): the followers' critics
 explained none of their returns, because the shared task they could neither
@@ -364,16 +370,19 @@ pays −0.00001.
 
 Everything around the reward: how the legs are driven, what each segment
 sees, how the agents explore, and how training is scheduled.
-✅ is in use now (run 57); ⬜ is not. The runs are those of the study notes
+✅ is in use now (run 57); ⬜ is not; the appendix test, run 58, differs as
+its rows say. The runs are those of the study notes
 (`results/oscillators/README.md` in CentipedeTraining).
 
 | | Tool | Kind | Setting | Runs |
 | :---: | --- | --- | --- | --- |
 | ⬜ | [Model A, the network draws](#model-a-the-network-draws) | Leg control | `leg_drive = "swing"` | pilot |
 | ✅ | [Model B, the clock is the engine](#model-b-the-clock-is-the-engine) | Leg control | `leg_drive = "waves"`, `waves = 2` | 31– |
-| ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]`, `max_tempo_hz = 12.5` | 31– (ceiling 35–) |
+| ✅ | [The heart](#the-heart) | Leg control | `tempo_rate_octaves_per_s = 1`, `start_tempo_range_hz = [1, 4]`, `max_tempo_hz = 12.5` | 31–57 (ceiling 35–) |
+| ⬜ | [A fixed tempo](#a-fixed-tempo) | Leg control | `[environment.clock] fixed_tempo = true`, `middle_tempo_hz = 6` | 58 |
 | ✅ | [Targets along the curve](#targets-along-the-curve) | Leg control | always with models A and B | 31– |
 | ✅ | [Curves held for a turn](#curves-held-for-a-turn) | Leg control | `hold_curves = true` | 57– |
+| ⬜ | [Learning from whole turns](#learning-from-whole-turns) | Leg control | `hold_spine = true` | 58 |
 | ✅ | [A clock per leg](#a-clock-per-leg) | Leg control | `leg_clocks = true`, `segment_tempo = true` | 08– |
 | ✅ | [Passive follower spine](#passive-follower-spine) | Leg control | `passive_follower_spine = true` | all |
 | ⬜ | [The step shape](#the-step-shape) | Leg control | `leg_drive = "step_shape"` | 08–28 |
@@ -485,6 +494,21 @@ segment sees each of its hands as `cos φ`, `sin φ`, and its tempo in octaves
 around 2 Hz.
 </details>
 
+#### A fixed tempo
+
+⬜ **Idea.** The user's appendix test (2026-10-14, run 58): the heart
+stops, and every clock turns at one tempo, 6 Hz, about *S. polymorpha*'s on
+flat ground (Diaz et al., J. Exp. Biol. 2023). The segments lose their tempo
+action, so nothing they output goes unread, and the rhythm leaves what they
+learn: a body that cannot learn to walk with its rhythm given will not learn
+it with its own. With every tempo equal, the [tempo chain](#tempo-chain),
+the [neighbours' tempos](#neighbours-tempos) and the [tempo
+noise](#tempo-noise-that-follows-the-gap) have nothing to do and are off.
+Each segment's hand still starts at a random place. Run 57's heart had let
+the tempo fall from 2.2 to 0.9 Hz, one way of moving less; at 6 Hz a turn
+is 8.3 steps, so a 128-step window holds about 15 of each segment's turns
+instead of 2.3.
+
 #### Targets along the curve
 
 ✅ **Idea.** Within each 20 ms step a leg's target moves along its curve
@@ -552,6 +576,44 @@ Sutton and Barto, 2nd ed., 2018, section 12.8; a turn is one step of a
 semi-Markov decision process, Sutton, Precup and Singh, 1999). The agents
 find the turns' starts from the masks: the steps on which every action took
 effect.
+</details>
+
+#### Learning from whole turns
+
+⬜ **Idea.** The user's (2026-10-14, run 58): one action, held until the
+next, so one sample per turn: what the segment saw as the turn started, the
+actions it held, the turn's rewards added up, and where the next turn
+starts. The head's neck is held for the turn too (`hold_spine`), so every
+action is a turn's decision, and only the turns reach PPO: no masks, every
+action explores with white noise, and the critic learns only the values at
+turns' starts, the ones the decisions are judged by.
+
+<details>
+<summary>Math, and what it changes</summary>
+
+For a turn that starts at step `t` and lasts `τ` steps:
+
+```math
+\hat A_t \;=\; \sum_{k=0}^{\tau-1} \gamma^{k} r_{t+k} \;+\; \gamma^{\tau} V(s_{t+\tau}) \;-\; V(s_t) \;+\; \gamma^{\tau} \lambda\, \hat A_{t+\tau}
+```
+
+GAE over turns, with the step's discount γ compounded over each turn
+(a semi-Markov decision process, Sutton, Precup and Singh, 1999). For the
+curves this is what run 57 already computed: with λ 1 inside a turn, the
+values in its middle cancel out. What changes is everything around it:
+
+- **Turns cut short are left out.** A turn the window's end or a restart
+  cuts would be judged on part of its turn and a value in its middle, which
+  the critic no longer learns; the turn before it then ends with
+  `V(s_{t+τ})` alone. Run 57 judged the last decision of every world's
+  window this way: at 0.9 Hz, 2.3 decisions per window, about 43% of them.
+- **The critic learns where it is used**, at the turns' starts, instead of
+  mostly in the middle of turns.
+- **No masks reach PPO**, so the minibatches are the decisions themselves
+  (run 57's fault, 128 Adam steps on about 150 decisions each, cannot
+  return).
+
+Code: `RolloutStorage.turn_batch` in the agents.
 </details>
 
 #### A clock per leg

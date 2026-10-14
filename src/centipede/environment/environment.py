@@ -77,7 +77,13 @@ class Environment:
     effect: all of a deciding segment's, and otherwise only the spine
     command, which acts every step; the step ignores the rest, so that the
     agents learn only from the actions that acted. None without
-    ``hold_curves``, when every action acts.
+    ``hold_curves``, when every action acts. With ``hold_spine`` the spine
+    command is held for the turn too. ``every_action_held`` says whether
+    every action is a turn's decision, so that the agents can learn from
+    whole turns.
+
+    With a ``fixed_tempo`` the segments have no tempo action: their actions
+    start with their legs' curves, and every clock turns at the middle tempo.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -129,17 +135,17 @@ class Environment:
                 shared_hand=settings.hold_curves,
             )
         # With held curves, each segment holds its tempo action and its legs'
-        # curves, model B's leg actions, and sees, last, the curves and how
-        # its last turn went.
+        # curves, model B's leg actions, and with hold_spine its spine
+        # command after them; it sees, last, the curves and how its last turn
+        # went.
+        curve_value_count = leg_motor_count * (1 + 2 * settings.waves)
         held_action_count = (
-            1 + leg_motor_count * (1 + 2 * settings.waves)
+            1 + curve_value_count + int(settings.hold_spine)
             if settings.hold_curves
             else 0
         )
         turn_value_count = (
-            held_action_count - 1 + len(STEP_VALUE_CHECKS)
-            if settings.hold_curves
-            else 0
+            curve_value_count + len(STEP_VALUE_CHECKS) if settings.hold_curves else 0
         )
         self.observation_builder = ObservationBuilder(
             self.segment_count,
@@ -194,11 +200,16 @@ class Environment:
         else:
             leg_action_count = leg_motor_count
         self.leg_action_count = leg_action_count
+        # With a fixed tempo the segments have no tempo action, their first
+        # with models A and B; the step puts back a tempo action of 0, the
+        # middle tempo, in front of theirs.
+        self.tempo_dropped = int(settings.clock.fixed_tempo)
         self.segment_action_sizes = [
-            leg_action_count + int(commands) + int(settings.clocks)
+            leg_action_count - self.tempo_dropped + int(commands) + int(settings.clocks)
             for commands in commands_spine
         ]
         self.action_size = max(self.segment_action_sizes)
+        # The spine command's column in the joint action with its tempo.
         self.spine_column = leg_action_count
         # Each spine command, of the segment ahead of its joint, is kept or
         # replaced by zero; a follower's spine column may hold its tempo.
@@ -212,15 +223,19 @@ class Environment:
             # The tempo first; then each joint's angle, or its curve's values
             # starting with its centre.
             per_joint = 1 if self.leg_drive == "swing" else self.wave_value_count
-            self.tempo_columns = [[0] for _ in commands_spine]
+            first_leg_column = 1 - self.tempo_dropped
+            self.tempo_columns = [
+                [] if self.tempo_dropped else [0] for _ in commands_spine
+            ]
             leg_motor_columns = [
-                1 + (leg * leg_joint_count + joint) * per_joint
+                first_leg_column + (leg * leg_joint_count + joint) * per_joint
                 for leg in range(2)
                 for joint in range(3)
             ]
             if self.leg_drive == "waves":
                 self.shape_columns = [
-                    list(range(1, leg_action_count)) for _ in commands_spine
+                    list(range(first_leg_column, leg_action_count - self.tempo_dropped))
+                    for _ in commands_spine
                 ]
         elif settings.leg_clocks:
             per_leg = self.leg_clock_value_count
@@ -247,7 +262,7 @@ class Environment:
                 leg * leg_joint_count + joint for leg in range(2) for joint in range(3)
             ]
         self.motor_columns = [
-            leg_motor_columns + [self.spine_column] * commands
+            leg_motor_columns + [self.spine_column - self.tempo_dropped] * commands
             for commands in commands_spine
         ]
         # A clock per segment reads its tempo from the joint action by index.
@@ -383,6 +398,7 @@ class Environment:
             (self.world_count, self.segment_count, 2), device=self.device
         )
         self.action_mask = None
+        self.every_action_held = False
         if settings.hold_curves:
             # The actions each segment holds, and which segments start a turn
             # on the next step: every one, after a restart.
@@ -418,11 +434,13 @@ class Environment:
                 dtype=torch.bool,
                 device=self.device,
             )
-            # The actions a turn holds, the tempo and the legs' curves, and
-            # those that act on every step, the spine command after them.
+            # The actions a turn holds, the tempo and the legs' curves (and
+            # with hold_spine the spine command), and those that act on every
+            # step, the spine command after them.
             self.held_columns = torch.zeros(self.action_size, device=self.device)
-            self.held_columns[:held_action_count] = 1.0
+            self.held_columns[: held_action_count - self.tempo_dropped] = 1.0
             self.always_acting = 1 - self.held_columns
+            self.every_action_held = not self.always_acting.any().item()
             self.action_mask = torch.ones(
                 (self.world_count, self.segment_count, self.action_size),
                 device=self.device,
@@ -493,6 +511,8 @@ class Environment:
         walks on after an arrival has the same final observation as its next.
         """
         state = self.simulation.physical_state
+        if self.tempo_dropped:
+            joint_action = torch.nn.functional.pad(joint_action, (1, 0))
 
         # 1. Copy the positions before the step: the physical state is
         # overwritten in place by the step.
@@ -527,14 +547,15 @@ class Environment:
             # Models A and B: the tempo action moves the heart, the hands turn,
             # and each leg's targets follow its curve from the hand's place
             # before the step to its place after it. With held curves, the
-            # actions held, the heart moved only as a turn starts, and the
-            # segments whose turn hands start a turn decide next.
+            # actions held (the spine command too, with hold_spine), the heart
+            # moved only as a turn starts, and the segments whose turn hands
+            # start a turn decide next.
             if self.settings.hold_curves:
-                drive_action = self._hold_curves(joint_action)
-                tempo = self._turn_tempo_action(drive_action[..., :1])
+                joint_action = self._hold_curves(joint_action)
+                tempo = self._turn_tempo_action(joint_action[..., :1])
             else:
-                drive_action = joint_action
-                tempo = drive_action[..., :1]
+                tempo = joint_action[..., :1]
+            drive_action = joint_action
             tempo = tempo.expand(-1, -1, 2)
             clock_actions = torch.zeros(
                 (*tempo.shape, self.leg_clock_value_count), device=self.device
@@ -709,8 +730,8 @@ class Environment:
 
     def _hold_curves(self, joint_action: torch.Tensor) -> torch.Tensor:
         """The joint action with each segment's held actions, its tempo and
-        its legs' curves, in place of its own, after the deciding segments
-        took theirs from it."""
+        its legs' curves (and with hold_spine its spine command), in place of
+        its own, after the deciding segments took theirs from it."""
         held = self.held_actions
         held.copy_(
             torch.where(
@@ -855,7 +876,13 @@ class Environment:
             self.leg_joint_acceleration,
             self._feet_values() if self.settings.feet_physics else None,
             clocks.neighbour_tempos() if self.settings.neighbour_tempos else None,
-            torch.cat((self.held_actions[..., 1:], self.last_turn_result), dim=-1)
+            torch.cat(
+                (
+                    self.held_actions[..., 1 : self.leg_action_count],
+                    self.last_turn_result,
+                ),
+                dim=-1,
+            )
             if self.settings.hold_curves
             else None,
         )

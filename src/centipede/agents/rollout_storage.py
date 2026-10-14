@@ -138,6 +138,57 @@ class RolloutStorage:
             return_targets.reshape(samples, *return_targets.shape[2:]),
         )
 
+    def turn_batch(
+        self, discount: float, gae_lambda: float
+    ) -> tuple[torch.Tensor, ...]:
+        """Each complete turn as one sample, when every action is held for a
+        turn: what the segment saw as the turn started, the actions it held,
+        their log-probability, the turn's advantage and return target, and
+        last the noise scales it was drawn with (None without).
+
+        A turn's advantage is its rewards, discounted step by step, plus the
+        value where the next turn starts, discounted over the turn, minus the
+        value where it started; ``gae_lambda`` mixes turns as GAE mixes
+        steps. With λ 1 inside a turn, the values in its middle cancel out.
+        A turn is complete when the next one starts within the window, or
+        when an arrival ends it with nothing after. One cut by the window's
+        end or by a restart is left out, and the turn before it does not
+        lean on its advantage, since the critic learns no values in the
+        middle of a turn: each world loses about one turn per window and one
+        per episode.
+        """
+        starts = self.action_masks.all(dim=-1)
+        # Whether the turn each step belongs to completes, from the last row
+        # back.
+        complete = torch.zeros_like(starts)
+        complete[-1] = self.terminated[-1]
+        for row in range(len(starts) - 2, -1, -1):
+            complete[row] = torch.where(
+                self.episode_ended[row],
+                self.terminated[row],
+                starts[row + 1] | complete[row + 1],
+            )
+        turns = starts & complete
+        lambdas = torch.ones_like(self.log_probabilities)
+        lambdas[:-1] = torch.where(starts[1:], gae_lambda * turns[1:], 1.0)
+        advantages, return_targets = generalized_advantage_estimates(
+            self.rewards,
+            self.values,
+            self.next_values,
+            terminated=self.terminated,
+            episode_ended=self.episode_ended,
+            discount=discount,
+            gae_lambda=lambdas,
+        )
+        return (
+            self.observations[turns],
+            self.policy_actions[turns],
+            self.log_probabilities[turns],
+            advantages[turns],
+            return_targets[turns],
+            None if self.noise_scales is None else self.noise_scales[turns],
+        )
+
     def noise_scale_batch(self) -> torch.Tensor | None:
         """The window's noise scales in ``training_batch``'s sample order, or None."""
         if self.noise_scales is None:

@@ -118,3 +118,31 @@ def test_a_masked_agent_judges_each_decision_on_its_whole_turn():
     second = 1 + 0.9
     first = 1 + 0.9 + 0.9**2 + 0.9**3 * 0.5 * second
     torch.testing.assert_close(advantages[[0, 3]], torch.tensor([first, second]))
+
+
+def test_whole_turns_learn_one_sample_from_each_complete_turn():
+    """Eight steps, rewards 1, values 0 but 2 after step 5. World 0's turns
+    start on steps 0, 3 and 6, and the window's end cuts the last; world 1's
+    on 0 and 4, and a restart after step 5 cuts the second (the turn from 6
+    is cut by the window). Only the complete turns are samples: each judged
+    on its whole turn, the turn before a cut one on its own."""
+    storage = RolloutStorage(8, 2, 1, "cpu", action_size=2, masked=True)
+    storage.observations[..., 0] = torch.arange(8.0)[:, None] * 10 + torch.arange(2)
+    storage.rewards.fill_(1.0)
+    storage.next_values[5] = 2.0
+    storage.episode_ended[5, 1] = True
+    storage.action_masks.zero_()
+    storage.action_masks[[0, 3, 6], 0] = 1.0
+    storage.action_masks[[0, 4, 6], 1] = 1.0
+
+    observations, _, _, advantages, _, _ = storage.turn_batch(
+        discount=0.9, gae_lambda=0.5
+    )
+
+    assert observations[:, 0].tolist() == [0.0, 1.0, 30.0]
+    world_0_second = 1 + 0.9 + 0.9**2 * (1 + 0.9 * 2)
+    world_0_first = 1 + 0.9 + 0.9**2 + 0.9**3 * 0.5 * world_0_second
+    world_1_first = 1 + 0.9 + 0.9**2 + 0.9**3
+    torch.testing.assert_close(
+        advantages, torch.tensor([world_0_first, world_1_first, world_0_second])
+    )

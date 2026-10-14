@@ -36,6 +36,7 @@ class Agents:
         shape_columns: list[list[int]] | None = None,
         tempo_gap_ahead_column: int | None = None,
         masked: bool = False,
+        whole_turns: bool = False,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -53,8 +54,10 @@ class Agents:
         follower's tempo noise follows it, and the head's never does. With
         ``masked`` (the environment's ``hold_curves``), ``act`` takes the
         environment's action mask, and the agents learn only from the
-        actions that took effect. With ``head_task_critic_weight``, the head
-        learns the task with a critic of its own.
+        actions that took effect; with ``whole_turns`` too (the environment's
+        ``every_action_held``), each from its complete turns, one sample per
+        turn. With ``head_task_critic_weight``, the head learns the task with
+        a critic of its own.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
@@ -87,6 +90,7 @@ class Agents:
                 if segment_index == 0
                 else 0.0,
                 masked=masked,
+                whole_turns=whole_turns,
             )
             for segment_index in range(segment_count)
         ]

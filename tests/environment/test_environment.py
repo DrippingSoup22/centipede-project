@@ -589,3 +589,53 @@ def test_a_segment_decides_once_per_turn_and_plays_it_at_one_tempo():
     torch.testing.assert_close(
         env.clocks.clock_tempo_hz, tempo_hz * 2 ** (-0.2 / tempo_hz)
     )
+
+
+def test_a_fixed_tempo_has_no_action_and_a_held_neck_steers_for_the_whole_turn():
+    """Model B with held curves, a fixed 6 Hz tempo and the neck held: the
+    segments' actions are their 40 curve values, and the head's neck after
+    them. Set just past a turn's start, a 6 Hz hand (0.12 of a turn per
+    step) comes round on the ninth step; until then every action is held,
+    the neck's command too, the mask marks none, and the clocks stay at
+    6 Hz. Each segment sees the curves it holds."""
+    env = environment(
+        world_count=1,
+        model_path="models/assembly_v5.xml",
+        leg_clocks=True,
+        leg_drive="waves",
+        hold_curves=True,
+        hold_spine=True,
+        spine_control=True,
+        passive_follower_spine=True,
+        feet_physics=True,
+        clock={
+            "segment_tempo": True,
+            "clock_time_constant_s": 0.0,
+            "fixed_tempo": True,
+            "middle_tempo_hz": 6.0,
+        },
+    )
+    assert env.segment_action_sizes[:2] == [41, 40] and env.every_action_held
+    assert env.tempo_columns[0] == [] and env.shape_columns[0] == list(range(40))
+    env.reset(seed=1)
+    env.clocks.clock_phase.fill_(1e-3)
+    first = torch.full((1, env.segment_count, env.action_size), 0.1)
+    first[0, 0, 40] = 0.5  # the head's neck
+    second = torch.full_like(first, -0.2)
+    simulation_step = env.simulation.step
+    neck_commands = []
+
+    def recording_step(leg_actions, spine_actions, leg_actions_end):
+        neck_commands.append(spine_actions[0, 0].item())
+        simulation_step(leg_actions, spine_actions, leg_actions_end)
+
+    env.simulation.step = recording_step
+
+    observations, *_ = env.step(first)
+    torch.testing.assert_close(observations[..., -44:-4], first[..., :40])
+    while not env.deciding.any():
+        assert torch.all(env.action_mask == 0)
+        env.step(second)
+    assert neck_commands == [0.5] * 9 and env.deciding.all()
+    assert torch.all(env.clocks.clock_tempo_hz == 6.0)
+    assert torch.all(env.action_mask == 1)

@@ -121,6 +121,10 @@ class ClockSettings:
     by default) is the heart's ceiling: without one, the heads of the first
     pilot runs, which pay no tempo cost, raced past 25 Hz, where a 20 ms step
     jumps more than half a turn and samples the curve like a strobe light.
+
+    With ``fixed_tempo`` (off by default; the user's test, 2026-10-14) the
+    segments set no tempo: they have no tempo action, and every clock turns
+    at ``middle_tempo_hz``.
     """
 
     middle_tempo_hz: float
@@ -136,6 +140,7 @@ class ClockSettings:
     tempo_rate_octaves_per_s: float = 0.0
     start_tempo_range_hz: tuple[float, float] = (2.0, 2.0)
     max_tempo_hz: float = 0.0
+    fixed_tempo: bool = False
 
     @classmethod
     def from_section(cls, values: dict, leg_clocks: bool = False) -> "ClockSettings":
@@ -175,6 +180,7 @@ class ClockSettings:
                 "start_tempo_range_hz", default=(2.0, 2.0), minimum=1e-3
             ),
             max_tempo_hz=section.number("max_tempo_hz", default=0.0, minimum=0.0),
+            fixed_tempo=section.boolean("fixed_tempo", default=False),
         )
         if settings.max_tempo_hz and not (
             settings.tempo_rate_octaves_per_s
@@ -836,7 +842,10 @@ class EnvironmentSettings:
     turn, so that the curves judged are the curves drawn and every turn is
     played at one tempo. Each segment observes, last, the curves it holds
     and the step value's checks over its last turn. It needs ``leg_drive =
-    "waves"`` and a heart whose legs' hands turn alike (``ClockSettings``).
+    "waves"`` and a heart or a fixed tempo, with the legs' hands turning alike
+    (``ClockSettings``). With ``hold_spine`` too (off by default; the user's
+    test, 2026-10-14), the spine commands are held for the turn as well, so
+    that every action is a turn's decision.
     """
 
     max_episode_steps: int
@@ -857,6 +866,7 @@ class EnvironmentSettings:
     tilt: bool = False
     neighbour_tempos: bool = False
     hold_curves: bool = False
+    hold_spine: bool = False
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -897,6 +907,7 @@ class EnvironmentSettings:
             tilt=section.boolean("tilt", default=False),
             neighbour_tempos=section.boolean("neighbour_tempos", default=False),
             hold_curves=section.boolean("hold_curves", default=False),
+            hold_spine=section.boolean("hold_spine", default=False),
         )
         section.reject_unknown_keys()
         feet_costs = [
@@ -931,20 +942,38 @@ class EnvironmentSettings:
                 " with their clocks at their segment's one tempo: set leg_clocks ="
                 " true and [environment.clock] segment_tempo = true"
             )
+        if clock.fixed_tempo and (
+            settings.leg_drive == "step_shape" or clock.tempo_rate_octaves_per_s
+        ):
+            raise SettingsError(
+                "[environment.clock] fixed_tempo takes the tempo action away and"
+                " turns every clock at middle_tempo_hz: it needs leg_drive"
+                ' "swing" or "waves", whose first action is the tempo, and no'
+                " heart (tempo_rate_octaves_per_s = 0)"
+            )
         if settings.hold_curves and (
             settings.leg_drive != "waves"
             or settings.neighbour_clocks
-            or not clock.tempo_rate_octaves_per_s
+            or not (clock.tempo_rate_octaves_per_s or clock.fixed_tempo)
             or clock.load_feedback_rad_per_s
             or clock.follow_nudge_rad_per_s
         ):
             raise SettingsError(
                 "[environment] hold_curves holds model B's curves for each"
                 " segment's turn, both legs' curves played by one hand at its"
-                ' heart\'s tempo: set leg_drive = "waves" and neighbour_clocks ='
-                " false, and in [environment.clock] tempo_rate_octaves_per_s"
-                " above 0 and no load feedback or follow nudge, which would turn"
-                " one leg's hand away from the other's"
+                ' segment\'s tempo: set leg_drive = "waves" and neighbour_clocks'
+                " = false, and in [environment.clock] a heart"
+                " (tempo_rate_octaves_per_s above 0) or fixed_tempo = true, and"
+                " no load feedback or follow nudge, which would turn one leg's"
+                " hand away from the other's"
+            )
+        if settings.hold_spine and not (
+            settings.hold_curves and settings.spine_control
+        ):
+            raise SettingsError(
+                "[environment] hold_spine holds the spine commands for each"
+                " segment's turn, with its curves: set hold_curves = true and"
+                " spine_control = true"
             )
         if settings.passive_follower_spine and not settings.spine_control:
             raise SettingsError(

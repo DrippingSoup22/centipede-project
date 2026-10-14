@@ -43,6 +43,7 @@ class SegmentAgent:
         tempo_gap_column: int | None = None,
         task_critic_weight: float = 0.0,
         masked: bool = False,
+        whole_turns: bool = False,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
@@ -62,10 +63,14 @@ class SegmentAgent:
         agent learns only from the actions that took effect, each decision
         judged on all the steps it held (``RolloutStorage.training_batch``);
         its held actions, ``tempo_columns`` and ``shape_columns``, explore
-        with white noise.
+        with white noise. With ``whole_turns`` too (every action is held for
+        a turn), it learns from each complete turn as one sample
+        (``RolloutStorage.turn_batch``), and every action explores with white
+        noise.
         """
         self.segment_index = segment_index
         self.settings = settings
+        self.whole_turns = whole_turns
         self.action_size = action_size
         self.tempo_columns = tempo_columns
         self.tempo_gap_column = tempo_gap_column
@@ -113,7 +118,9 @@ class SegmentAgent:
         # a fresh trial each turn; the actions that act every step keep the
         # noise's colour.
         noise_beta = settings.exploration_noise_beta
-        if masked:
+        if whole_turns:
+            noise_beta = 0.0
+        elif masked:
             held = set(tempo_columns or ()) | set(shape_columns or ())
             noise_beta = [
                 0.0 if column in held else noise_beta for column in range(action_size)
@@ -244,20 +251,32 @@ class SegmentAgent:
         """Learn from this agent's full window, then start a new one."""
         ppo_settings = self.settings.ppo
         storage = self.rollout_storage
-        summary = self.ppo.update(
-            *storage.training_batch(
+        if self.whole_turns:
+            *turns, noise_scales = storage.turn_batch(
                 discount=ppo_settings.discount, gae_lambda=ppo_settings.gae_lambda
-            ),
-            update_epochs=ppo_settings.update_epochs,
-            minibatch_size=ppo_settings.minibatch_size,
-            next_observations=storage.next_observations.reshape(
-                -1, storage.next_observations.shape[-1]
             )
-            if ppo_settings.temporal_smoothness_coefficient
-            else None,
-            noise_scales=storage.noise_scale_batch(),
-            action_masks=storage.action_mask_batch(),
-        )
+            summary = self.ppo.update(
+                *turns,
+                update_epochs=ppo_settings.update_epochs,
+                minibatch_size=ppo_settings.minibatch_size,
+                noise_scales=noise_scales,
+            )
+        else:
+            summary = self.ppo.update(
+                *storage.training_batch(
+                    discount=ppo_settings.discount,
+                    gae_lambda=ppo_settings.gae_lambda,
+                ),
+                update_epochs=ppo_settings.update_epochs,
+                minibatch_size=ppo_settings.minibatch_size,
+                next_observations=storage.next_observations.reshape(
+                    -1, storage.next_observations.shape[-1]
+                )
+                if ppo_settings.temporal_smoothness_coefficient
+                else None,
+                noise_scales=storage.noise_scale_batch(),
+                action_masks=storage.action_mask_batch(),
+            )
         if storage.noise_scales is not None:
             self.tempo_noise_scale = storage.noise_scales[
                 ..., self.tempo_columns
