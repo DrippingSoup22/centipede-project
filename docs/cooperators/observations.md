@@ -1,7 +1,6 @@
 # Observations
 
-**Status (2026-10-14): what each segment may see is decided; what each
-segment's description holds is proposed.**
+**Status (2026-10-14): agreed with the user.**
 
 ## Decided
 
@@ -20,7 +19,7 @@ segment's description holds is proposed.**
   sees, plus the neighbours' actions of the same step
   ([critic.md](critic.md)).
 
-## Proposed: what describes a segment
+## What describes a segment (agreed)
 
 Each segment's **block** is what that segment senses of itself; an actor
 sees five blocks. Proposed for v4, with its eight leg joints:
@@ -72,9 +71,14 @@ how much the leg carries, which is what the neighbours need to know.
 | Spine only with spine control, outside the block | In the block, since every segment but the rear commands a spine joint |
 | No actions | The last action |
 
-**Simulated senses.** The body speed comes from the simulator; an animal
-would estimate it. The project is a simulation, so this is a choice of
-simplicity, not of realism.
+**A perfect sense of speed.** How fast a segment moves is the agents'
+choice, learned like everything else; what comes from the simulator is
+only the measurement a segment receives of its own speed, exact, like a
+perfect speedometer. A real animal has no such sense: it estimates its
+speed from what it sees and from its legs, and robots estimate theirs from
+an inertial sensor and leg motion. The project is a simulation, so the
+exact reading is a choice of simplicity, not of realism; legged_gym's
+policies read the simulator's body velocity the same way.
 
 ## Later experiments
 
