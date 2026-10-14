@@ -346,8 +346,8 @@ force is worth.
 | --- | --- |
 | Goal : costs | 1 : 1, agreed |
 | α | Halving per segment, as a share of the whole, agreed |
-| Pushing : braking work | About 4 : 1, proposed from muscle data |
-| Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
+| Pushing : braking work | About 4 : 1, from muscle data, agreed |
+| Work : force, inside energy | Force dominant, as in animals of a gram, agreed; the exact ratio measured on our model |
 | Pain : energy | 1 : 1 in activation, agreed |
 | Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
 

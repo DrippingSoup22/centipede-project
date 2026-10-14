@@ -22,7 +22,7 @@
 ## What describes a segment (agreed)
 
 Each segment's **block** is what that segment senses of itself; an actor
-sees five blocks. Proposed for v4, with its eight leg joints:
+sees five blocks. For v4, with its eight leg joints:
 
 | Part | Values | What it is | Why |
 | --- | ---: | --- | --- |
