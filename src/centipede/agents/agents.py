@@ -4,7 +4,8 @@ The group looks like one agent from outside: it takes and returns tensors for
 the whole body, with the worlds first and the segments second, and gives each
 segment agent only its own segment's slice. The interaction loop uses ``act``,
 ``record``, and ``update``; the experiment creates the group, sets its
-learning rate before each update, saves and loads it, and reads
+learning rate before each update (unless each agent adapts its own), saves
+and loads it, and reads
 ``diagnostics``. The two baselines offer the same ``act`` for
 evaluation. See docs/agents.md.
 """
@@ -143,7 +144,6 @@ class Agents:
         """Every agent uses ``learning_rate`` from the next update on."""
         for agent in self.segment_agents:
             agent.set_learning_rate(learning_rate)
-        self.diagnostics.learning.learning_rate.fill_(learning_rate)
 
     def set_action_std(self, action_std: float) -> None:
         """Every agent's actions get the spread ``action_std`` (a schedule's)."""
@@ -151,11 +151,16 @@ class Agents:
             agent.set_action_std(action_std)
 
     def update(self) -> None:
-        """Let each agent learn from its own window, then fill the diagnostics."""
+        """Let each agent learn from its own window, then fill the diagnostics;
+        with the adaptive schedule, each agent then sets its next learning
+        rate from its own update."""
         summaries: list[PPOUpdateSummary] = []
         for agent in self.segment_agents:
             summaries.append(agent.update())
         self.diagnostics.record_update(summaries, self.segment_agents)
+        if self.settings.learning_rate_schedule == "adaptive":
+            for agent, summary in zip(self.segment_agents, summaries, strict=True):
+                agent.adapt_learning_rate(summary.approximate_kl)
 
     def state_dict(self) -> dict:
         """Every agent's state, the body it fits, and the settings as plain values."""

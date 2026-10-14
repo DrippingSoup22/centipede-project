@@ -52,7 +52,7 @@ Set by the user on 2026-10-14.
 
 | Part | File | Status |
 | --- | --- | --- |
-| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic |
+| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL) |
 | Reward | [reward.md](reward.md) | Built: goal in millimetres, energy and pain in millijoules; force price measured |
 | Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block |
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |

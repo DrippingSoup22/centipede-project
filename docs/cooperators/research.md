@@ -92,7 +92,27 @@ load and contact, not from a reward for the wave.
 
 MAPPO's advice (Yu et al., 2022): normalise the value targets; at most 10
 epochs on hard tasks; few minibatches; a clip of at most 0.2; large
-batches.
+batches. Too much reuse of one batch hurts, which they relate to every
+agent learning while the others change.
+
+The GPU locomotion studies, per update (samples per world × worlds):
+
+| Study | Batch | Minibatch | Epochs | Adam steps | Learning rate |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Rudin et al., ANYmal, 50 Hz, 20 s episodes | 24 × 4,096 = 98,304 | 24,576 | 5 | 20 | Adapted to a KL of 0.01 |
+| Isaac Gym, Humanoid | 32 × 4,096 = 131,072 | 32,768 | 5 | 20 | Adapted to 0.008 |
+| Isaac Gym, ANYmal | 16 × 8,192 = 131,072 | 32,768 | 5 | 20 | Adapted to 0.01 |
+| Isaac Gym, ANYmal on rough terrain | 24 × 4,096 = 98,304 | 24,576 | 10 | 40 | Adapted to 0.01 |
+| Isaac Gym, Ant | 16 × 4,096 = 65,536 | 32,768 | 4 | 8 | Adapted to 0.008 |
+
+Rudin et al. found that learning struggles with fewer than 25 steps per
+robot and an update, that too many robots with too few steps each drop
+sharply, and the best trade-off at 2,048 to 4,096 robots with batches of
+about 100k to 200k. Andrychowicz et al. (ICLR 2021): go over each batch
+several times; 3e-4 is a safe Adam learning rate; larger minibatches did not
+hurt; shorter stretches of experience per environment, bootstrapped
+earlier, can. Isaac Gym's runs trained ANYmal for 65 M steps, ANYmal on
+rough terrain for 150 M, the humanoid for 327 M.
 
 ## Sources
 
@@ -136,5 +156,7 @@ batches.
 - Rudin, Hoeller, Reist & Hutter, Learning to walk in minutes using massively parallel deep reinforcement learning, CoRL 2021, [arXiv 2109.11978](https://arxiv.org/abs/2109.11978)
 - Diaz et al., Active and passive mechanics for rugose terrain traversal in centipedes, J. Exp. Biol. 226, 2023, [JEB](https://cob.silverchair.com/jeb/article/226/4/jeb244688/287689/Active-and-passive-mechanics-for-rugose-terrain)
 - legged_gym (Rudin et al.'s code): 20 s episodes, 50 Hz control, discount 0.99, random first episode lengths, [GitHub](https://github.com/leggedrobotics/legged_gym)
+- Makoviychuk et al., Isaac Gym, NeurIPS Datasets and Benchmarks 2021, [arXiv 2108.10470](https://arxiv.org/abs/2108.10470), Table 17
+- Andrychowicz et al., What matters in on-policy reinforcement learning? A large-scale empirical study, ICLR 2021, [arXiv 2006.05990](https://arxiv.org/abs/2006.05990)
 - Anderson, Shultz & Jayne, Axial kinematics and muscle activity during terrestrial locomotion of the centipede Scolopendra heros, J. Exp. Biol. 198, 1995, [PDF](https://jwshultz.weebly.com/uploads/4/6/2/2/46222147/j_exp_biol-1995-anderson-1185-95.pdf)
 - Dallmann, Hoinville, Dürr & Schmitz, A load-based mechanism for inter-leg coordination in insects, Proc. R. Soc. B 284, 2017, [PUB Bielefeld](https://pub.uni-bielefeld.de/record/2915640)

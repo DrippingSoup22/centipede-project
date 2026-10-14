@@ -102,6 +102,43 @@ def test_each_agent_acts_and_learns_from_its_own_segment_only():
     assert agents.diagnostics.learning.actor_loss.ne(0).all()
 
 
+def test_an_adaptive_schedule_lets_each_actor_steer_its_rate_by_its_own_kl():
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "learning_rate_schedule": "adaptive",
+            "desired_kl": 1.0,
+            "ppo": {"minibatch_size": 4},
+        }
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+    )
+    assert settings.learning_rate_at(1, 10) is None  # left to the agents
+    collect_window(agents)
+    agents.update()
+
+    # Each update moved its policy far less than half the desired KL: the
+    # diagnostics hold the rate it used, and each actor's rose by 1.5 for the
+    # next update, while the critics kept theirs.
+    learning_rates = agents.diagnostics.learning.learning_rate.tolist()
+    assert learning_rates == pytest.approx([3e-4] * SEGMENTS)
+    for agent in agents.segment_agents:
+        assert agent.ppo.actor_optimizer.param_groups[0]["lr"] == pytest.approx(4.5e-4)
+        assert agent.ppo.critic_optimizer.param_groups[0]["lr"] == 3e-4
+    # Above twice the desired KL, it falls by 1.5.
+    first = agents.segment_agents[0]
+    first.adapt_learning_rate(2.5)
+    assert first.ppo.actor_optimizer.param_groups[0]["lr"] == pytest.approx(3e-4)
+
+
 def test_a_saved_file_restores_every_agent_and_rejects_another_body():
     original = make_agents()
     collect_window(original)

@@ -219,7 +219,7 @@ def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     assert not (child / "recordings").exists()  # nothing recorded by default
     # Its own learning rate replaced the parent's, along its own cycles.
     lines = (child / "training_log.jsonl").read_text(encoding="utf-8").splitlines()
-    rates = [json.loads(line)["learning"]["learning_rate"] for line in lines]
+    rates = [json.loads(line)["learning"]["learning_rate"][0] for line in lines]
     assert rates == pytest.approx([1e-3, 5.5e-4, 1e-4])
 
     other_optimizer = harder_file.replace(

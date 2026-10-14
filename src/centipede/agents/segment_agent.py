@@ -17,6 +17,10 @@ from rl_lib.normalization import ObservationNormalizer
 from centipede.agents.rollout_storage import RolloutStorage
 from centipede.agents.settings import AgentSettings
 
+# The adaptive learning rate's step and limits (Rudin et al., CoRL 2021).
+ADAPTIVE_STEP = 1.5
+ADAPTIVE_LIMITS = (1e-5, 1e-2)
+
 
 class SegmentAgent:
     """PPO for one segment, acting in every world at once."""
@@ -170,6 +174,21 @@ class SegmentAgent:
         for optimizer in self._optimizers():
             for group in optimizer.param_groups:
                 group["lr"] = learning_rate
+
+    def adapt_learning_rate(self, approximate_kl: float) -> None:
+        """Rudin et al.'s rule (CoRL 2021, algorithm 1), once per update: the
+        actor's learning rate falls by ADAPTIVE_STEP after an update whose KL
+        was above twice ``desired_kl`` and rises by it after one below half,
+        within ADAPTIVE_LIMITS. The critics keep theirs: the KL measures only
+        how far the policy moved. Their rule acts after every minibatch; once
+        per update, the GPU never waits in the middle of one."""
+        desired_kl = self.settings.desired_kl
+        low, high = ADAPTIVE_LIMITS
+        for group in self.ppo.actor_optimizer.param_groups:
+            if approximate_kl > 2 * desired_kl:
+                group["lr"] = max(low, group["lr"] / ADAPTIVE_STEP)
+            elif 0 < approximate_kl < desired_kl / 2:
+                group["lr"] = min(high, group["lr"] * ADAPTIVE_STEP)
 
     def set_action_std(self, action_std: float) -> None:
         """Give every action the spread ``action_std`` from the next step on."""

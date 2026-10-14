@@ -111,6 +111,27 @@ teammates' actions to the target, this one subtracts them out.
   goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.
 
+## How each update learns
+
+**Decided** (the user, 2026-10-15), from the GPU locomotion studies closest
+to this one and the oscillators' own updates ([research.md](research.md#training-practice-for-ppo-with-many-agents)).
+An episode of 20 s is 1,000 steps: the agents act every 20 ms, as in
+Rudin et al.'s 20 s episodes at 50 Hz.
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Worlds | 2,048 | The worlds test: more still gains speed, but each doubling halves the updates per hour |
+| Rollout window | 64 steps (1.28 s) | 131,072 samples per segment per update, Isaac Gym's Humanoid and ANYmal batch, inside Rudin et al.'s best range (about 100k to 200k with 2,048 to 4,096 robots) and well above their floor of 25 steps; twice the updates per hour of 128 steps for the same data. The 128 steps of run 57 kept its leg turns whole; here every step is a decision |
+| Minibatch | 32,768 | Four per epoch, the size of both papers' minibatches |
+| Epochs | 5 | Theirs; within MAPPO's 5 to 10 for hard tasks |
+| Adam steps per update | 20 | Theirs. Adam's steps have about the same size whatever the minibatch, so the policy moves with their number: the oscillators' 32 at a fixed 3e-4 moved it by a KL of 0.02 to 0.2 an update, far above the papers' 0.01 |
+| Learning rate | 3e-4 at the start, then adapted | Each actor's own, set after every update by Rudin et al.'s rule: divided by 1.5 after an update whose KL was above twice 0.01, multiplied by 1.5 after one below half, between 1e-5 and 1e-2. A fixed rate drifts: as training narrows the action spread σ, the same step of the mean is a larger KL (d²/2σ² for two Gaussians of the same spread). The critics keep 3e-4 |
+
+What the window leaves to the critic: on average about 28% of what the
+advantage would measure is replaced by the value at the window's end (14%
+with 128 steps; about half in Rudin et al.'s 24-step windows). The pink
+noise's sequences are as long as an episode, whatever the window.
+
 ## As built
 
 **Each critic has two networks** (the user's agreement, 2026-10-14). A
@@ -140,6 +161,10 @@ and cost, value and baseline, each 2 × 64, and an actor of 2 × 64.
 
 The PPO is RL_lib's, on its `cooperators` branch; the settings are
 `[agents] critic_baselines`, `value_normalization` and `advantage_weights`.
+The adaptive learning rate is Centipede's (`[agents] learning_rate_schedule
+= "adaptive"`, `desired_kl`), applied once per update rather than after
+every minibatch, so that the GPU never waits in the middle of one; each
+segment's learning rate is logged.
 
 ## Not chosen
 

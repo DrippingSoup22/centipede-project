@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from centipede.settings_section import SettingsSection
 
 OPTIMIZERS = ("adam", "adamw", "sgd")
-LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine")
+LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine", "adaptive")
 ACTION_STD_SCHEDULES = ("learned", "log_linear")
 
 
@@ -73,7 +73,10 @@ class AgentSettings:
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
     ``learning_rate_schedule`` over the run's update cycles
-    (``learning_rate_at``).
+    (``learning_rate_at``). With "adaptive", each agent's actor steers its
+    own learning rate from ``learning_rate`` by how far each update moved
+    its policy, toward ``desired_kl`` (``SegmentAgent.adapt_learning_rate``),
+    and the critics keep ``learning_rate``.
 
     With an environment that pays several reward channels, each agent has a
     critic per channel, and ``advantage_weights`` weighs their normalised
@@ -93,6 +96,7 @@ class AgentSettings:
     learning_rate: float
     learning_rate_schedule: str
     final_learning_rate: float
+    desired_kl: float
     weight_decay: float
     momentum: float
     normaliser_epsilon: float
@@ -102,11 +106,14 @@ class AgentSettings:
     value_normalization: bool
     ppo: PPOSettings
 
-    def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
+    def learning_rate_at(self, cycle: int, total_cycles: int) -> float | None:
         """The learning rate of the update in ``cycle``, counted from 1 to
         ``total_cycles``: ``learning_rate`` in the first, moving to
         ``final_learning_rate`` in the last, in a straight line or along half
-        a cosine, or ``learning_rate`` throughout when constant."""
+        a cosine, or ``learning_rate`` throughout when constant; None when
+        each agent adapts its own."""
+        if self.learning_rate_schedule == "adaptive":
+            return None
         if self.learning_rate_schedule == "constant" or total_cycles == 1:
             return self.learning_rate
         progress = (cycle - 1) / (total_cycles - 1)
@@ -161,6 +168,7 @@ class AgentSettings:
             final_learning_rate=section.positive_number(
                 "final_learning_rate", default=learning_rate / 10
             ),
+            desired_kl=section.positive_number("desired_kl", default=0.01),
             weight_decay=section.number("weight_decay", default=0.0, minimum=0.0),
             momentum=section.number("momentum", default=0.9, minimum=0.0, maximum=1.0),
             normaliser_epsilon=section.positive_number(

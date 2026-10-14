@@ -345,10 +345,11 @@ const SETTING_CHIPS = [
       (a.critic_baselines ? ", with the neighbours' actions" : "") + (a.value_normalization ? ", values normalised" : "") },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
-            "agents.final_learning_rate", "agents.weight_decay", "agents.momentum", "agents.initial_action_std"],
+            "agents.final_learning_rate", "agents.desired_kl", "agents.weight_decay", "agents.momentum", "agents.initial_action_std"],
     text: ({ agents: a }) => {
       // Runs from before the optimizer could be chosen used Adam at a constant rate.
-      const schedule = a.learning_rate_schedule && a.learning_rate_schedule !== "constant"
+      const schedule = a.learning_rate_schedule === "adaptive" ? ` at the start, adapted to KL ${a.desired_kl}`
+        : a.learning_rate_schedule && a.learning_rate_schedule !== "constant"
         ? ` → ${a.final_learning_rate} (${a.learning_rate_schedule})` : "";
       const optimizer = (a.optimizer || "adam") === "sgd" ? `SGD, momentum ${a.momentum}` : (a.optimizer === "adamw" ? "AdamW" : "Adam");
       const decay = a.weight_decay ? ` · weight decay ${a.weight_decay}` : "";
@@ -477,7 +478,7 @@ const TRAINING_LAYOUT = [
       { kind: "health", width: "auto", size: "small", key: "learning.explained_variance" },
       { kind: "health", width: "auto", size: "small", key: "learning.action_std" },
       { kind: "health", width: "auto", size: "small", key: "learning.approximate_kl" },
-      { kind: "lines", width: "auto", size: "small", key: "learning.learning_rate",
+      { kind: "health", width: "auto", size: "small", key: "learning.learning_rate",
         onlyIf: (settings) => (settings.agents.learning_rate_schedule || "constant") !== "constant" },
     ]] },
   { title: "Behaviour", minor: true, intro: "How the centipede moved, over one episode length of windows: the last, or the first to compare.",

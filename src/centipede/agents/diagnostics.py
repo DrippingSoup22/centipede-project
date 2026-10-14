@@ -46,7 +46,8 @@ class LearningSummary:
         " actions; NaN without baselines, (N, K)"
     )
     learning_rate: torch.Tensor = measure(
-        "The optimizers' learning rate in the update, the same for every agent"
+        "The actor's learning rate in the update; the critics' is the same"
+        " unless the schedule is adaptive, (N,)"
     )
     action_std: torch.Tensor = measure(
         "Each leg action's learned spread, before squashing, in leg action"
@@ -90,7 +91,7 @@ class AgentDiagnostics:
             baseline_explained_variances=torch.full(
                 (segment_count, reward_channel_count), torch.nan, device=device
             ),
-            learning_rate=torch.zeros((), device=device),
+            learning_rate=torch.zeros(segment_count, device=device),
             action_std=torch.zeros((segment_count, leg_motor_count), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
         )
@@ -100,7 +101,8 @@ class AgentDiagnostics:
         summaries: Sequence[PPOUpdateSummary],
         segment_agents: Sequence[SegmentAgent],
     ) -> None:
-        """Copy every agent's update summary and current action spreads.
+        """Copy every agent's update summary, learning rate and current action
+        spreads.
 
         ``summaries`` and ``segment_agents`` are both in segment order.
         """
@@ -123,6 +125,9 @@ class AgentDiagnostics:
             )
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
+                self.learning.learning_rate[segment_index] = (
+                    agent.ppo.actor_optimizer.param_groups[0]["lr"]
+                )
                 # The policy clamps the log spread to [-20, 2] before using it.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
                 legs = self.leg_motor_count

@@ -250,12 +250,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     loop.diagnostics.progress = progress
     progress.header()
     # The learning rate of each update follows the schedule over the run's
-    # cycles, and so do scheduled action spreads; the loop pauses after every
-    # cycle, before the next window.
+    # cycles (an adaptive one is each agent's own), and so do scheduled action
+    # spreads; the loop pauses after every cycle, before the next window.
     agent_settings = configuration.agents
 
     def follow_schedules(cycle: int) -> None:
-        agents.set_learning_rate(agent_settings.learning_rate_at(cycle, total_cycles))
+        learning_rate = agent_settings.learning_rate_at(cycle, total_cycles)
+        if learning_rate is not None:
+            agents.set_learning_rate(learning_rate)
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)

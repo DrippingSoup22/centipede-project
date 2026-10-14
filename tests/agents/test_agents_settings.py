@@ -24,6 +24,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         learning_rate=3e-4,
         learning_rate_schedule="constant",
         final_learning_rate=3e-4 / 10,
+        desired_kl=0.01,
         weight_decay=0.0,
         momentum=0.9,
         normaliser_epsilon=1e-8,
