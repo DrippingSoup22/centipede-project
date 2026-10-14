@@ -3,13 +3,16 @@
 It keeps each world's episode state (target, step count, previous positions)
 and coordinates the observation builder, the reward function, the diagnostics,
 and the physics simulation. The interaction loop uses only ``reset`` and
-``step``; the experiment reads ``segment_count``, ``observation_size``, the
-action sizes and ``leg_motor_count`` to create the agents. See
-docs/environment.md.
+``step``; the experiment creates it with ``create_environment``, which also
+offers the cooperators' design, and reads ``segment_count``,
+``observation_size``, the action sizes, ``leg_motor_count``,
+``reward_channel_count`` and ``neighbour_table`` to create the agents. See
+docs/environment.md and docs/cooperators/.
 """
 
 import torch
 
+from centipede.environment.cooperative_environment import CooperativeEnvironment
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.head import head_forward_direction, target_under_head
 from centipede.environment.observation_builder import ObservationBuilder
@@ -17,6 +20,15 @@ from centipede.environment.reward_function import RewardFunction, joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.settings_section import SettingsError
+
+
+def create_environment(
+    settings: EnvironmentSettings,
+) -> "Environment | CooperativeEnvironment":
+    """The environment of the design the settings choose."""
+    if settings.design == "cooperators":
+        return CooperativeEnvironment(settings)
+    return Environment(settings)
 
 
 class Environment:
@@ -30,7 +42,11 @@ class Environment:
     with ankles), and with spine control one more, the spine joint behind it,
     for every segment but the rear. ``action_size`` is the width of the joint
     action, the largest of them; the rear's last column is padding.
+    Rewards have one channel, ``(W, N)``; ``neighbour_table`` lists the
+    segments each segment sees (``observation_builder.neighbour_table``).
     """
+
+    reward_channel_count = 1
 
     def __init__(self, settings: EnvironmentSettings) -> None:
         """Create the simulation and the parts, and allocate the episode state."""
@@ -59,6 +75,7 @@ class Environment:
             spine_observed=settings.spine_control,
         )
         self.observation_size = self.observation_builder.observation_size
+        self.neighbour_table = self.observation_builder.neighbour_table
         spine_count = self.segment_count - 1
         if settings.spine_control:
             self.segment_action_sizes = [leg_motor_count + 1] * spine_count + [

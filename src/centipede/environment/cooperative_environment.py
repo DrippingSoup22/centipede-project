@@ -1,0 +1,233 @@
+"""The cooperators' environment: the same interface as the main environment,
+with the task, observations and reward of docs/cooperators/.
+
+The interaction loop uses ``reset`` and ``step``; the experiment reads the
+same sizes as the main environment's, plus ``neighbour_table`` for the
+agents' critics, and after each update cycle calls ``adjust_level`` and
+reads ``task``.
+"""
+
+from dataclasses import dataclass
+
+import torch
+
+from centipede.diagnostics_category import measure
+from centipede.environment.cooperative_observations import (
+    CooperativeObservationBuilder,
+)
+from centipede.environment.cooperative_reward import PART_NAMES, CooperativeReward
+from centipede.environment.cooperative_task import CooperativeTask
+from centipede.environment.diagnostics import EnvironmentDiagnostics
+from centipede.environment.head import target_under_head
+from centipede.environment.reward_function import joint_angles
+from centipede.environment.settings import EnvironmentSettings
+from centipede.environment.simulation import PhysicsSimulation
+from centipede.settings_section import SettingsError
+
+
+@dataclass(frozen=True)
+class TaskFacts:
+    """The task's state after an update cycle; single values, on the CPU."""
+
+    level: torch.Tensor = measure("The targets' difficulty, from 0 to 1")
+    in_time_share: torch.Tensor = measure(
+        "Share of the targets whose stopwatch ended over the last episode"
+        " length that were reached within it; NaN before one is recorded"
+    )
+
+
+class CooperativeEnvironment:
+    """Batches of centipede worlds walking on from target to target.
+
+    Every tensor passed in or out has the worlds as its first dimension. Every
+    segment commands its leg motors and, but the rear, the spine joint behind
+    it; ``segment_action_sizes`` and ``action_size`` are as in the main
+    environment with spine control. Rewards have two channels, goal and cost,
+    ``(W, N, 2)``. An arrival never ends an episode: the next target appears
+    at once. The only end is the time limit, a cut that the agents bootstrap
+    from; the world then restarts. ``diagnostics`` are the main environment's,
+    in which each target is an episode: it ends when reached, or when its
+    world restarts.
+    """
+
+    reward_channel_count = 2
+
+    def __init__(self, settings: EnvironmentSettings) -> None:
+        """Create the simulation, measuring effort, and the design's parts."""
+        self.settings = settings
+        cooperators = settings.cooperators
+        self.simulation = PhysicsSimulation(settings.simulation, measure_effort=True)
+        self.world_count = self.simulation.world_count
+        self.segment_count = segment_count = self.simulation.segment_count
+        self.leg_motor_count = legs = self.simulation.leg_motor_count
+        self.device = self.simulation.physical_state.body_height.device
+        radius = settings.observation_radius
+        if radius >= segment_count:
+            raise SettingsError(
+                f"[environment] observation_radius must be less than the model's "
+                f"{segment_count} segments, got {radius}"
+            )
+        body = self.simulation.body_measures
+
+        self.segment_action_sizes = [legs + 1] * (segment_count - 1) + [legs]
+        self.action_size = legs + 1
+        commanded_joints = torch.ones(
+            (segment_count, legs + 1), dtype=torch.float32, device=self.device
+        )
+        commanded_joints[-1, -1] = 0.0
+        self.head_outline = self.simulation.head_outline
+
+        self.observation_builder = CooperativeObservationBuilder(
+            segment_count,
+            radius,
+            self.world_count,
+            legs,
+            body.unit_weight_n,
+            self.device,
+        )
+        self.observation_size = self.observation_builder.observation_size
+        self.neighbour_table = self.observation_builder.neighbour_table
+        self.task = CooperativeTask(
+            cooperators, body, self.world_count, settings.max_episode_steps, self.device
+        )
+        self.reward = CooperativeReward(
+            cooperators, segment_count, radius, body, commanded_joints
+        )
+        self.diagnostics = EnvironmentDiagnostics(
+            self.world_count,
+            segment_count,
+            list(PART_NAMES),
+            self.device,
+            self.simulation.diagnostics.facts,
+        )
+        self.task_facts = TaskFacts(
+            level=torch.tensor(self.task.level), in_time_share=torch.tensor(torch.nan)
+        )
+
+        # Episode state, overwritten in place.
+        state = self.simulation.physical_state
+        self.episode_steps = torch.zeros(
+            self.world_count, dtype=torch.int32, device=self.device
+        )
+        self.last_action = torch.zeros(
+            (self.world_count, segment_count, legs + 1), device=self.device
+        )
+        self.previous_body_planar_position = torch.zeros_like(
+            state.body_planar_position
+        )
+        self.previous_head_tip_position = torch.zeros_like(
+            state.head_tip_position[:, :2]
+        )
+        self.previous_joint_position = torch.zeros_like(self.last_action)
+        # No range circle: the diagnostics record an infinite one.
+        self.range_radius = torch.full(
+            (self.world_count,), torch.inf, device=self.device
+        )
+
+    @property
+    def level(self) -> float:
+        return self.task.level
+
+    def set_level(self, level: float) -> None:
+        """Place the following targets at ``level``, as a continued run does."""
+        self.task.level = level
+        self.task_facts.level.fill_(level)
+
+    def adjust_level(self) -> None:
+        """After an update cycle: move the level by the share of targets reached
+        in time, and refresh ``task_facts``."""
+        self.task.adjust_level()
+        share = self.task.in_time_share
+        self.task_facts.level.fill_(self.task.level)
+        self.task_facts.in_time_share.fill_(torch.nan if share is None else share)
+
+    def reset(self, seed: int | None = None) -> torch.Tensor:
+        """Start a new episode in every world; return the observations.
+
+        A ``seed`` restarts the starting poses' and the targets' random
+        sequences. With ``stagger_first_episodes`` every world starts its
+        episode at a random step of it, drawn after the targets.
+        """
+        self.simulation.reset(seed=seed)
+        if seed is not None:
+            self.task.generator.manual_seed(seed)
+        state = self.simulation.physical_state
+        every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
+        self.task.place_targets(every_world, state)
+        self.episode_steps.zero_()
+        if self.settings.cooperators.stagger_first_episodes:
+            self.episode_steps.random_(
+                0, self.settings.max_episode_steps, generator=self.task.generator
+            )
+        self.last_action.zero_()
+        self.diagnostics.start_episodes(
+            every_world, state, self.task.target_position, self.range_radius
+        )
+        return self._observations()
+
+    def step(
+        self, joint_action: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Apply the ``(W, N, M + 1)`` joint action for one 20 ms step.
+
+        Returns the observations, the rewards ``(W, N, 2)``, terminated (never)
+        and truncated ``(W,)``, and the final observations. A world that
+        arrived already sees its next target in both; a world whose time ran
+        out is already reset, and its final observation is the one its episode
+        ended with.
+        """
+        state = self.simulation.physical_state
+        task = self.task
+        self.previous_body_planar_position.copy_(state.body_planar_position)
+        self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
+        self.previous_joint_position.copy_(joint_angles(state))
+
+        legs = self.leg_motor_count
+        self.simulation.step(joint_action[..., :legs], joint_action[:, :-1, legs])
+        self.episode_steps += 1
+
+        arrived = target_under_head(state, task.target_position, self.head_outline)
+        task.time_step(arrived)
+        near, far = task.distance_range_m()
+        rewards, step_rewards = self.reward.compute(
+            state,
+            self.previous_body_planar_position,
+            self.previous_head_tip_position,
+            task.target_position,
+            arrived,
+            self.settings.cooperators.arrival_approaches * (near + far) / 2,
+            self.previous_joint_position,
+            joint_action,
+        )
+        truncated = self.episode_steps >= self.settings.max_episode_steps
+        never = torch.zeros_like(truncated)
+        self.diagnostics.record_step(
+            state,
+            self.previous_body_planar_position,
+            self.previous_head_tip_position,
+            task.target_position,
+            step_rewards,
+            arrived,
+            truncated & ~arrived,
+            never,
+        )
+
+        # Walking on: a reached target is replaced where the head stands.
+        self.last_action.copy_(joint_action)
+        task.place_targets(arrived & ~truncated, state)
+        final_observations = observations = self._observations()
+        if truncated.any():
+            self.simulation.reset(truncated)
+            task.place_targets(truncated, state)
+            self.episode_steps.masked_fill_(truncated, 0)
+            self.last_action.masked_fill_(truncated[:, None, None], 0.0)
+            observations = self._observations()
+        self.diagnostics.start_episodes(
+            arrived | truncated, state, task.target_position, self.range_radius
+        )
+        return observations, rewards, never, truncated, final_observations
+
+    def _observations(self) -> torch.Tensor:
+        return self.observation_builder.build(
+            self.simulation.physical_state, self.task.target_position, self.last_action
+        )

@@ -297,9 +297,102 @@ class RewardSettings:
 
 
 @dataclass(frozen=True)
-class EnvironmentSettings:
-    """The [environment] section, with its three nested sections.
+class CooperatorsSettings:
+    """The [environment.cooperators] section: the cooperators' task and reward,
+    used with ``design = "cooperators"`` (docs/cooperators/task.md, reward.md).
 
+    **Targets.** At level 0 a target lies between ``start_near_distance_m``
+    and ``far_to_near_ratio`` times it from the head's tip, within
+    ``start_bearing_deg`` either side of straight ahead; at level 1 its near
+    end is ``final_near_body_lengths`` body lengths. Both ends grow in a
+    straight line with the level, and the bearing opens to the full circle at
+    the level where the near end clears a body length and a turning circle.
+    A target stays until the head reaches it, and the next appears at once.
+    **Level.** Each target's stopwatch of ``stopwatch_s`` tells whether it was
+    reached in time; after each update cycle the level, from ``start_level``,
+    moves by ``level_rate`` times the share reached in time over the last
+    episode length, less ``level_set_point``, and stays between 0 and 1. With
+    ``stagger_first_episodes`` each world's first episode after a full reset
+    has a random length, so that the worlds restart at different steps.
+
+    **Reward.** The goal: millimetres each segment gains toward its target,
+    and for the head's arrival ``arrival_approaches`` times the middle
+    distance of the level's targets. The cost, in millijoules: energy, the
+    pushing work, the braking work times ``braking_price`` and the force,
+    each motor's squared command times its duration times ``force_price_w``,
+    shared among a segment and the neighbours it sees with weights that fall
+    by ``energy_sharing_decay`` per segment; and pain, the squared force of
+    its legs pressed by others over a leg's strongest push, priced as force
+    times ``pain_price``.
+    """
+
+    start_near_distance_m: float
+    final_near_body_lengths: float
+    far_to_near_ratio: float
+    start_bearing_deg: float
+    stopwatch_s: float
+    start_level: float
+    level_set_point: float
+    level_rate: float
+    stagger_first_episodes: bool
+    arrival_approaches: float
+    braking_price: float
+    force_price_w: float
+    pain_price: float
+    energy_sharing_decay: float
+
+    @classmethod
+    def from_section(cls, values: dict) -> "CooperatorsSettings":
+        """Check the section's values and fill in the defaults: the values
+        agreed in docs/cooperators/."""
+        section = SettingsSection(values, "environment.cooperators")
+        settings = cls(
+            start_near_distance_m=section.positive_number(
+                "start_near_distance_m", default=0.020
+            ),
+            final_near_body_lengths=section.positive_number(
+                "final_near_body_lengths", default=2.7
+            ),
+            far_to_near_ratio=section.number(
+                "far_to_near_ratio", default=1.5, minimum=1.0
+            ),
+            start_bearing_deg=section.number(
+                "start_bearing_deg", default=45.0, minimum=0.0, maximum=180.0
+            ),
+            stopwatch_s=section.positive_number("stopwatch_s", default=7.0),
+            start_level=section.number(
+                "start_level", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            level_set_point=section.number(
+                "level_set_point", default=0.10, minimum=0.0, maximum=1.0
+            ),
+            level_rate=section.number("level_rate", default=0.02, minimum=0.0),
+            stagger_first_episodes=section.boolean(
+                "stagger_first_episodes", default=True
+            ),
+            arrival_approaches=section.number(
+                "arrival_approaches", default=1.0, minimum=0.0
+            ),
+            braking_price=section.number("braking_price", default=0.25, minimum=0.0),
+            force_price_w=section.number("force_price_w", default=0.00219, minimum=0.0),
+            pain_price=section.number("pain_price", default=1.0, minimum=0.0),
+            energy_sharing_decay=section.number(
+                "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0
+            ),
+        )
+        section.reject_unknown_keys()
+        return settings
+
+
+@dataclass(frozen=True)
+class EnvironmentSettings:
+    """The [environment] section, with its nested sections.
+
+    ``design`` chooses the task, observations and reward: ``"main"``, those of
+    docs/environment.md, set by ``[environment.target]`` and
+    ``[environment.rewards]``; or ``"cooperators"``, those of
+    docs/cooperators/, set by ``[environment.cooperators]``, in which every
+    segment but the rear always commands its spine joint.
     ``observation_radius`` is how many neighbours a segment sees on each side;
     0 means it sees only itself. With ``spine_control`` each segment but the
     rear also commands the spine joint behind it and observes its angle and
@@ -310,9 +403,11 @@ class EnvironmentSettings:
     max_episode_steps: int
     observation_radius: int
     spine_control: bool
+    design: str
     simulation: SimulationSettings
     target: TargetSettings
     rewards: RewardSettings
+    cooperators: CooperatorsSettings
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -330,9 +425,11 @@ class EnvironmentSettings:
                 "observation_radius", default=1, minimum=0
             ),
             spine_control=section.boolean("spine_control", default=False),
+            design=section.choice("design", ("main", "cooperators"), default="main"),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             target=TargetSettings.from_section(section.table("target")),
             rewards=RewardSettings.from_section(section.table("rewards")),
+            cooperators=CooperatorsSettings.from_section(section.table("cooperators")),
         )
         section.reject_unknown_keys()
         return settings
