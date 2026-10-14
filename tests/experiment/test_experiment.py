@@ -157,6 +157,48 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
                 assert sum(counts) == 2
 
 
+def test_a_cooperators_run_keeps_its_level_when_continued_and_evaluated(tmp_path):
+    """The cooperators' design on model v4: two critics with baselines, the
+    level logged after every cycle, saved, restored and evaluated at."""
+    cooperators = (
+        TRAINING_FILE.replace("assembly_v3", "assembly_v4")
+        .replace(
+            "max_episode_steps = 3",
+            'max_episode_steps = 3\nobservation_radius = 2\ndesign = "cooperators"',
+        )
+        .replace(
+            "hidden_layers = [8]",
+            "hidden_layers = [8]\ncritic_baselines = true\nvalue_normalization = true",
+        )
+        .replace("update_cycles = 3", "update_cycles = 2")
+    )
+    folder = run_file(tmp_path, cooperators, NAME="cooperators")
+    log = [
+        json.loads(line)
+        for line in (folder / "training_log.jsonl").read_text().splitlines()
+    ]
+    assert list(log[-1]["task"]) == ["level", "in_time_share"]
+    assert len(log[-1]["learning"]["baseline_explained_variances"][0]) == 2
+    checkpoint = torch.load(folder / "checkpoints" / "cycle_0002.pt", weights_only=True)
+    assert checkpoint["task_level"] == log[-1]["task"]["level"]
+
+    continuing = (
+        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
+        "[interaction_loop]\nupdate_cycles = 3\n"
+    )
+    run_file(tmp_path, continuing)
+    assert logged_cycles(folder) == [1, 2, 3]
+    evaluation = (
+        f'[run]\nmode = "evaluate"\nsource = "{folder.as_posix()}"\n'
+        "[evaluation]\nseeds = [7]\nepisodes_per_seed = 2\nrecord = false\n"
+        "[environment.cooperators]\nstagger_first_episodes = false\n"
+    )
+    run_file(tmp_path, evaluation)
+    (results_path,) = (folder / "evaluations").glob("*.json")
+    (record,) = json.loads(results_path.read_text())["results"]["agents"]
+    assert record["episodes"]["episode_ended"] >= 2  # each world's targets
+
+
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
     harder_file = (

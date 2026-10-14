@@ -153,12 +153,12 @@ class SettingsSection:
     def number_list(
         self, key: str, default: Any = REQUIRED, minimum: float | None = None
     ) -> tuple[float, ...]:
-        """A non-empty list of real numbers, such as weights."""
+        """A list of real numbers, such as weights; may be empty."""
         if self._missing(key, default):
             return default
         value = self.values[key]
-        if not isinstance(value, list) or not value:
-            raise self._error(key, "must be a non-empty list of numbers", value)
+        if not isinstance(value, list):
+            raise self._error(key, "must be a list of numbers", value)
         return tuple(self._check_number(key, item, minimum, None) for item in value)
 
     def integer_list(

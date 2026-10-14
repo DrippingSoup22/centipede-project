@@ -38,7 +38,11 @@ import torch
 from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBaseline
 from centipede.agents.settings import AgentSettings
 from centipede.diagnostics_category import descriptions, values
-from centipede.environment.environment import Environment
+from centipede.environment.environment import (
+    CooperativeEnvironment,
+    Environment,
+    create_environment,
+)
 from centipede.experiment.configuration import (
     Configuration,
     EvaluationSettings,
@@ -112,17 +116,10 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     # Everything that can fail comes before the run folder is written, so a
     # rejected run leaves nothing behind.
-    environment = Environment(configuration.environment)
-    agents = Agents(
-        environment.segment_count,
-        environment.observation_size,
-        environment.world_count,
-        loop_settings.rollout_window_steps,
-        configuration.agents,
-        run_settings.seed,
-        environment.segment_action_sizes,
-        environment.leg_motor_count,
-    )
+    environment = create_environment(configuration.environment)
+    agents = _agents_for(environment, configuration, loop_settings.rollout_window_steps)
+    # The cooperators' task has a level, which follows the arrivals.
+    levelled = isinstance(environment, CooperativeEnvironment)
     completed_cycles = 0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
@@ -130,6 +127,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         )
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
+            if levelled and "task_level" in checkpoint:
+                environment.set_level(checkpoint["task_level"])
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -178,17 +177,18 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         ),
         end="\n\n",
     )
-    weights = configuration.environment.rewards.weights(
-        configuration.environment.max_episode_steps
-    )
-    print(
-        reward_weights(
-            weights.per_step,
-            weights.episode_shares,
-            configuration.agents.ppo.discount,
-        ),
-        end="\n\n",
-    )
+    if not levelled:
+        weights = configuration.environment.rewards.weights(
+            configuration.environment.max_episode_steps
+        )
+        print(
+            reward_weights(
+                weights.per_step,
+                weights.episode_shares,
+                configuration.agents.ppo.discount,
+            ),
+            end="\n\n",
+        )
     if run_settings.record_every_episodes:
         blocks = recording_windows * run_settings.record_every_episodes
         file_count = sum(
@@ -267,6 +267,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     cycles_start = time.monotonic()
     for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
         cycle = completed_cycles + session_cycle + 1
+        if levelled:
+            environment.adjust_level()
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
@@ -306,7 +308,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             or cycle == total_cycles
             or out_of_time
         ):
-            folder.save_checkpoint(cycle, agents.state_dict())
+            folder.save_checkpoint(
+                cycle,
+                agents.state_dict(),
+                task_level=environment.level if levelled else None,
+            )
             if run_settings.report:
                 _write_training_report(folder, configuration, categories)
         if out_of_time:
@@ -325,6 +331,27 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         f" overall: {folder.path}"
     )
     return folder.path
+
+
+def _agents_for(
+    environment: Environment | CooperativeEnvironment,
+    configuration: Configuration,
+    rollout_window_steps: int,
+) -> Agents:
+    """Agents that fit the environment: its body, its reward channels, and the
+    segments each segment sees."""
+    return Agents(
+        environment.segment_count,
+        environment.observation_size,
+        environment.world_count,
+        rollout_window_steps,
+        configuration.agents,
+        configuration.run.seed,
+        environment.segment_action_sizes,
+        environment.leg_motor_count,
+        environment.reward_channel_count,
+        environment.neighbour_table,
+    )
 
 
 def _check_recording_fits(environment: Environment, frames: int) -> None:
@@ -403,6 +430,25 @@ def _training_categories(
         ),
         _timing_category(loop),
         _physics_category(loop),
+        *_task_category(environment),
+    ]
+
+
+def _task_category(
+    environment: Environment | CooperativeEnvironment,
+) -> list[LoggedCategory]:
+    """The task's level after each cycle, for an environment that has one."""
+    if not isinstance(environment, CooperativeEnvironment):
+        return []
+    return [
+        LoggedCategory(
+            "task",
+            "Task",
+            "After each update cycle; the level moves toward the difficulty"
+            " where one target in ten is reached within its stopwatch.",
+            descriptions(environment.task_facts),
+            lambda: values(environment.task_facts),
+        )
     ]
 
 
@@ -558,20 +604,14 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     folder = RunFolder.open(evaluation.source)
     checkpoint_path = folder.checkpoint_named_by(evaluation.source)
 
-    environment = Environment(configuration.environment)
+    environment = create_environment(configuration.environment)
     # Evaluation never stores or learns, so the agents' storage is one step.
-    agents = Agents(
-        environment.segment_count,
-        environment.observation_size,
-        environment.world_count,
-        1,
-        configuration.agents,
-        configuration.run.seed,
-        environment.segment_action_sizes,
-        environment.leg_motor_count,
-    )
+    agents = _agents_for(environment, configuration, 1)
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])
+    # The task's targets are those of the level the run reached.
+    if isinstance(environment, CooperativeEnvironment) and "task_level" in checkpoint:
+        environment.set_level(checkpoint["task_level"])
     loop = InteractionLoop(environment, agents, configuration.interaction_loop)
     categories = _evaluation_categories(loop, environment)
 

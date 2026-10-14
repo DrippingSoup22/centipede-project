@@ -55,7 +55,8 @@ class RecordingScene:
             frame_seconds=environment.simulation.step_duration_s,
             # With arrival under the head, the target is only a point to see.
             marker_radius=target.arrival_radius_m or TARGET_MARKER_RADIUS_M,
-            range_circle=bool(target.range_circle_ratio),
+            range_circle=bool(target.range_circle_ratio)
+            and configuration.environment.design == "main",
         )
 
 
