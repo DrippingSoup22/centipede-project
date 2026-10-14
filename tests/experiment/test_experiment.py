@@ -180,6 +180,7 @@ def test_a_cooperators_run_keeps_its_level_when_continued_and_evaluated(tmp_path
     )
     run_file(tmp_path, evaluation)
     (results_path,) = (folder / "evaluations").glob("*.json")
+    assert results_path.with_suffix(".html").exists()  # its own layout
     (record,) = json.loads(results_path.read_text())["results"]["agents"]
     assert record["episodes"]["episode_ended"] >= 2  # each world's targets
 

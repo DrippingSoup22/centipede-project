@@ -13,6 +13,8 @@
     SETTING_CHIPS      the settings summarised under the title;
     TRAINING_LAYOUT    which values the training report shows, where, and how;
     EVALUATION_LAYOUT  the same for the evaluation report.
+  The cooperators' design has its own values, tiles and evaluation layout,
+  in section 2b; its runs write only evaluation reports.
   Values that no layout places are shown under "Show details" automatically.
   docs/configuration.md explains which chart is used for which question.
 -->
@@ -300,7 +302,7 @@ const SETTING_CHIPS = [
     const seconds = s.environment.max_episode_steps * STEP_SECONDS;
     return `episodes up to ${seconds < 600 ? withUnit(seconds, "s") : duration(seconds)}`;
   } },
-  { keys: ["environment.target"],
+  { design: "main", keys: ["environment.target"],
     text: ({ environment: { target: t } }) => `targets ${number(t.distance_range_m[0] * 1000)}–${number(t.distance_range_m[1] * 1000)} mm, ` +
       `${number(t.bearing_range_deg[0])}° to ${number(t.bearing_range_deg[1])}°, ` +
       // A file that sets the tip's radius uses arrival at the tip.
@@ -308,8 +310,8 @@ const SETTING_CHIPS = [
       (t.range_circle_ratio ? `, range circle ${number(t.range_circle_ratio)} × the start distance` : "") },
   { keys: ["environment.observation_radius"], text: (s) => `sees ${s.environment.observation_radius} neighbour${s.environment.observation_radius === 1 ? "" : "s"} each way` },
   // Runs before the spine could be commanded have no such setting.
-  { keys: ["environment.spine_control"], text: (s) => s.environment.spine_control ? "each segment bends the spine joint behind it" : "passive spine" },
-  { keys: ["environment.rewards"],
+  { design: "main", keys: ["environment.spine_control"], text: (s) => s.environment.spine_control ? "each segment bends the spine joint behind it" : "passive spine" },
+  { design: "main", keys: ["environment.rewards"],
     text: ({ environment: { rewards: r } }) => {
       // The earlier efficiency reward sets per-step weights instead of proportions.
       if (r.step_cost_parts === undefined) return `rewards: arrival ${r.arrival_reward} · efficiency ${r.efficiency_cost} · body ${r.body_contact_cost} · legs ${r.leg_contact_cost}`;
@@ -324,6 +326,23 @@ const SETTING_CHIPS = [
         (movement ? ` : movement ${number(movement)}` : "") +
         `${r.cost_budget_parts !== used ? ` of ${number(r.cost_budget_parts)} parts` : ""} · progress: head ${number(r.head_progress_ratio)} × step cost, ${followers}`;
     } },
+  { design: "cooperators",
+    keys: ["environment.cooperators.start_near_distance_m", "environment.cooperators.start_bearing_deg",
+           "environment.cooperators.final_near_body_lengths", "environment.cooperators.far_to_near_ratio"],
+    text: ({ environment: { cooperators: c } }) => `targets ${number(c.start_near_distance_m * 1000)}–${number(c.start_near_distance_m * c.far_to_near_ratio * 1000)} mm within ±${number(c.start_bearing_deg)}° at level 0, ` +
+      `${number(c.final_near_body_lengths)}–${number(c.final_near_body_lengths * c.far_to_near_ratio)} body lengths all around at level 1` },
+  { design: "cooperators",
+    keys: ["environment.cooperators.start_level", "environment.cooperators.stopwatch_s",
+           "environment.cooperators.level_set_point", "environment.cooperators.level_rate"],
+    text: ({ environment: { cooperators: c } }) => `level from ${number(c.start_level)}, aiming at ${number(100 * c.level_set_point)}% of targets reached within ${number(c.stopwatch_s)} s` },
+  { design: "cooperators",
+    keys: ["environment.cooperators.force_price_w", "environment.cooperators.braking_price",
+           "environment.cooperators.pain_price", "environment.cooperators.energy_sharing_decay"],
+    text: ({ environment: { cooperators: c } }) => `cost: force ${number(c.force_price_w * 1000)} mW per motor, braking × ${number(c.braking_price)}, ` +
+      `pain × ${number(c.pain_price)}, energy shared × ${number(c.energy_sharing_decay)} per segment` },
+  { design: "cooperators", keys: ["agents.advantage_weights", "agents.critic_baselines", "agents.value_normalization"],
+    text: ({ agents: a }) => `critics: goal and cost ${(a.advantage_weights.length ? a.advantage_weights : [1, 1]).map(number).join(" : ")}` +
+      (a.critic_baselines ? ", with the neighbours' actions" : "") + (a.value_normalization ? ", values normalised" : "") },
   { keys: ["interaction_loop"], text: ({ interaction_loop: l }) => `window ${count(l.rollout_window_steps)} steps · ${count(l.update_cycles)} cycles` },
   { keys: ["agents.hidden_layers", "agents.optimizer", "agents.learning_rate", "agents.learning_rate_schedule",
             "agents.final_learning_rate", "agents.weight_decay", "agents.momentum", "agents.initial_action_std"],
@@ -536,6 +555,155 @@ const EVALUATION_DETAILS = [
 ];
 
 // =============================================================================
+// 2b. The cooperators' design (Centipede's docs/cooperators/): its values,
+// result tiles, and evaluation layout, used when the run's design is
+// "cooperators". Its runs write no training report: the training project's
+// monitor shows a run while it trains.
+// =============================================================================
+
+const COOPERATORS = (data.settings.environment || {}).design === "cooperators";
+// The reward's parts that make the goal channel come first, the cost's after
+// them (environment/cooperative_reward.py).
+const GOAL_PARTS = 2;
+
+const COOPERATIVE_METRICS = {
+  "episodes.targets_reached": { label: "Targets per episode", unit: "", better: "higher",
+    about: "How many targets the head reached in each 20 s episode. A reached target is replaced at once, from the head, so a centipede that walks well reaches one after another; at a higher level the targets lie farther, and fewer fit in an episode." },
+  "episodes.targets_in_time": { label: "Targets in time", unit: "", better: "higher",
+    about: "The targets of each episode reached within their 7 s stopwatch, the time the level judges them by." },
+  "episodes.head_progress": { label: "Distance closed per episode", unit: "mm", scale: 1000,
+    about: "How far the head's tip came closer to its targets over an episode, every target together." },
+  "episodes.energy": { label: "Energy per episode", unit: "mJ",
+    about: "The energy every segment spent over an episode, added up: the motors' pushing work, their braking work, and the force they held, priced as the cost charges them." },
+  "episodes.segment_return": { label: "Returns per segment", unit: "",
+    about: "Each segment's rewards over an episode, by channel: the goal in millimetres, the cost in millijoules." },
+  "episode_distributions.targets_reached": { label: "Targets per episode, every episode", source: "episodes.targets_reached", better: "higher",
+    about: "How the episodes spread over the number of targets they reached: a mean of three can be every centipede reaching three, or a few walking well while the others stand still." },
+  "step_facts.reward_parts": { label: "Reward parts", unit: "",
+    about: "The reward's parts per step, averaged over the segments: the goal's progress and arrival in millimetres, the cost's pushing, braking, force and pain in millijoules." },
+  "step_facts.target_reached": { label: "Targets per minute", unit: "/min", scale: 60 / STEP_SECONDS,
+    about: "Targets the head reached per minute, in each world." },
+  "step_facts.feet_carry": { label: "Weight on the feet", unit: "%", scale: 100, better: "higher",
+    about: "How much of a segment's own weight the floor carries through its two feet: about 100% when it walks raised on its legs, more when it also carries a neighbour, little when its belly drags or its neighbours hold it up." },
+  "step_facts.belly_carry": { label: "Weight on the belly", unit: "%", scale: 100, better: "lower",
+    about: "How much of a segment's own weight the floor carries through its body: a dragging belly, which costs several times more energy per millimetre than walking raised." },
+  "step_facts.feet_push": { label: "Feet's push", unit: "%", scale: 100,
+    about: "The floor's push on a segment's feet along the segment, in percent of its weight: positive drives it forward, negative brakes it." },
+  "step_facts.own_energy": { label: "Own energy", unit: "mW", scale: 1 / STEP_SECONDS,
+    about: "Each segment's own energy per second, before it is shared with the neighbours: pushing, braking, and force." },
+  "step_facts.foot_standing": { label: "Standing",
+    about: "The share of steps a foot stands, carrying at least a tenth of a segment's weight: its duty factor. A real Scolopendra's is about one half." },
+  "step_facts.lift_off": { label: "Step tempo", unit: "Hz", scale: 1 / STEP_SECONDS,
+    about: "How many steps a foot starts per second: its lift-offs after a stance of at least 60 ms." },
+  "step_facts.on_course": { label: "On course", better: "higher",
+    about: "The share of steps in which the target lies ahead of the head, within the head's width of its forward line: walking straight on would reach it." },
+  "step_facts.support": { label: "Support", better: "higher",
+    about: "The share of steps with at least one left and one right foot standing somewhere along the body." },
+  "step_facts.neighbour_lag_measured": { label: "Lags measured", unit: "/s", scale: 1 / STEP_SECONDS,
+    about: "How many times per second a foot lifted off while the same-side foot ahead had a known phase: how often the lag was measured." },
+  "step_facts.left_right_lag_measured": { label: "Left–right lags measured", unit: "/s", scale: 1 / STEP_SECONDS,
+    about: "How many times per second a right foot lifted off while its left foot had a known phase." },
+  "report.segment_energy": { label: "Own energy", unit: "mW", uses: ["step_facts.own_energy"],
+    about: "Each segment's own energy per second, pushing, braking and force together, before it is shared with the neighbours.",
+    compute: (record) => {
+      const parts = raw(record, "step_facts.own_energy");
+      return parts === null ? null : parts.map((segment) => segment.reduce((a, b) => a + b, 0) / STEP_SECONDS);
+    } },
+};
+
+const WAVE_ABOUT = "At every lift-off of a foot, its lag behind the same-side foot of the segment ahead: where that foot is in its own step, from one lift-off to the next. About 0° when the two lift together, 180° when they alternate, a small positive lag when the rear foot follows, as in a wave from head to tail (as in real centipedes), negative when it leads. A lag of x degrees makes a wave 360/x segments long. The consistency, from 0 to 1, says how alike the lags are over every world and lift-off: every world starts from its own random poses, so only a wave the segments learn makes them agree; lags that point every way give almost 0. The lock says how steady the lag stays within each world.";
+const LEFT_RIGHT_ABOUT = "At every lift-off of a right foot, where the left foot of the same segment is in its step: 180° when the two legs alternate, as in a walking centipede, 0° when they step together. Consistency and lock as for the wave.";
+
+const COOPERATIVE_TILES = [
+  { title: "Targets per episode", unit: "", better: "higher", keys: ["episodes.targets_reached", "episodes.targets_in_time"],
+    about: () => info("episodes.targets_reached").about,
+    value: (sample) => sample.episodeMean("episodes.targets_reached"),
+    note: (sample) => {
+      const inTime = sample.episodeMean("episodes.targets_in_time");
+      return inTime === null ? "" : `${number(inTime)} within their 7 s`;
+    } },
+  { title: "Closing speed", unit: "mm/s", better: "higher", keys: ["step_facts.segment_progress"],
+    about: () => "How fast the head closed on its target, averaged over the steps: the useful part of its speed.",
+    value: (sample) => (sample.stepMean("step_facts.segment_progress") || [null])[0],
+    note: () => "the head's, toward its target" },
+  { title: "Legs' wave", unit: "", better: "higher", keys: ["step_facts.neighbour_lag"],
+    about: () => WAVE_ABOUT,
+    value: (sample) => consistencyOf(combinedLag(sample.records, "step_facts.neighbour_lag")),
+    note: (sample) => waveShape(combinedLag(sample.records, "step_facts.neighbour_lag")) },
+  { title: "Left–right step", unit: "", better: "higher", keys: ["step_facts.left_right_lag"],
+    about: () => LEFT_RIGHT_ABOUT,
+    value: (sample) => consistencyOf(combinedLag(sample.records, "step_facts.left_right_lag")),
+    note: (sample) => leftRightShape(combinedLag(sample.records, "step_facts.left_right_lag")) },
+  { title: "Weight on the feet", unit: "%", better: "higher", keys: ["step_facts.feet_carry"],
+    about: () => info("step_facts.feet_carry").about,
+    value: (sample) => overall(sample.stepMean("step_facts.feet_carry")),
+    note: () => "of each segment's own weight" },
+  { title: "Energy per mm", unit: "mJ/mm", better: "lower", keys: ["episodes.energy", "episodes.head_progress"],
+    about: () => "The energy every segment spent per millimetre the head closed on its targets: the walk's cost of transport. Dragging the belly costs several times more than walking raised.",
+    value: (sample) => {
+      const energy = sample.episodeMean("episodes.energy"), closed = sample.episodeMean("episodes.head_progress");
+      return energy === null || closed === null || closed <= 0 ? null : energy.reduce((a, b) => a + b, 0) / closed;
+    },
+    note: () => "the energy check's raised walk: 0.29" },
+];
+
+const COOPERATIVE_BEHAVIOUR_STATS = [
+  { kind: "stat", width: "w3", key: "step_facts.heading_error", better: "lower", note: "0° points at the target" },
+  { kind: "stat", width: "w3", key: "step_facts.on_course", better: "higher", note: "walking straight on would reach it" },
+  { kind: "stat", width: "w3", key: "step_facts.support", better: "higher", note: "a left and a right foot standing" },
+  { kind: "stat", width: "w3", key: "episodes.upside_down_share", better: "lower", note: "the head, share of steps" },
+];
+
+const COOPERATIVE_PROFILE_COLUMNS = [
+  { key: "step_facts.foot_standing", part: 0, short: "Left standing" },
+  { key: "step_facts.foot_standing", part: 1, short: "Right standing" },
+  { key: "step_facts.lift_off", part: 0, short: "Left tempo" },
+  { key: "step_facts.lift_off", part: 1, short: "Right tempo" },
+  { key: "step_facts.contact_flags", part: 2, short: "Body down" },
+  { key: "step_facts.contact_flags", part: 3, short: "Legs touching" },
+  { key: "step_facts.feet_carry", short: "On the feet" },
+  { key: "step_facts.belly_carry", short: "On the belly" },
+  { key: "step_facts.feet_push", short: "Push" },
+  { key: "step_facts.body_height", short: "Height" },
+  { key: "step_facts.uprightness", short: "Upright" },
+  { key: "step_facts.segment_moved", short: "Speed" },
+  { key: "step_facts.segment_progress", short: "Toward goal" },
+  { key: "step_facts.spine_bend", short: "Spine bend" },
+  { key: "report.segment_energy", short: "Energy" },
+];
+
+const COOPERATIVE_PROFILE_ABOUT = "Exact values of how each segment behaves, one row per segment with the head at the top. Each column is coloured on its own scale. Standing: the share of steps each foot carries at least a tenth of the segment's weight (its duty factor). Tempo: steps started per second. Body down, legs touching: share of steps. On the feet, on the belly: the share of the segment's own weight the floor carries there. Push: the floor's push on its feet along the segment, in percent of its weight. Height of its centre; upright 1, on its side 0, upside down −1. Speed and the part of it toward its goal. Spine bend of the joint behind it. Energy: its own, per second, before sharing.";
+
+const COOPERATIVE_EVALUATION_LAYOUT = [
+  { title: "Results", tiles: true,
+    rows: [
+      [{ kind: "histogram", width: "w6", size: "small", key: "episode_distributions.targets_reached" },
+       { kind: "bearing", width: "w6", size: "small" }],
+      [{ kind: "influence", width: "w8", size: "small" },
+       { kind: "stat", width: "w4", key: "episodes.head_path_length", note: "the head's path per episode; the closer to the distance closed, the more direct" }],
+    ] },
+  { title: "Gait", minor: true, intro: "How the feet keep time with each other, measured at every lift-off of the agents' episodes, every seed together.",
+    rows: [[{ kind: "lags", width: "w7", size: "small" }, { kind: "left_right_lags", width: "w5", size: "small" }]] },
+  { title: "Behaviour", minor: true, intro: "How the centipede moved, averaged over the steps of each world's first episode and over the seeds.",
+    rows: [
+      [{ kind: "body_table", width: "w12", size: "small" }],
+      COOPERATIVE_BEHAVIOUR_STATS,
+    ] },
+];
+
+const COOPERATIVE_EVALUATION_DETAILS = [
+  { title: "Each segment", intro: "One bar per segment, head first, for each actor.",
+    cards: ["report.segment_energy", "step_facts.feet_carry"].map((key) => ({ kind: "segments", width: "w6", size: "small", key })) },
+];
+
+// What the design's runs use, chosen once.
+if (COOPERATORS) Object.assign(METRICS, COOPERATIVE_METRICS);
+const TILES = COOPERATORS ? COOPERATIVE_TILES : RESULT_TILES;
+const PROFILE = COOPERATORS
+  ? { columns: COOPERATIVE_PROFILE_COLUMNS, about: COOPERATIVE_PROFILE_ABOUT }
+  : { columns: PROFILE_COLUMNS, about: PROFILE_ABOUT };
+
+// =============================================================================
 // 3. Reading values from the data.
 // =============================================================================
 
@@ -671,6 +839,7 @@ function isEpisodeMean(key) {
 // and the bin counts of histograms are added up.
 function recordSample(records, episodeCounts) {
   return {
+    records,
     episodes: episodeCounts.reduce((a, b) => a + b, 0),
     episodeMean: (key) => weightedMeanOfValues(records.map((record) => shown(record, key)), episodeCounts),
     stepMean: (key) => meanOfValues(records.map((record) => shown(record, key))),
@@ -684,6 +853,121 @@ function recordSample(records, episodeCounts) {
 // One number for a value over a sample: the mean over the segments (or one part).
 function sampleValue(sample, key, part) {
   return overall(isEpisodeMean(key) ? sample.episodeMean(key) : sample.stepMean(key), part);
+}
+
+// The numbers of a value, nested lists flattened in order.
+function flatValues(value) {
+  return Array.isArray(value) ? value.flatMap(flatValues) : [value];
+}
+
+// A gait lag over every record and foot it was measured at, or over one
+// entry of it that pick chooses: the direction of the mean of the feet's
+// mean unit vectors, each as long as its consistency, in degrees, and that
+// mean's length, the consistency over them all. Lags are angles, so they are
+// combined as unit vectors: a plain mean of 170° and −170° would give 0°.
+function combinedLag(records, key, pick = null) {
+  let x = 0, y = 0, n = 0;
+  for (const record of records) {
+    const angles = raw(record, key), lengths = raw(record, `${key}_consistency`);
+    if (angles === null || lengths === null) continue;
+    const a = pick ? [pick(angles)] : flatValues(angles), c = pick ? [pick(lengths)] : flatValues(lengths);
+    a.forEach((angle, i) => {
+      if (angle === null || c[i] === null) return;
+      x += c[i] * Math.cos(angle);
+      y += c[i] * Math.sin(angle);
+      n += 1;
+    });
+  }
+  return n ? { degrees: Math.atan2(y, x) * RADIANS_TO_DEGREES, consistency: Math.hypot(x, y) / n } : null;
+}
+
+function consistencyOf(lag) {
+  return lag === null ? null : lag.consistency;
+}
+
+function signedDegrees(degrees) {
+  return `${degrees > 0.5 ? "+" : ""}${Math.round(degrees)}°`;
+}
+
+// What a neighbour lag means for the body's wave.
+function waveShape(lag) {
+  if (lag === null) return "not measured";
+  const size = Math.abs(lag.degrees);
+  if (size >= 150) return `lag ${signedDegrees(lag.degrees)}: neighbours alternate`;
+  if (size < 5) return `lag ${signedDegrees(lag.degrees)}: neighbours step together`;
+  return `lag ${signedDegrees(lag.degrees)}: a wave of ${number(360 / size)} segments, ${lag.degrees > 0 ? "head to tail" : "tail to head"}`;
+}
+
+// What a left–right lag means for a segment's two legs.
+function leftRightShape(lag) {
+  if (lag === null) return "not measured";
+  const size = Math.abs(lag.degrees);
+  if (size >= 150) return `lag ${signedDegrees(lag.degrees)}: the two legs alternate`;
+  if (size < 30) return `lag ${signedDegrees(lag.degrees)}: the two legs step together`;
+  return `lag ${signedDegrees(lag.degrees)}`;
+}
+
+// One table of gait lags: a row per label, and for each of its entries
+// (picks) the lag, its consistency and its lock over the records, the two
+// coloured from 0 (red) to 1 (blue).
+function lagTable(records, key, rows, entryNames) {
+  const scale = colorScale([], "", [0, 1], "higher");
+  const coloured = (value) => {
+    if (value === null) return html("td", {}, "–");
+    const background = scale.color(value);
+    return html("td", { style: `background:${background};color:${isDark(background) ? "#ffffff" : "#0b0b0b"}` }, value.toFixed(2));
+  };
+  const head = html("tr", {}, html("th", {}, ""), ...entryNames.flatMap((name) =>
+    [html("th", {}, `${name} lag`), html("th", {}, "consistency"), html("th", {}, "lock")]));
+  const body = rows.map(([label, picks]) => html("tr", {}, html("td", { class: "segment" }, label), ...picks.flatMap((pick) => {
+    const lag = combinedLag(records, key, pick);
+    const lock = mean(records.map((record) => {
+      const locks = raw(record, `${key}_lock`);
+      return locks === null ? null : pick(locks);
+    }));
+    return [html("td", {}, lag === null ? "–" : signedDegrees(lag.degrees)), coloured(consistencyOf(lag)), coloured(lock)];
+  })));
+  return html("div", { class: "scroll" }, html("table", { class: "profile" }, html("thead", {}, head), html("tbody", {}, ...body)));
+}
+
+// One bar per actor of the reward's parts, each as its share of its channel:
+// the goal's to the right of zero, the cost's to the left, each channel 50%
+// in all, since the two critics weigh their channels the same. A part
+// against its channel's sign, such as progress while the head walks away,
+// falls on the other side. Each channel's sum per second is written beside.
+function influenceRows(rows, names, colors, width) {
+  const left = 108, right = 200, rowHeight = 24, gap = 14, axis = 20;
+  const px = (share) => left + ((share + 50) / 100) * (width - left - right);
+  const height = rows.length * (rowHeight + gap) + axis;
+  const chart = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img" });
+  for (const tick of [-50, -25, 0, 25, 50]) {
+    chart.append(svg("line", { x1: px(tick), x2: px(tick), y1: 0, y2: height - axis, style: `stroke:var(${tick === 0 ? "--axis" : "--grid"})` }));
+    chart.append(svg("text", { x: px(tick), y: height - 5, "text-anchor": "middle" }, `${Math.abs(tick)}%`));
+  }
+  rows.forEach((row, index) => {
+    const top = 4 + index * (rowHeight + gap);
+    const perSecond = row.values.map((value) => value / STEP_SECONDS);
+    const channels = [[0, GOAL_PARTS], [GOAL_PARTS, names.length]].map(([from, to]) => ({
+      size: perSecond.slice(from, to).reduce((sum, value) => sum + Math.abs(value), 0),
+      sum: perSecond.slice(from, to).reduce((sum, value) => sum + value, 0),
+    }));
+    const units = names.map((_, k) => (k < GOAL_PARTS ? "mm/s" : "mW"));
+    const text = `${row.label}\n${names.map((name, k) => `${name}: ${withUnit(perSecond[k], units[k])}`).join("\n")}`;
+    let above = 0, below = 0;
+    perSecond.forEach((value, k) => {
+      const channel = channels[k < GOAL_PARTS ? 0 : 1];
+      const share = channel.size ? (50 * value) / channel.size : 0;
+      if (!share) return;
+      const from = share > 0 ? above : below + share;
+      if (share > 0) above += share; else below += share;
+      chart.append(svg("rect", { x: px(from), y: top, width: Math.max(0.5, px(from + Math.abs(share)) - px(from)), height: rowHeight,
+        style: `fill:${colors[k]};opacity:0.85` }, hoverText(text)));
+    });
+    chart.append(svg("text", { x: left - 8, y: top + rowHeight / 2 + 4, "text-anchor": "end", class: "label" }, row.label));
+    chart.append(svg("text", { x: px(50) + 8, y: top + rowHeight / 2 + 4, class: "label" },
+      `goal ${withUnit(channels[0].sum, "mm/s")} · cost ${withUnit(channels[1].sum, "mW")}`));
+  });
+  return chart;
 }
 
 function timeLimit(settings) {
@@ -771,7 +1055,7 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 // together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
-  movement: "var(--series-6)" };
+  movement: "var(--series-6)", pushing: "#d62728", braking: "#ff7f0e", force: "#8c564b", pain: "#e377c2" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }
@@ -1428,12 +1712,12 @@ function bodyTableCard(spec, views, initial) {
   const holder = html("div", {});
   const buttons = views.map((view) => html("button", { class: "toggle", type: "button" }, view.name));
   const show = (which) => {
-    holder.replaceChildren(profileTable(PROFILE_COLUMNS, valuesOf(views[which]), sharedScale));
+    holder.replaceChildren(profileTable(PROFILE.columns, valuesOf(views[which]), sharedScale));
     buttons.forEach((button, i) => button.classList.toggle("on", i === which));
   };
   buttons.forEach((button, i) => button.addEventListener("click", () => show(i)));
   show(initial);
-  return card({ ...spec, title: "The body, segment by segment", about: PROFILE_ABOUT, keys: PROFILE_COLUMNS.map((column) => column.key) },
+  return card({ ...spec, title: "The body, segment by segment", about: PROFILE.about, keys: PROFILE.columns.map((column) => column.key) },
     views.length > 1 ? html("div", { class: "toggles" }, ...buttons) : null, holder);
 }
 
@@ -1532,7 +1816,9 @@ function settingsTable(settings, setKeys) {
 // The settings summarised as chips; setKeys holds the dotted keys to highlight.
 function settingChips(settings, setKeys, note) {
   const chips = [];
+  const design = COOPERATORS ? "cooperators" : "main";
   for (const chip of SETTING_CHIPS) {
+    if (chip.design && chip.design !== design) continue;
     let text;
     try { text = chip.text(settings); } catch (error) { continue; }  // a setting this run does not have
     if (!text) continue;  // a setting left at a value that needs no chip
@@ -1940,7 +2226,8 @@ function evaluationReport(root) {
   const settings = data.settings;
   const seedCount = facts.seeds.length;
   root.append(html("h1", {}, data.title), html("p", { class: "status" },
-    `Evaluation of cycle ${facts.cycles_trained} · ${seedCount} seed${seedCount === 1 ? "" : "s"} × ${count(facts.episodes_per_seed)} episodes · ` +
+    `Evaluation of cycle ${facts.cycles_trained}` + (facts.task_level !== undefined ? ` at level ${number(facts.task_level)}` : "") +
+    ` · ${seedCount} seed${seedCount === 1 ? "" : "s"} × ${count(facts.episodes_per_seed)} episodes · ` +
     (actors.length > 1 ? `compared with ${actors.slice(1).join(" and ")}` : "no baselines")));
   const changes = Object.keys(facts.changed_from_training || {}).map((key) => `environment.${key}`);
   root.append(...settingChips(settings, new Set(changes), "Highlighted: changed for this evaluation; the others are as in training."));
@@ -1959,10 +2246,10 @@ function evaluationReport(root) {
   const actorColors = actors.map((_, i) => ACTOR_COLORS[i] || SERIES[i]);
   const context = { actors, samples, seedSamples, perSeed, summary, actorColors, settings, facts };
 
-  EVALUATION_LAYOUT.forEach((layout, index) => {
+  (COOPERATORS ? COOPERATIVE_EVALUATION_LAYOUT : EVALUATION_LAYOUT).forEach((layout, index) => {
     const spec = layout.tiles ? { ...layout, intro: EVALUATION_INTRO(actors.length > 1, seedCount) } : layout;
-    const content = spec.tiles ? [html("div", { class: "tiles", style: `--tile-count:${RESULT_TILES.length}` },
-      ...RESULT_TILES.map((tile) => evaluationStat(tile, context)))] : [];
+    const content = spec.tiles ? [html("div", { class: "tiles", style: `--tile-count:${TILES.length}` },
+      ...TILES.map((tile) => evaluationStat(tile, context)))] : [];
     for (const row of spec.rows) content.push(html("div", { class: "row" }, ...row.map((item) => evaluationCard(item, context))));
     root.append(section(index + 1, spec, ...content));
   });
@@ -1970,13 +2257,16 @@ function evaluationReport(root) {
   // Details: the episodes in bins, each segment's return, every value per
   // actor, the evaluation's facts, and the settings.
   const details = [];
-  for (const group of EVALUATION_DETAILS) {
+  for (const group of COOPERATORS ? COOPERATIVE_EVALUATION_DETAILS : EVALUATION_DETAILS) {
     details.push(html("h3", { class: "group" }, group.title), group.intro ? html("p", { class: "note" }, group.intro) : null);
     details.push(html("div", { class: "row" }, ...group.cards.map((item) => evaluationCard(item, context))));
   }
   const rows = [];
-  const keys = [...Object.keys(DESCRIPTIONS), "report.reward_per_step", "report.mean_return"];
+  const keys = [...Object.keys(DESCRIPTIONS),
+    ...(COOPERATORS ? ["report.segment_energy"] : ["report.reward_per_step", "report.mean_return"])];
   for (const key of keys) {
+    // An angle's mean is not the mean of its seeds' means; the gait shows it.
+    if ((DESCRIPTIONS[key] || {}).summary === "angle") continue;
     const metric = info(key);
     const sample = sampleOf(actors.flatMap((actor) => perSeed(actor, key)));
     if (sample === undefined) continue;
@@ -1999,7 +2289,8 @@ function evaluationReport(root) {
 }
 
 // A number of an evaluation: the agents' over every seed, with the seeds'
-// range, and each baseline's below it. "tile" is as in RESULT_TILES.
+// range, and each baseline's below it. "tile" is as in RESULT_TILES and
+// COOPERATIVE_TILES.
 function evaluationStat(tile, context, { small = false, width = "" } = {}) {
   const { actors, samples, seedSamples, settings } = context;
   const valueOf = (sample) => tile.value(sample, settings);
@@ -2065,6 +2356,53 @@ function evaluationCard(item, context) {
     const colors = parts.map((name, part) => partColor(name, part));
     return card(spec, legend([...parts, "sum"], [...colors, "var(--ink)"]),
       termRows(rows, parts.map((name, part) => ({ name, color: colors[part] })), width, info(key).unit));
+  }
+
+  if (item.kind === "influence") {
+    const key = "step_facts.reward_parts", names = info(key).parts;
+    const spec = { ...item, key, title: "Where the reward comes from",
+      subtitle: "Each part's share of its channel, the goal right of zero and the cost left; mean over segments, steps, and seeds",
+      about: "The reward has two channels with no common unit: the goal in millimetres and the cost in millijoules. Each has its own critic, and their advantages are scaled to the same size before they are added 1 : 1, so each channel drives half of what the agents learn, whatever its size in its own unit. A part's length is its share of its channel: what it pays to the right of zero, what it charges to the left. Beside the bar, each channel's sum per second. Hover a bar for every part's own value." };
+    const rows = actors.map((label, i) => {
+      const values = samples[i].stepMean(key);
+      return values === null ? null : { label, values: names.map((_, part) => overall(values, part)) };
+    }).filter(Boolean);
+    if (!rows.length) return card(spec, empty());
+    const colors = names.map((name, part) => partColor(name, part));
+    return card(spec, legend(names, colors), influenceRows(rows, names, colors, width));
+  }
+
+  if (item.kind === "bearing") {
+    const names = info("episodes.targets_by_bearing").parts;
+    const spec = { ...item, keys: ["episodes.reached_by_bearing", "episodes.targets_by_bearing"], title: "Targets reached, by where they appeared",
+      subtitle: "Share of the targets reached, by their bearing from the head when they appeared; under each, the agents' targets of that bearing per episode",
+      about: "Each target counts in one of four classes of 45°, by its bearing from the head's forward direction when it appeared: ahead, to the side, behind to the side, behind. At a low level every target appears ahead; behind the head they come only as the level opens the circle. A class reached less often than the others shows a turn the centipede has not learned." };
+    const series = actors.map((name, i) => {
+      const placed = samples[i].episodeMean("episodes.targets_by_bearing"), reached = samples[i].episodeMean("episodes.reached_by_bearing");
+      return { name, color: actorColors[i],
+        values: names.map((_, k) => (placed && reached && placed[k] > 0 ? (100 * reached[k]) / placed[k] : null)) };
+    });
+    const placed = samples[0].episodeMean("episodes.targets_by_bearing");
+    const labels = names.map((name, k) => `${name} (${placed ? number(placed[k]) : "–"})`);
+    return card(spec, several ? legend(actors, actorColors) : null, groupedBars(labels, series, "%", width));
+  }
+
+  if (item.kind === "lags" || item.kind === "left_right_lags") {
+    const neighbours = item.kind === "lags";
+    const key = neighbours ? "step_facts.neighbour_lag" : "step_facts.left_right_lag";
+    const records = data.results[actors[0]];
+    const overallLag = combinedLag(records, key);
+    const spec = { ...item, keys: [key, `${key}_consistency`, `${key}_lock`],
+      title: neighbours ? "Each foot behind the foot ahead" : "Each segment's two feet",
+      subtitle: `The ${actors[0]}' lags; over every pair: ${neighbours ? waveShape(overallLag) : leftRightShape(overallLag)}` +
+        (overallLag === null ? "" : `, consistency ${number(overallLag.consistency)}`),
+      about: neighbours ? WAVE_ABOUT : LEFT_RIGHT_ABOUT };
+    const sample = sampleOf(records.map((record) => raw(record, key)));
+    if (sample === undefined) return card(spec, empty());
+    const rows = neighbours
+      ? sample.map((_, pair) => [`${pair}–${pair + 1}`, [0, 1].map((side) => (value) => value[pair][side])])
+      : sample.map((_, segment) => [segment === 0 ? "0 head" : String(segment), [(value) => value[segment]]]);
+    return card(spec, lagTable(records, key, rows, neighbours ? ["Left", "Right"] : ["Left–right"]));
   }
 
   if (item.kind === "body_table") {

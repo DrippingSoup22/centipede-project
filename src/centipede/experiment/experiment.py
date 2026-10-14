@@ -18,9 +18,9 @@
   listed baseline, and writes the results, their report, and the recordings
   into the run.
 
-The report pages describe the main design's episodes, which end at the
-target; a run of the cooperators' design writes none, and its log and
-evaluation results are read by the training project's dashboard.
+A run of the cooperators' design writes no training report, since the
+training project's monitor shows its log while it trains; its evaluation
+page has the design's own layout.
 
 This is the only component that deals with files. See docs/architecture.md and
 docs/configuration.md.
@@ -693,16 +693,17 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         "agents_act_with": "their policy's mean action, without exploration",
         "changed_from_training": evaluation.environment_changes,
     }
+    if levelled:
+        run_facts["task_level"] = environment.level
     settings = configuration.training_values()
-    results_path = folder.write_evaluation(
+    folder.write_evaluation(
         stem, {"run_facts": run_facts, "settings": settings, "results": results}
     )
-    if not levelled:
-        results_path = folder.evaluations / f"{stem}.html"
-        write_evaluation_report(
-            results_path, folder.path.name, run_facts, categories, results, settings
-        )
-    print(f"\nResults: {results_path}")
+    report_path = folder.evaluations / f"{stem}.html"
+    write_evaluation_report(
+        report_path, folder.path.name, run_facts, categories, results, settings
+    )
+    print(f"\nResults: {report_path}")
     return folder.path
 
 
