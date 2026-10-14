@@ -10,14 +10,14 @@ advantage is mostly noise and the actor learns nothing.
 ## The setup
 
 Every segment learns with two critics of its own (the user, 2026-10-14):
-a **goal critic** for the progress it is paid for, and a **health
-critic** for its costs ([reward.md](reward.md)).
+a **goal critic** for the progress it is paid for, and a **cost critic**
+for what its acting costs, energy and pain ([reward.md](reward.md)).
 
 | | Head | Each follower |
 | --- | --- | --- |
 | Actor | Its own; sees itself, its neighbours within the radius, and the target | Its own; sees itself and its neighbours within the radius |
 | Goal critic | Its own; judges the task (progress toward the target, arrivals), so it also sees the target | Its own; judges the path (progress along the trail of the segment ahead) |
-| Health critic | Its own; judges its costs and its neighbours' | The same |
+| Cost critic | Its own; judges its energy and pain and its neighbours' | The same |
 | Each critic's input | What its actor sees, plus those neighbours' actions | The same |
 | Shared with other segments | Nothing | Nothing |
 
@@ -27,11 +27,11 @@ their goal is, and in the head's goal critic seeing the target.
 
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
-every segment: goal and health count **1 : 1** to start. The weight alone
+every segment: goal and costs count **1 : 1** to start. The weight alone
 sets the balance, whatever the units of the two (progress is a distance,
-effort an energy), and a goal whose raw signal is small early in training
+the costs an energy), and a goal whose raw signal is small early in training
 keeps its voice (van Seijen et al., NeurIPS 2017; the oscillators' head did
-the same). The goal never counts less than health ([reward.md](reward.md),
+the same). The goal never counts less than the costs ([reward.md](reward.md),
 principle 1); in run 57, a task weight of 0.2 did not pull the body along.
 
 **Size: two hidden layers of 64** to start (the user's proposal), against

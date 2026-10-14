@@ -1,14 +1,13 @@
 # Reward
 
-**Status (2026-10-14): the structure is agreed in ideas; the balances are
-being set as ratios; no term has a formula or a number yet.**
+**Status (2026-10-14): the structure is agreed in ideas; four ratios
+remain; no term has a formula or a number yet.**
 
 Agreed with the user: the goal layers (task for the head, path for the
-followers), effort as an energy cost, α fading with distance over every
-neighbour a segment sees, a goal critic and a health critic for every
-segment at 1 : 1, and free speed. Proposed and awaiting the user: effort
-and damage as two layers judged by one cost critic, and the list of
-damage.
+followers), the costs as energy and pain, α fading with distance over every
+neighbour a segment sees, a goal critic and a cost critic for every segment
+at 1 : 1, and free speed. Proposed and awaiting the user: energy measured
+as what a motor draws (work plus heat), braking never refunded.
 
 ## Principles
 
@@ -32,8 +31,8 @@ what its moving costs.**
 | --- | --- | --- | --- |
 | Task | The head | Progress toward the target, and arriving | Goal critic |
 | Path | Each follower | Progress along the trail the segment ahead leaves | Goal critic |
-| Effort (proposed as its own layer) | Every segment | The energy its motors spend, and its neighbours' through α | Cost critic |
-| Damage (proposed as its own layer) | Every segment | Harm to the body, its own and its neighbours' through α | Cost critic |
+| Energy | Every segment | Every force its motors exert and every movement they make; its neighbours' through α | Cost critic |
+| Pain | Every segment | The force with which its legs hit other legs; its neighbours' through α | Cost critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -84,61 +83,95 @@ simpler and differs only in curves, where the body bends.
 
 ### Speed is free
 
-Progress is paid, more is better, and effort costs, so the body settles at
-the speed where more progress stops being worth its effort: the balance
+Progress is paid, more is better, and energy costs, so the body settles at
+the speed where more progress stops being worth its energy: the balance
 between goal and costs is the speed dial, and the gait that emerges is the
 cheapest for that speed. The speed comes from the environment, not from a
 command (the user, 2026-10-14; a commanded speed, as in Fu et al., is not
 planned). How the task's distances and the arrival's value make speed pay
 belongs to [task.md](task.md).
 
-### Effort: the price of acting (proposed as its own layer)
+### Energy: the price of every force (the user's design)
 
-The energy the segment's motors spend. It is not health: nothing is
-harmed, it is what doing things costs, and it shapes how the body walks.
-It is the general rule that can replace every gait rule. Horses use each
-gait in the range of speeds where it costs them the least energy (Hoyt and
-Taylor, Nature 1981). Quadruped robots paid for moving at a commanded speed
-and charged for their motors' power found walk, trot and gallop by
-themselves, each at the speed where it is cheapest (Fu et al., CoRL 2021).
-Energy changed nothing in the oscillators' run 43, but that run was
-dominated by clocks and step rewards.
+**The idea: be as lazy as possible, intelligently.** Energy is everything
+the centipede's motors do: every force they exert and every movement they
+make. It is not harm; it is what acting costs, and it shapes how the body
+walks. Almost every cost reduces to it:
 
-**What it measures: work done and force held** (proposed).
+| What happens | How energy charges it |
+| --- | --- |
+| Standing | Holding the body up against gravity takes force, all the time |
+| Resting on the belly | Saves that force; standing up again costs work. The agents weigh the two, as a real Scolopendra rests on its belly when still |
+| Dragging the belly while moving | The body's friction on the floor (0.8, as the feet's, [model.md](../model.md#contacts-and-friction)) must be pushed through: work |
+| A clumsy step, a slip, legs fighting | Work and force spent for nothing |
+| A joint pushed against its stop | Force held without motion |
+| Hanging, being carried | Costs the lazy segment little, but its neighbours pay the extra force, and α brings their cost back to it |
 
-| Measure | Charges | Alone, it would |
+So no posture rule is needed: whether to stand, rest or drag is a choice
+the physics prices. Energy is the general rule that can replace every gait
+rule. Horses use each gait in the range of speeds where it costs them the
+least energy (Hoyt and Taylor, Nature 1981). Quadruped robots paid for
+moving at a commanded speed and charged for their motors' power found walk,
+trot and gallop by themselves, each at the speed where it is cheapest (Fu
+et al., CoRL 2021). Energy changed nothing in the oscillators' run 43, but
+that run was dominated by clocks and step rewards.
+
+**What it measures: what a motor draws** (proposed). An electric motor's
+draw is its mechanical power, torque times speed, plus the heat its
+current makes, which grows with the square of the torque, moving or not. A
+muscle likewise spends energy moving and also tires just holding a weight.
+
+| Part | Charges | Alone, it would |
 | --- | --- | --- |
-| Work done: the motors' power (Fu et al.) | Moving | Make holding a load still free: a segment holding up a hanging neighbour pays nothing, so α could not stop free-riding at rest |
-| Force held: the squared torque (Gymnasium's Ant) | Holding and moving alike | Not tell useful motion from holding still |
+| Work: torque times joint speed (Fu et al.) | Moving | Make holding still free: standing and holding up a hanging neighbour would cost nothing |
+| Heat: the squared torque (as Gymnasium's Ant's control cost) | Holding and moving alike | Not tell useful motion from holding still |
 
-Together they are closest to a muscle, which spends energy moving and also
-tires just holding a weight. With torque motors the torque is the action,
-so the cost critic sees it, its neighbours' included.
+Together they make one physical quantity, and the ratio between them is the
+motor's own constant. Braking is never refunded: a motor that slows a
+joint still draws power, as a muscle that brakes still spends energy (Fu
+et al. counted negative work as a gain). With torque motors the torque is
+the action, so the cost critic sees it, its neighbours' included.
 
-### Damage: harm to the body (proposed as its own layer)
+### Pain: legs hitting legs (the user's design)
 
-What counts as damage must be (1) an outcome, not a form of movement;
-(2) visible to the cost critic; (3) not already paid by another term; and
-(4) something that is really happening or that another term pushes toward.
-Proposed:
+Energy cannot price everything. When legs hit each other, two things
+happen: force is wasted, which energy charges, and harm is done, which it
+does not:
 
-| Candidate | Proposal | Why |
-| --- | --- | --- |
-| Body on the ground | **Kept** | Effort makes it necessary: holding the body up costs force, so with effort alone, lying on the belly would become the cheapest way to move. It is effort's counterweight. Real centipedes walk with the body raised |
-| Legs colliding | **Kept** | Two neighbours' legs hit each other only when they move out of step in space, so avoiding it asks each to take the other into account: the damage most tied to cooperation, yet an outcome, not a gait. Both segments involved pay |
-| Body turned over | Left out | Never seen in any run: the many legs keep the body stable. A term that never fires teaches nothing, and if it fired, the goal would already suffer. It returns if a recording shows it |
-| Joints pushed against their stops | Left out | Effort already charges it: torque held without motion is force held |
-| Feet slipping | Left out | A judgement of the step's quality, gamed in the oscillators; slipping also wastes work, which effort charges |
-| Hard impacts, tapping feet | Left out for now | Seen in the oscillators with other motors and clocks; added only if it appears here |
+- **A leg could push off a neighbour's leg instead of the ground.** If that
+  is cheaper, energy would even reward it. Pain forbids using legs as
+  footholds.
+- **A hard, brief kick costs little energy** but is harm all the same.
 
-The rule: a damage term enters only for harm we see, or that another term
-pushes toward.
+Pain is graded by force: the force with which a segment's legs press on
+other legs, so legs that brush without pushing feel almost nothing, as in
+the real animal. Both segments of a contact pay. This is the user's leg
+pushing of 2026-10-11 (oscillators, cycle 1), inert there (under 1% of its
+most) while clocks kept the legs apart; here nothing does.
+
+It is also the cost most tied to cooperation. Two same-side neighbours'
+legs touch when the rear one's sweep converges on the front one's, so how
+far each can sweep depends on how the neighbours' steps are offset in time
+(the oscillators' leg geometry, 2026-10-11): pain makes each segment take
+its neighbours' steps into account, without saying which offset to use.
+
+### Other harms left out
+
+| Candidate | Why |
+| --- | --- |
+| Body on the ground | Energy prices it: resting saves force, dragging costs work. Forbidding it would forbid a real centipede's rest (the user) |
+| Body turned over | Never seen in any run: the many legs keep the body stable. A term that never fires teaches nothing; it returns if a recording shows it |
+| Feet slipping | Energy charges the wasted work; a judgement of the step's quality was gamed in the oscillators |
+| Hard impacts, tapping feet | Seen in the oscillators with other motors and clocks; added only if it appears here |
+
+The rule: every cost is energy, except harm that costs no energy, and that
+harm enters only when we see it.
 
 ### The cooperation dial α (agreed)
 
-A segment's effort and damage also count its neighbours', as far as it
+A segment's energy and pain also count its neighbours', as far as it
 sees them (the user, 2026-10-14). It is essential, not optional: if each
-segment paid only its own effort, laziness would pay, since a segment that
+segment paid only its own energy, laziness would pay, since a segment that
 hangs from its neighbours saves its own energy while they carry it. That
 is what the oscillators' followers learned (no foot down in 42 to 54% of
 steps). With α, burdening the neighbours costs the segment too. It is
@@ -172,30 +205,29 @@ Why a share of a whole: the head and the rear see fewer neighbours than a
 middle segment. Scaled to a whole, every segment's costs have the same
 size, so the balance between goal and costs is the same along the body.
 
-α applies to effort and damage only. The path is already shared by the
+α applies to energy and pain only. The path is already shared by the
 chain; blending it would add nothing.
 
 ## Critics and balances
 
 | Agent | Goal critic | Cost critic |
 | --- | --- | --- |
-| Head | Task | Effort and damage |
-| Each follower | Path | Effort and damage |
+| Head | Task | Energy and pain |
+| Each follower | Path | Energy and pain |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
-apart ([critic.md](critic.md)). Effort and damage share one critic
-(proposed) rather than one each: damage is rare, and a critic of a signal
-that is almost always zero would have its noise enlarged by the
-normalisation. Inside the cost critic, damage is priced in effort: how
-many steps of ordinary effort one step of damage is worth.
+apart ([critic.md](critic.md)). Energy and pain share one critic rather
+than one each: pain is rare, and a critic of a signal that is almost
+always zero would have its noise enlarged by the normalisation. Inside the
+cost critic, pain is priced in energy: how much energy a hit of a given
+force is worth.
 
 | Balance | Status |
 | --- | --- |
 | Goal : costs | 1 : 1, agreed |
 | α | Halving per segment, as a share of the whole, agreed |
-| Work : force, inside effort | Open |
-| Damage : effort | Open |
-| Body on the ground : legs colliding | Open |
+| Work : heat, inside energy | Open: the motor's constant |
+| Pain : energy | Open |
 | Progress : arrival, for the head | Open, with [task.md](task.md) |
 
 ## Left out
