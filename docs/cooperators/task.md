@@ -85,6 +85,62 @@ networks learn to ignore it. If the observations leave out the world
 heading altogether ([observations.md](observations.md)), the starting
 heading stops mattering, and randomising it still costs nothing.
 
+## Walking on (proposed, 2026-10-14)
+
+**An arrival never ends the episode** (the user): a new target appears at
+once, by the current level's rules, **placed from the head where it
+stands**. The alternative, every target around the episode's starting
+point, keeps the walk in one area, easier to watch (the user's lean), but
+the agents never see that origin: they see only the target relative to
+the head. From the origin, the next target would lie anywhere from almost
+under the head to twice the range away, in any direction, so the 1.5 ratio,
+the opening of the circle and the level would stop controlling the task,
+and near targets would come back. Placed from the head, every target obeys
+the level exactly. Watching is the viewer's job: a camera that follows the
+head, or the trail drawn on the floor. The floor is the same everywhere,
+and a walk of metres loses nothing in precision.
+
+**A time allowance per target** (proposed). With walking on, a target that
+is never reached would hold its world forever, and the level needs a share
+of arrivals. So each target allows a fixed time; when it runs out, the
+target counts as missed and a new one appears, without a reset. A fixed
+time is the user's earlier idea (a fixed length asks a farther target for
+a faster walk), moved from the episode to each target, where it acts now
+that one episode holds many targets; the oscillators' circle task allowed
+10 s per target, so its level read as speed.
+
+## The episode (proposed, 2026-10-14)
+
+**Fixed, generous, and never growing with the level.** With walking on,
+the task has no end: the centipede is judged over an indefinite time, and
+the episode's time limit only restarts a world from a fresh pose. In that
+case the learning must bootstrap at the time limit, valuing the state it
+was cut in, rather than treat it as an end (Pardo et al., ICML 2018), as
+main already does. Then the episode's length is not part of the task: it
+changes nothing in what is best to do, only how often each world starts
+afresh. Growing it with the level would change nothing the levels do not
+already change; the difficulty is the targets' job.
+
+What the length trades:
+
+- **Longer:** more practice at walking on and at recovering from bad
+  positions, which the policy must learn anyway, and fewer restarts.
+- **Shorter:** more fresh starts, and a world stuck early in training (a
+  body tangled or sunk) waits less before its reset (the user's concern).
+
+Since nothing else ends an episode (resting on the belly is allowed, and
+the body never turned over), the time limit is the only reset. A length of
+a few target allowances keeps both sides: several targets per episode,
+and no world stuck for long. Rudin et al. (CoRL 2021), training thousands
+of quadrupeds in parallel, used 20 s episodes, bootstrapped at the time
+limit and reset only there, so one episode spans many updates; with too
+short a horizon per robot, their performance dropped sharply.
+
+**The discount follows the target, not the episode.** Main ties it to the
+episode's length ([agents.md](../agents.md#settings)); with walking on and
+bootstrapping, the time that matters is a target's: the discount should
+see about one allowance ahead.
+
 ## The levels (proposed, 2026-10-14)
 
 **The user's rule:** the level starts rising once the arrivals pass 10%,
@@ -109,6 +165,13 @@ missed, and the low end of the band costs little. It keeps the centipede
 on the hardest targets it can still reach. The price: arrivals are rare, so
 the arrival part of the goal is learned from few events, which thousands
 of worlds make up for.
+
+**An option from the research: a level per world.** Rudin et al. gave each
+robot its own level: up when it crossed its terrain, down when it covered
+less than half of what was asked, and robots at the top sent back to a
+random level, for variety and against forgetting. The population then
+spreads across levels by itself, each world at its own edge. A single
+level, as above, is simpler to read; this stays an option.
 
 **The stages blur, and that is fine:** early is level 0 until arrivals
 reach 10%, the walk being learned from progress; middle is the level

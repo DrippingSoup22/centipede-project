@@ -132,3 +132,5 @@ batches.
 - Dallmann, Dürr & Schmitz, Proc. R. Soc. B 283, 2016, [PMC4795010](https://pmc.ncbi.nlm.nih.gov/articles/PMC4795010)
 - Guschlbauer, dissertation, University of Cologne, 2009, [KUPS](https://kups.ub.uni-koeln.de/3001/)
 - Florensa, Held, Geng & Abbeel, Automatic goal generation for reinforcement learning agents, ICML 2018, [arXiv 1705.06366](https://arxiv.org/abs/1705.06366)
+- Pardo, Tavakoli, Levdik & Kormushev, Time limits in reinforcement learning, ICML 2018, [arXiv 1712.00378](https://arxiv.org/abs/1712.00378)
+- Rudin, Hoeller, Reist & Hutter, Learning to walk in minutes using massively parallel deep reinforcement learning, CoRL 2021, [arXiv 2109.11978](https://arxiv.org/abs/2109.11978)
