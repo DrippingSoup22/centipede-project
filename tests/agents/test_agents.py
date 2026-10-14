@@ -72,6 +72,23 @@ def test_the_head_learns_the_task_with_a_critic_of_its_own():
     assert learning.task_explained_variance[1].isnan()
 
 
+def test_an_arrival_ends_no_return_when_the_body_walks_on():
+    """With returns continuing after arrivals, the arrival in world 0 ends
+    neither the head's returns nor the follower's; world 1's restart cuts
+    them, bootstrapped."""
+    settings = AgentSettings.from_section(
+        {"head_task_critic_weight": 0.2, "returns_continue_after_arrival": True}
+    )
+    agents = Agents(2, 5, 2, 1, settings, 0)
+    agents.act(torch.zeros(2, 2, 5), training=True)
+    arrived, restarted = torch.tensor([True, False]), torch.tensor([False, True])
+    agents.record(torch.zeros(2, 2, 2), arrived, restarted, torch.zeros(2, 2, 5))
+
+    for agent in agents.segment_agents:
+        assert agent.rollout_storage.terminated[0].tolist() == [False, False]
+        assert agent.rollout_storage.episode_ended[0].tolist() == [False, True]
+
+
 def test_a_masked_agent_judges_each_decision_on_its_whole_turn():
     """One world, five steps: decisions on steps 0 and 3 (every action marked)
     held by the steps between (none marked); rewards 1, values 0. Each

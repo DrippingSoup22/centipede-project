@@ -154,11 +154,18 @@ class Clocks:
         device: torch.device | str,
         per_leg: bool = False,
         leg_joint_count: int = 3,
+        shared_hand: bool = False,
     ) -> None:
-        """Allocate the clocks and count what each clock is compared with."""
+        """Allocate the clocks and count what each clock is compared with.
+
+        With ``shared_hand`` (held curves), a segment's two legs' clocks start
+        at the same random hand, which then turns at their one tempo: the
+        segment's turn hand, which it observes once.
+        """
         self.settings = settings
         self.step_duration_s = step_duration_s
         self.per_leg = per_leg
+        self.shared_hand = shared_hand
         shape = (world_count, segment_count, 2 if per_leg else 1)
         self.clock_phase = torch.zeros(shape, dtype=torch.float32, device=device)
         self.clock_tempo_octaves = torch.zeros(
@@ -170,7 +177,7 @@ class Clocks:
         self.phase = self.clock_phase[..., 0]
         self.tempo_octaves = self.clock_tempo_octaves[..., 0]
         self.tempo_hz = self.clock_tempo_hz[..., 0]
-        self.value_count = VALUES_PER_CLOCK * shape[2]
+        self.value_count = VALUES_PER_CLOCK * (1 if shared_hand else shape[2])
         if per_leg:
             self.step_shape = torch.zeros(
                 (world_count, segment_count, 2, 2 + leg_joint_count),
@@ -245,15 +252,16 @@ class Clocks:
         """
         if seed is not None:
             self.generator.manual_seed(seed)
+        hand_shape = self.clock_phase.shape
+        if self.shared_hand:
+            hand_shape = (*hand_shape[:2], 1)
         new_phase = (
             2
             * math.pi
             * torch.rand(
-                self.clock_phase.shape,
-                generator=self.generator,
-                device=self.clock_phase.device,
+                hand_shape, generator=self.generator, device=self.clock_phase.device
             )
-        )
+        ).expand(self.clock_phase.shape)
         restarted = world_mask[:, None, None]
         self.clock_phase.copy_(torch.where(restarted, new_phase, self.clock_phase))
         start_octaves = torch.zeros_like(self.clock_tempo_octaves)
@@ -521,13 +529,16 @@ class Clocks:
 
         For each clock, the left leg's first: its hand as ``cos`` and ``sin``,
         so that the end of a turn and the start of the next look alike, and
-        its tempo in use in action units, from −1 to 1.
+        its tempo in use in action units, from −1 to 1. With a shared hand,
+        the first clock's alone.
         """
+        clocks = slice(0, 1) if self.shared_hand else slice(None)
         return torch.stack(
             (
-                torch.cos(self.clock_phase),
-                torch.sin(self.clock_phase),
-                self.clock_tempo_octaves / self.settings.tempo_range_octaves,
+                torch.cos(self.clock_phase[..., clocks]),
+                torch.sin(self.clock_phase[..., clocks]),
+                self.clock_tempo_octaves[..., clocks]
+                / self.settings.tempo_range_octaves,
             ),
             dim=-1,
         ).flatten(start_dim=2)

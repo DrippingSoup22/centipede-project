@@ -396,6 +396,15 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
             "[agents] follower_tempo_noise_gap_octaves needs [environment] "
             "neighbour_tempos = true: a follower reads its tempo gap there"
         )
+    if (
+        configuration.agents.returns_continue_after_arrival
+        and configuration.environment.target.after_arrival != "new_target"
+    ):
+        raise SettingsError(
+            "[agents] returns_continue_after_arrival runs every return on"
+            " through an arrival, after which the body walks on: set"
+            ' [environment.target] after_arrival = "new_target"'
+        )
     backend = configuration.environment.simulation.backend
     if configuration.agents.device != DEVICE_FOR_BACKEND[backend]:
         raise SettingsError(

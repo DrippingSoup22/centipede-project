@@ -12,7 +12,11 @@ import math
 import pytest
 import torch
 
-from centipede.environment.environment import Environment, _load_ahead
+from centipede.environment.environment import (
+    STEP_VALUE_CHECKS,
+    Environment,
+    _load_ahead,
+)
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.settings_section import SettingsError
@@ -129,8 +133,9 @@ def test_episodes_end_by_arrival_time_limit_or_range_and_only_those_restart():
 
 
 def test_after_an_arrival_the_body_can_walk_on_toward_a_new_target():
-    """With after_arrival = "new_target", world 0 arrives and keeps its body;
-    world 1 runs out of time and still restarts."""
+    """With after_arrival = "new_target", world 0 arrives and keeps its body,
+    its final observation what it sees next, the new target; world 1 runs out
+    of time and still restarts."""
     env = environment(
         world_count=2, max_episode_steps=2, target={"after_arrival": "new_target"}
     )
@@ -146,7 +151,7 @@ def test_after_an_arrival_the_body_can_walk_on_toward_a_new_target():
     assert terminated.tolist() == [True, False] and truncated.tolist() == [False, True]
     assert env.episode_steps.tolist() == [0, 0]
     # World 0 sees the same body, with a new target; world 1 a new body.
-    assert torch.equal(observations[0, :, :-2], final[0, :, :-2])
+    assert torch.equal(observations[0], final[0])
     assert target_distance_and_bearing(observations)[0][0] >= 0.030
     assert not torch.equal(observations[1, :, :-2], final[1, :, :-2])
 
@@ -522,19 +527,22 @@ def test_the_carrying_is_measured_on_every_physics_step():
 
 
 def test_a_segment_decides_once_per_turn_and_plays_it_at_one_tempo():
-    """Model B with held curves, every segment's heart at 2 Hz: after a
-    restart each segment takes its legs' curves and its tempo from the first
-    action, the heart moving at once as far as it would over a turn (0.5 ×
-    1 octave/s × 0.5 s), and holds them, at that tempo, its legs' hands
-    keeping their places apart, until its turn hand comes round: 22 steps at
+    """Model B with held curves, every segment's heart at 2 Hz, its two legs
+    on one hand, set just past a turn's start: after a restart each segment
+    takes its legs' curves and its tempo from the first action, the heart
+    moving at once as far as it would over a turn (0.5 × 1 octave/s × 0.5 s),
+    and holds them, at that tempo, until its hand comes round: 22 steps at
     2.38 Hz. Only then does the mask mark its actions again, and it take the
-    next action's. Each segment sees what it holds, last."""
+    next action's. Each segment sees, last, the curves it holds and the step
+    value's checks averaged over its last turn."""
     env = environment(
         world_count=1,
         model_path="models/assembly_v5.xml",
         leg_clocks=True,
         leg_drive="waves",
         hold_curves=True,
+        feet_physics=True,
+        rewards={"step_value_scale": 0.01},
         clock={
             "segment_tempo": True,
             "clock_time_constant_s": 0.0,
@@ -544,26 +552,36 @@ def test_a_segment_decides_once_per_turn_and_plays_it_at_one_tempo():
     )
     held = env.leg_action_count
     env.reset(seed=1)
+    phase = env.clocks.clock_phase
+    assert torch.equal(phase[..., 0], phase[..., 1])
+    phase.fill_(1e-3)
     assert torch.all(env.action_mask == 1)
     first = torch.full((1, env.segment_count, env.action_size), 0.1)
     first[..., 0] = 0.5
     second = torch.full_like(first, -0.2)
-    legs_apart = env.clocks.clock_phase.diff(dim=-1)
+    compute = env.reward_function.compute
+    checks = [env.reward_function.term_names.index(name) for name in STEP_VALUE_CHECKS]
+    turn_checks = []
+
+    def recording_compute(*arguments, **keywords):
+        step_rewards = compute(*arguments, **keywords)
+        turn_checks.append(step_rewards.reward_parts[..., checks])
+        return step_rewards
+
+    env.reward_function.compute = recording_compute
 
     observations, *_ = env.step(first)
-    torch.testing.assert_close(observations[..., -held:], first[..., :held])
+    torch.testing.assert_close(observations[..., -held - 3 : -4], first[..., 1:held])
     tempo_hz = torch.full_like(env.clocks.clock_tempo_hz, 2 * 2**0.25)
     torch.testing.assert_close(env.clocks.clock_tempo_hz, tempo_hz)
-    steps = 1
     while not env.deciding.any():
         assert torch.all(env.action_mask == 0)
-        env.step(second)
-        steps += 1
+        observations, *_ = env.step(second)
         assert torch.equal(env.held_actions, first[..., :held])
         torch.testing.assert_close(env.clocks.clock_tempo_hz, tempo_hz)
-    assert steps == 22 and env.deciding.all()
-    turned_apart = env.clocks.clock_phase.diff(dim=-1) - legs_apart
-    torch.testing.assert_close(turned_apart.cos(), torch.ones_like(turned_apart))
+    assert len(turn_checks) == 22 and env.deciding.all()
+    turn_mean = torch.stack(turn_checks).mean(dim=0) / 0.01  # weights x mm
+    torch.testing.assert_close(observations[..., -4:], turn_mean)
 
     assert torch.all(env.action_mask == 1)
     env.step(second)

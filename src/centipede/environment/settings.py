@@ -830,12 +830,13 @@ class EnvironmentSettings:
     segment also hears the tempo of each neighbour it sees, relative to its
     own; it needs clocks per leg. With ``hold_curves`` (off by default; the
     user's rule, 2026-10-13, made per segment 2026-10-14), each segment
-    decides once per turn instead of every 20 ms: on the step its turn
-    starts, it takes both legs' curves and its tempo from its actions and
-    holds them for the whole turn, so that the curves judged are the curves
-    drawn and every turn is played at one tempo. Each segment observes the
-    actions it holds, last. It needs ``leg_drive = "waves"`` and a heart
-    whose legs' hands turn alike (``ClockSettings``).
+    decides once per turn instead of every 20 ms: its legs' curves are
+    played by one hand, and on the step it starts a turn the segment takes
+    both curves and its tempo from its actions and holds them for the whole
+    turn, so that the curves judged are the curves drawn and every turn is
+    played at one tempo. Each segment observes, last, the curves it holds
+    and the step value's checks over its last turn. It needs ``leg_drive =
+    "waves"`` and a heart whose legs' hands turn alike (``ClockSettings``).
     """
 
     max_episode_steps: int
@@ -932,16 +933,18 @@ class EnvironmentSettings:
             )
         if settings.hold_curves and (
             settings.leg_drive != "waves"
+            or settings.neighbour_clocks
             or not clock.tempo_rate_octaves_per_s
             or clock.load_feedback_rad_per_s
             or clock.follow_nudge_rad_per_s
         ):
             raise SettingsError(
                 "[environment] hold_curves holds model B's curves for each"
-                " segment's turn, both legs' hands turning at its heart's tempo:"
-                ' set leg_drive = "waves", and in [environment.clock]'
-                " tempo_rate_octaves_per_s above 0 and no load feedback or follow"
-                " nudge, which would turn one leg's hand faster than the other's"
+                " segment's turn, both legs' curves played by one hand at its"
+                ' heart\'s tempo: set leg_drive = "waves" and neighbour_clocks ='
+                " false, and in [environment.clock] tempo_rate_octaves_per_s"
+                " above 0 and no load feedback or follow nudge, which would turn"
+                " one leg's hand away from the other's"
             )
         if settings.passive_follower_spine and not settings.spine_control:
             raise SettingsError(

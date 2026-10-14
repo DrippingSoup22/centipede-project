@@ -20,7 +20,7 @@ head learns its step and the [task](#1-task-terms), each with a [critic of
 its own](#a-task-critic-for-the-head). Each segment decides its legs' curves
 and its tempo once per turn and [holds them for the whole
 turn](#curves-held-for-a-turn), and learns from each turn as a whole. Model v5, model B, the circle
-task from 10 cm, pink noise, no CAPS. Before it, runs 51 to 56 paid every
+task from 10 cm, white noise, no CAPS. Before it, runs 51 to 56 paid every
 segment the head's task and charged the [retired](#retired-reward-terms)
 health costs (foot hold, carry, leg pushing): the followers' critics
 explained none of their returns, because the shared task they could neither
@@ -387,7 +387,7 @@ sees, how the agents explore, and how training is scheduled.
 | ✅ | [Leg accelerations](#leg-accelerations) | What a segment sees | `leg_accelerations = true` | 15– |
 | ⬜ | [Neighbours' clocks](#neighbours-clocks) | What a segment sees | `neighbour_clocks = true` | 08–14, 17 |
 | ✅ | [Neighbours' tempos](#neighbours-tempos) | What a segment sees | `neighbour_tempos = true` | 41– |
-| ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 1` | 1: 52, 54–57 (and 02, 04, 08, 09, 13); 2: 31–51, 53; 0.5: 10–12, 14–28 |
+| ⬜ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta` | 0, white: 57–; 1: 52, 54–56 (and 02, 04, 08, 09, 13); 2: 31–51, 53; 0.5: 10–12, 14–28 |
 | ✅ | [Tempo noise that follows the gap](#tempo-noise-that-follows-the-gap) | Exploration | `[agents] follower_tempo_noise_gap_octaves = 0.17` | 51– |
 | ⬜ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34; 1: 44–50 |
 | ✅ | [A task critic for the head](#a-task-critic-for-the-head) | Learning | `[agents] head_task_critic_weight = 0.2` | 57– |
@@ -496,25 +496,37 @@ staircase of 50 jumps a second.
 #### Curves held for a turn
 
 ✅ **Idea.** The user's rule (2026-10-13), made per segment (2026-10-14): a
-step is judged as a whole, so it must be played whole. Each segment has a
-turn hand that starts at 0 when its world restarts and turns at its tempo.
-On the step its turn starts, the segment takes both legs' curves (40
-values) and its tempo action from its actions, and plays them unchanged for
-the whole turn. One decision, one turn, one judgement, and exploration that
-tries one whole step against another. The tempo is the only thing the two
-legs share: each leg's hand keeps its own random place, so each leg switches
-curves at its own point of its cycle, and nothing fixes a phase. Where each
-leg's stance falls in the turn is its curve's to choose, since a curve of
-two waves shifted in time is another curve of two waves. Each segment sees
-the 41 values it holds, last in its observation (the user's "they see their
-own curve"). A new curve may start away from where the leg is; no rule stops
-it, since the lurch costs sliding or support.
+step is judged as a whole, so it must be played whole. A segment's two legs'
+curves are played by one hand, which starts at a random place when its
+world restarts and turns at its tempo. On the step the hand starts a turn,
+the segment takes both legs' curves (40 values) and its tempo action from
+its actions, and plays them unchanged for the whole turn. One decision, one
+turn, one judgement, and exploration that tries one whole step against
+another. Each leg's timing is its own curve's: where its stance falls in
+the turn is its curve's to choose, since a curve of two waves shifted in
+time is another curve of two waves, so nothing ties the legs together, and
+the starting curves are random. A hand per leg, at a random place each,
+would only make the network turn its 20 values by an angle that changes
+every episode; on one hand every curve starts at φ = 0, so starting a new
+curve where the leg is means its centre plus its cosine amounts. A new
+curve may still start away from where the leg is; no rule stops it, since
+the lurch costs sliding or support.
 
 The tempo action moves the [heart](#the-heart) only as a turn
 starts, by as much as the heart would over one turn at the tempo it had
 (action × 1 octave/s × the turn's length), so that every turn is played at
-one tempo and both legs' hands turn alike; the clocks' load feedback and
-follow nudge, which would turn one hand faster than the other, must be off.
+one tempo; the clocks' load feedback and follow nudge, which would turn one
+leg's hand away from the other's, must be off.
+
+What a segment sees is fitted to deciding a turn (the user's review,
+2026-10-14), 210 values: its body and its 4 neighbours' (height, tilt and
+bend, velocities, feet, leg angles and speeds; no leg accelerations, a 20 ms
+snapshot of jerks that tells nothing about a whole turn), the target (the
+head's), the spine joint behind, its hand and tempo once, its neighbours'
+tempos, and last its turn's values: the 40 curve values it holds (the user's
+"they see their own curve") and the step value's four checks averaged over
+its last turn, how its last step went, which a critic that sees only one
+instant of a rhythm could not tell.
 
 <details>
 <summary>How the agents learn from it</summary>
@@ -718,7 +730,11 @@ movement for a while rather than jittering. Cycle 2 uses β = 2, red noise:
 per step it changes less than the step's own motion, so model B's curves are
 explored as curves (the twitching of runs 08 to 10 came from noise that
 changed faster than the step). β = 1, pink noise (Eberhard et al., ICLR
-2023), is the pilot's alternative.
+2023), is the pilot's alternative. ⬜ From run 57 the noise is white: a
+held turn already keeps one curve for a whole step, which is what the
+colour was for, and a turn spans about 25 steps of a coloured sequence, so
+consecutive turns would explore alike; white noise makes every turn a fresh
+trial.
 
 <details>
 <summary>Math</summary>
@@ -931,4 +947,8 @@ history is in the study notes.
 
 ✅ **Idea.** After an arrival the body keeps walking toward a new target,
 with its clocks running, as a real centipede would, and the targets reached
-per minute count every arrival.
+per minute count every arrival. Since run 57 the learning treats it so too
+(`[agents] returns_continue_after_arrival`): an arrival ends no return, and
+only a restart, at the time limit or outside the range circle, cuts them.
+Until run 56 every arrival ended every segment's return as if the world had
+stopped there, a cut the followers could neither see nor cause.

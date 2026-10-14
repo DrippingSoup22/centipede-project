@@ -110,6 +110,13 @@ class AgentSettings:
     this much against the walk's 1, whatever the two rewards' scales (RL_lib's
     PPO; van Seijen et al., NeurIPS 2017). The followers, and the head when
     it is 0, learn the two channels' sum with one critic.
+
+    ``returns_continue_after_arrival`` (cycle 3, off by default) ends no
+    return at an arrival: with ``after_arrival = "new_target"`` the body
+    walks on toward a new target, so every return runs on through it, and
+    only a restart (the time limit, or leaving the range circle) cuts them,
+    bootstrapped from the critics' values. Without it, an arrival ends every
+    return, as when it restarted the world.
     """
 
     device: str
@@ -133,6 +140,7 @@ class AgentSettings:
     initial_action_offset_spread: float = 0.0
     follower_tempo_noise_gap_octaves: float = 0.0
     head_task_critic_weight: float = 0.0
+    returns_continue_after_arrival: bool = False
 
     def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
         """The learning rate of the update in ``cycle``, counted from 1 to
@@ -217,6 +225,9 @@ class AgentSettings:
             ),
             head_task_critic_weight=section.number(
                 "head_task_critic_weight", default=0.0, minimum=0.0
+            ),
+            returns_continue_after_arrival=section.boolean(
+                "returns_continue_after_arrival", default=False
             ),
         )
         section.reject_unknown_keys()

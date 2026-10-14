@@ -32,7 +32,7 @@ observation_radius = 2
 spine_control = true
 passive_follower_spine = true
 leg_clocks = true
-leg_accelerations = true
+leg_accelerations = false
 leg_drive = "waves"
 waves = 2
 feet_physics = true
@@ -86,6 +86,7 @@ initial_action_offset_spread = 0.2
 exploration_noise_beta = 2.0
 follower_tempo_noise_gap_octaves = 0.17
 head_task_critic_weight = 0.2
+returns_continue_after_arrival = true
 
 [agents.ppo]
 minibatch_size = 4

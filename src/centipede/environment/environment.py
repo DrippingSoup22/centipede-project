@@ -20,9 +20,13 @@ from centipede.environment.observation_builder import (
     head_forward_direction,
 )
 from centipede.environment.reward_function import RewardFunction, joint_angles
-from centipede.environment.settings import EnvironmentSettings
+from centipede.environment.settings import STEP_VALUE_CHECK_KEYS, EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.settings_section import SettingsError
+
+# The step value's four checks, whose means over its last turn a segment
+# sees with held curves.
+STEP_VALUE_CHECKS = tuple(key.removesuffix("_weight") for key in STEP_VALUE_CHECK_KEYS)
 
 
 class Environment:
@@ -60,14 +64,15 @@ class Environment:
     amounts; empty otherwise), whose starting values the agents may draw at
     random.
 
-    With ``hold_curves`` (cycle 3), each segment decides once per turn: its
-    turn hand ``turn_phase`` ``(W, N)`` starts at 0 when its world restarts
-    and turns at its tempo, as its legs' hands do, which keep their own
-    random places on their curves; on the step it starts a turn, the segment
-    takes both legs' curves and its tempo action from its actions and holds
-    them for the whole turn. The tempo action changes the tempo only then,
-    by as much as the heart would over a turn at the tempo it had, so that
-    every turn is played at one tempo. ``action_mask`` ``(W, N,
+    With ``hold_curves`` (cycle 3), each segment decides once per turn. Its
+    two legs' clocks share one hand, which starts at a random place when its
+    world restarts and plays both legs' curves; each leg's own timing is its
+    curve's. On the step the hand starts a turn, the segment takes both legs'
+    curves and its tempo action from its actions and holds them for the
+    whole turn. The tempo action changes the tempo only then, by as much as
+    the heart would over a turn at the tempo it had, so that every turn is
+    played at one tempo. Each segment sees, last, the curves it holds and
+    the step value's four checks averaged over its last turn. ``action_mask`` ``(W, N,
     action_size)`` marks, for the next step, the actions that will take
     effect: all of a deciding segment's, and otherwise only the spine
     command, which acts every step; the step ignores the rest, so that the
@@ -121,11 +126,18 @@ class Environment:
                 self.device,
                 per_leg=settings.leg_clocks,
                 leg_joint_count=leg_joint_count,
+                shared_hand=settings.hold_curves,
             )
         # With held curves, each segment holds its tempo action and its legs'
-        # curves: model B's leg actions.
+        # curves, model B's leg actions, and sees, last, the curves and how
+        # its last turn went.
         held_action_count = (
             1 + leg_motor_count * (1 + 2 * settings.waves)
+            if settings.hold_curves
+            else 0
+        )
+        turn_value_count = (
+            held_action_count - 1 + len(STEP_VALUE_CHECKS)
             if settings.hold_curves
             else 0
         )
@@ -144,14 +156,14 @@ class Environment:
             feet_physics_observed=settings.feet_physics,
             tilt_observed=settings.tilt,
             neighbour_tempo_observed=settings.neighbour_tempos,
-            held_action_count=held_action_count,
+            turn_value_count=turn_value_count,
         )
         self.observation_size = self.observation_builder.observation_size
-        # With the neighbours' tempos, observed last but for the held
-        # actions, the first of them is a segment's tempo gap to the segment
+        # With the neighbours' tempos, observed last but for the turn's
+        # values, the first of them is a segment's tempo gap to the segment
         # just ahead, in octaves.
         self.tempo_gap_ahead_column = (
-            self.observation_size - 2 * settings.observation_radius - held_action_count
+            self.observation_size - 2 * settings.observation_radius - turn_value_count
             if settings.neighbour_tempos
             else None
         )
@@ -372,16 +384,35 @@ class Environment:
         )
         self.action_mask = None
         if settings.hold_curves:
-            # The actions each segment holds, its turn hand, and which
-            # segments start a turn on the next step: every one, after a
-            # restart.
+            # The actions each segment holds, and which segments start a turn
+            # on the next step: every one, after a restart.
             self.held_actions = torch.zeros(
                 (self.world_count, self.segment_count, held_action_count),
                 device=self.device,
             )
-            self.turn_phase = torch.zeros(
-                (self.world_count, self.segment_count), device=self.device
+            # The step value's checks summed over each segment's turn so far,
+            # its steps, and their mean over its last turn; the selection
+            # takes each check's reward part back to segment weights × mm, 0
+            # for a check left out.
+            check_count = len(STEP_VALUE_CHECKS)
+            self.turn_check_sums = torch.zeros(
+                (self.world_count, self.segment_count, check_count),
+                device=self.device,
             )
+            self.turn_steps = torch.zeros(
+                (self.world_count, self.segment_count, 1), device=self.device
+            )
+            self.last_turn_result = torch.zeros_like(self.turn_check_sums)
+            term_names = self.reward_function.term_names
+            weights = self.reward_function.weights.per_step
+            self.check_selection = torch.zeros(
+                (len(term_names), check_count), device=self.device
+            )
+            for check_index, check in enumerate(STEP_VALUE_CHECKS):
+                if check in term_names:
+                    self.check_selection[term_names.index(check), check_index] = (
+                        1 / weights[check]
+                    )
             self.deciding = torch.ones(
                 (self.world_count, self.segment_count),
                 dtype=torch.bool,
@@ -457,8 +488,9 @@ class Environment:
         for its walk and for the task (``StepRewards.channel_rewards``),
         terminated and truncated ``(W,)``, and the final observations. Worlds
         whose episode ended have already started a new one: their
-        observations start the new episode, and their final observations are
-        the ones the old episode ended with.
+        observations start the new episode, and the final observations of
+        those restarted are the ones the old episode ended with; a body that
+        walks on after an arrival has the same final observation as its next.
         """
         state = self.simulation.physical_state
 
@@ -517,12 +549,8 @@ class Environment:
             leg_actions = self._drive_targets(drive_action, phase_before)
             leg_actions_end = self._drive_targets(drive_action, self.clocks.clock_phase)
             if self.settings.hold_curves:
-                self.turn_phase.add_(
-                    self.clocks.tempo_hz,
-                    alpha=2 * math.pi * self.simulation.step_duration_s,
-                )
-                torch.ge(self.turn_phase, 2 * math.pi, out=self.deciding)
-                self.turn_phase.remainder_(2 * math.pi)
+                # The segment's hand, its legs' one hand, started a new turn.
+                torch.lt(self.clocks.phase, phase_before[..., 0], out=self.deciding)
         elif self.settings.leg_clocks:
             self.clocks.follow_actions(
                 self._leg_clock_actions(joint_action) + self.default_step
@@ -622,6 +650,8 @@ class Environment:
             self.stride_support if self.settings.feet_physics else None,
             foot_lift_load,
         )
+        if self.settings.hold_curves:
+            self._add_to_turn(step_rewards.reward_parts)
         observations = self._observations()
         self.diagnostics.record_step(
             state,
@@ -640,7 +670,9 @@ class Environment:
         # 6. Start a new episode in the worlds whose episode ended: restart
         # them, except, with after_arrival = "new_target", those that arrived,
         # whose body walks on toward a new target. ``build`` returns a new
-        # tensor, so the final observations keep the values from before.
+        # tensor, so the final observations keep the values from before; a
+        # body that walks on is not restarted, and its final observation is
+        # what it sees next, the new target.
         ended = terminated | truncated
         final_observations = observations
         if ended.any():
@@ -661,6 +693,9 @@ class Environment:
                 ended, state, self.target_position, self.range_radius
             )
             observations = self._observations()
+            final_observations = torch.where(
+                restarted[:, None, None], final_observations, observations
+            )
         if self.settings.hold_curves:
             self._update_action_mask()
 
@@ -696,11 +731,30 @@ class Environment:
             self.deciding[..., None], tempo_action * steps_per_turn[..., None], 0.0
         )
 
+    def _add_to_turn(self, reward_parts: torch.Tensor) -> None:
+        """Add the step's checks to each segment's turn; where the turn just
+        ended, keep their means over it as its last turn's result and start
+        the next. The step on which the hand comes round belongs to the turn
+        it ends, which its curves played."""
+        self.turn_check_sums.add_(reward_parts @ self.check_selection)
+        self.turn_steps.add_(1.0)
+        ended = self.deciding[..., None]
+        self.last_turn_result.copy_(
+            torch.where(
+                ended, self.turn_check_sums / self.turn_steps, self.last_turn_result
+            )
+        )
+        self.turn_check_sums.masked_fill_(ended, 0.0)
+        self.turn_steps.masked_fill_(ended, 0.0)
+
     def _restart_held_curves(self, world_mask: torch.Tensor) -> None:
-        """The masked worlds hold nothing, and every segment starts a turn
-        on the next step."""
-        self.held_actions.masked_fill_(world_mask[:, None, None], 0.0)
-        self.turn_phase.masked_fill_(world_mask[:, None], 0.0)
+        """The masked worlds hold nothing and know no last turn, and every
+        segment starts a turn on the next step."""
+        mask = world_mask[:, None, None]
+        self.held_actions.masked_fill_(mask, 0.0)
+        self.turn_check_sums.masked_fill_(mask, 0.0)
+        self.turn_steps.masked_fill_(mask, 0.0)
+        self.last_turn_result.masked_fill_(mask, 0.0)
         self.deciding.logical_or_(world_mask[:, None])
         self._update_action_mask()
 
@@ -801,7 +855,9 @@ class Environment:
             self.leg_joint_acceleration,
             self._feet_values() if self.settings.feet_physics else None,
             clocks.neighbour_tempos() if self.settings.neighbour_tempos else None,
-            self.held_actions if self.settings.hold_curves else None,
+            torch.cat((self.held_actions[..., 1:], self.last_turn_result), dim=-1)
+            if self.settings.hold_curves
+            else None,
         )
 
     def _feet_values(self) -> torch.Tensor:

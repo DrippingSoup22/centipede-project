@@ -202,7 +202,9 @@ class SegmentAgent:
         ``rewards`` ``(W, 2)`` holds the walk's and the task's: learned each
         with its own critic, or their sum with one. The critic's value of the
         observation right after the step serves every way a stretch can end;
-        see docs/agents.md.
+        see docs/agents.md. With ``returns_continue_after_arrival`` an
+        arrival ends no return: the body walks on toward a new target, and
+        only a restart cuts the returns.
         """
         normalised_observations = self.observation_normaliser.normalize(
             final_observations, update_statistics=False
@@ -210,6 +212,8 @@ class SegmentAgent:
         next_values = self.ppo.state_value(normalised_observations)
         if self.critic_count == 1:
             rewards = rewards.sum(dim=-1)
+        if self.settings.returns_continue_after_arrival:
+            terminated = torch.zeros_like(terminated)
         self.rollout_storage.store_outcome(
             rewards, terminated, truncated, next_values, normalised_observations
         )
