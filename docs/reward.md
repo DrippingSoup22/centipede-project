@@ -20,7 +20,7 @@ head learns its step and the [task](#1-task-terms), each with a [critic of
 its own](#a-task-critic-for-the-head). Each segment decides its legs' curves
 and its tempo once per turn and [holds them for the whole
 turn](#curves-held-for-a-turn), and learns from each turn as a whole. Model v5, model B, the circle
-task from 10 cm, white noise, no CAPS. Before it, runs 51 to 56 paid every
+task from 10 cm, white noise for the turns and pink for the neck, no CAPS. Before it, runs 51 to 56 paid every
 segment the head's task and charged the [retired](#retired-reward-terms)
 health costs (foot hold, carry, leg pushing): the followers' critics
 explained none of their returns, because the shared task they could neither
@@ -387,7 +387,7 @@ sees, how the agents explore, and how training is scheduled.
 | ✅ | [Leg accelerations](#leg-accelerations) | What a segment sees | `leg_accelerations = true` | 15– |
 | ⬜ | [Neighbours' clocks](#neighbours-clocks) | What a segment sees | `neighbour_clocks = true` | 08–14, 17 |
 | ✅ | [Neighbours' tempos](#neighbours-tempos) | What a segment sees | `neighbour_tempos = true` | 41– |
-| ⬜ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta` | 0, white: 57–; 1: 52, 54–56 (and 02, 04, 08, 09, 13); 2: 31–51, 53; 0.5: 10–12, 14–28 |
+| ✅ | [Coloured exploration noise](#coloured-exploration-noise) | Exploration | `exploration_noise_beta = 1`, the neck only | 1, neck only, turns white: 57–; 1: 52, 54–56 (and 02, 04, 08, 09, 13); 2: 31–51, 53; 0.5: 10–12, 14–28 |
 | ✅ | [Tempo noise that follows the gap](#tempo-noise-that-follows-the-gap) | Exploration | `[agents] follower_tempo_noise_gap_octaves = 0.17` | 51– |
 | ⬜ | [CAPS, smooth mean actions](#caps-smooth-mean-actions) | Learning | `temporal_smoothness_coefficient` | 0.1: 14; 0, 0.3, 1, 3: 31–34; 1: 44–50 |
 | ✅ | [A task critic for the head](#a-task-critic-for-the-head) | Learning | `[agents] head_task_critic_weight = 0.2` | 57– |
@@ -730,11 +730,13 @@ movement for a while rather than jittering. Cycle 2 uses β = 2, red noise:
 per step it changes less than the step's own motion, so model B's curves are
 explored as curves (the twitching of runs 08 to 10 came from noise that
 changed faster than the step). β = 1, pink noise (Eberhard et al., ICLR
-2023), is the pilot's alternative. ⬜ From run 57 the noise is white: a
-held turn already keeps one curve for a whole step, which is what the
-colour was for, and a turn spans about 25 steps of a coloured sequence, so
-consecutive turns would explore alike; white noise makes every turn a fresh
-trial.
+2023), is the pilot's alternative. From run 57, with held curves, only
+the actions that act every step keep the colour, the head's neck, which
+steers: a held turn already keeps one curve for a whole step, which is what
+the colour was for, and a turn spans about 25 steps of a coloured sequence,
+so consecutive turns would explore alike. The held tempo and curves explore
+with white noise, every turn a fresh trial (RL_lib's beta per action
+component).
 
 <details>
 <summary>Math</summary>

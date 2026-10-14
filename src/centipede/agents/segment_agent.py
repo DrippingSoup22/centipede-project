@@ -60,7 +60,9 @@ class SegmentAgent:
         walk's 1 (``head_task_critic_weight``); otherwise their sum, with one.
         With ``masked``, ``act`` takes the environment's action mask, and the
         agent learns only from the actions that took effect, each decision
-        judged on all the steps it held (``RolloutStorage.training_batch``).
+        judged on all the steps it held (``RolloutStorage.training_batch``);
+        its held actions, ``tempo_columns`` and ``shape_columns``, explore
+        with white noise.
         """
         self.segment_index = segment_index
         self.settings = settings
@@ -107,6 +109,15 @@ class SegmentAgent:
         actor_network.to(device)
         critic = torch.nn.ModuleList(critic_networks).to(device)
         self.critic_count = len(critic_networks)
+        # Held for a turn, the tempo and the curves explore with white noise,
+        # a fresh trial each turn; the actions that act every step keep the
+        # noise's colour.
+        noise_beta = settings.exploration_noise_beta
+        if masked:
+            held = set(tempo_columns or ()) | set(shape_columns or ())
+            noise_beta = [
+                0.0 if column in held else noise_beta for column in range(action_size)
+            ]
 
         self.ppo = PPO(
             actor_network,
@@ -119,7 +130,7 @@ class SegmentAgent:
             max_gradient_norm=settings.ppo.max_gradient_norm,
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
-            noise_beta=settings.exploration_noise_beta,
+            noise_beta=noise_beta,
             noise_sequence_steps=settings.exploration_noise_sequence_steps,
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
             advantage_weights=[1.0, task_critic_weight]

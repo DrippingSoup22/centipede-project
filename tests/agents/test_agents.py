@@ -72,6 +72,20 @@ def test_the_head_learns_the_task_with_a_critic_of_its_own():
     assert learning.task_explained_variance[1].isnan()
 
 
+def test_held_actions_explore_with_white_noise_and_the_neck_keeps_its_colour():
+    """Masked agents: the tempo and curve columns are held for a turn, the
+    head's last column, its neck, acts every step."""
+    settings = AgentSettings.from_section({"exploration_noise_beta": 1.0})
+    agents = Agents(
+        2, 5, 3, 1, settings, 0, [4, 3], [[0], [0]],
+        shape_columns=[[1, 2], [1, 2]], masked=True,
+    )  # fmt: skip
+
+    head, follower = (agent.ppo.policy for agent in agents.segment_agents)
+    assert head.noise_beta.tolist() == [0.0, 0.0, 0.0, 1.0]
+    assert not follower.noise_is_colored
+
+
 def test_an_arrival_ends_no_return_when_the_body_walks_on():
     """With returns continuing after arrivals, the arrival in world 0 ends
     neither the head's returns nor the follower's; world 1's restart cuts
