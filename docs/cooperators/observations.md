@@ -1,7 +1,7 @@
 # Observations
 
 **Status (2026-10-14): what each segment may see is decided; what each
-segment's description holds is open.**
+segment's description holds is proposed.**
 
 ## Decided
 
@@ -14,25 +14,67 @@ segment's description holds is open.**
   legs, about five in the Tohoku model (Yasui et al., Frontiers 2022), so a
   window of five covers about one wavelength around each segment: what it
   needs to sense where it sits in a wave. A coincidence of scales, not
-  proof, but it points the same way.
+  proof, but it points the same way. A missing neighbour (ahead of the
+  head, behind the rear) is all zeros, as on main.
 - **The critics see a little more, in training only:** what their actor
   sees, plus the neighbours' actions of the same step
   ([critic.md](critic.md)).
 
-## Open
+## Proposed: what describes a segment
 
-- **What describes a segment:** which of its quantities its neighbours and
-  itself see. Main's block (height, orientation, leg angles and speeds,
-  body speeds, contacts; [environment.md](../environment.md#what-each-segment-sees))
-  is the starting reference, not adopted by default. The research points at
-  the neighbours' last actions (the hexapod, Schilling et al. 2020) and the
-  load and contact of the leg ahead (biology, [research.md](research.md)).
-- **What the head sees of the target.**
-- **Whether a segment sees its heading in the world.** Its orientation
-  includes the direction it faces, which carries no information about the
-  task ([task.md](task.md#the-starting-heading-agreed-2026-10-14));
-  gravity's direction and the neighbours' relative orientations may be
-  enough.
+Each segment's **block** is what that segment senses of itself; an actor
+sees five blocks. Proposed for v4, with its eight leg joints:
+
+| Part | Values | What it is | Why |
+| --- | ---: | --- | --- |
+| Gravity's direction | 3 | The downward direction in the segment's own frame | Its tilt, without its heading in the world, which means nothing for the task ([task.md](task.md#the-starting-heading-agreed-2026-10-14)); legged_gym's "projected gravity" |
+| Body speed | 3 | The segment's velocity in its own frame | Its own motion, the cause of its path progress (the pairing rule) |
+| Turning rate | 3 | Its angular velocity in its own frame | Turning and tilting |
+| Leg angles | 8 | Every leg joint's angle | Where its legs are: proprioception |
+| Leg speeds | 8 | Every leg joint's angular velocity | How they move; with the torques, the work its motors do |
+| Spine | 2 | The yaw angle and speed of the joint behind it | The joint it commands; across the five blocks, the body's local bend, which the trail follows |
+| Foot loads | 4 | Each foot's force on the ground: pressing down, and pushing fore or aft | **Load sensing**, the signal biology puts at the root of the wave (below) |
+| Belly load | 1 | The body's force on the ground | Resting or dragging, which energy prices |
+| Leg-on-leg force | 1 | The force with which its legs press on other legs | The cause of pain, so the critic can see it |
+| Last action | 9 | The commands it sent last step | What it is doing; across the blocks, the neighbours' last actions (the hexapod; legged_gym) |
+| **Block** | **42** | | |
+
+**The head also sees the target:** its position relative to the head's
+tip, in the head's own frame, forward and sideways (2 values, as on main).
+
+| Input | Size |
+| --- | ---: |
+| An actor: five blocks and the target's two values (zeros for the followers) | 212 |
+| A critic: the actor's input and the four neighbours' actions of the same step | 248 |
+
+Forces are in units of one unit's weight, so the inputs mean the same on
+the 21-segment model. Each agent normalises its own inputs, as on main.
+
+**Why load sensing.** In every source on how a gait emerges without a
+central clock, the signal is a leg's load. Real centipedes: a leg moves
+again when the leg ahead touches the ground, and the model's legs react to
+their own and their neighbours' ground forces (Yasui et al., PLOS ONE 2017).
+Stick insects: the load on a leg coordinates its neighbours (Dallmann et
+al., Proc. R. Soc. B 2017). A quadruped robot: local load sensing alone
+gave walk, trot and gallop (Owaki and Ishiguro, 2017). The oscillators
+found the same: their wave formed only with load feedback (runs 15 and 20
+against 16 and 25). Main gives only a contact flag per foot; a force says
+how much the leg carries, which is what the neighbours need to know.
+
+**What changes from main's block** (31 values,
+[environment.md](../environment.md#the-physical-state)):
+
+| Main | Here |
+| --- | --- |
+| Orientation as a quaternion, heading included | Gravity's direction only |
+| Body height | Left out: no animal senses it directly; leg angles and loads tell it on flat ground, and legged_gym leaves it out |
+| Foot, belly and leg-leg contact flags | Forces, graded |
+| Spine only with spine control, outside the block | In the block, since every segment but the rear commands a spine joint |
+| No actions | The last action |
+
+**Simulated senses.** The body speed comes from the simulator; an animal
+would estimate it. The project is a simulation, so this is a choice of
+simplicity, not of realism.
 
 ## Later experiments
 
