@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import torch
 
 from centipede.diagnostics_category import measure
-from centipede.environment.observation_builder import head_forward_direction
+from centipede.environment.head import head_forward_direction
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.diagnostics import SimulationFacts

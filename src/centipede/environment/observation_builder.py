@@ -1,5 +1,6 @@
 import torch
 
+from centipede.environment.head import target_seen_from_head
 from centipede.environment.simulation import PhysicalState
 
 # A segment's block, besides its leg joints' angles and speeds: its height,
@@ -10,19 +11,29 @@ TARGET_VALUE_COUNT = 2
 SPINE_VALUE_COUNT = 2
 
 
-def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
-    """The head's forward direction on the ground, as unit vectors ``(W, 2)``.
+def neighbour_table(
+    segment_count: int, observation_radius: int, device: torch.device | str
+) -> torch.Tensor:
+    """The blocks each segment sees, ``(N, 2 r + 1)``, in observation order.
 
-    ``head_quaternion`` is ``(W, 4)`` in MuJoCo's ``(w, x, y, z)`` order. The
-    head's forward axis is its body's x axis; turned into the world, its flat
-    ``x, y`` components are the first column of the rotation matrix. They are
-    scaled to length 1; the length is kept above a small minimum so that a head
-    pointing straight up or down gives a finite direction instead of NaN.
+    Row ``i`` lists segment ``i`` itself, the segments ahead (toward the head,
+    lower numbers), then the segments behind, nearest first. A neighbour that
+    does not exist points to row ``segment_count``, a block of zeros.
     """
-    w, x, y, z = head_quaternion.unbind(dim=-1)
-    forward = torch.stack((1 - 2 * (y * y + z * z), 2 * (x * y + w * z)), dim=-1)
-    length = forward.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-    return forward / length
+    rows = []
+    for segment_index in range(segment_count):
+        offsets = list(range(-1, -observation_radius - 1, -1)) + list(
+            range(1, observation_radius + 1)
+        )
+        neighbours = [segment_index + offset for offset in offsets]
+        rows.append(
+            [segment_index]
+            + [
+                index if 0 <= index < segment_count else segment_count
+                for index in neighbours
+            ]
+        )
+    return torch.tensor(rows, dtype=torch.long, device=device)
 
 
 class ObservationBuilder:
@@ -46,37 +57,15 @@ class ObservationBuilder:
         leg_motor_count: int,
         spine_observed: bool = False,
     ) -> None:
-        """Build the neighbour table and the reusable block tensor.
-
-        Row ``i`` of the neighbour table lists the blocks segment ``i`` sees, in
-        observation order: itself, the segments ahead (toward the head, lower
-        numbers), then the segments behind. A neighbour that does not exist
-        points to row ``segment_count`` of the block tensor, which stays zero.
-        """
+        """Build the neighbour table (``neighbour_table``) and the reusable
+        block tensor, whose last row stays zero for missing neighbours."""
         self.world_count = world_count
         self.segment_count = segment_count
         self.leg_motor_count = leg_motor_count
         self.block_size = BLOCK_VALUES_BESIDES_LEGS + 2 * leg_motor_count
         self.spine_observed = spine_observed
-        missing_neighbour = segment_count
-
-        neighbour_rows = []
-        for segment_index in range(segment_count):
-            ahead = [
-                segment_index - offset for offset in range(1, observation_radius + 1)
-            ]
-            behind = [
-                segment_index + offset for offset in range(1, observation_radius + 1)
-            ]
-            row = [segment_index] + [
-                neighbour_index
-                if 0 <= neighbour_index < segment_count
-                else missing_neighbour
-                for neighbour_index in ahead + behind
-            ]
-            neighbour_rows.append(row)
-        self.neighbour_table = torch.tensor(
-            neighbour_rows, dtype=torch.long, device=device
+        self.neighbour_table = neighbour_table(
+            segment_count, observation_radius, device
         )
 
         # One block per segment plus the zero block; refilled in place by build.
@@ -121,16 +110,11 @@ class ObservationBuilder:
         blocks = self.blocks
         neighbour_blocks = blocks[:, self.neighbour_table].flatten(start_dim=2)
 
-        # The target as seen from the head: along its forward direction, and
-        # along its left direction (forward turned 90 degrees anticlockwise).
-        offset = target_position - physical_state.head_tip_position[:, :2]
-        forward = head_forward_direction(physical_state.body_quaternion[:, 0])
-        left = torch.stack((-forward[:, 1], forward[:, 0]), dim=-1)
+        # The target as seen from the head, for the head only.
         target_values = blocks.new_zeros(
             (blocks.shape[0], segment_count, TARGET_VALUE_COUNT)
         )
-        target_values[:, 0, 0] = (offset * forward).sum(dim=-1)
-        target_values[:, 0, 1] = (offset * left).sum(dim=-1)
+        target_values[:, 0] = target_seen_from_head(physical_state, target_position)
 
         parts = [neighbour_blocks, target_values]
         if self.spine_observed:

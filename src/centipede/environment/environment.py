@@ -11,10 +11,8 @@ docs/environment.md.
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
-from centipede.environment.observation_builder import (
-    ObservationBuilder,
-    head_forward_direction,
-)
+from centipede.environment.head import head_forward_direction, target_under_head
+from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import RewardFunction, joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
@@ -182,7 +180,9 @@ class Environment:
             dim=-1
         )
         if self.settings.target.arrival == "head":
-            terminated = self._target_under_head()
+            terminated = target_under_head(
+                state, self.target_position, self.head_outline
+            )
         else:
             terminated = head_distance <= self.settings.target.arrival_radius_m
         left_range = (head_distance > self.range_radius) & ~terminated
@@ -270,22 +270,3 @@ class Environment:
                     self.range_radius,
                 )
             )
-
-    def _target_under_head(self) -> torch.Tensor:
-        """Worlds whose target lies under the head's outline, seen from above.
-
-        The target is measured from the head's centre along the head's forward
-        direction and to its side, and compared with the rectangle that encloses
-        the head's body shape.
-        """
-        state = self.simulation.physical_state
-        outline = self.head_outline
-        offset = self.target_position - state.body_planar_position[:, 0]
-        forward = head_forward_direction(state.body_quaternion[:, 0])
-        along = (offset * forward).sum(dim=-1)
-        across = forward[:, 0] * offset[:, 1] - forward[:, 1] * offset[:, 0]
-        return (
-            (along >= outline.rear_m)
-            & (along <= outline.front_m)
-            & (across.abs() <= outline.half_width_m)
-        )

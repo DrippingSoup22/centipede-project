@@ -9,10 +9,8 @@ import math
 import pytest
 import torch
 
-from centipede.environment.observation_builder import (
-    ObservationBuilder,
-    head_forward_direction,
-)
+from centipede.environment.head import head_forward_direction
+from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.simulation import PhysicalState
 
 SEGMENT_COUNT, WORLD_COUNT = 4, 2
