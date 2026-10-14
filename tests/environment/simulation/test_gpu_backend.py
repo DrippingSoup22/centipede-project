@@ -30,6 +30,9 @@ from centipede.environment.simulation.gpu_backend import (  # noqa: E402
     GPUBackend,
 )
 from centipede.environment.simulation.model_mapping import ModelMapping  # noqa: E402
+from centipede.environment.simulation.physical_state import (  # noqa: E402
+    EFFORT_FIELDS,
+)
 from centipede.environment.simulation.simulation import (  # noqa: E402
     physics_steps_per_action,
 )
@@ -78,10 +81,12 @@ def test_construction_prepares_the_gpu_worlds(model, mapping):
     ):
         assert np.array_equal(getattr(backend, table).numpy(), getattr(mapping, table))
 
+    effort_views = dict(zip(EFFORT_FIELDS, backend._effort, strict=True))
     for field in dataclasses.fields(backend.physical_state):
         tensor = getattr(backend.physical_state, field.name)
+        view = effort_views.get(field.name) or getattr(backend, f"_{field.name}")
         assert tensor.is_cuda, field.name
-        assert getattr(backend, f"_{field.name}").ptr == tensor.data_ptr(), field.name
+        assert view.ptr == tensor.data_ptr(), field.name
 
     # The simulation's category is MuJoCo Warp's own arrays, seen as tensors.
     facts = backend.diagnostics.facts
@@ -364,6 +369,58 @@ def test_gpu_physics_matches_cpu_physics_while_settling():
         expected = getattr(cpu.physical_state, field)
         actual = getattr(gpu.physical_state, field).cpu()
         assert torch.allclose(actual, expected, atol=tolerance), field
+
+
+def test_gpu_effort_matches_cpu_effort():
+    """From the same settled state, with two neighbours' legs swept together,
+    both backends measure the same effort: the floor's support, the legs'
+    press, the feet's forward forces, and the motors' work."""
+    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    cpu_model.opt.solver = SOLVERS[SOLVER]
+    mapping = ModelMapping.from_model(cpu_model)
+    segment_count = mapping.segment_count
+    cpu = CPUBackend(cpu_model, mapping, 1, STEPS, measure_effort=True)
+    cpu.reset(seed=0)
+    for _ in range(25):
+        cpu.step(torch.zeros(1, segment_count, 6))
+    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    gpu = GPUBackend(
+        gpu_model, mapping, 1, STEPS, SOLVER, 128, 512, measure_effort=True
+    )
+    gpu.reset(seed=0)
+    wp.to_torch(gpu.gpu_data.qpos)[0] = torch.from_numpy(cpu.world_data[0].qpos)
+    wp.to_torch(gpu.gpu_data.qvel)[0] = torch.from_numpy(cpu.world_data[0].qvel)
+    mjw.forward(gpu.gpu_model, gpu.gpu_data)
+
+    actions = torch.zeros(1, segment_count, 6)
+    actions[0, 2, 0], actions[0, 3, 0] = -1.0, 1.0
+    actions[0, 5:, 0] = actions[0, 5:, 3] = -0.8
+    for _ in range(2):
+        cpu.step(actions)
+        gpu.step(actions.cuda())
+
+    def measured(field: str) -> tuple[torch.Tensor, torch.Tensor]:
+        expected = getattr(cpu.physical_state, field)
+        assert expected.abs().max() > 0, field
+        return getattr(gpu.physical_state, field).cpu(), expected
+
+    # The legs' press and the motors' work belong to each segment exactly.
+    for field in EFFORT_FIELDS[3:]:
+        actual, expected = measured(field)
+        assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
+    # A resting body's load and friction are shared among its shapes as each
+    # solver finds (they are statically indeterminate, and the laptop's CG
+    # solver stops at its iteration limit), so only the totals compare;
+    # friction, the least converged, only roughly.
+    for field, tolerance in (
+        ("foot_normal_force", 0.03),
+        ("belly_normal_force", 0.03),
+        ("foot_forward_force", 0.5),
+    ):
+        actual, expected = measured(field)
+        assert actual.sum().item() == pytest.approx(
+            expected.sum().item(), rel=tolerance
+        )
 
 
 # -- Failure -------------------------------------------------------------------

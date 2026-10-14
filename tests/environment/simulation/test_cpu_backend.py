@@ -282,6 +282,46 @@ def test_contact_flags_follow_the_contact_list(model, mapping):
     assert all(seen.values()), seen
 
 
+def settled_backend_measuring_effort(model, mapping):
+    """One world measuring effort, settled for half a second with the motors
+    off: the body rests on the floor."""
+    backend = CPUBackend(
+        model, mapping, 1, physics_steps_per_action(model), measure_effort=True
+    )
+    backend.reset(seed=0)
+    for _ in range(25):
+        backend.step(torch.zeros(1, SEGMENT_COUNT, 6))
+    return backend
+
+
+def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
+    model, mapping
+):
+    backend = settled_backend_measuring_effort(model, mapping)
+    state = backend.physical_state
+    weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    support = state.foot_normal_force.sum() + state.belly_normal_force.sum()
+    assert support.item() == pytest.approx(weight, rel=1e-3)
+    assert state.motor_positive_work.sum() == state.motor_negative_work.sum() == 0
+
+    # Segments 2 and 3 sweep their left legs toward each other: both feel the
+    # same press, and only they; a mean of squares is at least the squared mean.
+    actions = torch.zeros(1, SEGMENT_COUNT, 6)
+    actions[0, 2, 0], actions[0, 3, 0] = -1.0, 1.0
+    for _ in range(3):
+        backend.step(actions)
+    pressed = state.leg_leg_force[0]
+    assert pressed[2] == pressed[3] > 0.1 * weight / SEGMENT_COUNT
+    assert pressed.sum() == pytest.approx(2 * pressed[2].item())
+    assert state.leg_leg_force_squared[0, 2] >= pressed[2] ** 2
+    assert (state.motor_positive_work[0, 2:4] > 0).all()
+
+    # Every sweep pushes back: the floor pushes the feet forward.
+    actions[..., 0] = actions[..., 3] = -0.8
+    backend.step(actions)
+    assert state.foot_forward_force.sum() > 0
+
+
 # -- Failure -------------------------------------------------------------------
 
 

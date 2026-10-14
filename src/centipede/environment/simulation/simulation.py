@@ -3,6 +3,7 @@ import math
 import mujoco
 import torch
 
+from centipede.environment.simulation.body_measures import measure_body
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import (
@@ -27,6 +28,17 @@ def physics_steps_per_action(model: mujoco.MjModel) -> int:
     return steps
 
 
+def check_effort_contract(model: mujoco.MjModel) -> None:
+    """Fail unless every contact's force can be read as the backends read it:
+    elliptic friction cones, and at least the normal and two tangential
+    directions in every contact."""
+    if model.opt.cone != mujoco.mjtCone.mjCONE_ELLIPTIC or model.geom_condim.min() < 3:
+        raise ModelContractError(
+            "Measuring effort needs elliptic friction cones and every shape's"
+            " condim at least 3"
+        )
+
+
 class PhysicsSimulation:
     """The physics simulation's front: the only part the environment uses.
 
@@ -34,14 +46,22 @@ class PhysicsSimulation:
     contract and the action's duration, and runs every world on the chosen
     backend. ``physical_state`` is refreshed in place by every ``reset`` and
     ``step``, and so is ``diagnostics.facts``, the simulation's diagnostics
-    category.
+    category. ``body_measures`` are the body's sizes, read from the model.
     """
 
-    def __init__(self, settings: SimulationSettings) -> None:
-        """Load and check the model, then create the chosen backend."""
+    def __init__(
+        self, settings: SimulationSettings, measure_effort: bool = False
+    ) -> None:
+        """Load and check the model, then create the chosen backend.
+
+        With ``measure_effort`` the backends also measure the physical state's
+        effort fields after every physics step.
+        """
         model = mujoco.MjModel.from_xml_path(str(settings.model_path))
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
+        if measure_effort:
+            check_effort_contract(model)
 
         start_heading_range_rad = math.radians(settings.start_heading_range_deg)
         if settings.backend == "cpu":
@@ -51,6 +71,7 @@ class PhysicsSimulation:
                 settings.world_count,
                 steps_per_action,
                 start_heading_range_rad,
+                measure_effort,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -66,12 +87,14 @@ class PhysicsSimulation:
                 settings.contacts_per_world,
                 settings.constraints_per_world,
                 start_heading_range_rad,
+                measure_effort,
             )
 
         self.segment_count = mapping.segment_count
         # Each segment's leg motors: both legs' joints (the mapping's roles).
         self.leg_motor_count = 2 * len(mapping.leg_roles)
         self.head_outline = mapping.head_outline
+        self.body_measures = measure_body(model, mapping)
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
         self.physical_state = self._backend.physical_state

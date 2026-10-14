@@ -49,6 +49,17 @@ def test_a_timestep_that_does_not_fit_the_action_is_rejected(tmp_path):
         PhysicsSimulation(settings(model_path=str(uneven)))
 
 
+def test_body_measures_are_read_from_the_model():
+    """Model v4's, as docs/cooperators/forces.md and task.md quote them."""
+    simulation = PhysicsSimulation(settings(model_path="models/assembly_v4.xml"))
+    measures = simulation.body_measures
+
+    assert measures.unit_weight_n == pytest.approx(0.857e-3, rel=1e-3)
+    assert measures.leg_push_n == pytest.approx(0.939e-3, rel=1e-3)
+    assert measures.body_length_m == pytest.approx(0.05475, rel=1e-3)
+    assert measures.turning_circle_m == pytest.approx(0.0329, rel=1e-2)
+
+
 def test_missing_model_file_fails_clearly():
     with pytest.raises(ValueError, match="no_such_model.xml"):
         PhysicsSimulation(settings(model_path="models/no_such_model.xml"))

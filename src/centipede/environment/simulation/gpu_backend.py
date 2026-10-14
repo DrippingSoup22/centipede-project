@@ -25,7 +25,10 @@ from centipede.environment.simulation.model_mapping import (
     RIGHT_FOOT_CATEGORY,
     ModelMapping,
 )
-from centipede.environment.simulation.physical_state import PhysicalState
+from centipede.environment.simulation.physical_state import (
+    EFFORT_FIELDS,
+    PhysicalState,
+)
 
 # Warp otherwise prints a banner when it starts and a line for every kernel it
 # loads, which bury the training's own output. The training profile measures
@@ -309,6 +312,201 @@ def _read_contact_flags(
         right_foot_ground_contact[world_index, owner_index] = True
 
 
+@wp.kernel
+def _clear_effort(
+    # In
+    world_mask: wp.array1d[wp.bool],
+    # Out
+    foot_normal_force: wp.array3d[float],
+    foot_forward_force: wp.array3d[float],
+    belly_normal_force: wp.array2d[float],
+    leg_leg_force: wp.array2d[float],
+    leg_leg_force_squared: wp.array2d[float],
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+) -> None:
+    """Zero the masked worlds' effort measures; one thread per (world, segment)."""
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    for side in range(2):
+        foot_normal_force[world_index, segment_index, side] = 0.0
+        foot_forward_force[world_index, segment_index, side] = 0.0
+    belly_normal_force[world_index, segment_index] = 0.0
+    leg_leg_force[world_index, segment_index] = 0.0
+    leg_leg_force_squared[world_index, segment_index] = 0.0
+    motor_positive_work[world_index, segment_index] = 0.0
+    motor_negative_work[world_index, segment_index] = 0.0
+
+
+@wp.kernel
+def _add_contact_forces(
+    # In: data
+    nacon: wp.array1d[int],
+    contact_geom: wp.array1d[wp.vec2i],
+    contact_worldid: wp.array1d[int],
+    contact_frame: wp.array1d[wp.mat33],
+    contact_efc_address: wp.array2d[int],
+    efc_force: wp.array2d[float],
+    xmat: wp.array2d[wp.mat33],
+    # In: tables
+    geom_owner_indices: wp.array1d[int],
+    geom_categories: wp.array1d[int],
+    body_ids: wp.array1d[int],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    # Out
+    foot_normal_force: wp.array3d[float],
+    foot_forward_force: wp.array3d[float],
+    belly_normal_force: wp.array2d[float],
+    leg_leg_pressed: wp.array2d[float],
+) -> None:
+    """Add one physics step's contact forces of the masked worlds.
+
+    Launched with one thread per pool slot, like ``_read_contact_flags``. The
+    arithmetic of the CPU backend's ``_add_effort``: a contact's first three
+    constraint rows are its normal and two tangential forces in its frame,
+    acting on its second shape as they are and on the first reversed. A foot
+    or body shape on the floor adds ``scale`` times its normal force, and a
+    foot also the part along its segment's forward axis; two legs touching
+    add their normal force, unscaled, to both owners' ``leg_leg_pressed``,
+    which ``_add_segment_effort`` then takes in. Several contacts may touch
+    one shape, so the forces are added atomically.
+    """
+    contact_index = wp.tid()
+    if contact_index >= nacon[0]:
+        return
+    world_index = contact_worldid[contact_index]
+    if contact_efc_address[contact_index, 0] < 0 or not world_mask[world_index]:
+        return
+    local_force = wp.vec3(
+        efc_force[world_index, contact_efc_address[contact_index, 0]],
+        efc_force[world_index, contact_efc_address[contact_index, 1]],
+        efc_force[world_index, contact_efc_address[contact_index, 2]],
+    )
+    normal_force = local_force[0]
+    pair = contact_geom[contact_index]
+    first_on_floor = geom_categories[pair[0]] == FLOOR_CATEGORY
+    if not first_on_floor and geom_categories[pair[1]] != FLOOR_CATEGORY:
+        for end in range(2):
+            wp.atomic_add(
+                leg_leg_pressed,
+                world_index,
+                geom_owner_indices[pair[end]],
+                normal_force,
+            )
+        return
+
+    # The shape on the floor, and the floor's force on it.
+    force = wp.transpose(contact_frame[contact_index]) @ local_force
+    shape_id = pair[1]
+    if not first_on_floor:
+        shape_id = pair[0]
+        force = -force
+    category = geom_categories[shape_id]
+    owner_index = geom_owner_indices[shape_id]
+    if category == BODY_CATEGORY:
+        wp.atomic_add(
+            belly_normal_force, world_index, owner_index, scale * normal_force
+        )
+    elif category == LEFT_FOOT_CATEGORY or category == RIGHT_FOOT_CATEGORY:
+        side = category - LEFT_FOOT_CATEGORY
+        rotation = xmat[world_index, body_ids[owner_index]]
+        forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
+        wp.atomic_add(
+            foot_normal_force, world_index, owner_index, side, scale * normal_force
+        )
+        wp.atomic_add(
+            foot_forward_force,
+            world_index,
+            owner_index,
+            side,
+            scale * wp.dot(force, forward),
+        )
+
+
+@wp.func
+def _add_motor_work(
+    actuator_force: wp.array2d[float],
+    actuator_velocity: wp.array2d[float],
+    motor_id: wp.int32,
+    world_index: int,
+    segment_index: int,
+    timestep: float,
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+):
+    """Add one motor's work over ``timestep`` to its segment's pushing work
+    where positive, to its braking work where negative."""
+    work = (
+        timestep
+        * actuator_force[world_index, motor_id]
+        * actuator_velocity[world_index, motor_id]
+    )
+    if work > 0.0:
+        motor_positive_work[world_index, segment_index] += work
+    else:
+        motor_negative_work[world_index, segment_index] -= work
+
+
+@wp.kernel
+def _add_segment_effort(
+    # In: data
+    actuator_force: wp.array2d[float],
+    actuator_velocity: wp.array2d[float],
+    # In: tables
+    leg_actuator_ids: wp.array2d[wp.int32],
+    spine_actuator_ids: wp.array1d[wp.int32],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    timestep: float,
+    # In and out
+    leg_leg_pressed: wp.array2d[float],
+    leg_leg_force: wp.array2d[float],
+    leg_leg_force_squared: wp.array2d[float],
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+) -> None:
+    """Add one physics step's legs pressed and motor work of the masked worlds.
+
+    One thread per (world, segment), after ``_add_contact_forces``: the
+    segment's pressed total adds ``scale`` times itself and its square, then
+    starts again from zero; each of its leg motors and the spine motor behind
+    it adds torque times speed times ``timestep`` to its pushing work where
+    positive, to its braking work where negative.
+    """
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    pressed = leg_leg_pressed[world_index, segment_index]
+    leg_leg_force[world_index, segment_index] += scale * pressed
+    leg_leg_force_squared[world_index, segment_index] += scale * pressed * pressed
+    leg_leg_pressed[world_index, segment_index] = 0.0
+
+    for leg_motor_index in range(leg_actuator_ids.shape[1]):
+        _add_motor_work(
+            actuator_force,
+            actuator_velocity,
+            leg_actuator_ids[segment_index, leg_motor_index],
+            world_index,
+            segment_index,
+            timestep,
+            motor_positive_work,
+            motor_negative_work,
+        )
+    if segment_index < spine_actuator_ids.shape[0]:
+        _add_motor_work(
+            actuator_force,
+            actuator_velocity,
+            spine_actuator_ids[segment_index],
+            world_index,
+            segment_index,
+            timestep,
+            motor_positive_work,
+            motor_negative_work,
+        )
+
+
 class GPUBackend:
     """Runs every world at once on the GPU with MuJoCo Warp.
 
@@ -328,6 +526,7 @@ class GPUBackend:
         contacts_per_world: int,
         constraints_per_world: int,
         start_heading_range_rad: float = 0.0,
+        measure_effort: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -337,7 +536,9 @@ class GPUBackend:
         set on the host model before the copy, because MuJoCo Warp reads it
         while building the GPU model. The contact and constraint capacities are
         reserved here once: contacts in one pool shared by all worlds,
-        constraints separately for each world.
+        constraints separately for each world. With ``measure_effort`` the
+        physical state's effort fields are measured after every physics step
+        (``_measure_effort``).
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
@@ -354,6 +555,8 @@ class GPUBackend:
         self.leg_motor_count = mapping.leg_actuator_ids.shape[1]
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
+        self.measure_effort = measure_effort
+        self.timestep = float(model.opt.timestep)
         self.root_quaternion_address = mapping.root_qpos_address + 3
 
         # The Warp device that holds the model and data, and its PyTorch name.
@@ -400,6 +603,14 @@ class GPUBackend:
         self._right_foot_ground_contact = wp.from_torch(state.right_foot_ground_contact)
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
+        self._effort = [wp.from_torch(getattr(state, name)) for name in EFFORT_FIELDS]
+        # Each segment's legs pressed by others during one physics step.
+        self._leg_leg_pressed = wp.zeros(
+            (world_count, self.segment_count), dtype=float, device=self.device
+        )
+        self._every_world = wp.from_torch(
+            torch.ones(world_count, dtype=torch.bool, device=torch_device)
+        )
 
         # The simulation's category, as views of MuJoCo Warp's own arrays: the
         # physics refreshes them, so nothing is copied per step.
@@ -542,11 +753,71 @@ class GPUBackend:
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        if self.measure_effort:
+            # The starting pose's forces; no motor has worked yet.
+            self._clear_effort(mask_view)
+            self._measure_effort(mask_view, 1.0)
 
     def _run_physics_steps(self) -> None:
-        """The physics steps of one action, launched from Python."""
-        for _ in range(self.physics_steps_per_action):
+        """The physics steps of one action, launched from Python, each
+        followed by its share of the effort when it is measured."""
+        steps = self.physics_steps_per_action
+        if self.measure_effort:
+            self._clear_effort(self._every_world)
+        for _ in range(steps):
             mjw.step(self.gpu_model, self.gpu_data)
+            if self.measure_effort:
+                self._measure_effort(self._every_world, 1 / steps)
+
+    def _clear_effort(self, world_mask: wp.array) -> None:
+        """Zero the masked worlds' effort measures."""
+        wp.launch(
+            _clear_effort,
+            dim=(self.world_count, self.segment_count),
+            inputs=[world_mask],
+            outputs=self._effort,
+            device=self.device,
+        )
+
+    def _measure_effort(self, world_mask: wp.array, scale: float) -> None:
+        """Add the masked worlds' effort of the physics state just computed:
+        ``scale`` times its forces, and its motors' work over a timestep."""
+        foot_normal, foot_forward, belly, leg_leg, leg_leg_squared, *work = self._effort
+        wp.launch(
+            _add_contact_forces,
+            dim=self.gpu_data.naconmax,
+            inputs=[
+                self.gpu_data.nacon,
+                self.gpu_data.contact.geom,
+                self.gpu_data.contact.worldid,
+                self.gpu_data.contact.frame,
+                self.gpu_data.contact.efc_address,
+                self.gpu_data.efc.force,
+                self.gpu_data.xmat,
+                self.geom_owner_indices,
+                self.geom_categories,
+                self.body_ids,
+                world_mask,
+                scale,
+            ],
+            outputs=[foot_normal, foot_forward, belly, self._leg_leg_pressed],
+            device=self.device,
+        )
+        wp.launch(
+            _add_segment_effort,
+            dim=(self.world_count, self.segment_count),
+            inputs=[
+                self.gpu_data.actuator_force,
+                self.gpu_data.actuator_velocity,
+                self.leg_actuator_ids,
+                self.spine_actuator_ids,
+                world_mask,
+                scale,
+                self.timestep,
+            ],
+            outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *work],
+            device=self.device,
+        )
 
     def _check_worlds(self) -> None:
         """Stop the run if any world's physics went wrong during the last step.
