@@ -30,33 +30,60 @@ plateau stop.
 
 ## The targets (proposed, 2026-10-14)
 
-| | Level 0 | Level 1 |
-| --- | --- | --- |
-| Distance from the head's tip | 15 to 30 mm | 2 to 4 body lengths (110 to 220 mm for twelve units) |
-| Direction | Within 45° of straight ahead | Within 90° |
+| | Level 0 | Level 0.55 | Level 1 |
+| --- | --- | --- | --- |
+| Distance from the head's tip | 20 to 30 mm | 89 to 134 mm | 146 to 219 mm (2.7 to 4 body lengths) |
+| Direction | Within 45° of straight ahead | All around | All around |
 
-Between the two, both ends of the range and the angle grow in a straight
-line with the level.
+**The far end is always 1.5 times the near end** (the user: half the
+spread of a doubling). Every target of a level then asks for about the
+same walk, within ±20% of the middle, so the effort per target and the
+arrival share stay steadier while the task still varies. Both ends grow in
+a straight line with the level, so the ratio holds at every level.
 
-- **The start, 15 to 30 mm** (the user proposed 1 to 3 cm; the lower end
-  raised). 10 mm is less than one and a half head lengths (the head's
-  outline is 7.2 mm long and 8 mm wide): a single lurch reaches it, and
-  near targets teach shuffling, not walking (the oscillators, 2026-10-13).
-  At 15 mm the head needs a few strides, and walking straight still
-  reaches about a third of the targets by luck, enough for a body learning
-  to step to find its first arrivals; the oscillators' curriculum began at
-  the same 15 to 30 mm within ±45°. The start is set by the head and the
-  stride, which the 21-segment model shares, so it stays in millimetres.
-- **The end, 2 to 4 body lengths within ±90°.** Far enough that only a
-  sustained, coordinated walk arrives, with real turning but no U-turns
-  (targets behind would ask for another skill). Stated in body lengths,
-  since the whole body must walk it, so it grows with the 21-segment
-  model.
+- **The start, 20 to 30 mm** (the user). 10 mm would be less than one and
+  a half head lengths (the head's outline is 7.2 mm long and 8 mm wide): a
+  single lurch would reach it, and near targets teach shuffling, not
+  walking (the oscillators, 2026-10-13). From 20 mm the head needs several
+  strides. The start is set by the head and the stride, which the
+  21-segment model shares, so it stays in millimetres.
+- **The end, 4 body lengths at most.** Far enough that only a sustained,
+  coordinated walk arrives. Stated in body lengths, since the whole body
+  must walk it, so it grows with the 21-segment model.
 - **A range whose near end grows too.** The oscillators left a range's
   near end at 30 mm, so a third of the targets lay close enough to arrive
   without a wave, which led them to the circle task (one distance per
-  level). Here the near end is always half the far end, so no level keeps
-  easy targets, and the task still varies, as the user wants.
+  level). Here the near end grows with the far one, so no level keeps easy
+  targets.
+
+**The direction opens to the full circle before the distance is at its
+largest** (the user: at level 0.5 to 0.7). Turning toward a target behind
+is a skill of its own, and it tests the body's following hardest: every
+follower must trace the head's U-turn. The level where the circle closes
+follows from the body's geometry. With every spine joint at its 15° limit
+the body turns on a circle about 33 mm across, so a target straight
+behind lies clear of the body only beyond its length plus that circle,
+about 88 mm (1.6 body lengths); closer, it lies among the body's own legs.
+The near end passes 88 mm at level 0.55, so the direction grows from ±45°
+at level 0 to the full circle at level 0.55, and from there every target
+behind can be reached by turning around. Stated as that rule (the full
+circle once the near end clears one body length plus a turning circle),
+it carries over to the 21-segment model.
+
+## The starting heading (proposed, 2026-10-14)
+
+**Any direction, from the start, not growing with the level.** The floor
+is the same everywhere and every target is placed relative to the head, so
+the direction the body faces when an episode starts changes nothing in the
+task: it is not a difficulty. It matters only if a segment observes its
+heading in the world, through its orientation, which main's observations
+do: with one starting heading, the networks see only the few world
+headings near it, and a body that later turns far gives them inputs they
+never trained on ([environment.md](../environment.md#episodes)).
+Randomising it fully makes the heading uninformative everywhere, so the
+networks learn to ignore it. If the observations leave out the world
+heading altogether ([observations.md](observations.md)), the starting
+heading stops mattering, and randomising it still costs nothing.
 
 ## The levels (proposed, 2026-10-14)
 

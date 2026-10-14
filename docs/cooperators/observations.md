@@ -28,6 +28,11 @@ segment's description holds is open.**
   the neighbours' last actions (the hexapod, Schilling et al. 2020) and the
   load and contact of the leg ahead (biology, [research.md](research.md)).
 - **What the head sees of the target.**
+- **Whether a segment sees its heading in the world.** Its orientation
+  includes the direction it faces, which carries no information about the
+  task ([task.md](task.md#the-starting-heading-proposed-2026-10-14));
+  gravity's direction and the neighbours' relative orientations may be
+  enough.
 
 ## Later experiments
 
