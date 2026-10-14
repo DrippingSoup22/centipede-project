@@ -75,11 +75,11 @@ COOPERATIVE_NAMES = {
     "body_down": "body down",
 }
 COOPERATIVE_LEGEND = (
-    "targets: reached per minute in each world. speed: the head's, along the"
-    " ground; toward: how fast\nit closes on its target. wave: each foot's lag"
-    " behind the same-side foot ahead, in degrees,\nthen its consistency from 0"
-    " (none) to 1; left-right: the same between a segment's two feet,\n180 when"
-    " they alternate. body down: share of steps with a body on the ground."
+    "speed: the head's, along the ground; toward: how fast it closes on its"
+    " target.\nwave: each foot's lag behind the same-side foot ahead, in degrees,"
+    " then its consistency\nfrom 0 (none) to 1; left-right: the same between a"
+    " segment's two feet, 180 when they\nalternate. body down: share of steps"
+    " with a body on the ground."
 )
 # Where the body-on-ground flag sits among a segment's contact flags.
 BODY_ON_GROUND = 2
@@ -429,9 +429,10 @@ class CooperativeTrainingProgress(TrainingProgress):
     COLUMNS = COOPERATIVE_TRAINING_COLUMNS
 
     def _legend(self) -> str:
-        return COOPERATIVE_LEGEND + (
-            "\nin time: share of the targets reached within their stopwatch, over"
-            " the last episode length."
+        return (
+            "level: the targets' difficulty, from 0 to 1; in time: share of the"
+            " targets reached within\ntheir stopwatch over the last episode length;"
+            " targets: reached per minute in each world.\n" + COOPERATIVE_LEGEND
         )
 
     def _column_names(self) -> dict[str, str]:
@@ -525,7 +526,10 @@ class CooperativeEvaluationProgress(EvaluationProgress):
     COLUMNS = COOPERATIVE_EVALUATION_COLUMNS
 
     def _legend(self) -> str:
-        return COOPERATIVE_LEGEND.replace("per minute in each world", "per episode")
+        return (
+            "targets: reached in each world's episode; in time: those reached"
+            " within their stopwatch.\n" + COOPERATIVE_LEGEND
+        )
 
     def _column_names(self) -> dict[str, str]:
         return {"in_time": "in time", **COOPERATIVE_NAMES}
