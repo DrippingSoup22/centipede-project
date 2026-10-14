@@ -1,6 +1,6 @@
 # Task
 
-**Status (2026-10-14): open, to discuss once the reward is set.** The
+**Status (2026-10-14): being designed with the user.** The
 task is the environment's side of the problem: the targets, the episodes,
 how the difficulty grows, and what happens after an arrival.
 
@@ -28,11 +28,31 @@ plateau stop.
   a new one follows, so the more targets reached, the more reward, which
   also pays speed.
 
-## A point to weigh
+## The targets (proposed, 2026-10-14)
+
+- **Where a target appears:** within 45° to either side of straight ahead
+  (the user: a 90° spawning angle), at a distance drawn from a range, so
+  the task varies (the user).
+- **How far: one to two body lengths**, 50 to 100 mm for the twelve-unit
+  model (54.8 mm). The user's 5 to 10 is read in centimetres: in
+  millimetres a target would lie within one or two strides, partly under
+  the head already (the head's outline is 7.2 mm long and 8 mm wide), and
+  near targets teach shuffling, not walking (the oscillators, 2026-10-13).
+  At 40 to 80 mm within ±45°, walking straight reaches only about 9% by
+  luck ([environment.md](../environment.md#episodes)). Stated in body
+  lengths, the range carries over to the 21-segment model.
+- **To discuss next:** how the range grows with the levels, the episode's
+  length, walking on after an arrival, and the starting heading (the
+  user). The oscillators' curriculum began at 15 to 30 mm within ±45° and
+  grew to 30 to 200 mm all around; their circle task then put every target
+  of a level at one distance, because with a range a third of the targets
+  lay close enough to arrive without a wave.
+
+## A point to weigh (answered in the reward)
 
 How progress is counted matters for the same question. Main counts it in
 halvings of the distance, which makes a millimetre near a far target worth
 less than one near a close target, while a millimetre's effort costs the
-same everywhere. Counting halvings, linear distance, or something between
-decides whether far targets are worth their energy before any arrival
-scaling.
+same everywhere. The reward now proposes millimetres, so a farther target
+pays more progress in proportion to its walk, and a fixed arrival
+([reward.md](reward.md#task-the-head-steers)).

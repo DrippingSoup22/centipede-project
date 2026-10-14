@@ -1,8 +1,8 @@
 # Reward
 
 **Status (2026-10-14): the structure and its ratios are agreed in ideas;
-only progress : arrival remains, decided with the task
-([task.md](task.md)); no term has a formula or a number yet.**
+progress in millimetres and the arrival's worth are proposed; no term has a
+formula or a number yet.**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -51,21 +51,54 @@ it: progress, step by step, as its distance to the target shrinks, and
 arrival, when the target comes under the head. The head decides where the
 body goes.
 
+**One logic for every segment** (proposed, 2026-10-14). Every segment is
+paid the distance it gains toward its own target in millimetres; the head's
+target is the target, a follower's the trail of the segment ahead
+([Path](#path-the-task-as-a-follower-sees-it)). The head alone can reach
+its target, so only the head has an arrival. Main counted the head's
+progress in halvings of its distance instead; in millimetres, the head and
+the followers measure their goals the same way, and every millimetre is
+worth the same near a target and far from it, as every millimetre of
+walking costs the same energy. A farther target therefore pays more
+progress in all, in proportion to the walk it asks for: the user's idea of
+an arrival scaled by distance, carried by the progress itself.
+
+**The arrival is a fixed bonus, worth one average approach** (proposed):
+reaching a target is worth as much as the progress of walking the middle
+distance of the targets' range. It makes finishing better than stopping
+just short, which progress alone would barely distinguish, while staying
+small enough that rare arrivals do not swamp the goal critic's signal.
+It need not pay back the trip's energy: goal and costs are judged by two
+critics and weighed 1 : 1 in every update ([critic.md](critic.md)), not
+summed into one value, so a long walk never makes a target "not worth it";
+with progress in millimetres, the trade between gaining ground and saving
+energy is the same at every distance.
+
 Progress and arrival are one goal at two time scales, so they stay together
 in one critic. Arrivals are rare; progress is the dense guide that leads to
 them. Summed over an approach, progress depends only on where the head
 started and where it ended, so wiggling earns nothing and progress cannot
-be farmed (main's progress works this way,
-[environment.md](../environment.md#rewards)). A critic of arrivals alone
-would see zero almost every step and a rare spike, and with its advantage
-normalised on its own, those spikes would dominate.
+be farmed. A critic of arrivals alone would see zero almost every step and
+a rare spike, and with its advantage normalised on its own, those spikes
+would dominate.
 
 ### Path: the task as a follower sees it
 
 A follower cannot see the target, so by the pairing rule it cannot be paid
 for it. What it can see is where the body goes: the head lays the path, and
 for each follower **the segment ahead is its target**. A follower is paid
-for its progress along the trail the segment ahead leaves.
+for its progress along the trail the segment ahead leaves: the path that
+segment has walked, measured in millimetres gained along it.
+
+**A follower never arrives.** The joint keeps the segment ahead one unit
+ahead, so its target can never be reached; its goal is continuous, to keep
+advancing along the trail. It gets no share of the head's arrival either:
+it cannot see the target, so an arrival would be an effect without a cause
+(the pairing rule), as for the oscillators' followers. Its part in every
+arrival is already paid, millimetre by millimetre, as it carried the body
+along the head's path. Nor is it about momentum: a body of a gram has
+almost none ([forces.md](forces.md)); the follower's work is advancing,
+step after step.
 
 - **It is visible.** The segment ahead is always within the radius.
 - **It is shared.** In a chain, this progress is how far the body moves
@@ -300,7 +333,7 @@ force is worth.
 | Pushing : braking work | About 4 : 1, proposed from muscle data |
 | Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
 | Pain : energy | 1 : 1 in activation, agreed |
-| Progress : arrival, for the head | Open, with [task.md](task.md) |
+| Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach, proposed |
 
 ## Left out
 
