@@ -63,9 +63,10 @@ walking costs the same energy. A farther target therefore pays more
 progress in all, in proportion to the walk it asks for: the user's idea of
 an arrival scaled by distance, carried by the progress itself.
 
-**The arrival is a fixed bonus, worth one average approach** (proposed):
-reaching a target is worth as much as the progress of walking the middle
-distance of the targets' range. It makes finishing better than stopping
+**The arrival is worth one average approach** (proposed): reaching a
+target is worth as much as the progress of walking the middle distance of
+the current level's range, so an average approach earns half its worth
+walking and half arriving, at every level. It makes finishing better than stopping
 just short, which progress alone would barely distinguish, while staying
 small enough that rare arrivals do not swamp the goal critic's signal.
 It need not pay back the trip's energy: goal and costs are judged by two
@@ -81,6 +82,22 @@ started and where it ended, so wiggling earns nothing and progress cannot
 be farmed. A critic of arrivals alone would see zero almost every step and
 a rare spike, and with its advantage normalised on its own, those spikes
 would dominate.
+
+**No price per millimetre in energy** (the user's view, 2026-10-14:
+progress is one thing, cost another). Each critic's advantage is
+normalised on its own before the two are weighed 1 : 1, so the scale of
+each side disappears: progress counted as 1 or as 1,000 per millimetre
+teaches the same. Millimetres and joules are never converted into each
+other; what sets the balance is the weight, and in every update the
+centipede improves gaining ground and saving energy with equal emphasis,
+each measured against its own usual spread. There is no break-even point:
+a centipede that walks well keeps both improving, faster progress for less
+energy per millimetre. Two consequences: inside the goal, only the ratio
+of progress to arrival matters (above); and the exchange rate between
+millimetres and energy is not fixed but follows how much each signal
+varies, so if the walk ends too lazy or too wasteful, the 1 : 1 weight is
+the dial, never below 1 for the goal. Normalising the critics' value
+targets too (MAPPO's first advice) makes even the critics blind to scale.
 
 ### Path: the task as a follower sees it
 

@@ -131,3 +131,4 @@ batches.
 - Tucker, The energetic cost of moving about, American Scientist 63, 1975
 - Dallmann, Dürr & Schmitz, Proc. R. Soc. B 283, 2016, [PMC4795010](https://pmc.ncbi.nlm.nih.gov/articles/PMC4795010)
 - Guschlbauer, dissertation, University of Cologne, 2009, [KUPS](https://kups.ub.uni-koeln.de/3001/)
+- Florensa, Held, Geng & Abbeel, Automatic goal generation for reinforcement learning agents, ICML 2018, [arXiv 1705.06366](https://arxiv.org/abs/1705.06366)
