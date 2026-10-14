@@ -1,6 +1,6 @@
 # Task
 
-**Status (2026-10-14): designed, with numbers proposed.** The
+**Status (2026-10-14): agreed with the user.** The
 task is the environment's side of the problem: the targets, the episodes,
 how the difficulty grows, and what happens after an arrival.
 
@@ -28,7 +28,7 @@ plateau stop.
   a new one follows, so the more targets reached, the more reward, which
   also pays speed.
 
-## The targets (proposed, 2026-10-14)
+## The targets (agreed, 2026-10-14)
 
 | | Level 0 | Level 0.55 | Level 1 |
 | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ behind can be reached by turning around. Stated as that rule (the full
 circle once the near end clears one body length plus a turning circle),
 it carries over to the 21-segment model.
 
-## The starting heading (proposed, 2026-10-14)
+## The starting heading (agreed, 2026-10-14)
 
 **Any direction, from the start, not growing with the level.** The floor
 is the same everywhere and every target is placed relative to the head, so
@@ -85,7 +85,29 @@ networks learn to ignore it. If the observations leave out the world
 heading altogether ([observations.md](observations.md)), the starting
 heading stops mattering, and randomising it still costs nothing.
 
-## Walking on (proposed, 2026-10-14)
+## How a world runs
+
+```text
+episode starts (fresh pose, random heading) ─┬─ target 1 appears, placed from the head, its own 7 s clock
+                                             │    reached in time → arrival bonus; target 2 appears at once
+                                             │    7 s run out     → missed; target 2 appears at once
+                                             ├─ target 2, with a fresh 7 s … target 3 …
+episode ends at 20 s ────────────────────────┴─ the world restarts from a fresh pose
+after every update, one level for all worlds moves toward 1 target in 10 reached in time
+```
+
+- **Every target has its own 7 s clock**, started when it appears. A
+  target reached early is replaced at once, with no waiting; a target not
+  reached in 7 s disappears and a new one takes its place. Either way the
+  new target is placed from the head where it stands, by the current
+  level's rules.
+- **The episode's 20 s are simulated time**, not waiting time. A training
+  cycle simulates the same number of steps in every world (the rollout
+  window), whatever the episode's length; the length only decides when a
+  world restarts. A shorter episode does not make training faster or
+  slower.
+
+## Walking on (agreed, 2026-10-14)
 
 **An arrival never ends the episode** (the user): a new target appears at
 once, by the current level's rules, **placed from the head where it
@@ -109,7 +131,7 @@ a faster walk), moved from the episode to each target, where it acts now
 that one episode holds many targets; the oscillators' circle task allowed
 10 s per target, so its level read as speed.
 
-## The episode (proposed, 2026-10-14)
+## The episode (agreed, 2026-10-14)
 
 **Fixed, generous, and never growing with the level.** With walking on,
 the task has no end: the centipede is judged over an indefinite time, and
@@ -141,19 +163,19 @@ episode's length ([agents.md](../agents.md#settings)); with walking on and
 bootstrapping, the time that matters is a target's: the discount should
 see about one allowance ahead.
 
-## The numbers (proposed, 2026-10-14)
+## The numbers (agreed, 2026-10-14)
 
 Times are in seconds, so they hold whatever the decision rate; in steps of
 20 ms they are 50 per second, as in legged_gym.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Targets, level 0 | 20 to 30 mm, within ±45° | [The targets](#the-targets-proposed-2026-10-14) |
+| Targets, level 0 | 20 to 30 mm, within ±45° | [The targets](#the-targets-agreed-2026-10-14) |
 | Targets, level 1 | 2.7 to 4 body lengths, all around | The same; the full circle from level 0.55 |
-| Starting heading | Any direction | [The starting heading](#the-starting-heading-proposed-2026-10-14) |
+| Starting heading | Any direction | [The starting heading](#the-starting-heading-agreed-2026-10-14) |
 | Time allowed per target | **7 s** (350 steps) | At level 1, the middle target, 3.3 body lengths, plus about one body length of turning, in 7 s asks for 0.64 body lengths per second: the slower speed measured for *S. polymorpha* on flat ground (0.64 to 1.44; Diaz et al., Georgia Tech). Level 1 means walking like a real centipede at an easy pace. At level 0 the same 7 s is very generous |
-| Episode | **28 s** (1,400 steps), four allowances | Three or four far targets at a good walk (the user); a world stuck early waits at most 28 s. legged_gym uses 20 s |
-| First episode of each world | A random length up to 28 s | Otherwise, with no other end to an episode, all worlds would restart on the same step; legged_gym starts every world at a random point of its episode for the same reason |
+| Episode | **20 s** (1,000 steps), about three allowances | The user's choice: about three far targets at a good walk, as legged_gym's 20 s; a world stuck early waits at most 20 s |
+| First episode of each world | A random length up to 20 s | Otherwise, with no other end to an episode, all worlds would restart on the same step; legged_gym starts every world at a random point of its episode for the same reason |
 | Discount | **0.998**, half-life 7 s | An arrival at the end of its allowance is still worth half, seen from the target's appearance (main's rule, tied now to the target instead of the episode). legged_gym's 0.99 sees about 1.4 s ahead: right for its velocity task, but a 7 s arrival would be worth 3% |
 | Level | One for all worlds; after every update, level += 0.02 × (arrival share − 0.10), kept between 0 and 1 | The user's rule. The arrival share counts the targets that ended, reached or missed, over the last episode length. At 50% arrivals the level climbs 0.008 per update, 0 to 1 in about 125 updates; the oscillators' step was the same 0.02 |
 | Range circle | None | The time allowance replaces it: a head that wanders off misses its target and gets a new one |
@@ -167,7 +189,7 @@ allowance is part of the task, since a missed target loses its arrival,
 so the head's task critic must see how much time remains, or it could not
 tell a target about to expire from a fresh one (Pardo et al., 2018).
 
-## The levels (proposed, 2026-10-14)
+## The levels (agreed, 2026-10-14)
 
 **The user's rule:** the level starts rising once the arrivals pass 10%,
 and rises faster the more they exceed it, episode after episode; the level
