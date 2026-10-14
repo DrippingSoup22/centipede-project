@@ -105,13 +105,13 @@ what the environment needs; this category carries what the recorder and the
 speed work need. All four values describe the moment after the `forward` call
 that follows a step's last physics step, or a reset, so the CPU and GPU
 backends report the same thing; they are not peaks over the physics steps of
-a transition (134 for model v3). On the GPU the category is made of views of MuJoCo Warp's own
+a transition (134 for models v3 and v4). On the GPU the category is made of views of MuJoCo Warp's own
 arrays, so filling it costs nothing; on the CPU each world's values are copied
 after the step.
 
 | Value | Shape | Meaning | Summary |
 | --- | --- | --- | --- |
-| `qpos` | `(W, nq)` | Every world's position coordinates, in MuJoCo's `qpos` layout (69 for models v2 and v3) | Recorded |
+| `qpos` | `(W, nq)` | Every world's position coordinates, in MuJoCo's `qpos` layout (69 for models v2 and v3, 125 for v4) | Recorded |
 | `contact_count` | `(1,)` | Contacts in all worlds together; the GPU reserves `contacts_per_world × W` | Maximum |
 | `constraint_rows` | `(W,)` | Constraint rows in each world; the GPU reserves `constraints_per_world` | Maximum |
 | `solver_iterations` | `(W,)` | Solver iterations each world needed on the last physics call | Maximum |
@@ -138,7 +138,7 @@ the explained variance, which describes the batch before the update.
 | `clip_fraction` | `(N,)` | Share of samples whose probability ratio was clipped |
 | `explained_variance` | `(N,)` | How much of the returns' variation the critic predicted: 1 exactly, 0 nothing |
 | `learning_rate` | `()` | The optimizers' learning rate in the update, the same for every agent; set by the experiment from the schedule |
-| `action_std` | `(N, 6)` | Each leg action's learned spread, before squashing |
+| `action_std` | `(N, M)` | Each leg action's learned spread, before squashing, in leg action order, for `M` leg motors per segment |
 | `spine_action_std` | `(N,)` | The learned spread of the command for the spine joint behind the segment, before squashing; 0 for a segment without one |
 
 ### Timing

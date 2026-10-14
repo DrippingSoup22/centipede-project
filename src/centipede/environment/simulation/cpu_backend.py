@@ -56,7 +56,7 @@ class CPUBackend:
             self.reset_generators.append(np.random.default_rng((0, world_index)))
 
         self.physical_state = PhysicalState.allocate(
-            world_count, mapping.segment_count, "cpu"
+            world_count, mapping.segment_count, mapping.leg_actuator_ids.shape[1], "cpu"
         )
         self._body_height = self.physical_state.body_height.numpy()
         self._body_quaternion = self.physical_state.body_quaternion.numpy()
@@ -98,7 +98,7 @@ class CPUBackend:
         else:
             selected_world_indices = world_mask.nonzero().flatten().tolist()
 
-        noise_shape = (self.mapping.segment_count, 6)
+        noise_shape = self.mapping.leg_qpos_addresses.shape
         for world_index in selected_world_indices:
             if seed is not None:
                 self.reset_generators[world_index] = np.random.default_rng(
@@ -108,7 +108,7 @@ class CPUBackend:
             generator = self.reset_generators[world_index]
 
             mujoco.mj_resetData(self.model, data)
-            # The (N, 6) address tables select all 48 leg joints of this world.
+            # The (N, M) address tables select every leg joint of this world.
             data.qpos[self.mapping.leg_qpos_addresses] += generator.uniform(
                 -LEG_ANGLE_NOISE_RAD, LEG_ANGLE_NOISE_RAD, noise_shape
             )
@@ -138,11 +138,11 @@ class CPUBackend:
     ) -> None:
         """Hold each world's leg and spine actions for one 20 ms step.
 
-        ``leg_actions`` has shape (W, N, 6): every world's segment actions, in
-        action order. ``spine_actions`` has shape (W, N - 1), one command per
-        spine joint from the head back; without it the spine motors receive
-        zero. Stops the run if the physics fails; afterwards the physical state
-        is refreshed.
+        ``leg_actions`` has shape (W, N, M): every world's segment actions, in
+        leg action order (``ModelMapping``). ``spine_actions`` has shape
+        (W, N - 1), one command per spine joint from the head back; without it
+        the spine motors receive zero. Stops the run if the physics fails;
+        afterwards the physical state is refreshed.
         """
         actions = leg_actions.cpu().numpy()
         spine_commands = (

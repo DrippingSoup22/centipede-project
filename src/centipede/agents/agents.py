@@ -15,8 +15,12 @@ import torch
 from rl_lib.algorithms.policy_gradient import PPOUpdateSummary
 
 from centipede.agents.diagnostics import AgentDiagnostics
-from centipede.agents.segment_agent import LEG_ACTION_COUNT, SegmentAgent
+from centipede.agents.segment_agent import SegmentAgent
 from centipede.agents.settings import AgentSettings
+
+# A checkpoint saved before the spine could be commanded, by agents of legs of
+# three joints, holds no action sizes: six per segment.
+EARLY_CHECKPOINT_ACTION_SIZE = 6
 
 
 class Agents:
@@ -30,20 +34,20 @@ class Agents:
         rollout_window_steps: int,
         settings: AgentSettings,
         seed: int,
-        segment_action_sizes: list[int] | None = None,
+        segment_action_sizes: list[int],
+        leg_motor_count: int,
     ):
         """Create one segment agent per segment, each with its own seed.
 
         Every (run seed, segment) pair gets a different agent seed.
-        ``segment_action_sizes`` is the environment's: how many motors each
-        segment commands, six each when not given.
+        ``segment_action_sizes`` and ``leg_motor_count`` are the
+        environment's: how many motors each segment commands, its leg motors
+        first and then, with spine control, the spine joint behind it.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
         self.settings = settings
-        self.segment_action_sizes = (
-            segment_action_sizes or [LEG_ACTION_COUNT] * segment_count
-        )
+        self.segment_action_sizes = segment_action_sizes
         self.action_size = max(self.segment_action_sizes)
 
         self.segment_agents: list[SegmentAgent] = [
@@ -59,7 +63,9 @@ class Agents:
             for segment_index in range(segment_count)
         ]
 
-        self.diagnostics = AgentDiagnostics(segment_count, device=self.settings.device)
+        self.diagnostics = AgentDiagnostics(
+            segment_count, leg_motor_count, device=self.settings.device
+        )
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.
@@ -132,7 +138,8 @@ class Agents:
         saved before the spine could be commanded hold six actions per segment.
         """
         saved_sizes = state.get(
-            "segment_action_sizes", [LEG_ACTION_COUNT] * state["segment_count"]
+            "segment_action_sizes",
+            [EARLY_CHECKPOINT_ACTION_SIZE] * state["segment_count"],
         )
         saved_body = (state["segment_count"], state["observation_size"], saved_sizes)
         this_body = (
@@ -168,7 +175,7 @@ class ZeroActionBaseline:
     ``action_size`` is the environment's joint action width.
     """
 
-    def __init__(self, action_size: int = LEG_ACTION_COUNT) -> None:
+    def __init__(self, action_size: int) -> None:
         self.action_size = action_size
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
@@ -185,9 +192,7 @@ class RandomActionBaseline:
     ``action_size`` is the environment's joint action width.
     """
 
-    def __init__(
-        self, device: torch.device | str, seed: int, action_size: int = LEG_ACTION_COUNT
-    ) -> None:
+    def __init__(self, device: torch.device | str, seed: int, action_size: int) -> None:
         """The generator lives on ``device``, where the actions are drawn."""
         self.generator = torch.Generator(device=device).manual_seed(seed)
         self.action_size = action_size

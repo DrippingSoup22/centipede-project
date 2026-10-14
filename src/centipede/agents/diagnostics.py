@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 import torch
 from rl_lib.algorithms.policy_gradient import PPOUpdateSummary
 
-from centipede.agents.segment_agent import LEG_ACTION_COUNT, SegmentAgent
+from centipede.agents.segment_agent import SegmentAgent
 from centipede.diagnostics_category import measure
 
 
@@ -42,15 +42,9 @@ class LearningSummary:
         "The optimizers' learning rate in the update, the same for every agent"
     )
     action_std: torch.Tensor = measure(
-        "Each leg action's learned spread, before squashing, (N, 6)",
-        parts=(
-            "left shoulder sweep",
-            "left shoulder lift",
-            "left knee",
-            "right shoulder sweep",
-            "right shoulder lift",
-            "right knee",
-        ),
+        "Each leg action's learned spread, before squashing, in leg action"
+        " order: the left leg's joints from the body outward, then the right"
+        " leg's, (N, M)"
     )
     spine_action_std: torch.Tensor = measure(
         "The learned spread of the command for the spine joint behind the"
@@ -65,15 +59,19 @@ SUMMARY_NAMES = tuple(item.name for item in fields(PPOUpdateSummary))
 class AgentDiagnostics:
     """Fills the agents' learning category, ``learning``, which the experiment reads."""
 
-    def __init__(self, segment_count: int, device: torch.device | str) -> None:
-        """Allocate the category, all zero."""
+    def __init__(
+        self, segment_count: int, leg_motor_count: int, device: torch.device | str
+    ) -> None:
+        """Allocate the category, all zero, for agents whose first
+        ``leg_motor_count`` actions drive their legs."""
+        self.leg_motor_count = leg_motor_count
         self.learning = LearningSummary(
             **{
                 name: torch.zeros(segment_count, device=device)
                 for name in SUMMARY_NAMES
             },
             learning_rate=torch.zeros((), device=device),
-            action_std=torch.zeros((segment_count, LEG_ACTION_COUNT), device=device),
+            action_std=torch.zeros((segment_count, leg_motor_count), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
         )
 
@@ -98,8 +96,7 @@ class AgentDiagnostics:
             for segment_index, agent in enumerate(segment_agents):
                 # The policy clamps the log spread to [-20, 2] before using it.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
-                self.learning.action_std[segment_index].copy_(spread[:LEG_ACTION_COUNT])
-                if agent.action_size > LEG_ACTION_COUNT:
-                    self.learning.spine_action_std[segment_index] = spread[
-                        LEG_ACTION_COUNT
-                    ]
+                legs = self.leg_motor_count
+                self.learning.action_std[segment_index].copy_(spread[:legs])
+                if agent.action_size > legs:
+                    self.learning.spine_action_std[segment_index] = spread[legs]

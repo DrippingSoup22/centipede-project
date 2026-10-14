@@ -129,13 +129,15 @@ def test_a_short_run_with_the_real_environment_and_agents_is_finite():
             {"hidden_layers": [8], "ppo": {"minibatch_size": 4}}
         ),
         seed=1,
+        segment_action_sizes=environment.segment_action_sizes,
+        leg_motor_count=environment.leg_motor_count,
     )
     loop = InteractionLoop(environment, agents, settings)
 
     for _ in loop.train(seed=1):
         pass
     training_steps = loop.diagnostics.step_window.result()
-    loop.evaluate(ZeroActionBaseline(), seed=2)
+    loop.evaluate(ZeroActionBaseline(environment.action_size), seed=2)
     evaluation_episodes = loop.diagnostics.episode_window.result()
 
     assert all(agent.update_count == 2 for agent in agents.segment_agents)

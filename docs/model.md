@@ -7,16 +7,19 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The current model is **v3**, used for training. It is v2 with a longer physics
-timestep (see [Model v3](#model-v3)). v2 has exactly the body and physics of the
-original **v1 flat-ground baseline**. v2 and v1 are kept unchanged for
-reference. All three are frozen: training work may change observations,
-rewards, targets, and learning, but never a model. A physical change requires a
-new, separately named version with its own validation.
+The newest model is **v4**: twelve body units, and legs of three links with a
+fourth joint, the ankle, on v3's physics and torque motors (see
+[Model v4](#model-v4)). **v3**, which the example configurations use, is v2
+with a longer physics timestep (see [Model v3](#model-v3)). v2 has exactly the
+body and physics of the original **v1 flat-ground baseline**. v2 and v1 are kept
+unchanged for reference. All four are frozen: training work may change
+observations, rewards, targets, and learning, but never a model. A physical
+change requires a new, separately named version with its own validation.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, the complete centipede used for training | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
+| [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs | `62f784bd0920eddabe18431b9052663e21a8260cfcaf1beb07bbb51a9871cabd` |
+| [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
 | [`models/assembly.xml`](../models/assembly.xml) | v1, the original baseline | `92143cf54b030856e436a1de6f4333c327ffb9a5f812a0e4a0b4c4aed107d50e` |
 | [`models/segment.xml`](../models/segment.xml) | One isolated trunk unit, for reference | |
@@ -36,6 +39,10 @@ v2 changes three things and nothing else:
    and configuration block were also removed.
 
 ## The body at a glance
+
+This section and those up to [Validation](#validation) describe the body of v1
+to v3. [Model v4](#model-v4) lists what v4 changes; everything it does not list
+is as described here.
 
 - Eight body units: one head and seven trunk units.
 - Sixteen two-link legs, one left/right pair on every unit.
@@ -296,16 +303,84 @@ that settling for 2 s with motors off ends with the same contacts and body
 positions within 0.013 mm of v2's (deepest penetration 0.020 mm against
 0.018 mm), and that no leg passes through a body under random commands.
 
+## Model v4
+
+v4 is a longer body whose legs have a fourth joint. Its physics settings,
+contacts and friction, head, body width and height, spine joints and motors,
+and the joints its legs share with v3 (ranges, damping, armature, and maximum
+torques) are exactly v3's. It changes:
+
+| Property | v3 | v4 |
+| --- | ---: | ---: |
+| Body units, each with a pair of legs | 8 | 12 |
+| Distance between unit centres | 3.8 mm | 4.3 mm |
+| Trunk unit length / mass | 4.4 mm / 73 mg | 4.9 mm / 81.3 mg |
+| Body length without legs | 33.8 mm | 54.8 mm |
+| Leg links | upper 4.6 mm, lower 5.8 mm | upper 4.6 mm, lower 3.2 mm, tarsus 2.6 mm |
+| Leg joints | sweep, lift, knee | sweep, lift, knee, ankle |
+| Coordinates (position / velocity) | 69 / 68 | 125 / 124 |
+| Motors | 55 | 107 |
+| Whole model | 643.4 mg | 1047.9 mg |
+
+The trunk unit is longer by the same amount as the spacing, so neighbouring
+units still overlap by 0.6 mm, and its mass grows with its length. The spacing
+and the number of units are engineering choices, still short of the reference
+species' 19 to 21 leg pairs.
+
+**Legs.** v3's lower link is split into a lower link and a **tarsus**, joined
+by the **ankle**, a hinge parallel to the knee. The leg keeps its total length,
+1.30 body widths, and its mass: 1.50 mg upper, 0.55 mg lower, 0.45 mg tarsus,
+and the 0.15 mg foot. The lower link is 0.22 mm in radius, as before, and the
+tarsus 0.18 mm.
+
+| Joint | Range | Maximum torque | Damping | Armature |
+| --- | ---: | ---: | ---: | ---: |
+| Ankle | −30° to +40° | ±5 µN·m | 1e-7 N·m·s/rad | 2e-12 kg·m² |
+
+The ankle damps like the knee, and its maximum torque is half the knee's, as
+it moves only the tarsus; its range and torque are engineering choices. In
+the model's pose the leg arches down and out: the upper link is horizontal,
+the lower link 35° below horizontal, and the tarsus 60° below. The lift range
+is therefore 25° below to 40° above horizontal, the knee bends between 15° and
+85°, and the ankle between −5° and 65°. The body's centres start 5.06 mm above
+the floor, with the feet just clear of it.
+
+**Motors.** Every unit owns eight leg motors, in leg action order the left
+leg's sweep, lift, knee, and ankle, then the right leg's, and every unit after
+the head the yaw motor joining it to the unit ahead: 8 × 12 + 11 = 107. The
+model's file is otherwise built like v3's, with the same naming, ownership and
+shape categories, and eleven visual membranes.
+
+**Validation.** The checks of [Validation](#validation), on v4 (CPU MuJoCo,
+the model's timestep unless stated):
+
+| Check | Result |
+| --- | --- |
+| Settling with every motor off, 2 s | The first body touches the floor after 36 ms (v3: about 33 ms); all 24 feet and 12 bodies end on the floor; 0.021 mm deepest penetration; no solver warning |
+| Every lift motor pressing down at 20%, 1 s | Stands on all 24 feet with no body contact, centres 4.6 mm high; at 40% or 60% the lift joints reach their limit and the centres stand 6.4 mm high |
+| Random full-strength motor commands, 2 s, 3 runs | 0.158 to 0.176 mm deepest penetration; no solver warning; joint limits exceeded by at most 6.4° (ankle) and 6.2° (knee), against 5.5° for v3's knee measured the same way, and at most 2.6° for the other joints |
+| Leg closest to another segment's body under the random commands | 0.55 mm |
+| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | No leg or body closer than 0.56 mm to another segment's body |
+| Half timestep | Settling ends within 0.02 mm of the full timestep, standing at the same heights; joint-limit excess at most 5.3° |
+
+As in v1 to v3, the light outer links overshoot their limits the most, softly,
+and the body cannot hold itself up with its motors off. The automated tests in
+`tests/models/test_model_v4.py` check that v3's physics, joints, and torques
+carry over, that the body sinks with its motors off and stands on its lift
+motors, and that no leg passes through a body under random commands.
+
 ## Possible future versions
 
-These are outside v1 and would each be a new model version:
+These are outside v1 to v4 and would each be a new model version:
 
 - A fully passive spine with no yaw motors.
 - A distinct tail unit.
-- Antennae, forcipules, extra leg sections, soft feet, or adhesion.
+- Antennae, forcipules, further leg sections, soft feet, or adhesion.
 - Deformable membranes between units.
 - Rough terrain, obstacles, or slopes.
 - A realistic number of segments.
+- Position actuators, which drive each joint toward a commanded angle instead
+  of applying a commanded torque.
 
 ## References
 

@@ -26,16 +26,18 @@ all of which conflict with this design.
 
 `W` is the number of worlds and `N` the number of segments. Everything passed in
 and out is a PyTorch tensor on the agents' device. The group is created from
-the environment's `segment_count`, `observation_size`, `world_count`, and
-`segment_action_sizes`, the interaction loop's `rollout_window_steps`, which
-sizes the storage, and the run's seed. It works for any number of segments.
-Each segment agent has as many actions as its segment commands: six for its
-legs, and with spine control a seventh, the spine joint behind it, for every
-segment but the rear ([environment.md](environment.md#actions-and-timing)).
+the environment's `segment_count`, `observation_size`, `world_count`,
+`segment_action_sizes`, and `leg_motor_count`, the interaction loop's
+`rollout_window_steps`, which sizes the storage, and the run's seed. It works
+for any number of segments and of leg motors. Each segment agent has as many
+actions as its segment commands: one per leg motor, `M` (six for legs without
+ankles, eight with them), and with spine control one more, the spine joint
+behind it, for every segment but the rear
+([environment.md](environment.md#actions-and-timing)).
 
 | Operation | Takes | Returns or does |
 | --- | --- | --- |
-| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, 6)`, or `(W, N, 7)` with spine control, where a segment with fewer actions gets zeros as padding; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
+| `act(observations, training)` | Observations `(W, N, observation_size)` | The joint action `(W, N, M)`, or `(W, N, M + 1)` with spine control, where a segment with fewer actions gets zeros as padding; when `training`, each segment agent also updates its normaliser and remembers what it needs for learning |
 | `record(rewards, terminated, truncated, final_observations)` | The environment's results for the step just taken | Each segment agent stores its own part |
 | `update()` | Nothing | Each segment agent learns from its own stored data, then clears it |
 | `state_dict()`, `load_state_dict(state)` | — | All segment agents' state, for checkpoints; the experiment writes it to a file |
@@ -86,7 +88,7 @@ per step, so it is not worth the added complexity.
 ## Observations
 
 Every segment agent has the same input size, `observation_size`: 83 with the
-first observation radius of 1 (see
+first observation radius of 1 for legs without ankles, 95 with them (see
 [environment.md](environment.md#what-each-segment-sees)). Inputs that are always
 zero for a segment, such as the head's missing neighbour ahead, never affect its
 network.
@@ -151,7 +153,7 @@ optimizer (see [configuration.md](configuration.md#starting-from-another-run)).
 
 **Widening.** A new run may give its agents more to see or to command than the
 run it starts from, as spine control does: two more inputs, after all the
-others, and a seventh action for every segment but the rear. Its agents are
+others, and one more action for every segment but the rear. Its agents are
 then widened from the checkpoint. Every saved weight keeps its place; the
 weights of the new inputs and of the new action start at zero, so at the first
 step each agent acts exactly as the saved one did and commands zero to its new

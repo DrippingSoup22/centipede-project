@@ -1,4 +1,4 @@
-"""Tests for the environment's front file, with the real model v3.
+"""Tests for the environment's front file, with the real model v3 (and v4).
 
 The parts have their own tests; these cover only what the front adds: episode
 state (targets, step counts, previous positions), episode ends, and resetting
@@ -17,9 +17,11 @@ from centipede.settings_section import SettingsError
 BACKENDS = ["cpu"] + (["gpu"] if torch.cuda.is_available() else [])
 
 
-def environment(backend="cpu", world_count=3, **changes) -> Environment:
+def environment(
+    backend="cpu", world_count=3, model_path="models/assembly_v3.xml", **changes
+) -> Environment:
     simulation = {
-        "model_path": "models/assembly_v3.xml",
+        "model_path": model_path,
         "backend": backend,
         "world_count": world_count,
         "gpu_solver": "cg",  # also runs on GPUs older than Volta
@@ -155,6 +157,29 @@ def test_with_spine_control_each_segment_but_the_rear_bends_the_joint_behind_it(
         (squared[:, :-1].mean(dim=-1), squared[:, -1:, :6].mean(dim=-1)), dim=1
     )
     assert torch.allclose(env.diagnostics.step.joint_movement, expected.sqrt())
+
+
+def test_with_model_v4_each_segment_also_commands_its_ankles():
+    """v4's legs have four joints: each segment commands eight leg motors, the
+    left leg's then the right's, before the spine joint behind it."""
+    env = environment(
+        world_count=2, model_path="models/assembly_v4.xml", spine_control=True
+    )
+    assert env.segment_action_sizes == [9] * 11 + [8]
+    # 15 + 2 × 8 values for each of the three segments seen, the target's
+    # two, and the spine joint's angle and speed.
+    assert env.observation_size == 3 * 31 + 2 + 2
+    env.reset(seed=2)
+    action = torch.zeros(2, env.segment_count, 9)
+    action[0, :, 7] = 1.0  # world 0 bends every right ankle
+
+    for _ in range(5):
+        env.step(action)
+
+    angles = env.simulation.physical_state.leg_joint_position
+    assert torch.all(angles[0, :, 7] > angles[1, :, 7] + 0.1)
+    # The spine motors, told zero, leave the spine nearly straight.
+    assert env.simulation.physical_state.spine_yaw_position.abs().max() < 0.1
 
 
 def test_an_observation_radius_reaching_past_the_body_is_rejected():

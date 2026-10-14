@@ -16,12 +16,14 @@ from centipede.environment.observation_builder import (
 from centipede.environment.simulation import PhysicalState
 
 SEGMENT_COUNT, WORLD_COUNT = 4, 2
+# Legs with ankles: eight leg motors, so a block holds 15 + 2 x 8 = 31 values.
+LEG_MOTORS, BLOCK = 8, 31
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 
 
 def distinct_state(device) -> PhysicalState:
     """A state where every value of every block differs."""
-    state = PhysicalState.allocate(WORLD_COUNT, SEGMENT_COUNT, device)
+    state = PhysicalState.allocate(WORLD_COUNT, SEGMENT_COUNT, LEG_MOTORS, device)
     generator = torch.Generator().manual_seed(0)
     for field in vars(state).values():
         if field.dtype == torch.bool:
@@ -32,7 +34,7 @@ def distinct_state(device) -> PhysicalState:
 
 
 def block(state, world_index, segment_index) -> torch.Tensor:
-    """One segment's 27 values, in the documented order."""
+    """One segment's block, in the documented order."""
     row = world_index, segment_index
     return torch.cat(
         [
@@ -57,12 +59,12 @@ def block(state, world_index, segment_index) -> torch.Tensor:
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("radius", [0, 1, 2])
 def test_each_segment_sees_itself_then_ahead_then_behind(radius, device):
-    builder = ObservationBuilder(SEGMENT_COUNT, radius, WORLD_COUNT, device)
+    builder = ObservationBuilder(SEGMENT_COUNT, radius, WORLD_COUNT, device, LEG_MOTORS)
     state = distinct_state(device)
 
     observations = builder.build(state, torch.zeros(WORLD_COUNT, 2, device=device))
 
-    assert builder.observation_size == (2 * radius + 1) * 27 + 2
+    assert builder.observation_size == (2 * radius + 1) * BLOCK + 2
     assert observations.shape == (WORLD_COUNT, SEGMENT_COUNT, builder.observation_size)
     for world_index in range(WORLD_COUNT):
         for segment_index in range(SEGMENT_COUNT):
@@ -71,7 +73,7 @@ def test_each_segment_sees_itself_then_ahead_then_behind(radius, device):
             expected = [
                 block(state, world_index, neighbour_index)
                 if 0 <= neighbour_index < SEGMENT_COUNT
-                else torch.zeros(27, device=device)
+                else torch.zeros(BLOCK, device=device)
                 for neighbour_index in [segment_index] + ahead + behind
             ]
             actual = observations[world_index, segment_index]
@@ -85,8 +87,8 @@ def test_each_segment_sees_itself_then_ahead_then_behind(radius, device):
 
 @pytest.mark.parametrize("heading_deg", [0.0, 90.0, -135.0])
 def test_target_values_are_in_the_heads_frame_and_only_for_the_head(heading_deg):
-    builder = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu")
-    state = PhysicalState.allocate(WORLD_COUNT, SEGMENT_COUNT, "cpu")
+    builder = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", LEG_MOTORS)
+    state = PhysicalState.allocate(WORLD_COUNT, SEGMENT_COUNT, LEG_MOTORS, "cpu")
     half_turn = math.radians(heading_deg) / 2
     state.body_quaternion[:] = torch.tensor(
         [math.cos(half_turn), 0.0, 0.0, math.sin(half_turn)]
@@ -106,9 +108,9 @@ def test_target_values_are_in_the_heads_frame_and_only_for_the_head(heading_deg)
 
 
 def test_with_the_spine_each_segment_sees_its_own_joint_last():
-    plain = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu")
+    plain = ObservationBuilder(SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", LEG_MOTORS)
     builder = ObservationBuilder(
-        SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", spine_observed=True
+        SEGMENT_COUNT, 1, WORLD_COUNT, "cpu", LEG_MOTORS, spine_observed=True
     )
     state = distinct_state("cpu")
     targets = torch.zeros(WORLD_COUNT, 2)

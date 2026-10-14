@@ -26,7 +26,7 @@ COMMANDED_JOINTS[2, 6] = 0.0  # the rear has no spine joint behind it
 
 
 def unchanged_state() -> PhysicalState:
-    state = PhysicalState.allocate(2, 3, "cpu")
+    state = PhysicalState.allocate(2, 3, 6, "cpu")
     state.body_planar_position[:] = CENTRES
     state.head_tip_position[:, :2] = TIP
     return state

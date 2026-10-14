@@ -211,9 +211,15 @@ def test_a_mask_resets_only_the_selected_worlds(model, mapping):
 # -- Physical state ------------------------------------------------------------
 
 
-def test_physical_state_matches_cpu_mujoco(model, mapping):
+@pytest.mark.parametrize(
+    "model_path", ["models/assembly_v3.xml", "models/assembly_v4.xml"]
+)
+def test_physical_state_matches_cpu_mujoco(model_path):
     """Each world's state is recomputed by CPU MuJoCo from the same positions and
-    speeds. Every speed is random, so the bodies move, not only the legs."""
+    speeds. Every speed is random, so the bodies move, not only the legs. v3's
+    legs have three joints and v4's four."""
+    model = mujoco.MjModel.from_xml_path(model_path)
+    mapping = ModelMapping.from_model(model)
     backend = make_backend(model, mapping, world_count=2, seed=3)
     generator = torch.Generator(device="cuda").manual_seed(0)
     wp.to_torch(backend.gpu_data.qvel)[:] = torch.randn(

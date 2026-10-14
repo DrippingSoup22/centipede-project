@@ -121,6 +121,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         configuration.agents,
         run_settings.seed,
         environment.segment_action_sizes,
+        environment.leg_motor_count,
     )
     completed_cycles = 0
     if checkpoint_path is not None:
@@ -567,6 +568,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
         configuration.agents,
         configuration.run.seed,
         environment.segment_action_sizes,
+        environment.leg_motor_count,
     )
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])

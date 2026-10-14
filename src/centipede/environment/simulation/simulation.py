@@ -69,6 +69,8 @@ class PhysicsSimulation:
             )
 
         self.segment_count = mapping.segment_count
+        # Each segment's leg motors: both legs' joints (the mapping's roles).
+        self.leg_motor_count = 2 * len(mapping.leg_roles)
         self.head_outline = mapping.head_outline
         self.world_count = settings.world_count
         self.step_duration_s = ACTION_DURATION_S
@@ -84,9 +86,12 @@ class PhysicsSimulation:
     def step(
         self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
     ) -> None:
-        """Hold the (W, N, 6) leg and (W, N - 1) spine actions for one step.
+        """Hold the (W, N, M) leg and (W, N - 1) spine actions for one step.
 
-        Spine command ``i`` drives the joint between segments ``i`` and ``i + 1``;
-        without spine actions, the spine motors receive zero.
+        Each segment's M leg actions are its left leg's joints from the body
+        outward, then its right leg's (``ModelMapping``); every command goes
+        unchanged to its motor, which applies it as a share of its maximum
+        torque. Spine command ``i`` drives the joint between segments ``i`` and
+        ``i + 1``; without spine actions, the spine motors receive zero.
         """
         self._backend.step(leg_actions, spine_actions)

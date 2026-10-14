@@ -2,7 +2,9 @@ import torch
 
 from centipede.environment.simulation import PhysicalState
 
-BLOCK_SIZE = 27
+# A segment's block, besides its leg joints' angles and speeds: its height,
+# orientation (4), linear and angular velocity (3 each), and four contact flags.
+BLOCK_VALUES_BESIDES_LEGS = 15
 TARGET_VALUE_COUNT = 2
 # With spine control: the angle and speed of the spine joint behind the segment.
 SPINE_VALUE_COUNT = 2
@@ -26,12 +28,13 @@ def head_forward_direction(head_quaternion: torch.Tensor) -> torch.Tensor:
 class ObservationBuilder:
     """Builds every segment's observation from the physical state and targets.
 
-    Each segment sees its own block of 27 values, the blocks of the segments up
-    to ``observation_radius`` ahead and behind (nearest first), and two target
-    values that are real only for the head; with ``spine_observed``, last, the
-    angle and speed of the spine joint behind it (zero for the rear segment).
-    A missing neighbour is a block of zeros. The layout is fixed in
-    docs/environment.md.
+    Each segment sees its own block of ``15 + 2 M`` values, with M its leg
+    motors (27 for legs of three joints, 31 with ankles), the blocks of the
+    segments up to ``observation_radius`` ahead and behind (nearest first),
+    and two target values that are real only for the head; with
+    ``spine_observed``, last, the angle and speed of the spine joint behind
+    it (zero for the rear segment). A missing neighbour is a block of zeros.
+    The layout is fixed in docs/environment.md.
     """
 
     def __init__(
@@ -40,6 +43,7 @@ class ObservationBuilder:
         observation_radius: int,
         world_count: int,
         device: torch.device | str,
+        leg_motor_count: int,
         spine_observed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor.
@@ -51,6 +55,8 @@ class ObservationBuilder:
         """
         self.world_count = world_count
         self.segment_count = segment_count
+        self.leg_motor_count = leg_motor_count
+        self.block_size = BLOCK_VALUES_BESIDES_LEGS + 2 * leg_motor_count
         self.spine_observed = spine_observed
         missing_neighbour = segment_count
 
@@ -75,12 +81,12 @@ class ObservationBuilder:
 
         # One block per segment plus the zero block; refilled in place by build.
         self.blocks = torch.zeros(
-            (world_count, segment_count + 1, BLOCK_SIZE),
+            (world_count, segment_count + 1, self.block_size),
             dtype=torch.float32,
             device=device,
         )
         self.observation_size = (
-            (2 * observation_radius + 1) * BLOCK_SIZE
+            (2 * observation_radius + 1) * self.block_size
             + TARGET_VALUE_COUNT
             + (SPINE_VALUE_COUNT if spine_observed else 0)
         )
@@ -96,20 +102,23 @@ class ObservationBuilder:
         returned observation never changes when ``build`` runs again.
         """
         segment_count = self.segment_count
-        blocks = self.blocks
-        blocks[:, :segment_count, 0] = physical_state.body_height
-        blocks[:, :segment_count, 1:5] = physical_state.body_quaternion
-        blocks[:, :segment_count, 5:11] = physical_state.leg_joint_position
-        blocks[:, :segment_count, 11:14] = physical_state.body_linear_velocity
-        blocks[:, :segment_count, 14:17] = physical_state.body_angular_velocity
-        blocks[:, :segment_count, 17:23] = physical_state.leg_joint_velocity
-        blocks[:, :segment_count, 23] = physical_state.left_foot_ground_contact.float()
-        blocks[:, :segment_count, 24] = physical_state.right_foot_ground_contact.float()
-        blocks[:, :segment_count, 25] = physical_state.body_ground_contact.float()
-        blocks[:, :segment_count, 26] = physical_state.leg_leg_contact.float()
+        m = self.leg_motor_count
+        # Each part's columns, in the documented order.
+        own = self.blocks[:, :segment_count]
+        own[..., 0] = physical_state.body_height
+        own[..., 1:5] = physical_state.body_quaternion
+        own[..., 5 : 5 + m] = physical_state.leg_joint_position
+        own[..., 5 + m : 8 + m] = physical_state.body_linear_velocity
+        own[..., 8 + m : 11 + m] = physical_state.body_angular_velocity
+        own[..., 11 + m : 11 + 2 * m] = physical_state.leg_joint_velocity
+        own[..., 11 + 2 * m] = physical_state.left_foot_ground_contact.float()
+        own[..., 12 + 2 * m] = physical_state.right_foot_ground_contact.float()
+        own[..., 13 + 2 * m] = physical_state.body_ground_contact.float()
+        own[..., 14 + 2 * m] = physical_state.leg_leg_contact.float()
 
-        # (W, N + 1, 27) gathered by the (N, 2k + 1) table gives
-        # (W, N, 2k + 1, 27); its blocks are then laid end to end per segment.
+        # (W, N + 1, B) gathered by the (N, 2k + 1) table gives
+        # (W, N, 2k + 1, B); its blocks are then laid end to end per segment.
+        blocks = self.blocks
         neighbour_blocks = blocks[:, self.neighbour_table].flatten(start_dim=2)
 
         # The target as seen from the head: along its forward direction, and

@@ -21,7 +21,7 @@ NO = torch.tensor([False, False])
 
 
 def upright_state() -> PhysicalState:
-    state = PhysicalState.allocate(2, 2, "cpu")
+    state = PhysicalState.allocate(2, 2, 6, "cpu")
     state.body_quaternion[..., 0] = 1.0
     state.body_planar_position[:, 1, 0] = -0.004
     state.head_tip_position[:, 0] = 0.005

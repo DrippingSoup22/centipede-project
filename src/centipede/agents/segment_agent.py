@@ -17,10 +17,6 @@ from rl_lib.normalization import ObservationNormalizer
 from centipede.agents.rollout_storage import RolloutStorage
 from centipede.agents.settings import AgentSettings
 
-# Each segment drives the six motors of its two legs; with spine control, the
-# spine joint behind it is a seventh action.
-LEG_ACTION_COUNT = 6
-
 
 class SegmentAgent:
     """PPO for one segment, acting in every world at once."""
@@ -33,13 +29,14 @@ class SegmentAgent:
         rollout_window_steps: int,
         settings: AgentSettings,
         seed: int,
-        action_size: int = LEG_ACTION_COUNT,
+        action_size: int,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
         The seed sets the networks' starting weights and starts the PPO's own
         generator, which draws its actions and orders its minibatches.
-        ``action_size`` is how many motors the segment commands.
+        ``action_size`` is how many motors the segment commands: its leg
+        motors, and with spine control the spine joint behind it.
         """
         self.segment_index = segment_index
         self.settings = settings

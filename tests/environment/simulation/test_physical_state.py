@@ -7,14 +7,15 @@ import torch
 
 from centipede.environment.simulation.physical_state import PhysicalState
 
-# Field name, shape after the world dimension (N = 12 segments), type.
+# Field name, shape after the world dimension (N = 12 segments, M = 8 leg
+# motors: legs with ankles), type.
 EXPECTED_FIELDS = [
     ("body_height", (12,), torch.float32),
     ("body_quaternion", (12, 4), torch.float32),
-    ("leg_joint_position", (12, 6), torch.float32),
+    ("leg_joint_position", (12, 8), torch.float32),
     ("body_linear_velocity", (12, 3), torch.float32),
     ("body_angular_velocity", (12, 3), torch.float32),
-    ("leg_joint_velocity", (12, 6), torch.float32),
+    ("leg_joint_velocity", (12, 8), torch.float32),
     ("left_foot_ground_contact", (12,), torch.bool),
     ("right_foot_ground_contact", (12,), torch.bool),
     ("body_ground_contact", (12,), torch.bool),
@@ -27,8 +28,11 @@ EXPECTED_FIELDS = [
 
 
 def test_allocate_creates_zeroed_fields_in_the_documented_order():
-    """A segment count other than 8 shows nothing assumes the v1 body."""
-    state = PhysicalState.allocate(world_count=5, segment_count=12, device="cpu")
+    """Counts other than v1's 8 segments and 6 leg motors show nothing assumes
+    the v1 body."""
+    state = PhysicalState.allocate(
+        world_count=5, segment_count=12, leg_motor_count=8, device="cpu"
+    )
 
     assert [field.name for field in dataclasses.fields(state)] == [
         name for name, _, _ in EXPECTED_FIELDS
@@ -42,7 +46,9 @@ def test_allocate_creates_zeroed_fields_in_the_documented_order():
 
 
 def test_fields_are_filled_in_place_but_never_replaced():
-    state = PhysicalState.allocate(world_count=2, segment_count=8, device="cpu")
+    state = PhysicalState.allocate(
+        world_count=2, segment_count=8, leg_motor_count=6, device="cpu"
+    )
 
     state.leg_joint_position[1, 3, 4] = 0.5
     assert state.leg_joint_position[1, 3, 4] == 0.5

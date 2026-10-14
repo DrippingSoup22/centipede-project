@@ -9,7 +9,8 @@ from centipede.environment.simulation.model_mapping import (
     BODY_CATEGORY,
     FLOOR_CATEGORY,
     LEFT_FOOT_CATEGORY,
-    LEG_ACTION_ORDER,
+    LEG_ROLES,
+    LEG_SIDES,
     MEMBRANE_CATEGORY,
     RIGHT_FOOT_CATEGORY,
     ModelContractError,
@@ -39,11 +40,15 @@ def test_mapping_matches_the_elements_found_by_name():
     mapping = ModelMapping.from_model(model)
 
     assert mapping.segment_count == 8
+    # v3's legs have three joints; their motors are the left leg's from the
+    # body outward, then the right leg's.
+    assert mapping.leg_roles == LEG_ROLES[:3]
+    leg_actions = [(side, role) for side in LEG_SIDES for role in LEG_ROLES[:3]]
     for segment in range(8):
         prefix = f"segment_{segment:02d}"
         assert mapping.body_ids[segment] == model.body(prefix).id
         assert mapping.center_site_ids[segment] == model.site(f"{prefix}_center").id
-        for action_index, (side, role) in enumerate(LEG_ACTION_ORDER):
+        for action_index, (side, role) in enumerate(leg_actions):
             joint = model.joint(f"{prefix}_{side}_{role}")
             motor = model.actuator(f"{prefix}_{side}_{role}_motor")
             assert mapping.leg_actuator_ids[segment, action_index] == motor.id
@@ -77,6 +82,28 @@ def test_mapping_matches_the_elements_found_by_name():
         geom_id = model.geom(name).id
         assert mapping.geom_owner_indices[geom_id] == owner
         assert mapping.geom_categories[geom_id] == category
+
+
+def test_legs_with_an_ankle_map_four_joints_each():
+    """v4's legs add the ankle; a model with ankles on only some legs fails."""
+    v4_xml = Path("models/assembly_v4.xml").read_text(encoding="utf-8")
+    model = load(v4_xml)
+    mapping = ModelMapping.from_model(model)
+
+    assert (mapping.segment_count, mapping.leg_roles) == (12, LEG_ROLES)
+    assert mapping.leg_actuator_ids[11].tolist() == [
+        model.actuator(f"segment_11_{side}_{role}_motor").id
+        for side in LEG_SIDES
+        for role in LEG_ROLES
+    ]
+
+    # Without the head's left ankle, legs have three joints, so the other
+    # legs' ankle motors are left over.
+    without_head_ankle = v4_xml.replace(
+        'segment_00_left_ankle"', 'segment_00_left_hinge"'
+    )
+    with pytest.raises(ModelContractError, match="no leg or spine joint: segment_00"):
+        ModelMapping.from_model(load(without_head_ankle))
 
 
 def test_v1_is_rejected_because_its_feet_share_one_category():

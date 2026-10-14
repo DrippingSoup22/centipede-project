@@ -16,13 +16,23 @@ from centipede.agents.settings import AgentSettings
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 SEGMENTS, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, SEED = 3, 4, 5, 2, 7
+LEG_MOTORS = 6  # legs of three joints
 SETTINGS = AgentSettings.from_section(
     {"hidden_layers": [8], "ppo": {"minibatch_size": 4}}
 )
 
 
 def make_agents(segment_count=SEGMENTS, observation_size=OBSERVATION_SIZE) -> Agents:
-    return Agents(segment_count, observation_size, WORLDS, WINDOW_STEPS, SETTINGS, SEED)
+    return Agents(
+        segment_count,
+        observation_size,
+        WORLDS,
+        WINDOW_STEPS,
+        SETTINGS,
+        SEED,
+        [LEG_MOTORS] * segment_count,
+        LEG_MOTORS,
+    )
 
 
 def body_tensor(step: int, *trailing_shape: int) -> torch.Tensor:
@@ -55,6 +65,7 @@ class LoneSegment:
             WINDOW_STEPS,
             SETTINGS,
             SEED * SEGMENTS + segment_index,
+            LEG_MOTORS,
         )
 
     def act(self, observations, training):
@@ -101,7 +112,16 @@ def test_a_saved_file_restores_every_agent_and_rejects_another_body():
     # The experiment loads checkpoints with PyTorch's safe loader.
     state = torch.load(file, weights_only=True)
 
-    restored = Agents(SEGMENTS, OBSERVATION_SIZE, WORLDS, WINDOW_STEPS, SETTINGS, 0)
+    restored = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        SETTINGS,
+        0,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+    )
     restored.load_state_dict(state)
     observations = body_tensor(5, OBSERVATION_SIZE)
     assert torch.equal(
@@ -119,7 +139,14 @@ def test_segments_may_command_more_motors_and_a_new_run_widens_saved_agents():
     """With the spine, every segment but the rear commands a seventh motor."""
     saved = make_agents().state_dict()
     wider = Agents(
-        SEGMENTS, OBSERVATION_SIZE + 2, WORLDS, WINDOW_STEPS, SETTINGS, SEED, [7, 7, 6]
+        SEGMENTS,
+        OBSERVATION_SIZE + 2,
+        WORLDS,
+        WINDOW_STEPS,
+        SETTINGS,
+        SEED,
+        [7, 7, 6],
+        LEG_MOTORS,
     )
 
     actions = wider.act(body_tensor(0, OBSERVATION_SIZE + 2), training=False)
@@ -136,17 +163,15 @@ def test_segments_may_command_more_motors_and_a_new_run_widens_saved_agents():
 def test_baselines_give_zero_and_seeded_uniform_actions(device):
     observations = torch.ones(WORLDS, SEGMENTS, OBSERVATION_SIZE, device=device)
 
-    zero = ZeroActionBaseline().act(observations, training=False)
-    random = RandomActionBaseline(device, seed=3).act(observations, training=False)
+    # The joint action's width, here with the spine.
+    width = LEG_MOTORS + 1
+    zero = ZeroActionBaseline(width).act(observations, training=False)
+    random = RandomActionBaseline(device, 3, width).act(observations, training=False)
 
-    assert torch.equal(zero, torch.zeros(WORLDS, SEGMENTS, 6, device=device))
-    assert random.shape == (WORLDS, SEGMENTS, 6)
+    assert torch.equal(zero, torch.zeros(WORLDS, SEGMENTS, width, device=device))
+    assert random.shape == (WORLDS, SEGMENTS, width)
     assert random.device.type == device
     assert -1 <= random.min() and random.max() < 1
     assert torch.equal(
-        random, RandomActionBaseline(device, seed=3).act(observations, training=False)
+        random, RandomActionBaseline(device, 3, width).act(observations, training=False)
     )
-    # With the spine, the joint action is seven wide.
-    assert ZeroActionBaseline(7).act(observations, training=False).shape[-1] == 7
-    wide = RandomActionBaseline(device, seed=3, action_size=7)
-    assert wide.act(observations, training=False).shape[-1] == 7

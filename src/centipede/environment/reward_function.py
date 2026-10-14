@@ -53,10 +53,11 @@ class RewardContext:
         ``previous_body_planar_position`` is ``(W, N, 2)`` and
         ``previous_head_tip_position`` and ``target_position`` are ``(W, 2)``,
         all flat on the ground; ``arrived`` is a boolean ``(W,)``.
-        ``previous_joint_position`` is ``(W, N, 7)``, the ``joint_angles``
-        before the step; ``commanded_joints`` is ``(N, 7)``, 1.0 for the joints
-        each segment commands and 0.0 for the others; ``joint_action`` is the
-        step's ``(W, N, 6 or 7)`` command, as ``Environment.step`` receives it.
+        ``previous_joint_position`` is ``(W, N, M + 1)``, the ``joint_angles``
+        before the step, with M leg motors; ``commanded_joints`` is
+        ``(N, M + 1)``, 1.0 for the joints each segment commands and 0.0 for
+        the others; ``joint_action`` is the step's ``(W, N, M or M + 1)``
+        command, as ``Environment.step`` receives it.
         New tensors are built, so neither the physical state nor the saved
         copies change.
         """
@@ -75,7 +76,7 @@ class RewardContext:
         squared_movement = (
             joint_angles(physical_state) - previous_joint_position
         ).square() * commanded_joints
-        # Without spine control the action has no seventh column.
+        # Without spine control the action has no spine column.
         squared_command = (
             joint_action.square() * commanded_joints[:, : joint_action.shape[-1]]
         )
@@ -92,7 +93,7 @@ class RewardContext:
 
 
 def joint_angles(physical_state: PhysicalState) -> torch.Tensor:
-    """Each segment's six leg angles and the spine joint behind it, ``(W, N, 7)``."""
+    """Each segment's M leg angles and the spine joint behind it, ``(W, N, M + 1)``."""
     return torch.cat(
         (
             physical_state.leg_joint_position,
@@ -243,7 +244,7 @@ class RewardFunction:
     ) -> None:
         """Pair every term with its name and weight, in a fixed order.
 
-        ``commanded_joints`` is the ``(N, 7)`` mask of ``RewardContext``.
+        ``commanded_joints`` is the ``(N, M + 1)`` mask of ``RewardContext``.
         """
         self.settings = reward_settings
         self.arrival_radius_m = arrival_radius_m

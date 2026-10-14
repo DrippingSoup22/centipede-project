@@ -3,8 +3,9 @@
 It keeps each world's episode state (target, step count, previous positions)
 and coordinates the observation builder, the reward function, the diagnostics,
 and the physics simulation. The interaction loop uses only ``reset`` and
-``step``; the experiment reads ``segment_count``, ``observation_size``, and the
-action sizes to create the agents. See docs/environment.md.
+``step``; the experiment reads ``segment_count``, ``observation_size``, the
+action sizes and ``leg_motor_count`` to create the agents. See
+docs/environment.md.
 """
 
 import torch
@@ -26,10 +27,11 @@ class Environment:
     Every tensor passed in or out has the worlds as its first dimension. When an
     episode ends in a world, ``step`` resets that world by itself.
 
-    ``segment_action_sizes`` lists how many actions each segment takes: six for
-    its legs, and with spine control a seventh, the spine joint behind it, for
-    every segment but the rear. ``action_size`` is the width of the joint
-    action, the largest of them; the rear's seventh column is padding.
+    ``segment_action_sizes`` lists how many actions each segment takes: one
+    per leg motor, ``leg_motor_count`` (six for legs of three joints, eight
+    with ankles), and with spine control one more, the spine joint behind it,
+    for every segment but the rear. ``action_size`` is the width of the joint
+    action, the largest of them; the rear's last column is padding.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -48,28 +50,35 @@ class Environment:
                 f"{self.segment_count} segments, got {settings.observation_radius}"
             )
 
+        leg_motor_count = self.simulation.leg_motor_count
+        self.leg_motor_count = leg_motor_count
         self.observation_builder = ObservationBuilder(
             self.segment_count,
             settings.observation_radius,
             self.world_count,
             self.device,
+            leg_motor_count,
             spine_observed=settings.spine_control,
         )
         self.observation_size = self.observation_builder.observation_size
         spine_count = self.segment_count - 1
         if settings.spine_control:
-            self.segment_action_sizes = [7] * spine_count + [6]
+            self.segment_action_sizes = [leg_motor_count + 1] * spine_count + [
+                leg_motor_count
+            ]
         else:
-            self.segment_action_sizes = [6] * self.segment_count
+            self.segment_action_sizes = [leg_motor_count] * self.segment_count
         self.action_size = max(self.segment_action_sizes)
-        # The joints each segment commands, among its six leg joints and the
-        # spine joint behind it.
+        # The joints each segment commands, among its leg joints and the spine
+        # joint behind it, last.
         commanded_joints = torch.ones(
-            (self.segment_count, 7), dtype=torch.float32, device=self.device
+            (self.segment_count, leg_motor_count + 1),
+            dtype=torch.float32,
+            device=self.device,
         )
-        commanded_joints[:, 6] = 0.0
+        commanded_joints[:, -1] = 0.0
         if settings.spine_control:
-            commanded_joints[:spine_count, 6] = 1.0
+            commanded_joints[:spine_count, -1] = 1.0
         # Arrival under the head counts progress no closer than half the head's
         # width: within the head's reach, nothing pays more.
         self.head_outline = self.simulation.head_outline
@@ -106,7 +115,7 @@ class Environment:
             (self.world_count, 2), dtype=torch.float32, device=self.device
         )
         self.previous_joint_position = torch.zeros(
-            (self.world_count, self.segment_count, 7),
+            (self.world_count, self.segment_count, leg_motor_count + 1),
             dtype=torch.float32,
             device=self.device,
         )
@@ -157,10 +166,12 @@ class Environment:
         self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
         self.previous_joint_position.copy_(joint_angles(state))
 
-        # 2. Move the body. With spine control, column 6 holds each segment's
-        # command for the spine joint behind it; without, the spine is passive.
+        # 2. Move the body. With spine control, the column after the leg motors
+        # holds each segment's command for the spine joint behind it; without,
+        # the spine is passive.
+        legs = self.leg_motor_count
         if self.settings.spine_control:
-            self.simulation.step(joint_action[..., :6], joint_action[:, :-1, 6])
+            self.simulation.step(joint_action[..., :legs], joint_action[:, :-1, legs])
         else:
             self.simulation.step(joint_action)
         self.episode_steps += 1

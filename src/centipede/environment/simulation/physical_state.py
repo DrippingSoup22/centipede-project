@@ -7,8 +7,9 @@ import torch
 class PhysicalState:
     """The physical state of every world, handed from the simulation upward.
 
-    Shapes use W for the number of worlds and N for the number of segments; see
-    the physical state table in docs/environment.md for each field's meaning.
+    Shapes use W for the number of worlds, N for the number of segments, and M
+    for each segment's leg motors (six, or eight with ankles); see the physical
+    state table in docs/environment.md for each field's meaning.
     The first ten fields form each segment's observation block, in order; the
     next two are used only for rewards and targets. The spine fields describe,
     for each segment, the yaw joint that joins it to the segment behind; the
@@ -22,10 +23,10 @@ class PhysicalState:
 
     body_height: torch.Tensor  # (W, N)
     body_quaternion: torch.Tensor  # (W, N, 4), (w, x, y, z)
-    leg_joint_position: torch.Tensor  # (W, N, 6), action order
+    leg_joint_position: torch.Tensor  # (W, N, M), action order
     body_linear_velocity: torch.Tensor  # (W, N, 3), segment frame
     body_angular_velocity: torch.Tensor  # (W, N, 3), segment frame
-    leg_joint_velocity: torch.Tensor  # (W, N, 6), action order
+    leg_joint_velocity: torch.Tensor  # (W, N, M), action order
     left_foot_ground_contact: torch.Tensor  # (W, N), bool
     right_foot_ground_contact: torch.Tensor  # (W, N), bool
     body_ground_contact: torch.Tensor  # (W, N), bool
@@ -37,7 +38,7 @@ class PhysicalState:
 
     @classmethod
     def allocate(
-        cls, world_count: int, segment_count: int, device: str
+        cls, world_count: int, segment_count: int, leg_motor_count: int, device: str
     ) -> "PhysicalState":
         """Create a physical state of zeros, to be filled in place by a backend."""
 
@@ -46,14 +47,14 @@ class PhysicalState:
                 (world_count, *trailing_shape), dtype=dtype, device=device
             )
 
-        n = segment_count
+        n, m = segment_count, leg_motor_count
         return cls(
             body_height=zeros(n),
             body_quaternion=zeros(n, 4),
-            leg_joint_position=zeros(n, 6),
+            leg_joint_position=zeros(n, m),
             body_linear_velocity=zeros(n, 3),
             body_angular_velocity=zeros(n, 3),
-            leg_joint_velocity=zeros(n, 6),
+            leg_joint_velocity=zeros(n, m),
             left_foot_ground_contact=zeros(n, dtype=torch.bool),
             right_foot_ground_contact=zeros(n, dtype=torch.bool),
             body_ground_contact=zeros(n, dtype=torch.bool),

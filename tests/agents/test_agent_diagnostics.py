@@ -27,7 +27,7 @@ def test_each_segment_row_gets_its_own_summary_and_spreads():
         PPOUpdateSummary(*(10.0 * index + part for part in range(6)))
         for index in range(2)
     ]
-    diagnostics = AgentDiagnostics(segment_count=2, device="cpu")
+    diagnostics = AgentDiagnostics(segment_count=2, leg_motor_count=6, device="cpu")
 
     diagnostics.record_update(summaries, segment_agents)
 

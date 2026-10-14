@@ -16,13 +16,16 @@ from centipede.agents.settings import AgentSettings
 
 DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
 WORLDS, OBSERVATION_SIZE, WINDOW_STEPS = 4, 5, 3
+LEG_MOTORS = 6  # legs of three joints, no spine
 
 
 def make_agent(device="cpu", seed=0, **values) -> SegmentAgent:
     settings = AgentSettings.from_section(
         {"device": device, "hidden_layers": [8], "ppo": {"minibatch_size": 4}, **values}
     )
-    return SegmentAgent(0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, seed)
+    return SegmentAgent(
+        0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, seed, LEG_MOTORS
+    )
 
 
 def observations(step: int, device="cpu") -> torch.Tensor:
@@ -209,7 +212,9 @@ def test_the_seed_alone_decides_the_starting_networks():
 def test_the_settings_choose_the_optimizer_and_loading_keeps_this_agents_own():
     def agent_with(**values):
         settings = AgentSettings.from_section({"hidden_layers": [8], **values})
-        return SegmentAgent(0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, 0)
+        return SegmentAgent(
+            0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, 0, LEG_MOTORS
+        )
 
     adam = agent_with(weight_decay=0.01)
     sgd = agent_with(optimizer="sgd", momentum=0.5)

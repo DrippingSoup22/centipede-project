@@ -22,9 +22,12 @@ separately.
 
 ## Status
 
-- **Model: complete and frozen.** The current body, v3, is in
-  [`models/assembly_v3.xml`](models/assembly_v3.xml) and described in
-  [`docs/model.md`](docs/model.md).
+- **Model: complete and frozen.** The newest body, v4, twelve units whose
+  legs have an ankle, is in [`models/assembly_v4.xml`](models/assembly_v4.xml);
+  the example configurations use v3, eight units with three-joint legs, in
+  [`models/assembly_v3.xml`](models/assembly_v3.xml). Both are described in
+  [`docs/model.md`](docs/model.md), and the program runs either without
+  change.
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
 - **Code: complete.** The physics simulation runs batches of worlds on the CPU
@@ -89,6 +92,10 @@ py -3.13 -m venv "$HOME\.venvs\Centipede"
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pybind11_stubgen mujoco -o typings --ignore-all-errors
 & "$HOME\.venvs\Centipede\Scripts\python.exe" -m pytest
 ```
+
+The last line runs the tests, except the physics checks of the GPU backend
+and the models, which take minutes on a laptop: `pytest -m physics` runs only
+those, and `pytest -m ""` runs everything.
 
 MuJoCo's functions are compiled code without type descriptions, so editors
 cannot see them. The `pybind11_stubgen` line generates those descriptions into

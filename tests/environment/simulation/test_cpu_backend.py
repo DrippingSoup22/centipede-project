@@ -15,7 +15,8 @@ from centipede.environment.simulation.constants import (
 )
 from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import (
-    LEG_ACTION_ORDER,
+    LEG_ROLES,
+    LEG_SIDES,
     ModelMapping,
 )
 from centipede.environment.simulation.simulation import physics_steps_per_action
@@ -50,7 +51,8 @@ def leg_joint_names():
     return [
         f"segment_{segment:02d}_{side}_{role}"
         for segment in range(SEGMENT_COUNT)
-        for side, role in LEG_ACTION_ORDER
+        for side in LEG_SIDES
+        for role in LEG_ROLES[:3]  # v3's legs have three joints
     ]
 
 

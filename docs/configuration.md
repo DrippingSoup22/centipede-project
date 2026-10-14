@@ -346,7 +346,7 @@ the run's setup, so it replays on its own
 (see [diagnostics.md](diagnostics.md#recordings)). With the defaults, a
 training run records every episode length and every world. A file takes about
 `steps × worlds × 289` bytes for model v3 (`4 × 69` for the positions, 13 for
-the target and the episode starts), and each training run prints its files'
+the target and the episode starts), and 513 for model v4 (`4 × 125 + 13`), and each training run prints its files'
 number and size before it starts:
 
 | Run | Worlds | Steps per file | File |

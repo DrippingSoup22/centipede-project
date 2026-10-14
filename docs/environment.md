@@ -17,7 +17,7 @@ in v1). Everything passed in and out is a PyTorch tensor.
 | Operation | Takes | Returns |
 | --- | --- | --- |
 | `reset(seed)` | An optional seed | Observations `(W, N, observation_size)` |
-| `step(joint_action)` | Actions `(W, N, 6)`, or `(W, N, 7)` with spine control | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
+| `step(joint_action)` | Actions `(W, N, M)`, or `(W, N, M + 1)` with spine control, for `M` leg motors per segment | Observations, rewards `(W, N)`, terminated `(W,)`, truncated `(W,)`, final observations |
 
 The environment also reports `segment_count`, `observation_size`,
 `segment_action_sizes` (how many actions each segment takes), and
@@ -77,19 +77,25 @@ The simulation accepts any model that follows the **segment contract**, checked
 once when it starts:
 
 - segments are numbered from 0 (the head) to `N − 1` (the rear), with no gaps;
-- every segment has a body, two legs with three motors each, and two feet;
+- every segment has a body, two feet, and two legs with the same joints, each
+  with a motor: shoulder sweep, shoulder lift, and knee, and with model v4 an
+  ankle;
 - there are `N − 1` spine connections, each with one yaw motor;
 - the head carries a `head_tip` site.
 
-It never relies on the order of elements in the XML file. It finds every motor by
+It never relies on the order of elements in the XML file. The legs have an
+ankle when the head's left leg has one (a joint named `segment_00_left_ankle`),
+and then every leg must. With `M` leg motors per segment, six without ankles and
+eight with them, it finds every motor by
 name (`segment_{id:02d}_{side}_{role}_motor`) and stores them in a table of shape
-`(N, 6)`, one row per segment in [action order](#actions-and-timing), and the
+`(N, M)`, one row per segment in [action order](#actions-and-timing), and the
 spine motors (`segment_{id:02d}_yaw_motor`) in a table of `N − 1` entries,
 entry `i` for the joint between segments `i` and `i + 1`, with their joints'
 addresses. It then
 checks that each motor's name matches the owning segment stored in the XML, that
 it drives the right joint and accepts commands from −1 to 1, and that every motor
-is found exactly once with none left over (`6N + N − 1`, which is 55 for v1). It
+is found exactly once with none left over (`MN + N − 1`: 55 for v1 to v3, 107
+for v4), so an ankle on only some legs is rejected. It
 also checks that every collision shape records its owning segment and its
 category (floor, body, leg, left foot, right foot, or membrane; see
 [model.md](model.md#contacts-and-friction)). From the head's body shape it
@@ -99,29 +105,35 @@ and its half-width. The environment reads it from the simulation
 (`head_outline`) to decide arrival and the closest distance progress counts.
 
 If any check fails, the program stops with a clear error; after that, the
-mapping is trusted. A model with a different number of segments needs no code
-change, only a configuration pointing to it.
+mapping is trusted. A model with a different number of segments, or with or
+without ankles, needs no code change, only a configuration pointing to it.
 
 ### Actions and timing
 
-Each segment controls only its own two legs. Its action is six numbers between
-−1 and 1, always in this order:
+Each segment controls only its own two legs. Its action is `M` numbers between
+−1 and 1, one per leg motor: the left leg's joints from the body outward, then
+the right leg's, always in this order:
 
-| Index | Motor |
-| ---: | --- |
-| 0 | Left shoulder sweep |
-| 1 | Left shoulder lift |
-| 2 | Left knee |
-| 3 | Right shoulder sweep |
-| 4 | Right shoulder lift |
-| 5 | Right knee |
+| Index, legs without ankles (v1 to v3) | Index, legs with ankles (v4) | Motor |
+| ---: | ---: | --- |
+| 0 | 0 | Left shoulder sweep |
+| 1 | 1 | Left shoulder lift |
+| 2 | 2 | Left knee |
+| | 3 | Left ankle |
+| 3 | 4 | Right shoulder sweep |
+| 4 | 5 | Right shoulder lift |
+| 5 | 6 | Right knee |
+| | 7 | Right ankle |
+
+Each number goes unchanged to its motor, which applies that share of the
+joint's maximum torque ([model.md](model.md#motors)).
 
 With **spine control** (`spine_control = true`), every segment but the rear
-also commands the spine yaw motor of the joint **behind** it, as a seventh
-action (index 6): the head bends its neck, and each later segment bends the
-segment behind it. The rear has no joint behind it and keeps six actions; the
-joint action is seven wide, and the rear's seventh column is padding that goes
-to no motor. The model stores each spine motor with the unit it sits in, the
+also commands the spine yaw motor of the joint **behind** it, as one more
+action after its leg motors (index `M`): the head bends its neck, and each
+later segment bends the segment behind it. The rear has no joint behind it and
+keeps `M` actions; the joint action is `M + 1` wide, and the rear's last column
+is padding that goes to no motor. The model stores each spine motor with the unit it sits in, the
 one behind the joint ([model.md](model.md#motors)); which agent commands it is
 the environment's choice. Without spine control, the spine motors always
 receive zero and the spine bends passively against its springs.
@@ -141,7 +153,8 @@ Actions are never clipped, because the executed action must be exactly the one
 the agent learns from.
 
 An action is held for **20 ms**, or 50 decisions per second: as many physics
-steps as the model's timestep fits into it, 134 steps of 0.149 ms for model v3.
+steps as the model's timestep fits into it, 134 steps of 0.149 ms for models v3
+and v4.
 The simulation computes that number from the model and rejects a model whose
 timestep does not divide 20 ms evenly. On the GPU, an action's physics steps
 are replayed from a CUDA graph recorded on the first step, so the CPU does not
@@ -178,7 +191,7 @@ Known differences of the GPU backend:
   at rest already reaches 40 contacts and 256 constraint rows.
 - Its default Newton solver needs a GPU of the Volta generation (compute
   capability 7.0) or newer, such as a T4; older GPUs such as the MX330 or the
-  P100 cannot compile it. With models v2 and v3, the MX330 can run the GPU
+  P100 cannot compile it. With models v2 to v4, the MX330 can run the GPU
   backend using the conjugate-gradient solver (`gpu_solver = "cg"`), slowly and
   less converged, which is enough for functional tests.
 
@@ -190,25 +203,26 @@ After every `step` and `reset`, the simulation fills the physical state of every
 world. It is a set of tensors overwritten in place; a reader that needs a value
 later copies it. Numbers are 32-bit floats and contact flags are booleans.
 
-Most fields also form a segment's **observation block**: 27 values describing one
-segment, in the order given by the last column.
+Most fields also form a segment's **observation block**: `15 + 2M` values
+describing one segment, 27 for legs without ankles and 31 with them, in the
+order given by the last two columns.
 
-| Field | Shape | Meaning | In the block |
-| --- | --- | --- | --- |
-| `body_height` | `(W, N)` | Height of the segment's centre, m | 0 |
-| `body_quaternion` | `(W, N, 4)` | Orientation as `(w, x, y, z)` | 1–4 |
-| `leg_joint_position` | `(W, N, 6)` | Leg angles in action order, rad | 5–10 |
-| `body_linear_velocity` | `(W, N, 3)` | Velocity of the centre in the segment's own frame, m/s | 11–13 |
-| `body_angular_velocity` | `(W, N, 3)` | Turning speed in the segment's own frame, rad/s | 14–16 |
-| `leg_joint_velocity` | `(W, N, 6)` | Leg angular velocities in action order, rad/s | 17–22 |
-| `left_foot_ground_contact` | `(W, N)` | Left foot touches the ground | 23 |
-| `right_foot_ground_contact` | `(W, N)` | Right foot touches the ground | 24 |
-| `body_ground_contact` | `(W, N)` | Body touches the ground | 25 |
-| `leg_leg_contact` | `(W, N)` | One of its legs touches another leg | 26 |
-| `body_planar_position` | `(W, N, 2)` | World `x`, `y` of the centre | Not observed; rewards only |
-| `head_tip_position` | `(W, 3)` | World position of the head's tip | Not observed; rewards and target only |
-| `spine_yaw_position` | `(W, N)` | Angle of the spine joint behind the segment, rad; 0 for the rear | With spine control, after the target values |
-| `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values |
+| Field | Shape | Meaning | In the block, without ankles | With ankles |
+| --- | --- | --- | --- | --- |
+| `body_height` | `(W, N)` | Height of the segment's centre, m | 0 | 0 |
+| `body_quaternion` | `(W, N, 4)` | Orientation as `(w, x, y, z)` | 1–4 | 1–4 |
+| `leg_joint_position` | `(W, N, M)` | Leg angles in action order, rad | 5–10 | 5–12 |
+| `body_linear_velocity` | `(W, N, 3)` | Velocity of the centre in the segment's own frame, m/s | 11–13 | 13–15 |
+| `body_angular_velocity` | `(W, N, 3)` | Turning speed in the segment's own frame, rad/s | 14–16 | 16–18 |
+| `leg_joint_velocity` | `(W, N, M)` | Leg angular velocities in action order, rad/s | 17–22 | 19–26 |
+| `left_foot_ground_contact` | `(W, N)` | Left foot touches the ground | 23 | 27 |
+| `right_foot_ground_contact` | `(W, N)` | Right foot touches the ground | 24 | 28 |
+| `body_ground_contact` | `(W, N)` | Body touches the ground | 25 | 29 |
+| `leg_leg_contact` | `(W, N)` | One of its legs touches another leg | 26 | 30 |
+| `body_planar_position` | `(W, N, 2)` | World `x`, `y` of the centre | Not observed; rewards only | |
+| `head_tip_position` | `(W, 3)` | World position of the head's tip | Not observed; rewards and target only | |
+| `spine_yaw_position` | `(W, N)` | Angle of the spine joint behind the segment, rad; 0 for the rear | With spine control, after the target values | |
+| `spine_yaw_velocity` | `(W, N)` | Its angular velocity, rad/s; 0 for the rear | With spine control, after the target values | |
 
 In the block, contact flags become 0 or 1. A segment never observes its position
 in the world. Without spine control the spine is not observed; with it, each
@@ -239,9 +253,9 @@ segments away (`k`, first value 1). Every observation has the same layout:
    the head; **sideways** is positive to its left;
 5. with spine control, the angle and speed of the spine joint behind it.
 
-That is `(2k + 1) × 27 + 2` values, **83** at radius 1 and 29 at radius 0, for
-every segment and any number of segments, and two more with spine control
-(**85** at radius 1). The spine's values come last so that a run with spine
+That is `(2k + 1) × (15 + 2M) + 2` values for every segment and any number of
+segments: **83** at radius 1 and 29 at radius 0 without ankles, 95 and 33 with
+them; and two more with spine control (**85** and 97 at radius 1). The spine's values come last so that a run with spine
 control can start from agents trained without it: their inputs keep their
 places, and the new ones are added at the end (see
 [agents.md](agents.md#checkpoints)). A neighbour that does not exist is filled with zeros, and
@@ -303,7 +317,7 @@ together:
 - **Arrival** (terminated): the target lies under the head, seen from above:
   inside the rectangle that encloses the head's body shape, which the
   simulation reads from the model when it loads (7.2 mm long, from 2.2 mm
-  behind the head's centre to its tip, and 8 mm wide, for model v3).
+  behind the head's centre to its tip, and 8 mm wide, for models v3 and v4).
 - **Time limit** (truncated): the episode reaches `max_episode_steps`, with no
   extra penalty.
 - **Leaving the range circle** (truncated, like the time limit): the head's tip
