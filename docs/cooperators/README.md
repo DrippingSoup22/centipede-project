@@ -53,7 +53,7 @@ Set by the user on 2026-10-14.
 | Part | File | Status |
 | --- | --- | --- |
 | Critic | [critic.md](critic.md) | Decided |
-| Reward | [reward.md](reward.md) | Layers agreed; the followers' goal proposed |
+| Reward | [reward.md](reward.md) | Layers agreed; balances being set as ratios |
 | Observations | [observations.md](observations.md) | Radius decided; contents open |
 | Actions | [actions.md](actions.md) | Open |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |
