@@ -1,6 +1,6 @@
 # Actions
 
-**Status (2026-10-14): torque motors decided; the vector proposed.**
+**Status (2026-10-14): agreed with the user.**
 
 ## What the constraints fix
 
@@ -22,7 +22,7 @@ is 40% of that motor's strength, so the force cost of energy is simply the
 square of each command, and a critic that sees its neighbours' actions sees
 their effort directly.
 
-## Proposed: the vector
+## The vector (agreed)
 
 | | Each segment but the rear | The rear |
 | --- | --- | --- |

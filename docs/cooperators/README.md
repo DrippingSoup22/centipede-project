@@ -54,8 +54,8 @@ Set by the user on 2026-10-14.
 | --- | --- | --- |
 | Critic | [critic.md](critic.md) | Decided |
 | Reward | [reward.md](reward.md) | Agreed in ideas; progress : arrival waits for the task |
-| Observations | [observations.md](observations.md) | Radius decided; contents open |
-| Actions | [actions.md](actions.md) | Torque motors decided; the vector proposed |
+| Observations | [observations.md](observations.md) | Radius decided; the block proposed |
+| Actions | [actions.md](actions.md) | Agreed: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
 | Task | [task.md](task.md) | Agreed, with numbers |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |

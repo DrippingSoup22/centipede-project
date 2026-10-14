@@ -116,6 +116,13 @@ after every update, one level for all worlds moves toward 1 target in 10 reached
   The progress on the way is discounted alike, so a faster walk is worth
   more at every moment. Scaling the bonus by the time taken as well would
   pay speed twice, and the head would need a clock to see why.
+
+  The bonus itself is paid in full whenever it comes; the percentages are
+  how much the centipede values it in advance. A late arrival can never
+  teach it to give up: the discount ranks later below sooner, but never
+  below never, which is worth nothing. And it always values from the
+  present: at second 6, a head one second from its target sees the
+  arrival at about 90%.
 - **The episode's 20 s are simulated time**, not waiting time. A training
   cycle simulates the same number of steps in every world (the rollout
   window), whatever the episode's length; the length only decides when a
