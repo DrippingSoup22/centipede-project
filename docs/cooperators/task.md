@@ -155,7 +155,7 @@ What the length trades:
 
 Since nothing else ends an episode (resting on the belly is allowed, and
 the body never turned over), the time limit is the only reset. A length of
-a few target allowances keeps both sides: several targets per episode,
+an episode of a few targets' 7 s keeps both sides: several targets per episode,
 and no world stuck for long. Rudin et al. (CoRL 2021), training thousands
 of quadrupeds in parallel, used 20 s episodes, bootstrapped at the time
 limit and reset only there, so one episode spans many updates; with too
@@ -177,9 +177,9 @@ Times are in seconds, so they hold whatever the decision rate; in steps of
 | Targets, level 1 | 2.7 to 4 body lengths, all around | The same; the full circle from level 0.55 |
 | Starting heading | Any direction | [The starting heading](#the-starting-heading-agreed-2026-10-14) |
 | Stopwatch per target, for the level | **7 s** (350 steps) | At level 1, the middle target, 3.3 body lengths, plus about one body length of turning, in 7 s asks for 0.64 body lengths per second: the slower speed measured for *S. polymorpha* on flat ground (0.64 to 1.44; Diaz et al., Georgia Tech). Level 1 means walking like a real centipede at an easy pace. At level 0 the same 7 s is very generous. The target stays after the 7 s; only the count changes |
-| Episode | **20 s** (1,000 steps), about three allowances | The user's choice: about three far targets at a good walk, as legged_gym's 20 s; a world stuck early waits at most 20 s |
+| Episode | **20 s** (1,000 steps), about three targets' 7 s | The user's choice: about three far targets at a good walk, as legged_gym's 20 s; a world stuck early waits at most 20 s |
 | First episode of each world | A random length up to 20 s | Otherwise, with no other end to an episode, all worlds would restart on the same step; legged_gym starts every world at a random point of its episode for the same reason |
-| Discount | **0.998**, half-life 7 s | An arrival at the end of its allowance is still worth half, seen from the target's appearance (main's rule, tied now to the target instead of the episode). legged_gym's 0.99 sees about 1.4 s ahead: right for its velocity task, but a 7 s arrival would be worth 3% |
+| Discount | **0.998**, half-life 7 s | An arrival 7 s after its target appeared is still worth half, seen from the target's appearance (main's rule, tied now to the target instead of the episode). legged_gym's 0.99 sees about 1.4 s ahead: right for its velocity task, but a 7 s arrival would be worth 3% |
 | Level | One for all worlds; after every update, level += 0.02 × (arrival share − 0.10), kept between 0 and 1 | The user's rule. The arrival share counts, over the last episode length, the targets whose 7 s ended: reached within them, or not. At 50% arrivals the level climbs 0.008 per update, 0 to 1 in about 125 updates; the oscillators' step was the same 0.02 |
 | Range circle | None | Walking on makes it needless: a head that wanders off still has its target, and the episode's 20 s bound the time it can lose |
 
