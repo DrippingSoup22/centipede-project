@@ -15,6 +15,8 @@ import torch
 mjw = pytest.importorskip("mujoco_warp")
 if not torch.cuda.is_available():
     pytest.skip("The GPU backend needs a CUDA GPU", allow_module_level=True)
+# A physics check (pyproject.toml): run with -m physics when the simulation changes.
+pytestmark = pytest.mark.physics
 
 import warp as wp  # noqa: E402
 

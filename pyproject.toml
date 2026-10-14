@@ -44,7 +44,13 @@ where = ["src"]
 centipede = ["experiment/report_page.html"]
 
 [tool.pytest.ini_options]
-addopts = "-ra"
+# The physics checks, about 75 s on the laptop, are left out by default: run
+# them with -m physics when a model or the simulation changes, and everything
+# with -m "" before merging into main.
+addopts = "-ra -m 'not physics'"
+markers = [
+    "physics: the GPU backend's and the models' checks, slow on the laptop",
+]
 pythonpath = ["src"]
 testpaths = ["tests"]
 

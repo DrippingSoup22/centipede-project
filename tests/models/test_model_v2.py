@@ -9,6 +9,9 @@ import mujoco
 import numpy as np
 import pytest
 
+# A physics check (pyproject.toml): run with -m physics when a model changes.
+pytestmark = pytest.mark.physics
+
 FLOOR, BODY, LEG, LEFT_FOOT, RIGHT_FOOT, MEMBRANE = range(6)
 LIMBS = (LEG, LEFT_FOOT, RIGHT_FOOT)
 
