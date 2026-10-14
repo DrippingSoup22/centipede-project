@@ -70,6 +70,24 @@ lead over it grew with the number of agents in Hanabi (Yu et al., 2022).
 The wave comes from what each leg senses of its own and the leg ahead's
 load and contact, not from a reward for the wave.
 
+## Energy: work and force
+
+- **Motors** (Seok et al., 2015): in the MIT Cheetah, heat in the actuators
+  was 76% of the energy spent.
+- **Muscle work** (Cavagna and Kaneko, 1977; Abbott, Bigland and Ritchie,
+  1952): positive work at about 25% efficiency; negative work several times
+  cheaper per joule.
+- **Muscle force** (Kram and Taylor, Nature 1990): the energy of running is
+  set mainly by producing force, its rate by body weight over the time a
+  foot is on the ground; small animals pay more because they make force
+  with fast fibres in many quick steps.
+- **Size** (Taylor, Heglund and Maloiy, 1982; Heglund et al., 1982): the
+  mechanical work per kilogram and metre hardly depends on size, while the
+  energy per kilogram rises as animals get smaller; for an animal of a gram,
+  the cost of force is almost all of it.
+- **Speed** (Hoyt and Taylor, 1981): energy per distance is U-shaped in
+  speed for each gait.
+
 ## Training practice for PPO with many agents
 
 MAPPO's advice (Yu et al., 2022): normalise the value targets; at most 10
@@ -103,3 +121,8 @@ batches.
 - Yasui, Takano, Kano & Ishiguro, Frontiers in Robotics and AI 2022, [doi 10.3389/frobt.2022.797566](https://www.frontiersin.org/articles/10.3389/frobt.2022.797566/full)
 - Schilling & Cruse, PLOS Computational Biology 2020, [PMC7205325](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7205325/)
 - Owaki & Ishiguro, Scientific Reports 2017, [doi 10.1038/s41598-017-00348-9](https://doi.org/10.1038/s41598-017-00348-9)
+- Seok et al., IEEE/ASME Transactions on Mechatronics 20(3), 2015, [MIT DSpace](https://dspace.mit.edu/handle/1721.1/108096)
+- Cavagna & Kaneko, J. Physiol. 268, 1977, [PMC1283673](https://pmc.ncbi.nlm.nih.gov/articles/PMC1283673)
+- Abbott, Bigland & Ritchie, The physiological cost of negative work, J. Physiol. 117, 1952
+- Kram & Taylor, Nature 346, 1990
+- Taylor, Heglund & Maloiy, J. Exp. Biol. 97, 1982, and Heglund, Fedak, Taylor & Cavagna, J. Exp. Biol. 97, 1982, [JEB](https://cob.silverchair.com/jeb/article/97/1/57/34676/Energetics-and-mechanics-of-terrestrial-locomotion)

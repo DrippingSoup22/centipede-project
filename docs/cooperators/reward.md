@@ -4,10 +4,11 @@
 remain; no term has a formula or a number yet.**
 
 Agreed with the user: the goal layers (task for the head, path for the
-followers), the costs as energy and pain, α fading with distance over every
-neighbour a segment sees, a goal critic and a cost critic for every segment
-at 1 : 1, and free speed. Proposed and awaiting the user: energy measured
-as what a motor draws (work plus heat), braking never refunded.
+followers), the costs as energy and pain, α sharing energy only, fading
+with distance over every neighbour a segment sees, a goal critic and a cost critic for every segment
+at 1 : 1, and free speed. Proposed and awaiting the user: energy
+as a small animal's muscles spend it (pushing work, cheaper braking work,
+and a dominant cost of force).
 
 ## Principles
 
@@ -32,7 +33,7 @@ what its moving costs.**
 | Task | The head | Progress toward the target, and arriving | Goal critic |
 | Path | Each follower | Progress along the trail the segment ahead leaves | Goal critic |
 | Energy | Every segment | Every force its motors exert and every movement they make; its neighbours' through α | Cost critic |
-| Pain | Every segment | The force with which its legs hit other legs; its neighbours' through α | Cost critic |
+| Pain | Every segment | The force with which its legs hit other legs, the same for both segments of a contact | Cost critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -116,21 +117,71 @@ trot and gallop by themselves, each at the speed where it is cheapest (Fu
 et al., CoRL 2021). Energy changed nothing in the oscillators' run 43, but
 that run was dominated by clocks and step rewards.
 
-**What it measures: what a motor draws** (proposed). An electric motor's
-draw is its mechanical power, torque times speed, plus the heat its
-current makes, which grows with the square of the torque, moving or not. A
-muscle likewise spends energy moving and also tires just holding a weight.
+**Two costs of different natures** (the user, 2026-10-14). Moving and
+holding both spend energy, but they are counted differently:
 
-| Part | Charges | Alone, it would |
+| | Work | Force |
 | --- | --- | --- |
-| Work: torque times joint speed (Fu et al.) | Moving | Make holding still free: standing and holding up a hanging neighbour would cost nothing |
-| Heat: the squared torque (as Gymnasium's Ant's control cost) | Holding and moving alike | Not tell useful motion from holding still |
+| What it is | Force times the distance it moves: torque times the angle a joint turns | The cost of producing a force at all, moving or not |
+| Counted per | Distance moved: it stops when the motion stops | Time held: a steady rate while the force lasts |
+| Lifting a barbell | m·g·h, once, for the lift | Nothing extra while lifting quickly |
+| Holding it still | Zero: nothing moves | The whole cost, every second it is held |
+| In an electric motor | The mechanical power the motor delivers | Heat in the windings, which grows with the square of the torque |
+| In a muscle | Pushing work at about 25% efficiency; braking work several times cheaper | The cost of generating force, which dominates in small animals |
 
-Together they make one physical quantity, and the ratio between them is the
-motor's own constant. Braking is never refunded: a motor that slows a
-joint still draws power, as a muscle that brakes still spends energy (Fu
-et al. counted negative work as a gain). With torque motors the torque is
-the action, so the cost critic sees it, its neighbours' included.
+**What the physics and the biology say.**
+
+- **Motors.** In the MIT Cheetah, heat in the actuators was 76% of all the
+  energy spent; the work done was the smaller part (Seok et al., IEEE/ASME
+  Transactions on Mechatronics 2015).
+- **Muscles, work.** Muscle turns about a quarter of the energy it spends
+  into positive work (the reference efficiency of Cavagna and Kaneko, J.
+  Physiol. 1977); negative work, braking, is several times cheaper per
+  joule (Abbott, Bigland and Ritchie, J. Physiol. 1952).
+- **Muscles, force.** The energy of running is set mainly by producing
+  force: its rate grows with body weight divided by the time a foot is on
+  the ground (Kram and Taylor, Nature 1990).
+- **Size.** The mechanical work an animal does per kilogram and per metre
+  hardly depends on its size, but the energy it spends per kilogram grows
+  as animals get smaller (Taylor, Heglund and Maloiy, J. Exp. Biol. 1982;
+  Heglund et al., 1982). For an animal of a gram, almost all of the energy
+  is the cost of force, made by fast muscle fibres in many quick steps
+  (Kram and Taylor, 1990).
+
+**Why the two natures give a preferred speed.** Work is paid per metre and
+force per second. Walking faster makes each metre take less time, so the
+force cost per metre falls; it also makes the legs swing faster, so the
+work per metre rises. The energy per metre is therefore U-shaped in speed,
+with a cheapest speed in between: the U-curves Hoyt and Taylor measured in
+horses. This is what makes free speed work, and the ratio between work and
+force decides where the cheapest speed lies.
+
+**The proposal: energy as a small animal's muscles spend it.**
+
+| Part | How it is counted | Ratio, from the sources |
+| --- | --- | --- |
+| Pushing work | Positive work of each motor, at muscle efficiency | 1 (the unit) |
+| Braking work | Negative work: charged, never refunded, but cheaper | About 1/4 of pushing work per joule (several times cheaper) |
+| Force | Each motor's torque, squared, for every moment it is held | Set so that force is by far the larger part in a walk, as in animals of a gram; measured on our model, not guessed |
+
+- **Squared force.** Producing a larger force costs more per unit of force:
+  muscles recruit their costlier fast fibres last, and a motor's heat grows
+  with the square of its torque. The square also makes sharing a load
+  between legs cheaper than one leg carrying it alone; a cost linear in
+  force would not care how the weight is shared.
+- **Fu et al. counted braking as a gain,** which would pay legs for braking
+  each other. Here it is a cost.
+- **What the simulation holds.** A motor's torque is held for each 20 ms
+  action, so the force cost of an action is exactly its torque squared
+  times its duration, and its work is the torque times the angle the joint
+  turned; braking is told apart from pushing by the sign of torque times
+  joint speed at each physics step. With torque motors the torque is the
+  action, so the cost critic sees it.
+- **A check of realism, not a rule.** With force dominant, whether a raised
+  walk or a belly drag is cheaper depends on how the legs carry the weight.
+  Real centipedes walk raised; if our energy made dragging the cheaper way
+  to move, the energy model, not the centipede, would be wrong, and it is
+  measured before any training.
 
 ### Pain: legs hitting legs (the user's design)
 
@@ -145,7 +196,10 @@ does not:
 
 Pain is graded by force: the force with which a segment's legs press on
 other legs, so legs that brush without pushing feel almost nothing, as in
-the real animal. Both segments of a contact pay. This is the user's leg
+the real animal. **Pain is mutual and stays between the two:** by
+Newton's third law, both legs of a contact feel the same force, so both
+segments pay it, the same amount, and no other segment does (the user,
+2026-10-14). This is the user's leg
 pushing of 2026-10-11 (oscillators, cycle 1), inert there (under 1% of its
 most) while clocks kept the legs apart; here nothing does.
 
@@ -169,8 +223,9 @@ harm enters only when we see it.
 
 ### The cooperation dial α (agreed)
 
-A segment's energy and pain also count its neighbours', as far as it
-sees them (the user, 2026-10-14). It is essential, not optional: if each
+A segment's energy also counts its neighbours', as far as it sees them
+(the user, 2026-10-14). Only energy is shared: pain stays between the two
+segments of a contact, and each follower's path is its own. It is essential, not optional: if each
 segment paid only its own energy, laziness would pay, since a segment that
 hangs from its neighbours saves its own energy while they carry it. That
 is what the oscillators' followers learned (no foot down in 42 to 54% of
@@ -205,8 +260,7 @@ Why a share of a whole: the head and the rear see fewer neighbours than a
 middle segment. Scaled to a whole, every segment's costs have the same
 size, so the balance between goal and costs is the same along the body.
 
-α applies to energy and pain only. The path is already shared by the
-chain; blending it would add nothing.
+α applies to energy only.
 
 ## Critics and balances
 
@@ -226,7 +280,8 @@ force is worth.
 | --- | --- |
 | Goal : costs | 1 : 1, agreed |
 | α | Halving per segment, as a share of the whole, agreed |
-| Work : heat, inside energy | Open: the motor's constant |
+| Pushing : braking work | About 4 : 1, proposed from muscle data |
+| Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
 | Pain : energy | Open |
 | Progress : arrival, for the head | Open, with [task.md](task.md) |
 
