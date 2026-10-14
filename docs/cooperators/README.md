@@ -53,7 +53,7 @@ Set by the user on 2026-10-14.
 | Part | File | Status |
 | --- | --- | --- |
 | Critic | [critic.md](critic.md) | Decided |
-| Reward | [reward.md](reward.md) | Structure agreed: goal, energy, pain; the ratios remain |
+| Reward | [reward.md](reward.md) | Agreed in ideas; progress : arrival waits for the task |
 | Observations | [observations.md](observations.md) | Radius decided; contents open |
 | Actions | [actions.md](actions.md) | Open |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |

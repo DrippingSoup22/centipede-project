@@ -1,14 +1,16 @@
 # Reward
 
-**Status (2026-10-14): the structure is agreed in ideas; four ratios
-remain; no term has a formula or a number yet.**
+**Status (2026-10-14): the structure and its ratios are agreed in ideas;
+only progress : arrival remains, decided with the task
+([task.md](task.md)); no term has a formula or a number yet.**
 
 Agreed with the user: the goal layers (task for the head, path for the
-followers), the costs as energy and pain, α sharing energy only, fading
-with distance over every neighbour a segment sees, a goal critic and a cost critic for every segment
-at 1 : 1, and free speed. Proposed and awaiting the user: energy
-as a small animal's muscles spend it (pushing work, cheaper braking work,
-and a dominant cost of force).
+followers); the costs as energy and pain; energy as a small animal's
+muscles spend it (pushing work, cheaper braking work, and a dominant cost
+of force, counted as squared activation); pain priced like force, 1 : 1;
+α sharing energy only, fading with distance over every neighbour a segment
+sees; a goal critic and a cost critic for every segment at 1 : 1; free
+speed.
 
 ## Principles
 
@@ -207,7 +209,7 @@ segments pay it, the same amount, and no other segment does (the user,
 pushing of 2026-10-11 (oscillators, cycle 1), inert there (under 1% of its
 most) while clocks kept the legs apart; here nothing does.
 
-**Priced like force** (proposed). Pain is counted in the same currency as
+**Priced like force** (agreed). Pain is counted in the same currency as
 the force cost: the contact force as a share of the strongest push a leg's
 sweep makes at its foot (about 0.9 mN, about one unit's weight; the
 user's measure of 2026-10-11), squared, for every moment it lasts. Pain and
@@ -297,7 +299,7 @@ force is worth.
 | α | Halving per segment, as a share of the whole, agreed |
 | Pushing : braking work | About 4 : 1, proposed from muscle data |
 | Work : force, inside energy | Proposed: force dominant, as in animals of a gram; measured on our model |
-| Pain : energy | 1 : 1 in activation, proposed |
+| Pain : energy | 1 : 1 in activation, agreed |
 | Progress : arrival, for the head | Open, with [task.md](task.md) |
 
 ## Left out
