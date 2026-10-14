@@ -57,7 +57,7 @@ Set by the user on 2026-10-14.
 | Observations | [observations.md](observations.md) | Radius decided; contents open |
 | Actions | [actions.md](actions.md) | Open |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
-| Task | [task.md](task.md) | Being designed: targets, levels, walking on and episode proposed |
+| Task | [task.md](task.md) | Designed; numbers proposed |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on |
 
 ## The plan

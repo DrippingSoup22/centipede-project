@@ -134,3 +134,5 @@ batches.
 - Florensa, Held, Geng & Abbeel, Automatic goal generation for reinforcement learning agents, ICML 2018, [arXiv 1705.06366](https://arxiv.org/abs/1705.06366)
 - Pardo, Tavakoli, Levdik & Kormushev, Time limits in reinforcement learning, ICML 2018, [arXiv 1712.00378](https://arxiv.org/abs/1712.00378)
 - Rudin, Hoeller, Reist & Hutter, Learning to walk in minutes using massively parallel deep reinforcement learning, CoRL 2021, [arXiv 2109.11978](https://arxiv.org/abs/2109.11978)
+- Diaz et al., Active and passive mechanics for rugose terrain traversal in centipedes, J. Exp. Biol. 226, 2023, [JEB](https://cob.silverchair.com/jeb/article/226/4/jeb244688/287689/Active-and-passive-mechanics-for-rugose-terrain)
+- legged_gym (Rudin et al.'s code): 20 s episodes, 50 Hz control, discount 0.99, random first episode lengths, [GitHub](https://github.com/leggedrobotics/legged_gym)

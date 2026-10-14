@@ -27,7 +27,8 @@ segment's description holds is open.**
   is the starting reference, not adopted by default. The research points at
   the neighbours' last actions (the hexapod, Schilling et al. 2020) and the
   load and contact of the leg ahead (biology, [research.md](research.md)).
-- **What the head sees of the target.**
+- **What the head sees of the target**, including the time left on it
+  ([task.md](task.md#the-numbers-proposed-2026-10-14)).
 - **Whether a segment sees its heading in the world.** Its orientation
   includes the direction it faces, which carries no information about the
   task ([task.md](task.md#the-starting-heading-proposed-2026-10-14));
