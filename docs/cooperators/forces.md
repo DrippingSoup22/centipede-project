@@ -45,11 +45,46 @@ shoulder torque of 1 µN·m makes about 0.12 mN at the foot.
   more reserve than ours, so v4's legs are plausible, perhaps on the weak
   side. No measured leg force of a centipede was found.
 - **The sweep is weaker than the lift,** less than half at the foot. The
-  strengths are engineering choices, not measurements. With force priced
-  as each motor's activation squared ([reward.md](reward.md)), the maximum
-  torques act as muscle sizes: a weaker motor pays more for the same
-  force. This deserves measurement if data appear; without it, changing
-  the ratios would be a guess.
+  strengths are engineering choices, but they follow the order measured in
+  a walking insect (below). With force priced as each motor's activation
+  squared ([reward.md](reward.md)), the maximum torques act as muscle
+  sizes: a weaker motor pays more for the same torque.
+
+## Compared with a walking insect of the same weight
+
+No leg forces of a centipede were found, but the stick insect *Carausius
+morosus*, 0.8 g, close to our 1.05 g, has measured joint torques in free
+walking (Dallmann, Dürr and Schmitz, Proc. R. Soc. B 2016). Its leg joints
+match ours: thorax–coxa is our sweep, coxa–trochanter our lift, femur–tibia
+our knee.
+
+| Stick insect, walking | Value |
+| --- | --- |
+| Peak lift (depression) torque, middle and hind legs | 54 to 58 µN·m |
+| Peak sweep torque, hind leg | 16 µN·m |
+| Lift : sweep | about 3.5 : 1 |
+| Peak vertical force per leg | about half the body weight on a middle or hind leg, a fifth on a front leg |
+
+- **The lift is the strongest joint, in insects and in v4.** The insect's
+  propulsion comes from pressing the legs down at the lift joint, not from
+  sweeping them back; the sweep and knee torques mostly keep the leg from
+  collapsing under the load. v4's lift : sweep strengths, 18 : 8, about
+  2.2 : 1, follow the same order.
+- **The insect's torques are larger because it has six long legs, not
+  twelve pairs of short ones.** Torque is force times reach: each of its
+  legs carries up to half its weight about 11 mm out. Each of v4's 24 legs
+  carries a twenty-fourth to a twelfth of the weight about 8.5 mm out, so it
+  needs about 4 to 7 µN·m of lift, 20 to 40% of its strength.
+- **Real joints are asymmetric; v4's motors are not.** In insects, the
+  muscle that pushes the leg against the ground is the stronger of each
+  pair: the lift joint presses down through all of stance, and the knee's
+  flexor has twice the extensor's lever arm (Guschlbauer, dissertation,
+  Cologne 2009). Every v4 motor is equally strong both ways. No centipede
+  data say by how much the two directions differ, so this stays a known
+  difference, not a change.
+
+So the engineering strengths of v4 have the insect's order and a
+plausible size; only their exact ratios and their symmetry are unmeasured.
 
 ## Speed limits
 
@@ -87,8 +122,9 @@ movements cost energy.
 
 ## Verdict
 
-v4's forces are plausible for a centipede of about a gram, with two points
-that are engineering choices rather than measurements: the relative
-strengths of the joints and the belly's friction. Without data to replace
+v4's forces are plausible for a centipede of about a gram. Its joints'
+strengths follow a walking insect's order (lift strongest, sweep weaker);
+unmeasured remain their exact ratios, the asymmetry of real joints, and the
+belly's friction. Without data to replace
 them, the model stays as it is; a physical change would be a new model
 version, agreed with the user.

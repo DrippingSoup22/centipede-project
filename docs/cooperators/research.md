@@ -129,3 +129,5 @@ batches.
 - Ackermann & van den Bogert, J. Biomech. 43, 2010, [PMC2849893](https://pmc.ncbi.nlm.nih.gov/articles/PMC2849893)
 - Biewener, Biomechanical consequences of scaling, J. Exp. Biol. 208, 2005
 - Tucker, The energetic cost of moving about, American Scientist 63, 1975
+- Dallmann, Dürr & Schmitz, Proc. R. Soc. B 283, 2016, [PMC4795010](https://pmc.ncbi.nlm.nih.gov/articles/PMC4795010)
+- Guschlbauer, dissertation, University of Cologne, 2009, [KUPS](https://kups.ub.uni-koeln.de/3001/)
