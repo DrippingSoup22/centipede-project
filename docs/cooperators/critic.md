@@ -120,16 +120,17 @@ Rudin et al.'s 20 s episodes at 50 Hz.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Worlds | 2,048 | The worlds test: more still gains speed, but each doubling halves the updates per hour |
-| Rollout window | 64 steps (1.28 s) | 131,072 samples per segment per update, Isaac Gym's Humanoid and ANYmal batch, inside Rudin et al.'s best range (about 100k to 200k with 2,048 to 4,096 robots) and well above their floor of 25 steps; twice the updates per hour of 128 steps for the same data. The 128 steps of run 57 kept its leg turns whole; here every step is a decision |
+| Worlds | 4,096 | Rudin et al.'s and Isaac Gym's Humanoid's number (the user's proposal, 2026-10-15). On the RTX 5090 it simulates 15% more steps per second than 2,048, measured; twice the starts and targets in each update |
+| Rollout window | 32 steps (0.64 s) | 131,072 samples per segment per update, Isaac Gym's Humanoid batch (4,096 × 32), inside Rudin et al.'s best range (about 100k to 200k with 2,048 to 4,096 robots) and above their floor of 25 steps. A cycle takes 22 s on the RTX 5090 (the smoke of 2026-10-15) |
 | Minibatch | 32,768 | Four per epoch, the size of both papers' minibatches |
 | Epochs | 5 | Theirs; within MAPPO's 5 to 10 for hard tasks |
 | Adam steps per update | 20 | Theirs. Adam's steps have about the same size whatever the minibatch, so the policy moves with their number: the oscillators' 32 at a fixed 3e-4 moved it by a KL of 0.02 to 0.2 an update, far above the papers' 0.01 |
 | Learning rate | 3e-4 at the start, then adapted | Each actor's own, set after every update by Rudin et al.'s rule: divided by 1.5 after an update whose KL was above twice 0.01, multiplied by 1.5 after one below half, between 1e-5 and 1e-2. A fixed rate drifts: as training narrows the action spread σ, the same step of the mean is a larger KL (d²/2σ² for two Gaussians of the same spread). The critics keep 3e-4 |
 
-What the window leaves to the critic: on average about 28% of what the
-advantage would measure is replaced by the value at the window's end (14%
-with 128 steps; about half in Rudin et al.'s 24-step windows). The pink
+What the window leaves to the critic: on average about 47% of what the
+advantage would measure is replaced by the value at the window's end (28%
+with 64 steps, 14% with 128; about half in Rudin et al.'s 24-step
+windows). The pink
 noise's sequences are as long as an episode, whatever the window.
 
 ## As built
