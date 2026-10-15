@@ -322,6 +322,25 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     assert state.foot_forward_force.sum() > 0
 
 
+def test_joint_forces_carry_a_push_from_behind_up_the_body(model, mapping):
+    """The rear segment, pushed forward with three body weights, pushes the
+    segment ahead with most of it, and each joint further up carries less:
+    each joint moves everything ahead of it. The head has no joint ahead."""
+    backend = CPUBackend(
+        model, mapping, 1, physics_steps_per_action(model), measure_joint_forces=True
+    )
+    backend.reset(seed=0)
+    push = 3 * model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    backend.world_data[0].xfrc_applied[mapping.body_ids[-1], 0] = push
+
+    backend.step(torch.zeros(1, SEGMENT_COUNT, 6))
+
+    force = backend.physical_state.front_joint_force[0]
+    assert force[0] == 0
+    assert force[-1] < -0.5 * push
+    assert (force[1:].diff() < 0).all()
+
+
 # -- Failure -------------------------------------------------------------------
 
 

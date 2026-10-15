@@ -324,6 +324,14 @@ class CooperatorsSettings:
     by ``energy_sharing_decay`` per segment; and pain, the squared force of
     its legs pressed by others over a leg's strongest push, priced as force
     times ``pain_price``.
+
+    **The chain** (off by default): each segment's own cost for the force on
+    the joints that join it to its neighbours, along the body, in unit
+    weights, priced as force times ``chain_price``: the size of its front
+    joint's force, push or lag, and the square of its rear joint's force
+    where it pulls the segment behind (docs/cooperators/reward.md). With
+    ``observe_joint_forces`` each observation block also holds its segment's
+    front joint force (docs/cooperators/observations.md).
     """
 
     start_near_distance_m: float
@@ -340,6 +348,8 @@ class CooperatorsSettings:
     force_price_w: float
     pain_price: float
     energy_sharing_decay: float
+    chain_price: float
+    observe_joint_forces: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -379,6 +389,8 @@ class CooperatorsSettings:
             energy_sharing_decay=section.number(
                 "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0
             ),
+            chain_price=section.number("chain_price", default=0.0, minimum=0.0),
+            observe_joint_forces=section.boolean("observe_joint_forces", default=False),
         )
         section.reject_unknown_keys()
         return settings

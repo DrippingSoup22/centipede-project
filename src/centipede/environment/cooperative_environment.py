@@ -52,10 +52,17 @@ class CooperativeEnvironment:
     reward_channel_count = 2
 
     def __init__(self, settings: EnvironmentSettings) -> None:
-        """Create the simulation, measuring effort, and the design's parts."""
+        """Create the simulation, measuring effort, and the joint forces when
+        the chain prices or the observations use them, and the design's
+        parts."""
         self.settings = settings
         cooperators = settings.cooperators
-        self.simulation = PhysicsSimulation(settings.simulation, measure_effort=True)
+        self.simulation = PhysicsSimulation(
+            settings.simulation,
+            measure_effort=True,
+            measure_joint_forces=cooperators.chain_price > 0
+            or cooperators.observe_joint_forces,
+        )
         self.world_count = self.simulation.world_count
         self.segment_count = segment_count = self.simulation.segment_count
         self.leg_motor_count = legs = self.simulation.leg_motor_count
@@ -82,6 +89,7 @@ class CooperativeEnvironment:
             self.world_count,
             legs,
             body.unit_weight_n,
+            cooperators.observe_joint_forces,
             self.device,
         )
         self.observation_size = self.observation_builder.observation_size

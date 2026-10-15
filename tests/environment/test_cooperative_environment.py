@@ -121,9 +121,47 @@ def test_energy_is_shared_with_the_neighbours_seen_and_pain_stays_with_the_press
     )
 
 
+def test_the_chain_charges_each_segment_its_own_joints_and_its_blocks_show_them():
+    """Segment 1 pushes the head with half a unit weight and drags segment 2,
+    which lags by two: segment 1 pays its push and the square of its pull,
+    segment 2 its lag, and the head nothing for being pushed."""
+    settings = CooperatorsSettings.from_section({"chain_price": 1.0})
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    reward = CooperativeReward(settings, SEGMENTS, 2, BODY, commanded)
+    state = resting_state(1)
+    state.front_joint_force[0] = torch.tensor([0.0, -0.5, 2.0, 0.0, 0.0]) * 1e-3
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    head_tip = state.head_tip_position[:, :2]
+    _, parts, _ = reward.compute(
+        state,
+        state.body_planar_position.clone(),
+        head_tip.clone(),
+        head_tip + 0.1,
+        torch.tensor([False]),
+        0.025,
+        zeros,
+        zeros,
+    )
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    one_motor = settings.force_price_w * 0.02 * 1e3
+    expected = -one_motor * torch.tensor([0.0, 0.5 + 2.0**2, 2.0, 0.0, 0.0])
+    torch.testing.assert_close(by_name["chain"], expected)
+
+    builder = CooperativeObservationBuilder(
+        SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, True, "cpu"
+    )
+    assert builder.block_size == 43
+    observations = builder.build(state, torch.tensor([[0.025, 0.01]]), zeros)
+    blocks = observations[0, 1, :-2].reshape(5, 43)
+    # Blocks: itself, the segments ahead, those behind. Segment 1 sees its
+    # front joint in its own block and its rear joint in segment 2's.
+    torch.testing.assert_close(blocks[[1, 0, 3], 33], torch.tensor([0.0, -0.5, 2.0]))
+
+
 def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target():
     builder = CooperativeObservationBuilder(
-        SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, "cpu"
+        SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, False, "cpu"
     )
     block = builder.block_size
     assert (block, builder.observation_size) == (42, 5 * 42 + 2)
@@ -157,7 +195,9 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
     every_world = torch.ones(2, dtype=torch.bool)
     diagnostics.new_targets(every_world, every_world, state, target)
     zeros = torch.zeros(2, SEGMENTS)
-    step_rewards = StepRewards(zeros, torch.zeros(2, SEGMENTS, 6), zeros, zeros)
+    step_rewards = StepRewards(
+        zeros, torch.zeros(2, SEGMENTS, len(PART_NAMES)), zeros, zeros
+    )
     delay = torch.arange(SEGMENTS)[:, None] + torch.tensor([0, 4])
     for step in range(40):
         standing = (step - delay) % 8 < 4

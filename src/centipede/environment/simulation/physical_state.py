@@ -57,6 +57,12 @@ class PhysicalState:
     leg_leg_force_squared: torch.Tensor  # (W, N), its square's mean, N²
     motor_positive_work: torch.Tensor  # (W, N), leg motors and spine motor behind
     motor_negative_work: torch.Tensor  # (W, N), the same motors braking, positive
+    # Measured with ``measure_joint_forces``, zeros otherwise, as a mean over
+    # the step: the force the segment ahead exerts on the segment through the
+    # joint between them, along the segment's forward axis, in newtons.
+    # Positive pulls it forward (it lags), negative is the segment pushing the
+    # one ahead. The head has no segment ahead; its entries stay zero.
+    front_joint_force: torch.Tensor  # (W, N)
 
     @classmethod
     def allocate(
@@ -92,4 +98,5 @@ class PhysicalState:
             leg_leg_force_squared=zeros(n),
             motor_positive_work=zeros(n),
             motor_negative_work=zeros(n),
+            front_joint_force=zeros(n),
         )

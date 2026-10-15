@@ -1,6 +1,7 @@
 # Observations
 
-**Status (2026-10-14): agreed with the user and built.**
+**Status (2026-10-15): agreed with the user and built; the joint forces
+added with the chain ([The joints around it](#the-joints-around-it-agreed-2026-10-15)).**
 
 ## Decided
 
@@ -80,13 +81,36 @@ an inertial sensor and leg motion. The project is a simulation, so the
 exact reading is a choice of simplicity, not of realism; legged_gym's
 policies read the simulator's body velocity the same way.
 
+## The joints around it (agreed, 2026-10-15)
+
+With the chain ([reward.md](reward.md#the-chain-push-and-pull-between-neighbours-the-users-design)),
+each segment pays for the force on its two joints, so by the pairing rule
+it must see them. **Each block holds one more value: the force of the
+segment ahead on its segment, along the body**, in unit weights, positive
+when it pulls (the segment lags), negative when the segment pushes; zero
+for the head. Since a segment's rear joint is the front joint of the
+segment behind, the five blocks show every joint around it once: its own
+front joint in its own block, its rear joint in the block behind, and
+three more, two ahead and one behind. From the difference between two
+neighbouring joints a segment can tell which segment is pushing or lagging,
+and so react to what is coming before its own joints feel it: the user's
+aim of anticipation, through what a segment sees rather than through what
+it pays. Only the part along the body is seen, as only it is priced.
+
+| Input | Size |
+| --- | ---: |
+| A block, with the joint force | 43 |
+| An actor: five blocks and the target's two values | 217 |
+| A critic: the actor's input and the four neighbours' actions | 253 |
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
 velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
-others, and the last action (9; the rear's ninth is always zero). The
+others, with `observe_joint_forces` the front joint's force, and the last
+action (9; the rear's ninth is always zero). The
 forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,
 forward and to the left of the head's tip, in metres, zeros for the

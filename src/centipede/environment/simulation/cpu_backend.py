@@ -37,13 +37,16 @@ class CPUBackend:
         physics_steps_per_action: int,
         start_heading_range_rad: float = 0.0,
         measure_effort: bool = False,
+        measure_joint_forces: bool = False,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
         turn the body about the vertical. With ``measure_effort`` the physical
-        state's effort fields are measured (``_add_effort``). The generators
+        state's effort fields are measured (``_add_effort``), and with
+        ``measure_joint_forces`` its joint forces (``_add_joint_forces``). The
+        generators
         start from seed 0
         until ``reset`` is given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
@@ -55,6 +58,7 @@ class CPUBackend:
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
         self.measure_effort = measure_effort
+        self.measure_joint_forces = measure_joint_forces
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -86,6 +90,7 @@ class CPUBackend:
         self._effort = {
             name: getattr(self.physical_state, name).numpy() for name in EFFORT_FIELDS
         }
+        self._front_joint_force = self.physical_state.front_joint_force.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
@@ -144,6 +149,9 @@ class CPUBackend:
             if self.measure_effort:
                 self._clear_effort(world_index)
                 self._add_effort(world_index, 1.0)
+            if self.measure_joint_forces:
+                self._front_joint_force[world_index] = 0.0
+                self._add_joint_forces(world_index, 1.0)
         self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(
@@ -169,10 +177,16 @@ class CPUBackend:
             data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
             if self.measure_effort:
                 self._clear_effort(world_index)
+            if self.measure_joint_forces:
+                self._front_joint_force[world_index] = 0.0
             for _ in range(self.physics_steps_per_action):
                 mujoco.mj_step(self.model, data)
                 if self.measure_effort:
                     self._add_effort(world_index, 1 / self.physics_steps_per_action)
+                if self.measure_joint_forces:
+                    self._add_joint_forces(
+                        world_index, 1 / self.physics_steps_per_action
+                    )
             self._check_world(world_index)
 
             mujoco.mj_forward(self.model, data)
@@ -255,6 +269,26 @@ class CPUBackend:
         along = (force[foot] * forward_axes[owner[foot]]).sum(axis=1)
         np.add.at(effort["foot_normal_force"], foot_index, scale * floor_normal[foot])
         np.add.at(effort["foot_forward_force"], foot_index, scale * along)
+
+    def _add_joint_forces(self, world_index: int, scale: float) -> None:
+        """Add ``scale`` times each segment's front joint force, along its
+        forward axis, to one world's measure.
+
+        MuJoCo's ``cfrc_int`` holds, for every body, the force its parent
+        exerts on the subtree it heads, about the subtree's centre, with the
+        force in its last three values. ``mj_rnePostConstraint`` fills it from
+        the physics step just taken. The body tree runs from the head back, so
+        a segment's subtree is itself and everything behind it, and its
+        parent is the segment ahead.
+        """
+        data = self.world_data[world_index]
+        mujoco.mj_rnePostConstraint(self.model, data)
+        behind_head = self.mapping.body_ids[1:]
+        force = data.cfrc_int[behind_head, 3:]
+        forward_axes = data.xmat[behind_head][:, [0, 3, 6]]
+        self._front_joint_force[world_index, 1:] += scale * (force * forward_axes).sum(
+            axis=1
+        )
 
     def _check_world(self, world_index: int) -> None:
         """Stop the run if MuJoCo reported or produced an impossible state.

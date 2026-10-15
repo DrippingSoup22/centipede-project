@@ -11,7 +11,7 @@ from centipede.environment.simulation.constants import ACTION_DURATION_S
 
 # The reward's parts, signed, in millimetres for the goal and millijoules for
 # the cost: the goal channel adds the first two, the cost channel the rest.
-PART_NAMES = ("progress", "arrival", "pushing", "braking", "force", "pain")
+PART_NAMES = ("progress", "arrival", "pushing", "braking", "force", "pain", "chain")
 GOAL_PARTS = 2
 
 
@@ -59,6 +59,9 @@ class CooperativeReward:
         self.pain_price_mj = (
             self.force_price_mj * settings.pain_price / body.leg_push_n**2
         )
+        # Millijoules for a unit weight on a joint through a step.
+        self.chain_price_mj = self.force_price_mj * settings.chain_price
+        self.unit_weight_n = body.unit_weight_n
 
     def compute(
         self,
@@ -78,9 +81,12 @@ class CooperativeReward:
         head's tip to the target, every other segment's centre to where the
         segment ahead's centre was before the step; and, when the head
         arrives, ``arrival_worth_m`` in millimetres. The cost: each segment's
-        energy, shared by the sharing weights, and its own pain. The arguments
-        are those of ``RewardContext.from_step``; the parts come back as
-        ``StepRewards``, whose ``rewards`` add both channels.
+        energy, shared by the sharing weights, its own pain, and its own
+        chain: the size of its front joint's force, push or lag, and the
+        square of its rear joint's where it pulls the segment behind, both in
+        unit weights; the head has no front joint, the rear no rear one. The
+        arguments are those of ``RewardContext.from_step``; the parts come
+        back as ``StepRewards``, whose ``rewards`` add both channels.
         """
         context = RewardContext.from_step(
             physical_state,
@@ -109,11 +115,16 @@ class CooperativeReward:
         )
         shared_energy = torch.einsum("ij,wjp->wip", self.sharing_weights, own_energy)
         pain = physical_state.leg_leg_force_squared * self.pain_price_mj
+        front = physical_state.front_joint_force / self.unit_weight_n
+        rear_pull = torch.zeros_like(front)
+        rear_pull[:, :-1] = front[:, 1:].clamp(min=0.0)
+        chain = self.chain_price_mj * (front.abs() + rear_pull.square())
         parts = torch.cat(
             (
                 torch.stack((progress_m * 1e3, arrival), dim=-1),
                 -shared_energy,
                 -pain[..., None],
+                -chain[..., None],
             ),
             dim=-1,
         )

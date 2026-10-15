@@ -1,7 +1,8 @@
 # Reward
 
-**Status (2026-10-14): agreed with the user and built; the force price
-measured on the model ([As built](#as-built)).**
+**Status (2026-10-15): agreed with the user and built; the force price
+measured on the model ([As built](#as-built)). The chain was added after
+runs 01 and 02 ([The chain](#the-chain-push-and-pull-between-neighbours-the-users-design)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -9,7 +10,8 @@ muscles spend it (pushing work, cheaper braking work, and a dominant cost
 of force, counted as squared activation); pain priced like force, 1 : 1;
 α sharing energy only, fading with distance over every neighbour a segment
 sees; a goal critic and a cost critic for every segment at 1 : 1; free
-speed.
+speed; the chain, each segment's own cost for pushing, lagging and
+yanking its neighbours, priced like force.
 
 ## Principles
 
@@ -35,6 +37,7 @@ what its moving costs.**
 | Path | Each follower | Progress along the trail the segment ahead leaves | Goal critic |
 | Energy | Every segment | Every force its motors exert and every movement they make; its neighbours' through α | Cost critic |
 | Pain | Every segment | The force with which its legs hit other legs, the same for both segments of a contact | Cost critic |
+| Chain | Every segment | The force on the joints to its neighbours, along the body: pushing or lagging behind the one ahead, yanking the one behind | Cost critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -275,6 +278,74 @@ far each can sweep depends on how the neighbours' steps are offset in time
 (the oscillators' leg geometry, 2026-10-11): pain makes each segment take
 its neighbours' steps into account, without saying which offset to use.
 
+### The chain: push and pull between neighbours (the user's design)
+
+**Why** (2026-10-15, runs 01 and 02). A follower is paid for its progress
+along the trail, but the joint keeps it one unit behind the segment ahead,
+so that progress is the whole body's speed, and every follower can raise
+it by pushing. Both runs learned exactly that, and nothing told the
+followers that the head was being pushed against its will: at cycle 64
+the head of run 01 carried 1.25 unit weights on its belly and touched the
+ground in 52% of steps, a sled pushed by followers walking on their feet,
+and it never learned to turn (heading error 139°). The missing signal is
+the force between neighbours. A difference of speed cannot show it, since
+the joint keeps two neighbours at a fixed distance and so at almost the
+same speed; the force through the joint shows who does the work. Zero
+means each segment carries and moves itself.
+
+**The force.** For each joint, the force of the segment ahead on the
+segment behind, along the segment behind's forward axis, in unit weights:
+positive when the segment ahead pulls it (it lags), negative when it pushes
+the segment ahead. MuJoCo computes it (`cfrc_int`, the force each body's
+parent exerts on the subtree it heads); the body tree runs from the head
+back, so a segment's subtree is itself and everything behind it, and the
+force on its front joint holds the push or lag of every segment behind.
+Only the part along the body is priced (the user): the vertical part,
+hanging on the neighbours, is left to energy, which already made runs 01
+and 02 carry their weight without any rule (their followers' feet down in
+80 to 95% of steps); the sideways part carries the head's turns along the
+body, and pricing it would tax steering.
+
+**Who pays: each segment, for its own two joints** (the user's chain, after
+the oscillators' tempo chain: the gap ahead linear, the gap behind
+squared).
+
+| Joint | What happens | Whose doing | The segment pays |
+| --- | --- | --- | --- |
+| Front | It pushes the segment ahead | Its own: it is faster | The size, linear |
+| Front | It is pulled, lagging | Its own: it is slower | The size, linear |
+| Rear | It pulls the segment behind | Its own: it should wait | The square |
+| Rear | It is pushed from behind | The segment behind's | Nothing: that segment pays it at its front |
+
+Keeping up with the segment ahead is a follower's duty, so the front joint
+costs linearly, already for small gaps. Waiting for the segment behind is a
+courtesy, so the rear joint's pull costs its square: small pulls almost
+nothing, big yanks a lot; the two prices meet at one unit weight. A segment
+pushed from behind pays nothing for it: if it did, its cheapest answer
+would be to run from the pusher, as the head of run 01 would learn to run
+straight on instead of turning. The head has no front joint, the rear no
+rear one.
+
+**Its own, not shared.** Every joint is already charged to the two segments
+it joins, and the physics already passes the chain along: the force on a
+segment's front joint holds the push or lag of every segment behind it, so
+a segment that lets a push through pays for it, and holding it back passes
+the charge on until it reaches the segment that pushes. Sharing the chain
+by α, or weighting the joints further away (the user's proposal of 2 : 1
+for the joints one and two segments away, considered on 2026-10-15), would
+charge a segment for joints it cannot change: the joint two ahead holds
+the lag of the segment ahead, which a segment can only cancel by pushing
+it, and the joint two behind is already inside its own rear joint. Costs
+an agent cannot affect blur what it learns from its own actions (Wolpert
+and Tumer, Advances in Complex Systems 2001). The weighted chain stays a
+variant to screen if the plain one reacts too late. Seeing the joints
+around it is what lets a segment anticipate: each segment observes them
+([observations.md](observations.md)).
+
+**The price** (agreed): `chain_price` = 1, a unit weight on a joint for a
+second costing as much as one motor fully on, 1.98 mJ/s
+([As built](#as-built)).
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -332,8 +403,8 @@ size, so the balance between goal and costs is the same along the body.
 
 | Agent | Goal critic | Cost critic |
 | --- | --- | --- |
-| Head | Task | Energy and pain |
-| Each follower | Path | Energy and pain |
+| Head | Task | Energy, pain and chain |
+| Each follower | Path | Energy, pain and chain |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
 apart ([critic.md](critic.md)). Energy and pain share one critic rather
@@ -349,6 +420,7 @@ force is worth.
 | Pushing : braking work | About 4 : 1, from muscle data, agreed |
 | Work : force, inside energy | Force dominant, as in animals of a gram, agreed: 90% of a raised walk's energy at the level-1 pace, which sets the force price at 1.98 mJ per second of one motor fully on ([As built](#as-built)) |
 | Pain : energy | 1 : 1 in activation, agreed |
+| Chain : energy | A unit weight on a joint as one motor fully on, agreed: in run 01's push about the followers' energy ([As built](#as-built)) |
 | Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
 
 ## As built
@@ -382,8 +454,16 @@ pain:
 
 where wᵢⱼ = 0.5^|i−j| over the segments it sees, scaled to add up to one,
 F is the force with which its legs press other legs, and F_push the
-strongest push of a leg's sweep at its foot, 0.94 mN on v4. The parts are
-logged apart: progress, arrival, pushing, braking, force, pain.
+strongest push of a leg's sweep at its foot, 0.94 mN on v4. With the
+chain (`chain_price` > 0), each segment also pays its own two joints:
+
+> chain = −p · c · (|f_front| + max(f_rear, 0)²)
+
+with f_front the force of the segment ahead on it and f_rear its own pull
+on the segment behind (the force on that segment's front joint), both
+along the body, in unit weights, as means over the step's physics steps,
+and c = `chain_price`. The parts are logged apart: progress, arrival,
+pushing, braking, force, pain, chain.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature
@@ -416,6 +496,28 @@ mostly the joints' damping (fast leg swings), not the body's motion; and
 with force dominant, a faster walk is cheaper per millimetre up to the
 fastest tried, 1.7 body lengths a second, so the preferred speed lies
 higher, and the task's distances, not energy, will set the pace at first.
+
+**The chain's price, measured** (`analysis/chain_check.py` in
+`../CentipedeTraining`, 2026-10-15): the force on each joint along the
+body, in unit weights, means over each step, on the CPU.
+
+| | Run 01 at cycle 64 (followers pushing) | Scripted raised walk (each segment carries itself) |
+| --- | ---: | ---: |
+| Force on the head's joint | −0.66 (pushed) | +0.02 |
+| Strongest mean force | −0.77 (pushed, segments 2-3) | +0.26 (pulled, segments 4-5) |
+| Mean size over the joints | 0.80 | 0.19 |
+| Energy per segment | 1.66 mJ/s | 0.78 mJ/s |
+| Front joints' chain at c = 1 | 1.58 mJ/s, about the energy | 0.38 mJ/s |
+
+Setting run 01's followers' chain equal to their energy gives c = 1.05, so
+the force price itself was kept: pushing as run 01 did doubles a
+follower's cost. The scripted walk's chain is an upper bound, since its
+segments' efforts are not evened out. In run 01 the push grows from the
+tail toward the front: segments 4 to 11 add it, a tenth to a fifth of a
+unit weight each, and segment 1, which adds none, carries 0.66 of it. A
+risk to watch: before the followers walk, a head that walks drags them,
+and the square of a pull of several unit weights could teach it to stand
+still.
 
 ## Left out
 

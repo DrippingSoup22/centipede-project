@@ -50,12 +50,16 @@ class PhysicsSimulation:
     """
 
     def __init__(
-        self, settings: SimulationSettings, measure_effort: bool = False
+        self,
+        settings: SimulationSettings,
+        measure_effort: bool = False,
+        measure_joint_forces: bool = False,
     ) -> None:
         """Load and check the model, then create the chosen backend.
 
         With ``measure_effort`` the backends also measure the physical state's
-        effort fields after every physics step.
+        effort fields after every physics step, and with
+        ``measure_joint_forces`` its front joint forces.
         """
         model = mujoco.MjModel.from_xml_path(str(settings.model_path))
         mapping = ModelMapping.from_model(model)
@@ -72,6 +76,7 @@ class PhysicsSimulation:
                 steps_per_action,
                 start_heading_range_rad,
                 measure_effort,
+                measure_joint_forces,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -88,6 +93,7 @@ class PhysicsSimulation:
                 settings.constraints_per_world,
                 start_heading_range_rad,
                 measure_effort,
+                measure_joint_forces,
             )
 
         self.segment_count = mapping.segment_count

@@ -507,6 +507,41 @@ def _add_segment_effort(
         )
 
 
+@wp.kernel
+def _add_joint_forces(
+    # In: data
+    cfrc_int: wp.array2d[wp.spatial_vector],
+    xmat: wp.array2d[wp.mat33],
+    # In: tables
+    body_ids: wp.array1d[wp.int32],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    start: bool,
+    # In and out
+    front_joint_force: wp.array2d[float],
+) -> None:
+    """Add ``scale`` times each segment's front joint force of the masked
+    worlds, along its forward axis; ``start`` replaces the value instead.
+
+    One thread per (world, segment). ``cfrc_int`` holds, for every body, the
+    force its parent exerts on the subtree it heads, its linear part last
+    (MuJoCo Warp fills it after the solver with ``run_rne_postconstraint``).
+    The body tree runs from the head back, so the parent is the segment
+    ahead; the head has none, and its value stays zero.
+    """
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index] or segment_index == 0:
+        return
+    body_id = body_ids[segment_index]
+    rotation = xmat[world_index, body_id]
+    forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
+    along = scale * wp.dot(wp.spatial_bottom(cfrc_int[world_index, body_id]), forward)
+    if start:
+        front_joint_force[world_index, segment_index] = along
+    else:
+        front_joint_force[world_index, segment_index] += along
+
+
 class GPUBackend:
     """Runs every world at once on the GPU with MuJoCo Warp.
 
@@ -527,6 +562,7 @@ class GPUBackend:
         constraints_per_world: int,
         start_heading_range_rad: float = 0.0,
         measure_effort: bool = False,
+        measure_joint_forces: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -538,12 +574,15 @@ class GPUBackend:
         reserved here once: contacts in one pool shared by all worlds,
         constraints separately for each world. With ``measure_effort`` the
         physical state's effort fields are measured after every physics step
-        (``_measure_effort``).
+        (``_measure_effort``), and with ``measure_joint_forces`` its joint
+        forces (``_measure_joint_forces``), for which MuJoCo Warp computes the
+        forces between bodies after every solve.
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
         model.opt.solver = SOLVERS[solver]
         self.gpu_model = mjw.put_model(model)
+        self.gpu_model.opt.run_rne_postconstraint = measure_joint_forces
         self.gpu_data = mjw.make_data(
             model,
             nworld=world_count,
@@ -556,6 +595,7 @@ class GPUBackend:
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
         self.measure_effort = measure_effort
+        self.measure_joint_forces = measure_joint_forces
         self.timestep = float(model.opt.timestep)
         self.root_quaternion_address = mapping.root_qpos_address + 3
 
@@ -604,6 +644,7 @@ class GPUBackend:
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
         self._effort = [wp.from_torch(getattr(state, name)) for name in EFFORT_FIELDS]
+        self._front_joint_force = wp.from_torch(state.front_joint_force)
         # Each segment's legs pressed by others during one physics step.
         self._leg_leg_pressed = wp.zeros(
             (world_count, self.segment_count), dtype=float, device=self.device
@@ -757,6 +798,8 @@ class GPUBackend:
             # The starting pose's forces; no motor has worked yet.
             self._clear_effort(mask_view)
             self._measure_effort(mask_view, 1.0)
+        if self.measure_joint_forces:
+            self._measure_joint_forces(mask_view, 1.0, start=True)
 
     def _run_physics_steps(self) -> None:
         """The physics steps of one action, launched from Python, each
@@ -764,10 +807,14 @@ class GPUBackend:
         steps = self.physics_steps_per_action
         if self.measure_effort:
             self._clear_effort(self._every_world)
-        for _ in range(steps):
+        for step_index in range(steps):
             mjw.step(self.gpu_model, self.gpu_data)
             if self.measure_effort:
                 self._measure_effort(self._every_world, 1 / steps)
+            if self.measure_joint_forces:
+                self._measure_joint_forces(
+                    self._every_world, 1 / steps, start=step_index == 0
+                )
 
     def _clear_effort(self, world_mask: wp.array) -> None:
         """Zero the masked worlds' effort measures."""
@@ -816,6 +863,26 @@ class GPUBackend:
                 self.timestep,
             ],
             outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *work],
+            device=self.device,
+        )
+
+    def _measure_joint_forces(
+        self, world_mask: wp.array, scale: float, start: bool
+    ) -> None:
+        """Add ``scale`` times the masked worlds' front joint forces of the
+        physics state just computed, or, with ``start``, replace them."""
+        wp.launch(
+            _add_joint_forces,
+            dim=(self.world_count, self.segment_count),
+            inputs=[
+                self.gpu_data.cfrc_int,
+                self.gpu_data.xmat,
+                self.body_ids,
+                world_mask,
+                scale,
+                start,
+            ],
+            outputs=[self._front_joint_force],
             device=self.device,
         )
 

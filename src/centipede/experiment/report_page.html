@@ -1056,7 +1056,7 @@ const ACTOR_COLORS = ["var(--series-1)", "var(--baseline-1)", "var(--baseline-2)
 // together.
 const PART_COLORS = { arrival: "var(--series-3)", progress: "var(--series-1)", step_cost: "var(--baseline-1)",
   efficiency: "var(--series-4)", body_contact: "var(--series-2)", leg_contact: "var(--series-5)",
-  movement: "var(--series-6)", pushing: "#d62728", braking: "#ff7f0e", force: "#8c564b", pain: "#e377c2" };
+  movement: "var(--series-6)", pushing: "#d62728", braking: "#ff7f0e", force: "#8c564b", pain: "#e377c2", chain: "#9467bd" };
 function partColor(name, index) {
   return PART_COLORS[name.toLowerCase().replaceAll(" ", "_")] || SERIES[index % SERIES.length];
 }

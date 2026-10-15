@@ -53,8 +53,8 @@ Set by the user on 2026-10-14.
 | Part | File | Status |
 | --- | --- | --- |
 | Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL) |
-| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy and pain in millijoules; force price measured |
-| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block |
+| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured |
+| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces |
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
 | Task | [task.md](task.md) | Built, with numbers |
@@ -70,9 +70,9 @@ behaviour, so main's configurations keep their meaning.
 | --- | --- | --- |
 | Environment | `environment/cooperative_environment.py`, made by the front file's `create_environment` | `[environment] design`, `max_episode_steps`, `observation_radius` |
 | Task | `environment/cooperative_task.py` | `[environment.cooperators]` |
-| Observations | `environment/cooperative_observations.py` | |
-| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]` |
-| Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU | |
+| Observations | `environment/cooperative_observations.py` | `[environment.cooperators] observe_joint_forces`, off by default |
+| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]`; the chain by `chain_price`, 0 (off) by default |
+| Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU; the joint forces too when the chain or the observations use them (`measure_joint_forces`, MuJoCo's `cfrc_int`) | |
 | Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `critic_baselines`, `value_normalization` |
 | Level | `experiment/`: moved after every update cycle, logged as `task`, kept in checkpoints | |
 | Diagnostics | `environment/cooperative_diagnostics.py`: each step, each 20 s episode, and the gait read from the feet (each foot's lag behind the foot ahead and the foot opposite); the terminal's own line in `experiment/progress.py`. No training report, since the monitor shows the log; the evaluation page has its own layout (section 2b of `experiment/report_page.html`) | |
