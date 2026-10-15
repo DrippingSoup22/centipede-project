@@ -43,7 +43,9 @@ class CooperativeEnvironment:
     segment commands its leg motors and, but the rear, the spine joint behind
     it; ``segment_action_sizes`` and ``action_size`` are as in the main
     environment with spine control. Rewards have two channels, goal and cost,
-    ``(W, N, 2)``. An arrival never ends an episode: the next target appears
+    ``(W, N, 2)``; ``segment_reward_channels`` lists those each segment's
+    critics learn from: both, or for a follower without a goal its cost
+    alone. An arrival never ends an episode: the next target appears
     at once. The only end is the time limit, a cut that the agents bootstrap
     from; the world then restarts. ``diagnostics`` summarise each step and
     each episode.
@@ -99,6 +101,10 @@ class CooperativeEnvironment:
         )
         self.reward = CooperativeReward(
             cooperators, segment_count, radius, body, commanded_joints
+        )
+        follower_channels = (0, 1) if cooperators.follower_goal else (1,)
+        self.segment_reward_channels = [(0, 1)] + [follower_channels] * (
+            segment_count - 1
         )
         self.diagnostics = CooperativeDiagnostics(
             self.world_count,

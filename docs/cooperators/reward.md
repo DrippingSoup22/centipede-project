@@ -2,7 +2,10 @@
 
 **Status (2026-10-15): agreed with the user and built; the force price
 measured on the model ([As built](#as-built)). The chain was added after
-runs 01 and 02 ([The chain](#the-chain-push-and-pull-between-neighbours-the-users-design)).**
+runs 01 and 02 ([The chain](#the-chain-push-and-pull-between-neighbours-the-users-design)).
+After run 04, cycle 3 takes the followers' goal away: they follow, paying
+the chain at ten times the force price
+([Cycle 3](#cycle-3-followers-that-follow-the-users-design)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -346,6 +349,104 @@ around it is what lets a segment anticipate: each segment observes them
 second costing as much as one motor fully on, 1.98 mJ/s
 ([As built](#as-built)).
 
+### Cycle 3: followers that follow (the user's design)
+
+**Why** (2026-10-15, run 04, the chain's pilot on 3 seeds). The chain lifted
+the head off its belly and it began to steer, but two seeds of three ended
+circling their targets: over 3 m walked per 20 s episode for 35 to 47 mm
+closed. Measured on the cycle-256 checkpoints (4 worlds per seed;
+`analysis/orbit_check.py` in `../Training`):
+
+| Measure | Run 04 |
+| --- | --- |
+| The head pushed by segment 1 | 85 to 97% of steps, 0.5 to 0.7 unit weights |
+| Strongest push, joints 1 to 3 | 0.8 to 1.0 unit weights |
+| Sideways force at the joints | 0.3 to 0.8 unit weights, as much as along |
+| Spine yaw joints | 10 to 12° of their 15° on average, at the limit 30 to 87% of the time, the middle zigzagging, the neck held to one side |
+| The head's path | 165 mm/s on circles of about 35 mm radius, its target 57 to 76 mm away, heading error about 90° |
+
+A follower never arrives, so progress along the trail is a reward for speed
+without a ceiling, and energy cannot cap it: with force dominant, a faster
+walk is cheaper per millimetre ([As built](#as-built)). Eleven followers
+paid for speed outvoted the head, the only segment that knows when to slow
+down; they pushed it, and a chain pushed from behind buckles, like a rope
+pushed or a trailer jackknifing. Bent and pushed, the head can only circle.
+
+**The design** (the user's, agreed 2026-10-15):
+
+- **The followers have no goal.** Only the head is paid, for its task; a
+  follower learns from its cost alone, with one critic, the cost critic.
+  The followers are called so because they follow: the head sets the pace
+  and the way, and the body's duty is to go with it.
+- **The chain is the followers' duty, priced high.** Each follower pays the
+  force on its front joint along the body, push or lag, linearly, at ten
+  times the force price (`chain_price` = 10): a unit weight on the joint for
+  a second costs 19.8 mJ, as ten motors fully on. Its minimum, zero force,
+  is a follower carrying and moving itself at the pace its leader sets. Only
+  differences teach, and each critic's signal is normalised on its own, so
+  while the forces swing they dominate what a follower learns; once it
+  follows well they stay near zero, and what still varies, energy, leads.
+- **The rear pull: an open question, tested both ways.** The head's square
+  of its pull on segment 1 is its safeguard against dragging the body faster
+  than the body adapts (run 05, `chain_rear_pull = "head"`); but before the
+  body walks, every move of the head pulls, and that cost could teach the
+  head, the only segment with a reason to move, to stand still (run 06,
+  `"none"`). No follower pays its rear pull: each joint is charged to the
+  segment behind it, whose duty is to follow.
+
+**The price, checked** (`analysis/price_check.py` in `../Training`, CPU,
+2026-10-15; per follower and second, the reward's own code at price 10):
+
+| Case | Speed | Energy | Chain | Total |
+| --- | ---: | ---: | ---: | ---: |
+| Scripted raised walk, every segment carrying itself | 39 mm/s | 0.8 mJ | 3.3 mJ | 4.0 mJ |
+| The head walks, the followers command nothing | 0 | 0.0 | 8.5 mJ | 8.5 mJ |
+| Run 04 at cycle 256, pushing and circling | 158 mm/s | 5.6 mJ | 13.4 mJ | 19.0 mJ |
+
+Following beats lying idle, and lying beats pushing. Two lessons. The head
+alone cannot move a passive body (its feet push at most about friction
+times its weight, 0.8 unit weights, which a resting segment's belly
+matches), so if the followers learn to rest before they learn to follow,
+nobody moves and no single follower's action changes its joint's force: a
+deadlock, run 57's stillness again. The fallback, if a run shows it, is
+Hwangbo et al.'s curriculum (Science Robotics 2019, "Policy training
+details"): every cost but the objective multiplied by a factor rising from
+0.3 to 1, here energy and pain, the chain at full price from the start. And
+even the scripted walk keeps a small steady joint force (about 0.15 unit
+weights), whose chain costs four times its energy; if energy never comes to
+lead, the price is the dial.
+
+**The sideways force: measured, not priced.** A follower that leaves the
+head's path, cutting a corner or going straight, pushes or is dragged
+sideways at its front joint, so the sideways force seemed the signal of a
+bad turn. Scripted turns say otherwise (`analysis/turn_forces.py` in
+`../Training`: the scripted walk with the spine's yaw motors at a constant
+command, since
+feedback on the angle at 50 Hz makes the joints chatter; mean square of the
+sideways force per joint and step, in unit weights squared):
+
+| Walk | Turn radius | Spine bend | Sideways² |
+| --- | ---: | ---: | ---: |
+| Straight | — | 2° | 0.10 |
+| Even bend, gentle | 109 mm | 3° | 0.11 |
+| Even bend, tight | 38 mm | 13° | 0.26 |
+| Even bend, tightest | 25 mm | 15° | 0.43 |
+| Rear bent more (cuts inside) | 44 mm | 10° | 0.18 |
+| Rear bent less (swings outside) | 308 mm | 12° | 0.29 |
+| S-shape | 62 mm | 12° | 0.15 |
+
+An even bend keeps every segment on one circle, the head's path; an uneven
+one leaves it. The sideways force grows with how hard the body turns, not
+with whether it follows the path: a correct tight turn costs more than a
+wrong one. Walking straight, left and right legs alternating, rocks each
+joint sideways by 0.26 unit weights a step even when every segment carries
+itself (0.01 with both legs together), a sway an average over a stride
+removes but a price per step would charge. And the bend at a follower's
+front joint is its leader's command, so a cost on that joint's sideways
+force would charge the follower for its leader's choice. So the chain
+prices the force along the body only, and whether the followers trace the
+head's path is measured in the runs, before any rule rewards it.
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -404,7 +505,7 @@ size, so the balance between goal and costs is the same along the body.
 | Agent | Goal critic | Cost critic |
 | --- | --- | --- |
 | Head | Task | Energy, pain and chain |
-| Each follower | Path | Energy, pain and chain |
+| Each follower | Path; none from cycle 3 | Energy, pain and chain |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
 apart ([critic.md](critic.md)). Energy and pain share one critic rather
@@ -462,8 +563,12 @@ chain (`chain_price` > 0), each segment also pays its own two joints:
 with f_front the force of the segment ahead on it and f_rear its own pull
 on the segment behind (the force on that segment's front joint), both
 along the body, in unit weights, as means over the step's physics steps,
-and c = `chain_price`. The parts are logged apart: progress, arrival,
-pushing, braking, force, pain, chain.
+and c = `chain_price`. The rear pull's square is paid by every segment
+(`chain_rear_pull = "every"`, cycle 2), by the head alone (`"head"`) or by
+none (`"none"`). Without `follower_goal` (cycle 3) the followers' progress
+is measured but not paid, and their critics learn from the cost channel
+alone (the environment's `segment_reward_channels`). The parts are logged
+apart: progress, arrival, pushing, braking, force, pain, chain.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

@@ -159,6 +159,48 @@ def test_the_chain_charges_each_segment_its_own_joints_and_its_blocks_show_them(
     torch.testing.assert_close(blocks[[1, 0, 3], 33], torch.tensor([0.0, -0.5, 2.0]))
 
 
+@pytest.mark.parametrize(
+    ("rear_pull", "chain_paid"),
+    [
+        ("every", [1.0, 1.0 + 2.0**2, 2.0]),
+        ("head", [1.0, 1.0, 2.0]),
+        ("none", [0.0, 1.0, 2.0]),
+    ],
+)
+def test_followers_without_a_goal_and_who_pays_the_rear_pull(rear_pull, chain_paid):
+    """The body steps 1 mm forward while the head drags segment 1 by a unit
+    weight and segment 1 drags segment 2 by two: only the head is paid
+    progress, every follower pays its lag, and the rear pull's square is paid
+    as ``chain_rear_pull`` says."""
+    settings = CooperatorsSettings.from_section(
+        {"chain_price": 1.0, "chain_rear_pull": rear_pull, "follower_goal": False}
+    )
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    reward = CooperativeReward(settings, SEGMENTS, 2, BODY, commanded)
+    state = resting_state(1)
+    state.front_joint_force[0] = torch.tensor([0.0, 1.0, 2.0, 0.0, 0.0]) * 1e-3
+    previous = state.body_planar_position.clone()
+    previous[..., 0] -= 0.001
+    head_tip = state.head_tip_position[:, :2]
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    _, parts, _ = reward.compute(
+        state,
+        previous,
+        head_tip - torch.tensor([[0.001, 0.0]]),
+        torch.tensor([[0.1, 0.0]]),
+        torch.tensor([False]),
+        0.025,
+        zeros,
+        zeros,
+    )
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    torch.testing.assert_close(by_name["progress"], torch.tensor([1.0, 0, 0, 0, 0]))
+    one_motor = settings.force_price_w * 0.02 * 1e3
+    expected = -one_motor * torch.tensor([*chain_paid, 0.0, 0.0])
+    torch.testing.assert_close(by_name["chain"], expected)
+
+
 def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target():
     builder = CooperativeObservationBuilder(
         SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, False, "cpu"

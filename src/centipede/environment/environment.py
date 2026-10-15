@@ -42,7 +42,8 @@ class Environment:
     with ankles), and with spine control one more, the spine joint behind it,
     for every segment but the rear. ``action_size`` is the width of the joint
     action, the largest of them; the rear's last column is padding.
-    Rewards have one channel, ``(W, N)``; ``neighbour_table`` lists the
+    Rewards have one channel, ``(W, N)``, which every segment's critic learns
+    from (``segment_reward_channels``); ``neighbour_table`` lists the
     segments each segment sees (``observation_builder.neighbour_table``).
     """
 
@@ -54,6 +55,7 @@ class Environment:
         self.simulation = PhysicsSimulation(settings.simulation)
         self.world_count = self.simulation.world_count
         self.segment_count = self.simulation.segment_count
+        self.segment_reward_channels = [(0,)] * self.segment_count
         self.device = self.simulation.physical_state.body_height.device
 
         # The radius comes from the configuration and the segment count from

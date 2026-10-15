@@ -26,6 +26,15 @@ There is no critic of the whole body. Critics are used only in training;
 an agent acts with its actor alone. Head and followers differ only in what
 their goal is, and in the head's goal critic seeing the target.
 
+**From cycle 3 the followers have no goal critic** (the user, 2026-10-15):
+they are paid no goal, only the cost, so each follower learns with its cost
+critic alone, its advantage normalised on its own; the head keeps both
+([reward.md](reward.md#cycle-3-followers-that-follow-the-users-design)).
+The environment lists the reward channels each segment learns from
+(`segment_reward_channels`), and each agent builds a critic, and a
+baseline, for each; the log shows a missing critic's explained variance as
+empty.
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone

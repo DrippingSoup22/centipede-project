@@ -329,9 +329,13 @@ class CooperatorsSettings:
     the joints that join it to its neighbours, along the body, in unit
     weights, priced as force times ``chain_price``: the size of its front
     joint's force, push or lag, and the square of its rear joint's force
-    where it pulls the segment behind (docs/cooperators/reward.md). With
+    where it pulls the segment behind, paid by ``chain_rear_pull``: every
+    segment, only the head, or none (docs/cooperators/reward.md). With
     ``observe_joint_forces`` each observation block also holds its segment's
     front joint force (docs/cooperators/observations.md).
+
+    Without ``follower_goal`` the followers are paid no progress: only the
+    head has a goal, and each follower learns from its cost alone.
     """
 
     start_near_distance_m: float
@@ -349,7 +353,9 @@ class CooperatorsSettings:
     pain_price: float
     energy_sharing_decay: float
     chain_price: float
+    chain_rear_pull: str
     observe_joint_forces: bool
+    follower_goal: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -390,7 +396,11 @@ class CooperatorsSettings:
                 "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0
             ),
             chain_price=section.number("chain_price", default=0.0, minimum=0.0),
+            chain_rear_pull=section.choice(
+                "chain_rear_pull", ("every", "head", "none"), default="every"
+            ),
             observe_joint_forces=section.boolean("observe_joint_forces", default=False),
+            follower_goal=section.boolean("follower_goal", default=True),
         )
         section.reject_unknown_keys()
         return settings

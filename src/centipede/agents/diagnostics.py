@@ -39,11 +39,12 @@ class LearningSummary:
         "update: 1 exactly, 0 nothing, (N,); with several critics, the first's"
     )
     critic_explained_variances: torch.Tensor = measure(
-        "The same for each critic, one per reward channel, (N, K)"
+        "The same for each critic, one per reward channel; NaN for a channel"
+        " the segment does not learn from, (N, K)"
     )
     baseline_explained_variances: torch.Tensor = measure(
         "The same for each critic's baseline, which also sees the neighbours'"
-        " actions; NaN without baselines, (N, K)"
+        " actions; NaN without baselines or that channel, (N, K)"
     )
     learning_rate: torch.Tensor = measure(
         "The actor's learning rate in the update; the critics' is the same"
@@ -76,10 +77,16 @@ class AgentDiagnostics:
         leg_motor_count: int,
         device: torch.device | str,
         reward_channel_count: int = 1,
+        segment_reward_channels: list[tuple[int, ...]] | None = None,
     ) -> None:
         """Allocate the category, all zero, for agents whose first
-        ``leg_motor_count`` actions drive their legs."""
+        ``leg_motor_count`` actions drive their legs and that learn from
+        ``segment_reward_channels`` (every channel if not given)."""
         self.leg_motor_count = leg_motor_count
+        self.segment_reward_channels = (
+            segment_reward_channels
+            or [tuple(range(reward_channel_count))] * segment_count
+        )
         self.learning = LearningSummary(
             **{
                 name: torch.zeros(segment_count, device=device)
@@ -114,15 +121,19 @@ class AgentDiagnostics:
         )
         for column, name in enumerate(SUMMARY_NAMES):
             getattr(self.learning, name).copy_(summary_rows[:, column])
-        self.learning.critic_explained_variances.copy_(
-            torch.tensor([summary.explained_variances for summary in summaries])
-        )
-        if summaries[0].baseline_explained_variances:
-            self.learning.baseline_explained_variances.copy_(
-                torch.tensor(
-                    [summary.baseline_explained_variances for summary in summaries]
-                )
+        critics = torch.full_like(self.learning.critic_explained_variances, torch.nan)
+        baselines = torch.full_like(critics, torch.nan)
+        for segment_index, summary in enumerate(summaries):
+            channels = list(self.segment_reward_channels[segment_index])
+            critics[segment_index, channels] = torch.tensor(
+                summary.explained_variances, device=critics.device
             )
+            if summary.baseline_explained_variances:
+                baselines[segment_index, channels] = torch.tensor(
+                    summary.baseline_explained_variances, device=critics.device
+                )
+        self.learning.critic_explained_variances.copy_(critics)
+        self.learning.baseline_explained_variances.copy_(baselines)
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
                 self.learning.learning_rate[segment_index] = (

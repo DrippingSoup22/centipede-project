@@ -331,8 +331,8 @@ def _agents_for(
     configuration: Configuration,
     rollout_window_steps: int,
 ) -> Agents:
-    """Agents that fit the environment: its body, its reward channels, and the
-    segments each segment sees."""
+    """Agents that fit the environment: its body, its reward channels and
+    those each segment learns from, and the segments each segment sees."""
     return Agents(
         environment.segment_count,
         environment.observation_size,
@@ -344,6 +344,7 @@ def _agents_for(
         environment.leg_motor_count,
         environment.reward_channel_count,
         environment.neighbour_table,
+        environment.segment_reward_channels,
     )
 
 

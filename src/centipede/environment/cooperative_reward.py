@@ -62,6 +62,17 @@ class CooperativeReward:
         # Millijoules for a unit weight on a joint through a step.
         self.chain_price_mj = self.force_price_mj * settings.chain_price
         self.unit_weight_n = body.unit_weight_n
+        # 1 for the segments paid progress and for those that pay their rear
+        # pull; the rear, without a joint behind it, pays none either way.
+        device = commanded_joints.device
+        self.progress_paid = torch.ones(segment_count, device=device)
+        if not settings.follower_goal:
+            self.progress_paid[1:] = 0.0
+        self.rear_pull_paid = torch.zeros(segment_count, device=device)
+        if settings.chain_rear_pull == "every":
+            self.rear_pull_paid[:] = 1.0
+        elif settings.chain_rear_pull == "head":
+            self.rear_pull_paid[0] = 1.0
 
     def compute(
         self,
@@ -79,12 +90,13 @@ class CooperativeReward:
 
         The goal: the millimetres each segment came closer to its target, the
         head's tip to the target, every other segment's centre to where the
-        segment ahead's centre was before the step; and, when the head
-        arrives, ``arrival_worth_m`` in millimetres. The cost: each segment's
-        energy, shared by the sharing weights, its own pain, and its own
-        chain: the size of its front joint's force, push or lag, and the
-        square of its rear joint's where it pulls the segment behind, both in
-        unit weights; the head has no front joint, the rear no rear one. The
+        segment ahead's centre was before the step (none without
+        ``follower_goal``); and, when the head arrives, ``arrival_worth_m`` in
+        millimetres. The cost: each segment's energy, shared by the sharing
+        weights, its own pain, and its own chain: the size of its front
+        joint's force, push or lag, and, for those ``chain_rear_pull`` names,
+        the square of its rear joint's where it pulls the segment behind, both
+        in unit weights; the head has no front joint, the rear no rear one. The
         arguments are those of ``RewardContext.from_step``; the parts come
         back as ``StepRewards``, whose ``rewards`` add both channels.
         """
@@ -118,10 +130,12 @@ class CooperativeReward:
         front = physical_state.front_joint_force / self.unit_weight_n
         rear_pull = torch.zeros_like(front)
         rear_pull[:, :-1] = front[:, 1:].clamp(min=0.0)
-        chain = self.chain_price_mj * (front.abs() + rear_pull.square())
+        chain = self.chain_price_mj * (
+            front.abs() + self.rear_pull_paid * rear_pull.square()
+        )
         parts = torch.cat(
             (
-                torch.stack((progress_m * 1e3, arrival), dim=-1),
+                torch.stack((progress_m * 1e3 * self.progress_paid, arrival), dim=-1),
                 -shared_energy,
                 -pain[..., None],
                 -chain[..., None],

@@ -52,8 +52,8 @@ Set by the user on 2026-10-14.
 
 | Part | File | Status |
 | --- | --- | --- |
-| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL) |
-| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured |
+| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL); from cycle 3 the followers have the cost critic only |
+| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured; cycle 3: only the head has a goal, the followers pay the chain at ten times the force price |
 | Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces |
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
@@ -71,7 +71,8 @@ behaviour, so main's configurations keep their meaning.
 | Environment | `environment/cooperative_environment.py`, made by the front file's `create_environment` | `[environment] design`, `max_episode_steps`, `observation_radius` |
 | Task | `environment/cooperative_task.py` | `[environment.cooperators]` |
 | Observations | `environment/cooperative_observations.py` | `[environment.cooperators] observe_joint_forces`, off by default |
-| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]`; the chain by `chain_price`, 0 (off) by default |
+| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]`; the chain by `chain_price`, 0 (off) by default, and who pays the rear pull by `chain_rear_pull`, `"every"` by default; `follower_goal`, on by default, pays the followers progress |
+| Reward channels | `environment/cooperative_environment.py`'s `segment_reward_channels`: those each segment learns from, the head both, a follower without a goal its cost alone | `[environment.cooperators] follower_goal` |
 | Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU; the joint forces too when the chain or the observations use them (`measure_joint_forces`, MuJoCo's `cfrc_int`) | |
 | Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `critic_baselines`, `value_normalization` |
 | Level | `experiment/`: moved after every update cycle, logged as `task`, kept in checkpoints | |

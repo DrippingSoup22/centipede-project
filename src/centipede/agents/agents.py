@@ -40,6 +40,7 @@ class Agents:
         leg_motor_count: int,
         reward_channel_count: int = 1,
         neighbour_table: torch.Tensor | None = None,
+        segment_reward_channels: list[tuple[int, ...]] | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -47,8 +48,11 @@ class Agents:
         ``segment_action_sizes`` and ``leg_motor_count`` are the
         environment's: how many motors each segment commands, its leg motors
         first and then, with spine control, the spine joint behind it. So are
-        ``reward_channel_count``, one critic each, and ``neighbour_table``,
-        the segments each one sees, itself first, from which the critics'
+        ``reward_channel_count``; ``segment_reward_channels``, the channels
+        each segment learns from, one critic each (every channel if not
+        given; a segment takes them all or one, so ``advantage_weights`` fits
+        every segment with several critics); and ``neighbour_table``, the
+        segments each one sees, itself first, from which the critics'
         baselines take the neighbours' actions.
         """
         self.segment_count = segment_count
@@ -76,6 +80,11 @@ class Agents:
             if self.neighbours is None
             else self.neighbours.shape[1] * self.action_size
         )
+        self.reward_channel_count = reward_channel_count
+        self.segment_reward_channels = (
+            segment_reward_channels
+            or [tuple(range(reward_channel_count))] * segment_count
+        )
 
         self.segment_agents: list[SegmentAgent] = [
             SegmentAgent(
@@ -86,7 +95,7 @@ class Agents:
                 settings=settings,
                 seed=seed * segment_count + segment_index,
                 action_size=self.segment_action_sizes[segment_index],
-                reward_channel_count=reward_channel_count,
+                reward_channel_count=len(self.segment_reward_channels[segment_index]),
                 baseline_input_size=baseline_input_size,
             )
             for segment_index in range(segment_count)
@@ -97,6 +106,7 @@ class Agents:
             leg_motor_count,
             device=self.settings.device,
             reward_channel_count=reward_channel_count,
+            segment_reward_channels=self.segment_reward_channels,
         )
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
@@ -127,14 +137,19 @@ class Agents:
         truncated: torch.Tensor,
         final_observations: torch.Tensor,
     ) -> None:
-        """Give each agent its segment's rewards and final observations.
+        """Give each agent its segment's rewards, the channels it learns from,
+        and final observations.
 
         The episode ends ``(W,)`` belong to the whole body, so every agent gets
         them in full.
         """
         for segment_index, agent in enumerate(self.segment_agents):
+            segment_rewards = rewards[:, segment_index]
+            channels = self.segment_reward_channels[segment_index]
+            if len(channels) < self.reward_channel_count:
+                segment_rewards = segment_rewards[:, list(channels)].squeeze(1)
             agent.record(
-                rewards[:, segment_index],
+                segment_rewards,
                 terminated,
                 truncated,
                 final_observations[:, segment_index],

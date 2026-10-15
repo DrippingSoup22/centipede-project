@@ -250,6 +250,44 @@ def test_two_reward_channels_and_baselines_that_see_the_neighbours_actions():
     assert torch.isfinite(learning.baseline_explained_variances).all()
 
 
+def test_followers_without_a_goal_learn_from_their_cost_alone():
+    """The head learns from both channels, the followers from the second only:
+    one critic each, their cost stored, and no goal critic reported."""
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        SETTINGS,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        reward_channel_count=2,
+        segment_reward_channels=[(0, 1), (1,), (1,)],
+    )
+    assert [a.ppo.several_critics for a in agents.segment_agents] == [
+        True,
+        False,
+        False,
+    ]
+    for step in range(WINDOW_STEPS):
+        agents.act(body_tensor(step, OBSERVATION_SIZE), training=True)
+        agents.record(
+            body_tensor(100 + step, 2),
+            torch.zeros(WORLDS, dtype=torch.bool),
+            torch.zeros(WORLDS, dtype=torch.bool),
+            body_tensor(step + 1, OBSERVATION_SIZE),
+        )
+    stored = agents.segment_agents[2].rollout_storage.rewards[0]
+    torch.testing.assert_close(stored, body_tensor(100, 2)[:, 2, 1])
+
+    agents.update()
+
+    critics = agents.diagnostics.learning.critic_explained_variances
+    assert torch.isnan(critics[1:, 0]).all()
+    assert torch.isfinite(critics[0]).all() and torch.isfinite(critics[:, 1]).all()
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_baselines_give_zero_and_seeded_uniform_actions(device):
     observations = torch.ones(WORLDS, SEGMENTS, OBSERVATION_SIZE, device=device)
