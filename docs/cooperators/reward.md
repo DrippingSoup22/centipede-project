@@ -347,14 +347,14 @@ force is worth.
 | Goal : costs | 1 : 1, agreed |
 | α | Halving per segment, as a share of the whole, agreed |
 | Pushing : braking work | About 4 : 1, from muscle data, agreed |
-| Work : force, inside energy | Force dominant, as in animals of a gram, agreed: 90% of a raised walk's energy at the level-1 pace, which sets the force price at 2.19 mJ per second of one motor fully on ([As built](#as-built)) |
+| Work : force, inside energy | Force dominant, as in animals of a gram, agreed: 90% of a raised walk's energy at the level-1 pace, which sets the force price at 1.98 mJ per second of one motor fully on ([As built](#as-built)) |
 | Pain : energy | 1 : 1 in activation, agreed |
 | Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
 
 ## As built
 
 Every quantity is per segment and per 20 ms step; the simulation measures
-forces and work after each of the step's 134 physics steps.
+forces and work after each of the step's physics steps (40 on v4).
 
 **The goal channel**, in millimetres. For segment *i*, with *d* its flat
 distance to its target before and after the step (the head's tip to the
@@ -374,7 +374,7 @@ leg motors and the spine motor behind it:
 
 with W⁺ and W⁻ the step's pushing and braking work in joules (torque times
 joint speed times the timestep, by its sign), a each motor's command, and
-p = 2.19 mJ/s × 0.02 s = 0.0438 mJ, the force price of one motor fully on
+p = 1.98 mJ/s × 0.02 s = 0.0396 mJ, the force price of one motor fully on
 for a step. A segment pays its neighbourhood's energy, shared, and its own
 pain:
 
@@ -386,7 +386,9 @@ strongest push of a leg's sweep at its foot, 0.94 mN on v4. The parts are
 logged apart: progress, arrival, pushing, braking, force, pain.
 
 **The force price, measured** (`analysis/energy_check.py` in
-`../CentipedeTraining`). Scripted gaits on v4: each sweep driven along a
+`../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature
+and a 0.5 ms timestep; before it the price was 2.19 mJ/s). Scripted gaits on
+v4: each sweep driven along a
 sine by a feedforward command, the lifts pressing in stance and rising in
 swing, a wave over five segments. The reference is a raised walk at the
 level-1 pace, 2.5 strides a second; the price makes force 90% of its energy.
@@ -400,19 +402,19 @@ legs make. An estimate, not a measurement of centipedes.
 | Gait | Speed | Height | Feet carry | Energy | Per mm walked |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Rest on the belly | 0 | 1.7 mm | 3% | 0 | |
-| Stand | 0 | 7.9 mm | 100% | 6.0 mJ/s | |
-| Raised walk, 2 Hz | 27 mm/s | 7.7 mm | 100% | 9.7 mJ/s | 357 µJ |
-| Raised walk, 2.5 Hz (reference) | 38 mm/s | 7.4 mm | 100% | 11.1 mJ/s | 293 µJ |
-| Raised walk, 6 Hz | 89 mm/s | 7.7 mm | 100% | 15.5 mJ/s | 173 µJ |
-| Belly drag, 2.5 Hz | 2.5 mm/s | 1.7 mm | 52% | 7.8 mJ/s | 3,119 µJ |
-| Belly drag, 6 Hz | 8.7 mm/s | 1.7 mm | 54% | 13.1 mJ/s | 1,498 µJ |
+| Stand | 0 | 7.8 mm | 100% | 5.9 mJ/s | |
+| Raised walk, 2 Hz | 27 mm/s | 7.8 mm | 100% | 8.4 mJ/s | 315 µJ |
+| Raised walk, 2.5 Hz (reference) | 36 mm/s | 7.6 mm | 100% | 9.3 mJ/s | 257 µJ |
+| Raised walk, 6 Hz | 93 mm/s | 7.6 mm | 100% | 14.7 mJ/s | 157 µJ |
+| Belly drag, 2.5 Hz | 2.2 mm/s | 1.7 mm | 51% | 6.7 mJ/s | 3,025 µJ |
+| Belly drag, 6 Hz | 8.1 mm/s | 1.7 mm | 54% | 12.0 mJ/s | 1,490 µJ |
 
-The check of realism passes: walking raised costs 5 to 10 times less per
+The check of realism passes: walking raised costs 6 to 12 times less per
 millimetre than dragging the belly, and a still centipede saves by resting
 on its belly, as a real one does. Two lessons: the scripted walks' work is
 mostly the joints' damping (fast leg swings), not the body's motion; and
 with force dominant, a faster walk is cheaper per millimetre up to the
-fastest tried, 1.6 body lengths a second, so the preferred speed lies
+fastest tried, 1.7 body lengths a second, so the preferred speed lies
 higher, and the task's distances, not energy, will set the pace at first.
 
 ## Left out

@@ -374,7 +374,7 @@ class CooperatorsSettings:
                 "arrival_approaches", default=1.0, minimum=0.0
             ),
             braking_price=section.number("braking_price", default=0.25, minimum=0.0),
-            force_price_w=section.number("force_price_w", default=0.00219, minimum=0.0),
+            force_price_w=section.number("force_price_w", default=0.00198, minimum=0.0),
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
             energy_sharing_decay=section.number(
                 "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0

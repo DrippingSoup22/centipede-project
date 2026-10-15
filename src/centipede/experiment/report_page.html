@@ -645,7 +645,7 @@ const COOPERATIVE_TILES = [
       const energy = sample.episodeMean("episodes.energy"), closed = sample.episodeMean("episodes.head_progress");
       return energy === null || closed === null || closed <= 0 ? null : energy.reduce((a, b) => a + b, 0) / closed;
     },
-    note: () => "the energy check's raised walk: 0.29" },
+    note: () => "the energy check's raised walk: 0.26" },
 ];
 
 const COOPERATIVE_BEHAVIOUR_STATS = [

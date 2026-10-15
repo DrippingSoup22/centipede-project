@@ -87,7 +87,7 @@ velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
 others, and the last action (9; the rear's ninth is always zero). The
-forces are means over the step's 134 physics steps, in unit weights of
+forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,
 forward and to the left of the head's tip, in metres, zeros for the
 followers. Each agent normalises its inputs with running statistics, as on
