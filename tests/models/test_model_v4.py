@@ -1,8 +1,12 @@
-"""Validation of model v4: twelve units with four-joint legs, on v3's physics.
+"""Validation of model v4: twelve units with four-joint legs.
 
-v4 keeps v3's physics settings, contacts, spine, and the joints and maximum
-torques its legs share with v3's; the ankle's torque is half the knee's. The
-checks below repeat the parts of its validation that a change could break.
+v4 keeps v3's contacts, spine, and the joints and maximum torques its legs
+share with v3's; the ankle's torque is half the knee's. Since 2026-10-15 its
+physics differ from v3's in three ways (docs/model.md, "Physics of v4"): leg
+armature that gives every leg joint a 2 ms transient, a 0.5 ms timestep (40
+steps per action), and contacts and joint limits that respond in twice the
+timestep. The checks below repeat the parts of its validation that a change
+could break.
 """
 
 import mujoco
@@ -14,7 +18,9 @@ pytestmark = pytest.mark.physics
 
 FLOOR, BODY, LEG, LEFT_FOOT, RIGHT_FOOT = range(5)
 LIMBS = (LEG, LEFT_FOOT, RIGHT_FOOT)
-STEPS_PER_ACTION = 134
+LEG_ROLES = ("sweep", "lift", "knee", "ankle")
+STEPS_PER_ACTION = 40
+LEG_TRANSIENT_S = 0.002
 
 
 @pytest.fixture(scope="module")
@@ -29,17 +35,17 @@ def v4():
 
 def joint_properties(model):
     """Each joint role (the name's last word) with the ranges, stiffnesses,
-    dampings and armatures its joints have."""
+    dampings and, for the spine, armatures its joints have."""
     properties = {}
     for joint_id in range(1, model.njnt):  # 0 is the root
         dof = model.jnt_dofadr[joint_id]
+        role = model.joint(joint_id).name.rsplit("_", 1)[1]
         values = (
             *model.jnt_range[joint_id],
             model.jnt_stiffness[joint_id],
             model.dof_damping[dof],
-            model.dof_armature[dof],
+            None if role in LEG_ROLES else model.dof_armature[dof],
         )
-        role = model.joint(joint_id).name.rsplit("_", 1)[1]
         properties.setdefault(role, set()).add(values)
     return properties
 
@@ -53,14 +59,32 @@ def motor_torques(model):
     return torques
 
 
-def test_v3s_physics_carry_over(v3, v4):
-    for name in ("timestep", "integrator", "iterations", "tolerance", "cone"):
+def test_v3s_physics_carry_over_but_the_timestep_responses_and_leg_armature(v3, v4):
+    for name in ("integrator", "iterations", "tolerance", "cone"):
         assert getattr(v4.opt, name) == getattr(v3.opt, name), name
+    assert STEPS_PER_ACTION * v4.opt.timestep == pytest.approx(0.020, abs=1e-12)
+    # Contacts and joint limits respond in twice the timestep, the shortest
+    # MuJoCo allows, so none is softened further.
+    response = (2 * v4.opt.timestep, 1.0)
+    assert {tuple(row) for row in v4.geom_solref} == {response}
+    assert {tuple(row) for row in v4.jnt_solref[v4.jnt_limited == 1]} == {response}
+
+    # Every leg joint takes LEG_TRANSIENT_S to reach the speed its torque and
+    # damping set: its inertia, armature included, over its damping.
+    data = mujoco.MjData(v4)
+    mujoco.mj_forward(v4, data)
+    inertia = np.zeros((v4.nv, v4.nv))
+    mujoco.mj_fullM(v4, data, inertia)
+    for joint_id in range(1, v4.njnt):
+        if v4.joint(joint_id).name.endswith(LEG_ROLES):
+            dof = v4.jnt_dofadr[joint_id]
+            transient = inertia[dof, dof] / v4.dof_damping[dof]
+            assert transient == pytest.approx(LEG_TRANSIENT_S, rel=0.05)
+
     for field in (
         "geom_contype",
         "geom_conaffinity",
         "geom_friction",
-        "geom_solref",
         "geom_solimp",
         "geom_condim",
     ):
@@ -74,7 +98,7 @@ def test_v3s_physics_carry_over(v3, v4):
     v3_joints, v4_joints = joint_properties(v3), joint_properties(v4)
     ankle = v4_joints.pop("ankle")
     assert v4_joints == v3_joints
-    # The ankle bends like the knee: the same damping and armature.
+    # The ankle bends like the knee: the same damping.
     assert {values[3:] for values in ankle} == {
         values[3:] for values in v3_joints["knee"]
     }
@@ -113,14 +137,15 @@ def held(model, lift_command, seconds):
 
 def test_motors_off_the_body_sinks_and_the_lift_motors_hold_it_up(v4):
     """With every motor off the body settles onto its belly, as v1 to v3 do;
-    with the lift motors pressing down at 20% it stands on all 24 feet."""
+    with the lift motors pressing down at 40% it stands on all 24 feet. The
+    1 ms contacts sink about 0.05 mm (v3's 0.3 ms ones 0.02 mm)."""
     settled, penetration = held(v4, 0.0, 1.0)
     assert ground_contacts(v4, settled)[1] == 12
-    assert penetration < 5e-5
+    assert penetration < 1e-4
 
-    standing, penetration = held(v4, -0.2, 1.0)
+    standing, penetration = held(v4, -0.4, 1.0)
     assert ground_contacts(v4, standing) == (24, 0)
-    assert penetration < 5e-5
+    assert penetration < 1e-4
 
 
 def test_no_leg_passes_through_a_body_under_random_commands(v4):
@@ -147,7 +172,7 @@ def test_no_leg_passes_through_a_body_under_random_commands(v4):
         if step >= 10 * STEPS_PER_ACTION and step % STEPS_PER_ACTION == 0:
             data.ctrl[:] = rng.uniform(-1.0, 1.0, v4.nu)
         mujoco.mj_step(v4, data)
-        if step % 7 == 0:
+        if step % 2 == 0:  # every millisecond
             for a, b in pairs:
                 closest = min(
                     closest, mujoco.mj_geomDistance(v4, data, a, b, 1e-3, None)

@@ -8,17 +8,20 @@ simulation loads it (see the [architecture](architecture.md)).
 ## Status
 
 The newest model is **v4**: twelve body units, and legs of three links with a
-fourth joint, the ankle, on v3's physics and torque motors (see
-[Model v4](#model-v4)). **v3**, which the example configurations use, is v2
+fourth joint, the ankle, with v3's torque motors, leg armature, and a 0.5 ms
+physics timestep (see [Model v4](#model-v4)). **v3**, which the example configurations use, is v2
 with a longer physics timestep (see [Model v3](#model-v3)). v2 has exactly the
 body and physics of the original **v1 flat-ground baseline**. v2 and v1 are kept
 unchanged for reference. All four are frozen: training work may change
 observations, rewards, targets, and learning, but never a model. A physical
-change requires a new, separately named version with its own validation.
+change requires a new, separately named version with its own validation. The
+one exception: v4's physics were revised in place on 2026-10-15, before any
+training had used it, by the user's decision
+([Physics of v4](#physics-of-v4)).
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs | `62f784bd0920eddabe18431b9052663e21a8260cfcaf1beb07bbb51a9871cabd` |
+| [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
 | [`models/assembly.xml`](../models/assembly.xml) | v1, the original baseline | `92143cf54b030856e436a1de6f4333c327ffb9a5f812a0e4a0b4c4aed107d50e` |
@@ -305,10 +308,10 @@ positions within 0.013 mm of v2's (deepest penetration 0.020 mm against
 
 ## Model v4
 
-v4 is a longer body whose legs have a fourth joint. Its physics settings,
+v4 is a longer body whose legs have a fourth joint, with faster physics. Its
 contacts and friction, head, body width and height, spine joints and motors,
-and the joints its legs share with v3 (ranges, damping, armature, and maximum
-torques) are exactly v3's. It changes:
+and the joints its legs share with v3 (ranges, damping, and maximum torques)
+are exactly v3's, and so are the integrator and the solver. It changes:
 
 | Property | v3 | v4 |
 | --- | ---: | ---: |
@@ -321,6 +324,9 @@ torques) are exactly v3's. It changes:
 | Coordinates (position / velocity) | 69 / 68 | 125 / 124 |
 | Motors | 55 | 107 |
 | Whole model | 643.4 mg | 1047.9 mg |
+| Physics timestep | 0.149 ms, 134 steps per action | 0.5 ms, 40 steps per action |
+| Contact / joint-limit response time | 0.3 / 0.8 ms | 1 / 1 ms |
+| Leg joints' armature | 2e-11 (sweep, lift), 2e-12 (knee) kg·m² | each leg joint's transient 2 ms ([Physics of v4](#physics-of-v4)) |
 
 The trunk unit is longer by the same amount as the spacing, so neighbouring
 units still overlap by 0.6 mm, and its mass grows with its length. The spacing
@@ -333,9 +339,9 @@ by the **ankle**, a hinge parallel to the knee. The leg keeps its total length,
 and the 0.15 mg foot. The lower link is 0.22 mm in radius, as before, and the
 tarsus 0.18 mm.
 
-| Joint | Range | Maximum torque | Damping | Armature |
-| --- | ---: | ---: | ---: | ---: |
-| Ankle | −30° to +40° | ±5 µN·m | 1e-7 N·m·s/rad | 2e-12 kg·m² |
+| Joint | Range | Maximum torque | Damping |
+| --- | ---: | ---: | ---: |
+| Ankle | −30° to +40° | ±5 µN·m | 1e-7 N·m·s/rad |
 
 The ankle damps like the knee, and its maximum torque is half the knee's, as
 it moves only the tarsus; its range and torque are engineering choices. In
@@ -351,50 +357,83 @@ the head the yaw motor joining it to the unit ahead: 8 × 12 + 11 = 107. The
 model's file is otherwise built like v3's, with the same naming, ownership and
 shape categories, and eleven visual membranes.
 
+### Physics of v4
+
+v4's physics were revised on 2026-10-15, before any training had used it, so
+that the GPU, whose work per physics step limits training, takes 40 physics
+steps per action instead of 134.
+
+**Why v3 needed 134 steps.** MuJoCo makes contacts and joint limits soft
+constraints: each responds like a damped spring whose response time
+(`solref`) the model sets, and MuJoCo never lets a response be faster than
+twice the timestep. How far a constraint gives under a load is the response
+time squared times the acceleration the load would cause without it
+([MuJoCo's documentation](https://mujoco.readthedocs.io/en/stable/modeling.html#solver-parameters)).
+The legs' outer links weigh 0.15 to 1.5 mg, so a motor's full torque would
+accelerate them by up to 1.2 million rad/s² (the ankle): their limits and
+contacts held only with the very short responses of v1 to v3, 0.3 ms for
+contacts and 0.8 ms for limits, and so with a timestep under 0.15 ms.
+
+**What changed.** Every leg joint gets **armature**, an inertia added to the
+joint, as a robot's motor rotor adds to its joint: enough that the joint's
+inertia, armature included, over its damping is 2 ms. Damping, not inertia,
+governs the legs: a leg's top speed is its torque over its damping (40 to
+100 rad/s), and the armature leaves it unchanged; the leg reaches it in 2 ms
+instead of 0.04 to 0.5 ms, a tenth of an action. The accelerations the limits
+and contacts must stop fall up to twelvefold, so they hold with slower
+responses: **1 ms** for both, twice the new **0.5 ms timestep**.
+
+| Leg joint | Inertia without armature | Armature | Transient before / after |
+| --- | ---: | ---: | ---: |
+| Sweep | 7.0e-11 kg·m² | 3.3e-10 kg·m² | 0.45 / 2.0 ms |
+| Lift | 7.7e-11 kg·m² | 3.2e-10 kg·m² | 0.48 / 2.0 ms |
+| Knee | 1.6e-11 kg·m² | 1.8e-10 kg·m² | 0.18 / 2.0 ms |
+| Ankle | 2.1e-12 kg·m² | 2.0e-10 kg·m² | 0.04 / 2.0 ms |
+
+Small bodies need short timesteps: a fruit fly trained with reinforcement
+learning in MuJoCo walks on a 0.2 ms timestep (Vaxenburg et al., flybody),
+legged robots of several kilograms on 4 to 5 ms (Rudin et al., CoRL 2021; the
+Go1 of MuJoCo Playground). Scaled by the square root of size, as body motion
+under gravity is, both point to about 0.5 to 0.7 ms for legs of this length.
+
+**What was compared** (CPU MuJoCo for the checks, an RTX 5090 with MuJoCo
+Warp's Newton solver at 2,048 worlds for the speed; each variant with
+contacts and limits at twice its timestep):
+
+| Variant | Steps per action | Time per action on the GPU | Joint-limit excess, random commands | Feet's creep under a sideways push of 20% of the weight, 0.2 s |
+| --- | ---: | ---: | ---: | ---: |
+| v4 before the revision | 134 | 1,083 ms | 6.2° | 101 µm |
+| No armature, 0.5 ms | 40 | | 16.8° | 320 µm |
+| No armature, 1 ms | 20 | | 46° | 440 µm |
+| **Armature 2 ms, 0.5 ms (v4)** | **40** | **337 ms** | **3.1°** | **81 µm** |
+| Armature 2 ms, 0.8 ms | 25 | 228 ms | 5.1° | 127 µm |
+| Armature 3 ms, 1 ms | 20 | 187 ms, but a world became non-finite | 6.1° | 120 µm |
+
+A scripted walk (feet driven along sines, a wave over five units) moved at
+37.7 mm/s, 7.4 mm high, before the revision and at 37.1 mm/s, 7.5 mm high,
+after it. 0.5 ms was chosen over 0.8 ms for its margin from the point where
+the GPU's 32-bit arithmetic lost a world. Not chosen: impedances close to 1
+instead of armature (the solver needed three times the iterations and the
+feet lost their grip), MuJoCo's `noslip` solver (MuJoCo Warp does not
+implement it), and stiffer friction cones (`impratio` 10 let the feet slide
+further).
+
 **Validation.** The checks of [Validation](#validation), on v4 (CPU MuJoCo,
 the model's timestep unless stated):
 
 | Check | Result |
 | --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 36 ms (v3: about 33 ms); all 24 feet and 12 bodies end on the floor; 0.021 mm deepest penetration; no solver warning |
-| Every lift motor pressing down at 20%, 1 s | Stands on all 24 feet with no body contact, centres 4.6 mm high; at 40% or 60% the lift joints reach their limit and the centres stand 6.4 mm high |
-| Random full-strength motor commands, 2 s, 3 runs | 0.158 to 0.176 mm deepest penetration; no solver warning; joint limits exceeded by at most 6.4° (ankle) and 6.2° (knee), against 5.5° for v3's knee measured the same way, and at most 2.6° for the other joints |
-| Leg closest to another segment's body under the random commands | 0.55 mm |
+| Settling with every motor off, 2 s | The first body touches the floor after 38.5 ms (before the revision 36 ms); all 12 bodies and 19 of the 24 feet end on the floor; 0.055 mm deepest penetration; no solver warning |
+| Every lift motor pressing down, 1 s | At 40% or 60% the lift joints reach their limit and the body stands on all 24 feet with no body contact, centres 6.41 mm high, 0.042 mm deep; at 20% it stands 5.36 mm high on 22 feet |
+| Random full-strength motor commands, 2 s, 3 runs | 0.43 to 0.52 mm deepest penetration, in brief impacts (before the revision 0.16 to 0.18 mm); joint limits exceeded by at most 3.2° (before 6.4°); no solver warning |
+| Leg closest to another segment's body under the random commands | 0.54 mm |
 | Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | No leg or body closer than 0.56 mm to another segment's body |
-| Half timestep | Settling ends within 0.02 mm of the full timestep, standing at the same heights; joint-limit excess at most 5.3° |
+| Half timestep | Settling ends within 0.04 mm of the full timestep, standing at the same heights; joint-limit excess at most 2.9° |
+| GPU (RTX 5090, MuJoCo Warp, 32-bit), 2,048 worlds, 1,000 actions of random commands | Every world finite, no memory overflow, the solver never at its iteration limit; 0.54 mm deepest penetration, joint limits exceeded by at most 3.4°; 337 ms per action |
 
-As in v1 to v3, the light outer links overshoot their limits the most, softly,
-and the body cannot hold itself up with its motors off. The automated tests in
-`tests/models/test_model_v4.py` check that v3's physics, joints, and torques
-carry over, that the body sinks with its motors off and stands on its lift
-motors, and that no leg passes through a body under random commands.
-
-## Possible future versions
-
-These are outside v1 to v4 and would each be a new model version:
-
-- A fully passive spine with no yaw motors.
-- A distinct tail unit.
-- Antennae, forcipules, further leg sections, soft feet, or adhesion.
-- Deformable membranes between units.
-- Rough terrain, obstacles, or slopes.
-- A realistic number of segments.
-- Position actuators, which drive each joint toward a commanded angle instead
-  of applying a commanded torque.
-
-## References
-
-- Anderson, Shultz, and Jayne (1995), body bending in *S. heros*:
-  [paper](https://jwshultz.weebly.com/uploads/4/6/2/2/46222147/j_exp_biol-1995-anderson-1185-95.pdf)
-- Diaz et al. (2023), leg and body motion in *S. polymorpha*:
-  [DOI](https://doi.org/10.1242/jeb.244688)
-- Pierce et al. (2026), body width and leg length in *S. polymorpha*:
-  [authors' PDF](https://crablab.gatech.edu/pages/publications/pdf/2026_CPierce.pdf)
-- Sohlstrom et al. (2018), arthropod mass from body size:
-  [DOI](https://doi.org/10.1002/ece3.4702)
-- Nadein et al. (2025), arthropod joint structure:
-  [DOI](https://doi.org/10.1007/s00435-025-00708-4)
-- Gravish et al. (2023), foot traction on rough surfaces:
-  [DOI](https://doi.org/10.1242/jeb.245261)
-- MuJoCo contact parameters:
-  [documentation](https://mujoco.readthedocs.io/en/stable/modeling.html#contact-parameters)
+As in v1 to v3, the body cannot hold itself up with its motors off. The
+automated tests in `tests/models/test_model_v4.py` check that v3's physics,
+joints, and torques carry over except the timestep, the response times, and
+the leg armature, which they check too; that the body sinks with its motors
+off and stands on its lift motors; and that no leg passes through a body
+under random commands.
