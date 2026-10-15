@@ -105,7 +105,7 @@ what the environment needs; this category carries what the recorder and the
 speed work need. All four values describe the moment after the `forward` call
 that follows a step's last physics step, or a reset, so the CPU and GPU
 backends report the same thing; they are not peaks over the physics steps of
-a transition (134 for models v3 and v4). On the GPU the category is made of views of MuJoCo Warp's own
+a transition (134 for model v3, 40 for v4). On the GPU the category is made of views of MuJoCo Warp's own
 arrays, so filling it costs nothing; on the CPU each world's values are copied
 after the step.
 

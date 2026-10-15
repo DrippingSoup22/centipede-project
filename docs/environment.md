@@ -153,8 +153,8 @@ Actions are never clipped, because the executed action must be exactly the one
 the agent learns from.
 
 An action is held for **20 ms**, or 50 decisions per second: as many physics
-steps as the model's timestep fits into it, 134 steps of 0.149 ms for models v3
-and v4.
+steps as the model's timestep fits into it: 134 steps of 0.149 ms for model v3,
+40 steps of 0.5 ms for model v4.
 The simulation computes that number from the model and rejects a model whose
 timestep does not divide 20 ms evenly. On the GPU, an action's physics steps
 are replayed from a CUDA graph recorded on the first step, so the CPU does not
