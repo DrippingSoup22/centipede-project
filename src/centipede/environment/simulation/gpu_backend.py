@@ -177,6 +177,7 @@ def _read_segment_state(
     leg_dof_addresses: wp.array2d[int],
     spine_qpos_addresses: wp.array1d[int],
     spine_dof_addresses: wp.array1d[int],
+    spine_joint_ids: wp.array1d[int],
     head_tip_site_id: int,
     # In: model
     site_bodyid: wp.array1d[int],
@@ -185,6 +186,7 @@ def _read_segment_state(
     site_xpos: wp.array2d[wp.vec3],
     site_xmat: wp.array2d[wp.mat33],
     xquat: wp.array2d[wp.quat],
+    xanchor: wp.array2d[wp.vec3],
     qpos: wp.array2d[float],
     qvel: wp.array2d[float],
     cvel: wp.array2d[wp.spatial_vector],
@@ -200,6 +202,7 @@ def _read_segment_state(
     head_tip_position: wp.array1d[wp.vec3],
     spine_yaw_position: wp.array2d[float],
     spine_yaw_velocity: wp.array2d[float],
+    front_end_position: wp.array2d[wp.vec2],
 ) -> None:
     """Copy each segment's position, orientation, joints and velocity.
 
@@ -209,7 +212,8 @@ def _read_segment_state(
     velocity at a shared reference point (the centre of mass of its whole
     tree), so it is first moved to the site, then turned into site axes.
     The spine joint read is the one behind the segment; the rear segment has
-    none, and its entries stay zero.
+    none, and its entries stay zero. The front end is the head's tip, and
+    for every other segment its spine joint with the segment ahead.
     """
     world_index, segment_index = wp.tid()
     site_id = center_site_ids[segment_index]
@@ -255,7 +259,12 @@ def _read_segment_state(
     body_linear_velocity[world_index, segment_index] = world_to_site @ linear_velocity
 
     if segment_index == 0:
-        head_tip_position[world_index] = site_xpos[world_index, head_tip_site_id]
+        tip = site_xpos[world_index, head_tip_site_id]
+        head_tip_position[world_index] = tip
+        front_end_position[world_index, 0] = wp.vec2(tip[0], tip[1])
+    else:
+        anchor = xanchor[world_index, spine_joint_ids[segment_index - 1]]
+        front_end_position[world_index, segment_index] = wp.vec2(anchor[0], anchor[1])
 
 
 @wp.kernel
@@ -519,27 +528,42 @@ def _add_joint_forces(
     start: bool,
     # In and out
     front_joint_force: wp.array2d[float],
+    net_joint_force: wp.array2d[wp.vec2],
 ) -> None:
     """Add ``scale`` times each segment's front joint force of the masked
-    worlds, along its forward axis; ``start`` replaces the value instead.
+    worlds, along its forward axis, and its net joint force, along it and up;
+    ``start`` replaces the values instead.
 
     One thread per (world, segment). ``cfrc_int`` holds, for every body, the
-    force its parent exerts on the subtree it heads, its linear part last
-    (MuJoCo Warp fills it after the solver with ``run_rne_postconstraint``).
-    The body tree runs from the head back, so the parent is the segment
-    ahead; the head has none, and its value stays zero.
+    force its parent exerts on the subtree it heads, its linear part last, in
+    world axes (MuJoCo Warp fills it after the solver with
+    ``run_rne_postconstraint``). The body tree runs from the head back, so
+    the parent is the segment ahead; the head has none, and its front value
+    stays zero. The net force on a segment alone is what its front joint
+    gives its subtree less what it passes on to the subtree behind.
     """
     world_index, segment_index = wp.tid()
-    if not world_mask[world_index] or segment_index == 0:
+    if not world_mask[world_index]:
         return
     body_id = body_ids[segment_index]
     rotation = xmat[world_index, body_id]
     forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
-    along = scale * wp.dot(wp.spatial_bottom(cfrc_int[world_index, body_id]), forward)
+    front = wp.vec3(0.0)
+    if segment_index > 0:
+        front = wp.spatial_bottom(cfrc_int[world_index, body_id])
+    net = front
+    if segment_index < body_ids.shape[0] - 1:
+        net = front - wp.spatial_bottom(
+            cfrc_int[world_index, body_ids[segment_index + 1]]
+        )
+    along = scale * wp.dot(front, forward)
+    net_along_up = scale * wp.vec2(wp.dot(net, forward), net[2])
     if start:
         front_joint_force[world_index, segment_index] = along
+        net_joint_force[world_index, segment_index] = net_along_up
     else:
         front_joint_force[world_index, segment_index] += along
+        net_joint_force[world_index, segment_index] += net_along_up
 
 
 class GPUBackend:
@@ -612,6 +636,10 @@ class GPUBackend:
         self.spine_actuator_ids = to_gpu(mapping.spine_actuator_ids)
         self.spine_qpos_addresses = to_gpu(mapping.spine_qpos_addresses)
         self.spine_dof_addresses = to_gpu(mapping.spine_dof_addresses)
+        # The spine's yaw joints, from the head back: the joints its motors drive.
+        self.spine_joint_ids = to_gpu(
+            model.actuator_trnid[mapping.spine_actuator_ids, 0]
+        )
         self.body_ids = to_gpu(mapping.body_ids)
         self.center_site_ids = to_gpu(mapping.center_site_ids)
         self.geom_owner_indices = to_gpu(mapping.geom_owner_indices)
@@ -645,6 +673,10 @@ class GPUBackend:
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
         self._effort = [wp.from_torch(getattr(state, name)) for name in EFFORT_FIELDS]
         self._front_joint_force = wp.from_torch(state.front_joint_force)
+        self._net_joint_force = wp.from_torch(state.net_joint_force, dtype=wp.vec2)
+        self._front_end_position = wp.from_torch(
+            state.front_end_position, dtype=wp.vec2
+        )
         # Each segment's legs pressed by others during one physics step.
         self._leg_leg_pressed = wp.zeros(
             (world_count, self.segment_count), dtype=float, device=self.device
@@ -882,7 +914,7 @@ class GPUBackend:
                 scale,
                 start,
             ],
-            outputs=[self._front_joint_force],
+            outputs=[self._front_joint_force, self._net_joint_force],
             device=self.device,
         )
 
@@ -940,12 +972,14 @@ class GPUBackend:
                 self.leg_dof_addresses,
                 self.spine_qpos_addresses,
                 self.spine_dof_addresses,
+                self.spine_joint_ids,
                 self.head_tip_site_id,
                 self.gpu_model.site_bodyid,
                 self.gpu_model.body_rootid,
                 self.gpu_data.site_xpos,
                 self.gpu_data.site_xmat,
                 self.gpu_data.xquat,
+                self.gpu_data.xanchor,
                 self.gpu_data.qpos,
                 self.gpu_data.qvel,
                 self.gpu_data.cvel,
@@ -962,6 +996,7 @@ class GPUBackend:
                 self._head_tip_position,
                 self._spine_yaw_position,
                 self._spine_yaw_velocity,
+                self._front_end_position,
             ],
             device=self.device,
         )

@@ -103,14 +103,32 @@ it pays. Only the part along the body is seen, as only it is priced.
 | An actor: five blocks and the target's two values | 217 |
 | A critic: the actor's input and the four neighbours' actions | 253 |
 
+**Cycle 4: the offset and the net joint force** (the user's design,
+2026-10-16; [reward.md](reward.md#cycle-4-the-trail-and-carrying-oneself-the-users-design)).
+With the trail, each block holds its segment's offset from its trail, signed,
+positive to the left, in radians; with carrying oneself, the net force its
+two joints put on it, along the body and up, in unit weights. The pairing
+rule asks for both: a segment pays its own offset and that of the segment
+behind it, which it steers, and both lie within its radius; and the net
+force is what it pays for carrying itself. Seeing the offsets of the
+segments ahead also previews the trail it will walk: a turn shows in their
+offsets before it reaches its own.
+
+| Input | Size |
+| --- | ---: |
+| A block, with the offset and the net joint force | 45 |
+| An actor: five blocks and the target's two values | 227 |
+| A critic: the actor's input and the four neighbours' actions | 263 |
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
 velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
-others, with `observe_joint_forces` the front joint's force, and the last
-action (9; the rear's ninth is always zero). The
+others, with `observe_joint_forces` the front joint's force, with
+`carry_price` above 0 the net joint force (along, up), with `follow_trail`
+the offset, and the last action (9; the rear's ninth is always zero). The
 forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,
 forward and to the left of the head's tip, in metres, zeros for the

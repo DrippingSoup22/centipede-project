@@ -30,6 +30,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         normaliser_epsilon=1e-8,
         observation_clip=10.0,
         advantage_weights=(),
+        head_advantage_weights=(),
         critic_baselines=False,
         value_normalization=False,
         ppo=PPOSettings(

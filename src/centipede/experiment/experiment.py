@@ -421,7 +421,7 @@ def _training_categories(
             "Episodes",
             "Means over the episodes that ended in each window; 'episode ended' "
             "counts them. Windows in which no episode ended have no values.",
-            loop_diagnostics.episode_window.descriptions,
+            _episode_descriptions(loop, environment),
             loop_diagnostics.episode_window.result,
         ),
         _distribution_category(
@@ -480,6 +480,20 @@ def _distribution_category(loop: InteractionLoop, note: str) -> LoggedCategory:
         episode_window.histograms,
         holds_histograms=True,
     )
+
+
+def _episode_descriptions(
+    loop: InteractionLoop, environment: Environment | CooperativeEnvironment
+) -> dict[str, Any]:
+    """The episode values' descriptions, with the cooperators' reward
+    channels named."""
+    descriptions = dict(loop.diagnostics.episode_window.descriptions)
+    if isinstance(environment, CooperativeEnvironment):
+        descriptions["segment_return"] = replace(
+            descriptions["segment_return"],
+            parts=tuple(environment.diagnostics.channel_names),
+        )
+    return descriptions
 
 
 def _step_category(
@@ -720,7 +734,7 @@ def _evaluation_categories(
             "Episodes",
             "Each world's first episode only. Tables show the mean over seeds and, "
             "below it, the lowest to highest seed; charts show the mean over seeds.",
-            loop.diagnostics.episode_window.descriptions,
+            _episode_descriptions(loop, environment),
             loop.diagnostics.episode_window.result,
         ),
         _distribution_category(

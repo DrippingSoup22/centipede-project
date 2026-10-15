@@ -336,6 +336,17 @@ class CooperatorsSettings:
 
     Without ``follower_goal`` the followers are paid no progress: only the
     head has a goal, and each follower learns from its cost alone.
+
+    **The trail** (off by default; cycle 4 of docs/cooperators/reward.md).
+    With ``follow_trail``, which needs ``follower_goal`` off, a third channel
+    pays each segment for keeping its body on its trail, the path its front
+    end traced: the segment it steers through the spine joint behind it at
+    weight 1, its own body at ``trail_own_weight``, the head's own at 1. Each
+    observation block then holds its segment's offset. **Carry yourself**:
+    with ``carry_price`` above 0, each follower pays the net force its two
+    spine joints put on it, along the body and holding it up, and the head
+    the part holding it up, in unit weights, priced as force times
+    ``carry_price``; each block then holds that force.
     """
 
     start_near_distance_m: float
@@ -356,6 +367,9 @@ class CooperatorsSettings:
     chain_rear_pull: str
     observe_joint_forces: bool
     follower_goal: bool
+    follow_trail: bool
+    trail_own_weight: float
+    carry_price: float
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -401,8 +415,18 @@ class CooperatorsSettings:
             ),
             observe_joint_forces=section.boolean("observe_joint_forces", default=False),
             follower_goal=section.boolean("follower_goal", default=True),
+            follow_trail=section.boolean("follow_trail", default=False),
+            trail_own_weight=section.number(
+                "trail_own_weight", default=0.25, minimum=0.0
+            ),
+            carry_price=section.number("carry_price", default=0.0, minimum=0.0),
         )
         section.reject_unknown_keys()
+        if settings.follow_trail and settings.follower_goal:
+            raise SettingsError(
+                "[environment.cooperators] follow_trail replaces the followers'"
+                " progress: set follower_goal = false"
+            )
         return settings
 
 

@@ -1,11 +1,14 @@
 # Reward
 
-**Status (2026-10-15): agreed with the user and built; the force price
+**Status (2026-10-16): agreed with the user and built; the force price
 measured on the model ([As built](#as-built)). The chain was added after
 runs 01 and 02 ([The chain](#the-chain-push-and-pull-between-neighbours-the-users-design)).
 After run 04, cycle 3 takes the followers' goal away: they follow, paying
 the chain at ten times the force price
-([Cycle 3](#cycle-3-followers-that-follow-the-users-design)).**
+([Cycle 3](#cycle-3-followers-that-follow-the-users-design)). After runs 05
+and 06, cycle 4 returns to run 01's design without the chain and gives the
+followers a new goal, the trail, with a cost for not carrying themselves
+([Cycle 4](#cycle-4-the-trail-and-carrying-oneself-the-users-design)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -41,6 +44,8 @@ what its moving costs.**
 | Energy | Every segment | Every force its motors exert and every movement they make; its neighbours' through α | Cost critic |
 | Pain | Every segment | The force with which its legs hit other legs, the same for both segments of a contact | Cost critic |
 | Chain | Every segment | The force on the joints to its neighbours, along the body: pushing or lagging behind the one ahead, yanking the one behind | Cost critic |
+| Trail (cycle 4, replacing the path) | Every segment | How far its body, and the body of the segment it steers, point off their trails | Trail critic |
+| Carrying oneself (cycle 4) | Every segment | The net force its joints put on it: pulled, pushing, or held up; the head only held up | Cost critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -447,6 +452,156 @@ force would charge the follower for its leader's choice. So the chain
 prices the force along the body only, and whether the followers trace the
 head's path is measured in the runs, before any rule rewards it.
 
+### Cycle 4: the trail and carrying oneself (the user's design)
+
+**Why** (2026-10-15, runs 05 and 06, the cycle-3 design with and without
+the head's rear pull, seed 1, 128 cycles). The followers stopped pushing:
+the head's joint carried −0.01 and +0.02 unit weights, no belly dragged,
+pain was about zero. But nothing steered: 0.11 and 0.04 targets an
+episode, none in time, against run 04 seed 1's 0.49 at the same cycle.
+Three findings (`analysis/orbit_check.py` and `spine_chatter.py` in
+`../Training`):
+
+- **The spine chatters, in every run measured** (run 04 too). The mean
+  spine command changes sign on 23 to 50% of steps, and each joint swings
+  across its whole ±15°: the motor's 15 µN·m beats the spring's 5.2 at the
+  limit, so any command above about 0.35 reaches the limit within one
+  decision. The middle joints carry oscillating forces of 0.5 to 0.6 unit
+  weights.
+- **A follower cannot learn to lower a force it does not command.** Each
+  segment commands the joint behind it, but paid the chain of the one in
+  front. Segment 1, behind the light neck, cut its chain from 7.6 to
+  2.5 mJ/s; the middle followers, shaken by joints their leaders command,
+  only from 11.1 to 10.1, while their force rose from 3.4 to 5.8, so their
+  whole cost grew.
+- **Unpushed, the head hangs.** Its feet carried 0.05 to 0.15 of its
+  weight (1.55 in run 04, pressed down by the push), segment 1 holding it
+  up through the joint. Without grip it cannot pull, and it shook in place
+  on a path of 1 mm radius.
+
+The user's reading: along the body nothing stretches, so the body moves as
+one object, every segment at the same speed at every instant. A follower
+cannot have a speed of its own; it can only push or brake the whole body.
+Paying it for its own progress (runs 01 to 04) lets it push the head;
+charging it only a force that its leader causes (runs 05 and 06) teaches it
+nothing. A follower's goal is to follow the segment directly ahead of it:
+to go where it went. Every rule that prescribed a behaviour got the
+opposite, while energy, which only prices, gave a raised and lazy walk; so
+the new terms price outcomes and leave the rest to energy.
+
+**The design** (the user's, agreed 2026-10-16), built on run 01's design,
+without the chain:
+
+- **Direction belongs to the place, speed to the moment.** Where the body
+  turns is fixed to the ground: a follower should turn where its leader
+  turned, so its reference comes from that place. Its speed is the body's at
+  that instant; a speed copied from where its leader was would be a speed
+  from the past, pushing the head when it slows to turn and braking it when
+  it speeds up. So only the head is paid for moving (its task), and the
+  followers' goal is where their bodies lie.
+- **The trail.** A segment's trail is the path its front end traced: the
+  head's tip, or the spine joint it shares with the segment ahead. Its rear
+  end is one segment length behind (4.3 mm, the head 7.15 mm), so it lies
+  on its trail when its body points at where its front end was one segment
+  length ago. Its **offset** is the angle between the two. It is measured
+  by distance, never time: zero at any speed and standing still; each trail
+  is kept only one segment length back, and a front end swaying in place
+  adds nothing to it. Before a segment has walked a length, its trail runs
+  straight back along it.
+- **One number, two payers.** The joint between two segments only bends,
+  so a segment's offset is also the error of the joint in front of it: the
+  bend that would put the segment on its trail, less the bend it has. The
+  segment ahead steers that joint with its spine motor and pays the offset
+  fully; the segment itself, whose legs can only fight the joint, pays a
+  part, `trail_own_weight` (0.25 to start; the user also considers 0.5), so
+  that its legs help mend errors. Whoever causes an error pays it, which
+  cycle 3 lacked; a chattering spine knocks its own follower off the trail.
+  The head lays the trail: where it points is free, set by its task. It pays
+  its own offset fully, since only it decides where it walks: turning on
+  the spot about its neck costs almost nothing, walking crabwise does. It
+  also pays segment 1's, through its neck. The last segment pays its own.
+- **Squared.** An offset counts as its square in degrees, computed as
+  twice (1 − cos) of the angle in squared degrees: the square while the
+  angle is small, levelling off past a right angle. The natural sway of a
+  walk, about 5° in the middle of the body, then costs little beside real
+  errors, and a body walking backward (180°) costs only a few times a bad
+  turn.
+- **Its own critic, the trail critic.** The followers learn from trail and
+  cost, 1 : 1, their only goal being the trail; the head from task, trail
+  and cost, 1 : 0.25 : 1, so that its line never outweighs reaching
+  targets ([critic.md](critic.md)).
+- **Carrying oneself.** Energy alone does not stop a follower going limp
+  (below). So each follower pays the net force its two spine joints put on
+  it, its legs included: along the body, when it is pulled or pushes, and
+  up, when its neighbours hold it. The head pays only the second, so that
+  it is free to pull the body when the followers lag and still made to
+  stand on its own feet. Unlike the chain's front joint force, which carried
+  the push of every segment behind, the net force on a segment is its own
+  legs' doing. Linear in unit weights, priced at a quarter of the force
+  price (`carry_price` 0.25).
+- **Seen.** Each observation block holds its segment's offset and net
+  joint force ([observations.md](observations.md)), so each critic sees the
+  offsets it pays, its own and those of the segment behind, within its
+  radius.
+- **The spine stays active** (the user's choice, from biology: Anderson et
+  al., J. Exp. Biol. 1995, found the body muscles active in walking
+  *Scolopendra*; the spine helps the legs, never replaces them). A passive
+  spine, as in Aoi et al.'s centipede-like robot (Sci. Rep. 2016), whose
+  passive body joints follow its first module's steering, is kept for a
+  later test.
+
+**The trail, measured on scripted walks** (`analysis/trail_check.py` in
+`../Training`, CPU, 2026-10-16; the scripted wave walk with the spine's yaw
+motors at constant or alternating commands; mean offset sizes in degrees
+over 5 s):
+
+| Scripted case | The head's own | Segment 1 (the neck) | Trunk |
+| --- | ---: | ---: | ---: |
+| Walking straight | 4.7 | 3.9 | 6.5 |
+| Walking straight, the neck bent (crabwise) | 14.4 | 6.1 | 6.3 |
+| Spine flipping ±0.5 every 3 steps (like the runs' chatter) | 23.6 | 10.8 | 8.9 |
+| Spine flipping ±1 every 3 steps | 48.1 | 22.1 | 15.9 |
+| Body bent in an S | 25.7 | 15.4 | 18.6 |
+| Even bend, legs walking along each segment | 6.7 to 10.7 | 5.8 to 10.4 | 8.7 to 15.6 |
+| Standing still | 0.1 | 0.2 | 0.1 |
+| Standing, the head turning its neck | 3.9 | 2.4 | 0.7 |
+
+The walk sways about 5° in the middle of the body and 12 to 18° at the
+free tail. A crabwise head and a chattering spine show at the front; no
+scripted turn follows its trail, since the scripted legs walk along their
+own segment, and in a turn the rear segments skid inward: the learned legs
+must steer along the trail instead. The chattering spine made the scripted
+walk 2.5 to 4 times faster (42 to 103 and 168 mm/s), as an undulating
+body: probably why runs 01 to 04, paid for speed, learned it.
+
+**A lazy follower, measured** (`analysis/carry_check.py` in `../Training`,
+CPU, 2026-10-16; the scripted walk with segment 5's legs walking, limp or
+holding still; per second, through the reward's own code; forces in unit
+weights):
+
+| Segment 5's legs | Energy it pays (shared) | Carrying itself at 0.25 | Total | Pulled forward | Held up |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Walking | 0.71 mJ | 0.18 mJ | 0.89 mJ | 0.03 | −0.05 |
+| Limp | 0.49 mJ | 0.60 mJ | 1.09 mJ | 0.13 | 1.04 |
+| Holding still, dragged | 0.91 mJ | 0.35 mJ | 1.26 mJ | 0.55 | 0.07 |
+
+With energy alone, going limp is a third cheaper for the follower: it hangs
+from its neighbours, who hold its whole weight, and energy sharing returns
+too little of their effort to it. Carrying oneself at a quarter of the
+force price puts walking first, limp second, dragged last, while energy
+stays most of a walking follower's cost (the support its neighbours give
+it swings with every step, so even walking pays a fifth of its total).
+
+**What remains a risk.** The followers have no positive reward: they move
+because the head pulls them and because lagging and hanging cost. If the
+head does not lead, the body stands still: the deadlock of runs 05 and 06,
+whose shaking head kept a speed of 28 to 49 mm/s on a path of 1 mm radius.
+So a deadlock is read from the path's radius and the closing speed, not
+the head's speed, and its dial is the head's goal weight. A ramp of the
+costs (Hwangbo et al.'s, named in cycle 3) would change nothing here:
+each critic's advantage is normalised on its own, so a reward's scale
+disappears; only the weights between critics move the balance.
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -502,13 +657,14 @@ size, so the balance between goal and costs is the same along the body.
 
 ## Critics and balances
 
-| Agent | Goal critic | Cost critic |
-| --- | --- | --- |
-| Head | Task | Energy, pain and chain |
-| Each follower | Path; none from cycle 3 | Energy, pain and chain |
+| Agent | Goal critic | Trail critic (cycle 4) | Cost critic |
+| --- | --- | --- | --- |
+| Head | Task | Its own offset and segment 1's | Energy, pain, chain, and from cycle 4 being held up |
+| Each follower | Path; none from cycle 3 | The offset of the segment behind, and its own at `trail_own_weight` | Energy, pain, chain, and from cycle 4 carrying itself |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
-apart ([critic.md](critic.md)). Energy and pain share one critic rather
+apart ([critic.md](critic.md)); from cycle 4 the followers' trail and cost
+count 1 : 1, and the head's task, trail and cost 1 : 0.25 : 1. Energy and pain share one critic rather
 than one each: pain is rare, and a critic of a signal that is almost
 always zero would have its noise enlarged by the normalisation. Inside the
 cost critic, pain is priced in energy: how much energy a hit of a given
@@ -523,6 +679,8 @@ force is worth.
 | Pain : energy | 1 : 1 in activation, agreed |
 | Chain : energy | A unit weight on a joint as one motor fully on, agreed: in run 01's push about the followers' energy ([As built](#as-built)) |
 | Progress : arrival, for the head | Progress in millimetres; arrival worth one average approach of the current level, agreed |
+| Steering : own body, in the trail | 1 : 0.25 for the followers, the head 1 : 1, agreed (cycle 4) |
+| Carrying oneself : energy | A unit weight of net force as a quarter of one motor fully on, agreed (cycle 4): a fifth of a walking follower's cost, and going limp dearer than walking |
 
 ## As built
 
@@ -567,8 +725,34 @@ and c = `chain_price`. The rear pull's square is paid by every segment
 (`chain_rear_pull = "every"`, cycle 2), by the head alone (`"head"`) or by
 none (`"none"`). Without `follower_goal` (cycle 3) the followers' progress
 is measured but not paid, and their critics learn from the cost channel
-alone (the environment's `segment_reward_channels`). The parts are logged
-apart: progress, arrival, pushing, braking, force, pain, chain.
+alone (the environment's `segment_reward_channels`).
+
+**The trail channel** (cycle 4, `follow_trail`, which needs `follower_goal`
+off), in squared degrees. With θᵢ segment *i*'s offset from its trail
+(`environment/cooperative_trail.py`), and s(θ) = (180/π)² · 2 (1 − cos θ),
+the square of θ in degrees while it is small:
+
+> trail = −(s(θᵢ₊₁) + k · s(θᵢ))
+
+with k = `trail_own_weight` for the followers and 1 for the head, and no
+first term for the last segment. Each segment's front end, the head's tip
+or its spine joint, adds a point to its trail each time it has moved an
+eighth of the shortest segment length; θᵢ is the angle between the
+segment's forward axis and the line from the newest point at least one
+segment length (`BodyMeasures.segment_lengths_m`) behind its front end to
+the front end. The head's critics are weighed 1 : 0.25 : 1 by
+`[agents] head_advantage_weights`.
+
+**Carrying oneself** (cycle 4, `carry_price` > 0), in the cost channel. With
+g the net force of a segment's two spine joints on it, its legs included,
+as a mean over the step's physics steps, in unit weights, g_along along its
+forward axis and g_up up:
+
+> carry = −p · c_carry · (|g_along| + max(g_up, 0))
+
+with c_carry = `carry_price`, and no along term for the head. The parts are
+logged apart: progress, arrival, trail, pushing, braking, force, pain,
+chain, carry.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

@@ -59,8 +59,8 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 6), in the order of reward_part_names: the goal"
-        " in mm, the cost in mJ",
+        "Each reward part, (W, N, 9), in the order of reward_part_names: the goal"
+        " in mm, the trail in squared degrees, the cost in mJ",
         parts=PART_NAMES,
     )
     contact_flags: torch.Tensor = measure(
@@ -95,6 +95,10 @@ class StepFacts:
     spine_bend: torch.Tensor = measure(
         "Angle of the spine joint behind the segment, either way; 0 for the"
         " rear, (W, N)",
+        "rad",
+    )
+    trail_offset: torch.Tensor = measure(
+        "How far the segment's body points off its trail, either way, (W, N)",
         "rad",
     )
     body_height: torch.Tensor = measure("Height of the segment's centre, (W, N)", "m")
@@ -191,8 +195,9 @@ class EpisodeSummary:
         "Total distance the head's tip travelled, (W,)", "m"
     )
     segment_return: torch.Tensor = measure(
-        "Each segment's summed rewards by channel, (W, N, 2): the goal in mm,"
-        " the cost in mJ",
+        "Each segment's summed rewards by channel, (W, N, C), in the order of"
+        " channel_names: the goal in mm, the trail in squared degrees, the cost"
+        " in mJ",
         parts=CHANNELS,
     )
     energy: torch.Tensor = measure(
@@ -268,8 +273,8 @@ class CooperativeDiagnostics:
 
     ``step`` and ``episode`` are the categories the experiment reads, and
     ``simulation`` is the physics simulation's. ``reward_part_names`` labels
-    the reward's parts; a recording scores each world by ``recording_score``,
-    named ``score_name``.
+    the reward's parts and ``channel_names`` its channels; a recording scores
+    each world by ``recording_score``, named ``score_name``.
     """
 
     reward_part_names = list(PART_NAMES)
@@ -283,9 +288,11 @@ class CooperativeDiagnostics:
         head_outline: HeadOutline,
         device: torch.device | str,
         simulation_facts: SimulationFacts,
+        channel_names: tuple[str, ...] = CHANNELS,
     ) -> None:
         """Allocate both categories and the running totals, all zero."""
         self.simulation = simulation_facts
+        self.channel_names = list(channel_names)
         self.unit_weight_n = unit_weight_n
         self.head_outline = head_outline
         self.feet = FootCycles(world_count, segment_count, device)
@@ -308,6 +315,7 @@ class CooperativeDiagnostics:
             segment_moved=zeros(segment_count),
             own_energy=zeros(segment_count, len(ENERGY_PARTS)),
             spine_bend=zeros(segment_count),
+            trail_offset=zeros(segment_count),
             body_height=zeros(segment_count),
             uprightness=zeros(segment_count),
             head_distance=zeros(),
@@ -329,7 +337,7 @@ class CooperativeDiagnostics:
             targets_in_time=zeros(),
             head_progress=zeros(),
             head_path_length=zeros(),
-            segment_return=zeros(segment_count, len(CHANNELS)),
+            segment_return=zeros(segment_count, len(channel_names)),
             energy=zeros(len(ENERGY_PARTS)),
             upside_down_share=zeros(),
             targets_by_bearing=zeros(len(BEARINGS)),
@@ -393,6 +401,7 @@ class CooperativeDiagnostics:
         rewards: torch.Tensor,
         step_rewards: StepRewards,
         own_energy: torch.Tensor,
+        trail_offset: torch.Tensor,
         arrived: torch.Tensor,
         in_time: torch.Tensor,
         truncated: torch.Tensor,
@@ -401,9 +410,9 @@ class CooperativeDiagnostics:
 
         Called once per step, after the rewards are known and before any target
         is replaced or world restarted; the arguments are values the
-        environment already has: ``rewards`` by channel, ``(W, N, 2)``, the
-        reward's parts, each segment's own energy, and ``in_time`` marking the
-        arrivals within their stopwatch.
+        environment already has: ``rewards`` by channel, ``(W, N, C)``, the
+        reward's parts, each segment's own energy, its offset from its trail,
+        and ``in_time`` marking the arrivals within their stopwatch.
         """
         state = physical_state
         step = self.step
@@ -436,6 +445,7 @@ class CooperativeDiagnostics:
         )
         step.own_energy.copy_(own_energy)
         step.spine_bend.copy_(state.spine_yaw_position.abs())
+        step.trail_offset.copy_(trail_offset.abs())
         step.body_height.copy_(state.body_height)
         # The z component of each segment's up axis: 1 - 2(x² + y²).
         step.uprightness.copy_(

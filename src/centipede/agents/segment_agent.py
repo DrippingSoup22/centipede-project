@@ -36,6 +36,7 @@ class SegmentAgent:
         action_size: int,
         reward_channel_count: int = 1,
         baseline_input_size: int = 0,
+        advantage_weights: tuple[float, ...] = (),
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
@@ -44,7 +45,8 @@ class SegmentAgent:
         ``action_size`` is how many motors the segment commands: its leg
         motors, and with spine control the spine joint behind it. The agent
         has a critic for each of the ``reward_channel_count`` reward channels,
-        and with ``baseline_input_size`` a baseline for each, which sees its
+        weighed by ``advantage_weights`` (empty: 1 each), and with
+        ``baseline_input_size`` a baseline for each, which sees its
         observation and that many extra inputs (``store_baseline_inputs``).
         """
         self.segment_index = segment_index
@@ -100,9 +102,7 @@ class SegmentAgent:
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
-            advantage_weights=(settings.advantage_weights or None)
-            if several_critics
-            else None,
+            advantage_weights=(advantage_weights or None) if several_critics else None,
             baseline_networks=baseline_networks,
             value_normalization=settings.value_normalization,
         )

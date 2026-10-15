@@ -22,26 +22,34 @@ from centipede.environment.cooperative_reward import (
     energy_sharing_weights,
 )
 from centipede.environment.cooperative_task import CooperativeTask
+from centipede.environment.cooperative_trail import TrailMemory
 from centipede.environment.environment import create_environment
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.settings import CooperatorsSettings, EnvironmentSettings
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.model_mapping import HeadOutline
+from centipede.settings_section import SettingsError
 
 SETTINGS = CooperatorsSettings.from_section({})
 BODY = BodyMeasures(
-    unit_weight_n=1e-3, leg_push_n=2e-3, body_length_m=0.05, turning_circle_m=0.03
+    unit_weight_n=1e-3,
+    leg_push_n=2e-3,
+    body_length_m=0.05,
+    turning_circle_m=0.03,
+    segment_lengths_m=(0.01,) * 5,
 )
 SEGMENTS, LEGS = 5, 8
 
 
 def resting_state(world_count: int) -> PhysicalState:
-    """Upright segments facing +x, a centimetre apart, the head's tip at 5 mm."""
+    """Upright segments facing +x, a centimetre apart, the head's tip at 5 mm
+    and each joint halfway between two centres."""
     state = PhysicalState.allocate(world_count, SEGMENTS, LEGS, "cpu")
     state.body_quaternion[..., 0] = 1.0
     state.body_planar_position[..., 0] = -0.01 * torch.arange(SEGMENTS)
     state.head_tip_position[:, 0] = 0.005
+    state.front_end_position[..., 0] = 0.005 - 0.01 * torch.arange(SEGMENTS)
     return state
 
 
@@ -106,6 +114,7 @@ def test_energy_is_shared_with_the_neighbours_seen_and_pain_stays_with_the_press
         0.025,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         action,
+        torch.zeros(1, SEGMENTS),
     )
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
@@ -141,6 +150,7 @@ def test_the_chain_charges_each_segment_its_own_joints_and_its_blocks_show_them(
         0.025,
         zeros,
         zeros,
+        torch.zeros(1, SEGMENTS),
     )
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
@@ -152,7 +162,9 @@ def test_the_chain_charges_each_segment_its_own_joints_and_its_blocks_show_them(
         SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, True, "cpu"
     )
     assert builder.block_size == 43
-    observations = builder.build(state, torch.tensor([[0.025, 0.01]]), zeros)
+    observations = builder.build(
+        state, torch.tensor([[0.025, 0.01]]), zeros, torch.zeros(1, SEGMENTS)
+    )
     blocks = observations[0, 1, :-2].reshape(5, 43)
     # Blocks: itself, the segments ahead, those behind. Segment 1 sees its
     # front joint in its own block and its rear joint in segment 2's.
@@ -192,6 +204,7 @@ def test_followers_without_a_goal_and_who_pays_the_rear_pull(rear_pull, chain_pa
         0.025,
         zeros,
         zeros,
+        torch.zeros(1, SEGMENTS),
     )
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
@@ -199,6 +212,100 @@ def test_followers_without_a_goal_and_who_pays_the_rear_pull(rear_pull, chain_pa
     one_motor = settings.force_price_w * 0.02 * 1e3
     expected = -one_motor * torch.tensor([*chain_paid, 0.0, 0.0])
     torch.testing.assert_close(by_name["chain"], expected)
+
+
+def at_yaw(state: PhysicalState, degrees: float) -> None:
+    """Turn every segment of the state to face ``degrees`` from +x."""
+    half = math.radians(degrees) / 2
+    state.body_quaternion[:] = torch.tensor([math.cos(half), 0.0, 0.0, math.sin(half)])
+
+
+def test_the_trail_is_where_the_front_end_went():
+    """A segment a centimetre long walks 2 cm along x: it lies on its trail.
+    Turned 30 degrees where it stands, it points 30 degrees left of it. Facing
+    and walking a centimetre along y, it lies on its trail again; backing up a
+    centimetre, it points the trail's opposite way."""
+    trail = TrailMemory(1, (0.01,), "cpu")
+    state = PhysicalState.allocate(1, 1, LEGS, "cpu")
+    at_yaw(state, 0.0)
+    trail.restart(torch.tensor([True]), state)
+
+    def walk(steps: int, dx: float, dy: float) -> float:
+        for _ in range(steps):
+            state.front_end_position[0, 0] += torch.tensor([dx, dy])
+            offset = trail.update(state)
+        return math.degrees(offset[0, 0])
+
+    assert walk(20, 0.001, 0.0) == pytest.approx(0.0, abs=1e-4)
+    at_yaw(state, 30.0)
+    assert walk(1, 0.0, 0.0) == pytest.approx(30.0, abs=1e-4)
+    at_yaw(state, 90.0)
+    assert walk(12, 0.0, 0.001) == pytest.approx(0.0, abs=1e-4)
+    assert abs(walk(12, 0.0, -0.001)) == pytest.approx(180.0, abs=1e-3)
+
+
+def test_the_trail_charges_the_steerer_and_carrying_oneself_the_carried():
+    """Offsets of 5, 0, 10, 0 and 20 degrees: the head pays its own, each
+    segment the one behind it fully and its own at a quarter. Segment 1 is
+    pulled by half a unit weight and held up by one; the head, pushed and
+    held up a little, pays only for being held up; segment 2, pressed down,
+    pays nothing. Each block shows its segment's net force and offset."""
+    settings = CooperatorsSettings.from_section(
+        {"follower_goal": False, "follow_trail": True, "carry_price": 0.25}
+    )
+    reward = CooperativeReward(
+        settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
+    )
+    state = resting_state(1)
+    state.net_joint_force[0, :3] = (
+        torch.tensor([[-0.3, 0.2], [0.5, 1.0], [0.0, -0.4]]) * 1e-3
+    )
+    offset = torch.deg2rad(torch.tensor([[5.0, 0.0, 10.0, 0.0, 20.0]]))
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    head_tip = state.head_tip_position[:, :2]
+    channels, parts, _ = reward.compute(
+        state,
+        state.body_planar_position.clone(),
+        head_tip.clone(),
+        head_tip + 0.1,
+        torch.tensor([False]),
+        0.025,
+        zeros,
+        zeros,
+        offset,
+    )
+
+    def squared(degrees: float) -> float:
+        return (180 / math.pi) ** 2 * 2 * (1 - math.cos(math.radians(degrees)))
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    expected = [
+        squared(5),
+        squared(10),
+        0.25 * squared(10),
+        squared(20),
+        0.25 * squared(20),
+    ]
+    torch.testing.assert_close(
+        by_name["trail"], -torch.tensor(expected), rtol=1e-4, atol=0
+    )
+    assert squared(10) == pytest.approx(100.0, rel=0.01)  # its square, in degrees
+    one_motor = settings.force_price_w * 0.02 * 1e3
+    carried = torch.tensor([0.2, 0.5 + 1.0, 0.0, 0.0, 0.0])
+    torch.testing.assert_close(by_name["carry"], -0.25 * one_motor * carried)
+    assert channels.shape == (1, SEGMENTS, 3)
+    torch.testing.assert_close(channels[0, :, 1], by_name["trail"])
+
+    builder = CooperativeObservationBuilder(
+        SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, False, "cpu", trail=True, carry=True
+    )
+    assert builder.block_size == 45
+    observations = builder.build(state, torch.tensor([[0.025, 0.01]]), zeros, offset)
+    own = observations[0, 1, :45]
+    torch.testing.assert_close(own[33:36], torch.tensor([0.5, 1.0, 0.0]))
+    torch.testing.assert_close(observations[0, 2, 35], offset[0, 2])
+    with pytest.raises(SettingsError, match="follower_goal"):
+        CooperatorsSettings.from_section({"follow_trail": True})
 
 
 def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target():
@@ -211,7 +318,9 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
     state.foot_normal_force[0, 1] = torch.tensor([2e-3, 1e-3])
     last_action = torch.rand(1, SEGMENTS, LEGS + 1)
 
-    observations = builder.build(state, torch.tensor([[0.025, 0.01]]), last_action)
+    observations = builder.build(
+        state, torch.tensor([[0.025, 0.01]]), last_action, torch.zeros(1, SEGMENTS)
+    )
 
     own = observations[0, 1, :block]
     torch.testing.assert_close(own[:3], torch.tensor([0.0, 0.0, -1.0]))  # gravity
@@ -253,6 +362,7 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
             torch.zeros(2, SEGMENTS, 2),
             step_rewards,
             torch.zeros(2, SEGMENTS, 3),
+            zeros,
             arrived,
             arrived,
             torch.full((2,), step == 39),  # the time limit
@@ -311,3 +421,33 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
     assert truncated.all() and not terminated.any()
     assert environment.episode_steps.tolist() == [0, 0]
     assert not torch.equal(final, environment._observations())
+
+
+def test_with_the_trail_the_followers_learn_from_trail_and_cost():
+    """The whole environment on v4: three channels, the followers on two."""
+    settings = EnvironmentSettings.from_section(
+        {
+            "design": "cooperators",
+            "max_episode_steps": 3,
+            "observation_radius": 2,
+            "simulation": {
+                "model_path": str(Path("models/assembly_v4.xml").resolve()),
+                "backend": "cpu",
+                "world_count": 2,
+            },
+            "cooperators": {
+                "stagger_first_episodes": False,
+                "follower_goal": False,
+                "follow_trail": True,
+                "carry_price": 0.25,
+            },
+        }
+    )
+    environment = create_environment(settings)
+    environment.reset(seed=0)
+
+    observations, rewards, *_ = environment.step(torch.zeros(2, 12, 9))
+
+    assert environment.segment_reward_channels[:2] == [(0, 1, 2), (1, 2)]
+    assert rewards.shape == (2, 12, 3) and torch.isfinite(rewards).all()
+    assert observations.shape == (2, 12, 5 * 45 + 2)

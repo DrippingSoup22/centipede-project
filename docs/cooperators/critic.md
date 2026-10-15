@@ -35,6 +35,15 @@ The environment lists the reward channels each segment learns from
 baseline, for each; the log shows a missing critic's explained variance as
 empty.
 
+**From cycle 4 every segment has a trail critic** (the user, 2026-10-16):
+the reward has three channels, goal, trail and cost
+([reward.md](reward.md#cycle-4-the-trail-and-carrying-oneself-the-users-design)).
+The followers learn from trail and cost, 1 : 1, the trail being their goal;
+the head from all three, task, trail and cost weighed **1 : 0.25 : 1**
+(`[agents] head_advantage_weights`), so that its line never outweighs
+reaching targets. Each agent weighs its critics by the weights of the
+channels it learns from.
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone

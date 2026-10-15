@@ -80,7 +80,8 @@ class AgentSettings:
 
     With an environment that pays several reward channels, each agent has a
     critic per channel, and ``advantage_weights`` weighs their normalised
-    advantages, one per channel (empty: 1 each). With ``critic_baselines``
+    advantages, one per channel (empty: 1 each); ``head_advantage_weights``,
+    when given, are the head's own. With ``critic_baselines``
     each critic also has a baseline that sees the actions the neighbours took
     at the same step (RL_lib's PPO), and with ``value_normalization`` the
     critics learn standardised return targets.
@@ -102,6 +103,7 @@ class AgentSettings:
     normaliser_epsilon: float
     observation_clip: float
     advantage_weights: tuple[float, ...]
+    head_advantage_weights: tuple[float, ...]
     critic_baselines: bool
     value_normalization: bool
     ppo: PPOSettings
@@ -177,6 +179,9 @@ class AgentSettings:
             observation_clip=section.positive_number("observation_clip", default=10.0),
             advantage_weights=section.number_list(
                 "advantage_weights", default=(), minimum=0.0
+            ),
+            head_advantage_weights=section.number_list(
+                "head_advantage_weights", default=(), minimum=0.0
             ),
             critic_baselines=section.boolean("critic_baselines", default=False),
             value_normalization=section.boolean("value_normalization", default=False),

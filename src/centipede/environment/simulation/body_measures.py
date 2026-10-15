@@ -20,13 +20,17 @@ class BodyMeasures:
     the model's pose. ``body_length_m`` runs from the head's tip to the rear
     end of the last segment's body shape, and ``turning_circle_m`` is the
     diameter of the circle the segments' centres lie on with every spine yaw
-    joint bent to its limit.
+    joint bent to its limit. ``segment_lengths_m`` are each segment's length
+    from its front end to its rear end in the plane: the head's from its tip
+    to its spine joint, the others' from joint to joint, the rear segment's
+    twice the way from its joint to its centre.
     """
 
     unit_weight_n: float
     leg_push_n: float
     body_length_m: float
     turning_circle_m: float
+    segment_lengths_m: tuple[float, ...]
 
 
 def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
@@ -67,11 +71,19 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
     bend_limit = np.abs(model.jnt_range[spine_joint_ids]).min()
     turning_circle = unit_spacing / np.sin(bend_limit / 2)
 
+    front_ends = np.vstack([head_tip, data.xanchor[spine_joint_ids]])[:, :2]
+    rear_length = 2 * np.linalg.norm(front_ends[-1] - centers[-1, :2])
+    segment_lengths = [
+        *np.linalg.norm(np.diff(front_ends, axis=0), axis=1),
+        rear_length,
+    ]
+
     return BodyMeasures(
         unit_weight_n=float(weight_n / segment_count),
         leg_push_n=float(max_torque / reach),
         body_length_m=float(body_length),
         turning_circle_m=float(turning_circle),
+        segment_lengths_m=tuple(float(length) for length in segment_lengths),
     )
 
 

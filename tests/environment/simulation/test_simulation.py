@@ -58,6 +58,8 @@ def test_body_measures_are_read_from_the_model():
     assert measures.leg_push_n == pytest.approx(0.939e-3, rel=1e-3)
     assert measures.body_length_m == pytest.approx(0.05475, rel=1e-3)
     assert measures.turning_circle_m == pytest.approx(0.0329, rel=1e-2)
+    # The head from its tip to its joint, then a unit from joint to joint.
+    assert measures.segment_lengths_m == pytest.approx((0.00715,) + (0.0043,) * 11)
 
 
 def test_missing_model_file_fails_clearly():

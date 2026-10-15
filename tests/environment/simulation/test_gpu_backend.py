@@ -268,6 +268,13 @@ def test_physical_state_matches_cpu_mujoco(model_path):
                 expected["spine_yaw_velocity"] = data.qvel[
                     mapping.spine_dof_addresses[segment_index]
                 ]
+            # The front end: the head's tip, then the joint with the one ahead.
+            spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
+            expected["front_end_position"] = (
+                data.site_xpos[mapping.head_tip_site_id, :2]
+                if segment_index == 0
+                else data.xanchor[spine_joint_ids[segment_index - 1], :2]
+            )
             for field, value in expected.items():
                 actual = getattr(state, field)[world_index, segment_index]
                 assert np.allclose(actual.cpu().numpy(), value, atol=1e-5), field
@@ -446,6 +453,9 @@ def test_gpu_joint_forces_match_cpu_joint_forces(model, mapping):
     expected = cpu.physical_state.front_joint_force[0]
     actual = gpu.physical_state.front_joint_force[0].cpu()
     assert actual[0] == expected[0] == 0
+    assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
+    expected = cpu.physical_state.net_joint_force[0]
+    actual = gpu.physical_state.net_joint_force[0].cpu()
     assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
 
 

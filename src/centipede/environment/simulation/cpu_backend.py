@@ -59,6 +59,8 @@ class CPUBackend:
         self.start_heading_range_rad = start_heading_range_rad
         self.measure_effort = measure_effort
         self.measure_joint_forces = measure_joint_forces
+        # The spine's yaw joints, from the head back: the joints its motors drive.
+        self.spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -90,7 +92,9 @@ class CPUBackend:
         self._effort = {
             name: getattr(self.physical_state, name).numpy() for name in EFFORT_FIELDS
         }
+        self._front_end_position = self.physical_state.front_end_position.numpy()
         self._front_joint_force = self.physical_state.front_joint_force.numpy()
+        self._net_joint_force = self.physical_state.net_joint_force.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
@@ -151,6 +155,7 @@ class CPUBackend:
                 self._add_effort(world_index, 1.0)
             if self.measure_joint_forces:
                 self._front_joint_force[world_index] = 0.0
+                self._net_joint_force[world_index] = 0.0
                 self._add_joint_forces(world_index, 1.0)
         self.diagnostics.fill_from_cpu(self.world_data)
 
@@ -179,6 +184,7 @@ class CPUBackend:
                 self._clear_effort(world_index)
             if self.measure_joint_forces:
                 self._front_joint_force[world_index] = 0.0
+                self._net_joint_force[world_index] = 0.0
             for _ in range(self.physics_steps_per_action):
                 mujoco.mj_step(self.model, data)
                 if self.measure_effort:
@@ -272,23 +278,33 @@ class CPUBackend:
 
     def _add_joint_forces(self, world_index: int, scale: float) -> None:
         """Add ``scale`` times each segment's front joint force, along its
-        forward axis, to one world's measure.
+        forward axis, and its net joint force, along it and up, to one world's
+        measures.
 
         MuJoCo's ``cfrc_int`` holds, for every body, the force its parent
         exerts on the subtree it heads, about the subtree's centre, with the
-        force in its last three values. ``mj_rnePostConstraint`` fills it from
-        the physics step just taken. The body tree runs from the head back, so
-        a segment's subtree is itself and everything behind it, and its
-        parent is the segment ahead.
+        force in its last three values, in world axes. ``mj_rnePostConstraint``
+        fills it from the physics step just taken. The body tree runs from the
+        head back, so a segment's subtree is itself and everything behind it,
+        and its parent is the segment ahead. The net force on a segment alone
+        is then what its front joint gives its subtree less what it passes on
+        to the subtree behind.
         """
         data = self.world_data[world_index]
         mujoco.mj_rnePostConstraint(self.model, data)
-        behind_head = self.mapping.body_ids[1:]
-        force = data.cfrc_int[behind_head, 3:]
-        forward_axes = data.xmat[behind_head][:, [0, 3, 6]]
-        self._front_joint_force[world_index, 1:] += scale * (force * forward_axes).sum(
+        body_ids = self.mapping.body_ids
+        front = np.zeros((len(body_ids), 3))
+        front[1:] = data.cfrc_int[body_ids[1:], 3:]
+        net = front.copy()
+        net[:-1] -= front[1:]
+        forward_axes = data.xmat[body_ids][:, [0, 3, 6]]
+        self._front_joint_force[world_index] += scale * (front * forward_axes).sum(
             axis=1
         )
+        self._net_joint_force[world_index, :, 0] += scale * (net * forward_axes).sum(
+            axis=1
+        )
+        self._net_joint_force[world_index, :, 1] += scale * net[:, 2]
 
     def _check_world(self, world_index: int) -> None:
         """Stop the run if MuJoCo reported or produced an impossible state.
@@ -327,6 +343,14 @@ class CPUBackend:
         self._leg_joint_position[world_index] = data.qpos[mapping.leg_qpos_addresses]
         self._leg_joint_velocity[world_index] = data.qvel[mapping.leg_dof_addresses]
         self._head_tip_position[world_index] = data.site_xpos[mapping.head_tip_site_id]
+        # The head's tip, then the spine joints: each segment's joint with the
+        # segment ahead.
+        self._front_end_position[world_index, 0] = data.site_xpos[
+            mapping.head_tip_site_id, :2
+        ]
+        self._front_end_position[world_index, 1:] = data.xanchor[
+            self.spine_joint_ids, :2
+        ]
         # Each segment's joint behind it; the rear segment's entry stays zero.
         self._spine_yaw_position[world_index, :-1] = data.qpos[
             mapping.spine_qpos_addresses

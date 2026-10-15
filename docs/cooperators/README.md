@@ -52,9 +52,9 @@ Set by the user on 2026-10-14.
 
 | Part | File | Status |
 | --- | --- | --- |
-| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL); from cycle 3 the followers have the cost critic only |
-| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured; cycle 3: only the head has a goal, the followers pay the chain at ten times the force price |
-| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces |
+| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL); from cycle 3 the followers have the cost critic only; from cycle 4 a trail critic for every segment, the head's weighed 1 : 0.25 : 1 |
+| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured; cycle 3: only the head has a goal, the followers pay the chain at ten times the force price; cycle 4: run 01's design without the chain, the followers' goal the trail (how far off it, not how far along), each segment paying its own offset and the offset of the one it steers, and carrying itself |
+| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces, 45 with the offset and the net joint force (cycle 4) |
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
 | Task | [task.md](task.md) | Built, with numbers |
@@ -70,11 +70,12 @@ behaviour, so main's configurations keep their meaning.
 | --- | --- | --- |
 | Environment | `environment/cooperative_environment.py`, made by the front file's `create_environment` | `[environment] design`, `max_episode_steps`, `observation_radius` |
 | Task | `environment/cooperative_task.py` | `[environment.cooperators]` |
-| Observations | `environment/cooperative_observations.py` | `[environment.cooperators] observe_joint_forces`, off by default |
-| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]`; the chain by `chain_price`, 0 (off) by default, and who pays the rear pull by `chain_rear_pull`, `"every"` by default; `follower_goal`, on by default, pays the followers progress |
-| Reward channels | `environment/cooperative_environment.py`'s `segment_reward_channels`: those each segment learns from, the head both, a follower without a goal its cost alone | `[environment.cooperators] follower_goal` |
-| Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU; the joint forces too when the chain or the observations use them (`measure_joint_forces`, MuJoCo's `cfrc_int`) | |
-| Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `critic_baselines`, `value_normalization` |
+| Observations | `environment/cooperative_observations.py` | `[environment.cooperators] observe_joint_forces`, off by default; the offset with `follow_trail`, the net joint force with `carry_price` |
+| Reward | `environment/cooperative_reward.py` | `[environment.cooperators]`; the chain by `chain_price`, 0 (off) by default, and who pays the rear pull by `chain_rear_pull`, `"every"` by default; `follower_goal`, on by default, pays the followers progress; the trail by `follow_trail`, off by default, with `trail_own_weight`, 0.25; carrying oneself by `carry_price`, 0 (off) by default |
+| Trail | `environment/cooperative_trail.py`: each segment's trail, kept one segment length back, and its offset after every step | `[environment.cooperators] follow_trail` |
+| Reward channels | `environment/cooperative_environment.py`'s `segment_reward_channels`: those each segment learns from, the head both, a follower without a goal its cost alone; with the trail three channels, the head all, the followers trail and cost | `[environment.cooperators] follower_goal`, `follow_trail` |
+| Forces and work | `environment/simulation`, measured after every physics step (`measure_effort`), CPU and GPU; the joint forces too, each segment's front joint force and net joint force, when the chain, carrying oneself or the observations use them (`measure_joint_forces`, MuJoCo's `cfrc_int`); each segment's front end, the head's tip or its spine joint, always | |
+| Critics | `agents/`, with RL_lib's PPO on its `cooperators` branch | `[agents] advantage_weights`, `head_advantage_weights`, `critic_baselines`, `value_normalization` |
 | Level | `experiment/`: moved after every update cycle, logged as `task`, kept in checkpoints | |
 | Diagnostics | `environment/cooperative_diagnostics.py`: each step, each 20 s episode, and the gait read from the feet (each foot's lag behind the foot ahead and the foot opposite); the terminal's own line in `experiment/progress.py`. No training report, since the monitor shows the log; the evaluation page has its own layout (section 2b of `experiment/report_page.html`) | |
 | Recordings | `interaction_loop/recording.py`, for both designs: one episode of each of the first worlds, each from its own episode start, ending by 25, 50, 75 and 100% of the update cycles; worlds ranked by targets reached | `[run] record_worlds`, 0 (nothing) by default |

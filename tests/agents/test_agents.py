@@ -288,6 +288,34 @@ def test_followers_without_a_goal_learn_from_their_cost_alone():
     assert torch.isfinite(critics[0]).all() and torch.isfinite(critics[:, 1]).all()
 
 
+def test_each_segment_weighs_its_own_channels_and_the_head_may_weigh_its_own():
+    """With goal, trail and cost, the head weighs all three by its own
+    weights and the followers their trail and cost by the common ones."""
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "ppo": {"minibatch_size": 4},
+            "advantage_weights": [1.0, 2.0, 3.0],
+            "head_advantage_weights": [1.0, 0.25, 1.0],
+        }
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        reward_channel_count=3,
+        segment_reward_channels=[(0, 1, 2), (1, 2), (1, 2)],
+    )
+
+    weights = [a.ppo.advantage_weights.tolist() for a in agents.segment_agents]
+    assert weights == [[1.0, 0.25, 1.0], [2.0, 3.0], [2.0, 3.0]]
+
+
 @pytest.mark.parametrize("device", DEVICES)
 def test_baselines_give_zero_and_seeded_uniform_actions(device):
     observations = torch.ones(WORLDS, SEGMENTS, OBSERVATION_SIZE, device=device)

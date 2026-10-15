@@ -224,6 +224,12 @@ def test_physical_state_matches_mujoco(model, mapping):
                 spine = model.joint(f"segment_{segment + 1:02d}_yaw")
                 expected["spine_yaw_position"] = data.qpos[spine.qposadr[0]]
                 expected["spine_yaw_velocity"] = data.qvel[spine.dofadr[0]]
+            # The front end: the head's tip, then the joint with the one ahead.
+            expected["front_end_position"] = (
+                data.site_xpos[model.site("head_tip").id, :2]
+                if segment == 0
+                else data.xanchor[model.joint(f"segment_{segment:02d}_yaw").id, :2]
+            )
             for field, value in expected.items():
                 actual = getattr(state, field)[row].numpy()
                 assert np.allclose(actual, value, rtol=1e-6, atol=1e-7), field
@@ -325,7 +331,9 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
 def test_joint_forces_carry_a_push_from_behind_up_the_body(model, mapping):
     """The rear segment, pushed forward with three body weights, pushes the
     segment ahead with most of it, and each joint further up carries less:
-    each joint moves everything ahead of it. The head has no joint ahead."""
+    each joint moves everything ahead of it. The head has no joint ahead.
+    Net of both its joints, the rear segment is held back by most of the
+    push, and the joints' forces on the whole body cancel."""
     backend = CPUBackend(
         model, mapping, 1, physics_steps_per_action(model), measure_joint_forces=True
     )
@@ -339,6 +347,9 @@ def test_joint_forces_carry_a_push_from_behind_up_the_body(model, mapping):
     assert force[0] == 0
     assert force[-1] < -0.5 * push
     assert (force[1:].diff() < 0).all()
+    net = backend.physical_state.net_joint_force[0]
+    assert net[-1, 0] == force[-1]
+    assert net[:, 0].sum().abs() < 0.01 * push
 
 
 # -- Failure -------------------------------------------------------------------

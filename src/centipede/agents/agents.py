@@ -50,24 +50,24 @@ class Agents:
         first and then, with spine control, the spine joint behind it. So are
         ``reward_channel_count``; ``segment_reward_channels``, the channels
         each segment learns from, one critic each (every channel if not
-        given; a segment takes them all or one, so ``advantage_weights`` fits
-        every segment with several critics); and ``neighbour_table``, the
-        segments each one sees, itself first, from which the critics'
-        baselines take the neighbours' actions.
+        given; each weighs its critics by the weights of its channels in
+        ``advantage_weights``, the head by ``head_advantage_weights`` when
+        given); and ``neighbour_table``, the segments each one sees, itself
+        first, from which the critics' baselines take the neighbours' actions.
         """
         self.segment_count = segment_count
         self.observation_size = observation_size
         self.settings = settings
         self.segment_action_sizes = segment_action_sizes
         self.action_size = max(self.segment_action_sizes)
-        if settings.advantage_weights and (
-            len(settings.advantage_weights) != reward_channel_count
-        ):
-            raise SettingsError(
-                f"[agents] advantage_weights must have one weight for each of the"
-                f" environment's {reward_channel_count} reward channels, got"
-                f" {list(settings.advantage_weights)}"
-            )
+        for name in ("advantage_weights", "head_advantage_weights"):
+            weights = getattr(settings, name)
+            if weights and len(weights) != reward_channel_count:
+                raise SettingsError(
+                    f"[agents] {name} must have one weight for each of the"
+                    f" environment's {reward_channel_count} reward channels, got"
+                    f" {list(weights)}"
+                )
         # Each segment's neighbours, without itself; a missing one points to
         # the row after the last segment, which holds no action.
         self.neighbours = (
@@ -97,6 +97,7 @@ class Agents:
                 action_size=self.segment_action_sizes[segment_index],
                 reward_channel_count=len(self.segment_reward_channels[segment_index]),
                 baseline_input_size=baseline_input_size,
+                advantage_weights=self._weights_of(segment_index),
             )
             for segment_index in range(segment_count)
         ]
@@ -108,6 +109,16 @@ class Agents:
             reward_channel_count=reward_channel_count,
             segment_reward_channels=self.segment_reward_channels,
         )
+
+    def _weights_of(self, segment_index: int) -> tuple[float, ...]:
+        """The weights of the segment's critics: those of its channels, the
+        head's own if it has them; empty for 1 each."""
+        weights = self.settings.advantage_weights
+        if segment_index == 0 and self.settings.head_advantage_weights:
+            weights = self.settings.head_advantage_weights
+        if not weights:
+            return ()
+        return tuple(weights[c] for c in self.segment_reward_channels[segment_index])
 
     def act(self, observations: torch.Tensor, training: bool) -> torch.Tensor:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.

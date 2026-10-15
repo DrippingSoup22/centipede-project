@@ -46,6 +46,9 @@ class PhysicalState:
     head_tip_position: torch.Tensor  # (W, 3), world position
     spine_yaw_position: torch.Tensor  # (W, N), joint behind the segment, rad
     spine_yaw_velocity: torch.Tensor  # (W, N), joint behind the segment, rad/s
+    # Each segment's front end in the plane, world x and y: the head's tip,
+    # then each segment's joint with the segment ahead.
+    front_end_position: torch.Tensor  # (W, N, 2)
     # The effort of the last step, measured after each of its physics steps
     # when the simulation is asked to (``measure_effort``), zeros otherwise:
     # forces are means over the step, in newtons, work is added up, in joules.
@@ -63,6 +66,11 @@ class PhysicalState:
     # Positive pulls it forward (it lags), negative is the segment pushing the
     # one ahead. The head has no segment ahead; its entries stay zero.
     front_joint_force: torch.Tensor  # (W, N)
+    # The same measure, the net force both spine joints exert on the segment,
+    # its legs included, along its forward axis and up, in newtons. Zero
+    # means the segment carries itself; positive along, its neighbours pull
+    # it forward (it lags); positive up, they hold it up (it hangs on them).
+    net_joint_force: torch.Tensor  # (W, N, 2)
 
     @classmethod
     def allocate(
@@ -91,6 +99,7 @@ class PhysicalState:
             head_tip_position=zeros(3),
             spine_yaw_position=zeros(n),
             spine_yaw_velocity=zeros(n),
+            front_end_position=zeros(n, 2),
             foot_normal_force=zeros(n, 2),
             foot_forward_force=zeros(n, 2),
             belly_normal_force=zeros(n),
@@ -99,4 +108,5 @@ class PhysicalState:
             motor_positive_work=zeros(n),
             motor_negative_work=zeros(n),
             front_joint_force=zeros(n),
+            net_joint_force=zeros(n, 2),
         )
