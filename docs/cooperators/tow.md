@@ -82,6 +82,10 @@ tow the followers' noisy body erased 22 to 24 mm/s of line, against 0.8 and
   price must not let it hide a drag: it charges the own ground force, the
   joints' net force plus the tow
   ([reward.md](reward.md#cycle-10-each-segment-pays-its-own-ground-force-the-user-agreed)).
+  That price leaves passing the tow forward free, and run 19's followers
+  passed it to the head; from cycle 11 the own joint force, the joints' net
+  force alone, lets each segment brake its own tow for free instead
+  ([reward.md](reward.md#cycle-11-each-segment-brakes-its-own-tow-the-user-agreed)).
 - **The reflex inputs.** Each block adds its front joint's force and its
   net joint force of the step itself beside the 1 s averages
   (`observe_instant_joint_forces`), so that a segment feels at once that it

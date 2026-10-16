@@ -1107,6 +1107,60 @@ less. In a body holding still under a tow the soft contacts share the tow
 unevenly along the chain (its own ground force 0.24 to 0.76 at t = 0.5),
 which reads in the logs but changes nothing in the design.
 
+### Cycle 11: each segment brakes its own tow (the user agreed)
+
+**Why** (2026-10-16, run 19's first 47 cycles). Someone must brake the
+tow. In a towed body walking at a steady speed, nothing but the feet holds
+the body back, so the tows' total, 12t over the twelve segments, must
+leave through feet that brake. The own ground force G = N + t charges a
+follower whose feet brake its own tow (N = 0, G = t) and nothing for one
+whose feet do nothing (G = 0): that one passes its tow to its neighbours,
+N = −t. Cycle 10's free state, a segment stepping in time with the body,
+neither braking nor pushing, is that same state. The head pays no force
+price, so the followers' cheapest arrangement passes the tows forward until
+the head brakes them: with every follower passing, the neck would push the
+head with 11t.
+
+Run 19 showed it on its first checks (`review.py check` in `../Training`,
+seed 2's training worlds at cycles 44 to 47, whose tows average 0.2):
+
+| Measure | Run 19 |
+| --- | --- |
+| Segment 1's averaged front joint force, its neck on the head | −0.29 unit weights: pushing the head |
+| The followers' averaged net joint forces | about 0 to +0.08 at segments 1 to 7; −0.13 to −0.17 at 8 to 11, near −t |
+| The head's feet | braking, −0.27 unit weights |
+| The head | heading error 134 to 150°, on course 1%, closing about −20 mm/s |
+
+The rear passed its tow forward already; the middle braked its own and paid
+G ≈ t, the largest own ground costs (30 to 53 mm/s at segments 3 to 7), so
+its gradient pointed to the rear's state. A head pushed from behind cannot
+steer, as run 04's walked straight past its targets.
+
+**The change.** With `force_price = "own_joint"` a follower pays its
+averaged own net joint force along the body alone, N, at the same scale
+(0.3 unit weights) and pay (40 mm/s); the front joint is free. Passing the
+tow on costs t², braking it with one's own feet is free, so every tow is
+braked where it acts and none reaches the head. The goal's sixth part, the
+follower's own force price, is named `own_force` under either price.
+
+**What it gives up.** Cycle 10 added the tow back because under N a dragged
+holder pays (0.8 − t)² and a passive stepper t²: they tie at t = 0.4, the
+tow's top. Below it stepping is the cheaper, and the training worlds draw
+their tows from 0 to the top, which falls as the walk improves. Standing
+still is free at any tow, since the feet hold the tow back exactly, so the
+tow no longer prices a standstill; but the noise moves a towed body anyway
+(17 to 37 mm/s at tows of 0.3 to 0.5, [tow.md](tow.md#risks)), and a
+moving body drags its holders, who then pay. On run 16's checkpoints a
+segment's own exploring still paid under N at a tow of 0.4
+(`analysis/own_step_check.py`, segments 1, 5 and 10, mm over 3 s): +10 ± 4,
++58 ± 19 and −5 ± 8 at cycle 32; +55 ± 11, +56 ± 24 and +10 ± 12 at cycle
+128, against +45, +141 and +18, and +137, +105 and +29 under G.
+
+Without a tow the two prices are the same, so the evaluations, which never
+tow, price alike; only what the tow teaches changes. Under N each segment
+learns to brake its own tow, which turns into carrying itself as the tow
+fades; under G the followers learn a walk that leans on the head.
+
 ### Other harms left out
 
 | Candidate | Why |

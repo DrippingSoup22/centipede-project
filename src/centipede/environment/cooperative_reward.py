@@ -17,7 +17,7 @@ PART_NAMES = (
     "line",
     "off_line",
     "front_joint",
-    "own_ground",
+    "own_force",
     "pushing",
     "braking",
     "force",
@@ -160,12 +160,14 @@ class CooperativeReward:
         squared against its scale and priced at the reference pay: how far
         its tail lies from the line it has not erased (up to a cap), and, as
         ``force_price`` says, its front joint's averaged force, pulled or
-        pushed, or its own net ground force: the averaged net force of its
-        joints along its body plus its ``tow`` ``(W, N)``, in unit weights.
-        Along the body the joints' net force is its momentum's change less
-        the floor's force and the tow, so adding the tow back leaves what
-        its own feet and body fail to carry: positive dragged, negative
-        pushing (``line_erased`` and ``off_line`` ``(W, N)`` in metres, from
+        pushed, or its own force: the averaged net force of its joints along
+        its body, alone (its own joint force) or plus its ``tow`` ``(W, N)``
+        (its own ground force), in unit weights. Along the body the joints'
+        net force is its momentum's change less the floor's force and the
+        tow: alone it is what the segment passes to its neighbours, so
+        braking its own tow is free; with the tow added back it is what its
+        own feet and body fail to carry, positive dragged, negative pushing
+        (``line_erased`` and ``off_line`` ``(W, N)`` in metres, from
         ``HeadLine.update``; ``averaged_forces``,
         ``AveragedForces.values``). Health, in
         millijoules: each segment's energy, shared, its own pain, and its
@@ -196,11 +198,15 @@ class CooperativeReward:
         off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
         off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
         along, up, front, floor = averaged_forces.unbind(dim=-1)
-        own_ground = settings.force_price == "own_ground"
-        priced = along + tow if own_ground else front
+        priced = {
+            "front_joint": front,
+            "own_joint": along,
+            "own_ground": along + tow,
+        }[settings.force_price]
+        own = settings.force_price != "front_joint"
         force_cost = self.reference_mm * (priced / settings.joint_force_scale) ** 2
-        joint_cost = force_cost * (not own_ground)
-        own_ground_cost = force_cost * own_ground
+        joint_cost = force_cost * (not own)
+        own_cost = force_cost * own
         hanging = (up - self.free_support).clamp(min=0.0) + floor
 
         squared_commands = context.command_size * self.commanded_joints.sum(dim=-1)
@@ -224,7 +230,7 @@ class CooperativeReward:
                         line,
                         -self.is_follower * off_cost,
                         -self.is_follower * joint_cost,
-                        -self.is_follower * own_ground_cost,
+                        -self.is_follower * own_cost,
                     ),
                     dim=-1,
                 ),

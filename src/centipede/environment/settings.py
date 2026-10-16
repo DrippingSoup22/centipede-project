@@ -336,9 +336,11 @@ class CooperatorsSettings:
     ``hanging_price``. The forces are averaged over ``averaging_s`` (an
     exponential average; 0 none). ``force_price`` chooses the follower's
     force cost (cycle 10): ``"front_joint"``, its front joint's force, which
-    carries every segment's error behind it too; or ``"own_ground"``, its
+    carries every segment's error behind it too; ``"own_ground"``, its
     own net ground force, the net force of its two joints on it plus its tow,
-    which is its own error alone.
+    which is its own error alone; or ``"own_joint"`` (cycle 11), that net
+    force without the tow, what it passes to its neighbours, so that each
+    segment brakes its own tow for free and none passes it to the head.
 
     **Tow** (cycle 10, docs/cooperators/tow.md): training wheels that fade. In
     training each segment is pushed forward along the floor by its world's
@@ -445,7 +447,9 @@ class CooperatorsSettings:
             ),
             averaging_s=section.number("averaging_s", default=0.2, minimum=0.0),
             force_price=section.choice(
-                "force_price", ("front_joint", "own_ground"), default="front_joint"
+                "force_price",
+                ("front_joint", "own_ground", "own_joint"),
+                default="front_joint",
             ),
             tow_start=section.number(
                 "tow_start", default=0.0, minimum=0.0, maximum=1.0

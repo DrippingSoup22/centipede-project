@@ -158,7 +158,7 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
     torch.testing.assert_close(by_name["pushing"], -1e-3 * reward.sharing_weights[:, 2])
     # A full push for one step, priced as one motor fully on.
     torch.testing.assert_close(by_name["pain"], torch.tensor([0, 0, 0, -one_motor, 0]))
-    assert not by_name["own_ground"].any()
+    assert not by_name["own_force"].any()
     goal = sum(by_name[name] for name in PART_NAMES[:GOAL_PARTS])
     torch.testing.assert_close(
         channels[0], torch.stack((goal, parts.rewards[0] - goal), -1)
@@ -168,13 +168,23 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
     assert forces.update(state)[0, 2, 1] == pytest.approx(1.5)
 
 
-def test_the_own_ground_price_charges_each_follower_its_joints_net_force_and_tow():
+@pytest.mark.parametrize(
+    ("force_price", "squared_shares"),
+    [
+        ("own_ground", [0.0, 1.0, 1 / 9, 0.0, 1.0]),
+        ("own_joint", [0.0, 1.0, 1 / 9, 1.0, 0.0]),
+    ],
+)
+def test_the_own_prices_charge_each_follower_its_joints_net_force_with_or_without_tow(
+    force_price, squared_shares
+):
     """Averaged net joint forces along the body, in unit weights: segment 1
     dragged by 0.3, segment 2 pushing with 0.1, segment 3 held back by its
-    neighbours against a tow of 0.3, segment 4 carrying itself. With the
-    tow added back: 0.3, -0.1, 0 and 0.3, each priced 0.8 mm a step at 0.3;
-    the front joint is free."""
-    settings = CooperatorsSettings.from_section({"force_price": "own_ground"})
+    neighbours against a tow of 0.3 (its feet doing nothing, so it passes
+    the tow on), segment 4 braking its own tow of 0.3. With the tow added
+    back: 0.3, -0.1, 0 and 0.3; without: 0.3, -0.1, -0.3 and 0; each priced
+    0.8 mm a step at 0.3; the front joint is free."""
+    settings = CooperatorsSettings.from_section({"force_price": force_price})
     reward = CooperativeReward(
         settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
     )
@@ -202,7 +212,7 @@ def test_the_own_ground_price_charges_each_follower_its_joints_net_force_and_tow
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
     torch.testing.assert_close(
-        by_name["own_ground"], -0.8 * torch.tensor([0.0, 1.0, 1 / 9, 0.0, 1.0])
+        by_name["own_force"], -0.8 * torch.tensor(squared_shares)
     )
     assert not by_name["front_joint"].any()
 
