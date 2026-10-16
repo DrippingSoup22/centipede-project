@@ -1050,6 +1050,63 @@ pink at every window, so it stays out. The scripted walk's own cost hardly
 changes: 95 to 99% of it is a steady push of its unbalanced gait, which a
 learned walk must even out.
 
+### Cycle 10: each segment pays its own ground force (the user agreed)
+
+**Why** (2026-10-16, after runs 13 to 18). The front joint's force has the
+wrong owner. MuJoCo's joint forces make it exact: the force at a segment's
+front joint is the force its subtree needs, so T_k = N_k + N_k+1 + … +
+N_11, where N is each segment's own net joint force, its front joint's
+force less its rear one's. Each follower paid for every error behind it,
+the middle ones most (the tug of war), and a follower walking in front of
+one that drags paid that drag: walking beside a brake was punished, which
+feeds the all-standing trap. Measured on the scripted walk
+(`analysis/tow_check.py` in `../Training`; a follower's goal per second,
+stepping / holding, the steppers spread along the body):
+
+| Steppers, tow | Front joint, f | Own net, N | Own ground, G = N + tow |
+| --- | --- | --- | --- |
+| 8 of 12, none | −43.9 / +4.1 | −10.0 / −32.3 | as N |
+| 3 of 12, none | −3.9 / −13.1 | −36.4 / −5.6 | as N |
+| 3 of 12, 0.3 | −211 / −43 | −115 / −14 | −20.4 / −93.1 |
+| 3 of 12, 0.5 | −866 / −275 | −191 / −3.7 | −7.1 / −154.8 |
+| 8 of 12, 0.3 | −347 / −39 | −20.9 / −38.2 | +26.5 / −182 |
+| 8 of 12, 0.5 | −759 / −235 | −20.1 / −16.4 | +45.5 / −304 |
+
+Under the front joint's price holding beside walkers paid more than
+stepping, with or without a tow: the braced stance of runs 13 to 18's mean
+action. One segment holding while all others walk drags its neighbours;
+under the front joint's price the cost lands on the walker behind it (1.66
+unit weights at segment 6 against 0.88 at 5), under the own ground force on
+itself (0.54 unit weights: −76 mm/s against its neighbours' +24).
+
+**Why the tow must be added back.** A segment's own net force along the
+body is its momentum's change less the floor's force and its tow. Under a
+tow t, a held segment dragged by the moving body has N = 0.8 − t, and a
+segment stepping in time with the body, neither braking nor pushing, has
+N = −t: at t = 0.4 both pay the same, and above it holding is cheaper.
+Standing still costs nothing under N at any tow, since its feet hold the
+tow back exactly. Adding the tow back prices what the segment's own feet
+and body do: holding and sliding cost 0.8 at any tow, a step in time with
+the body is free, standing still costs t, and a pusher pays its push.
+Without a tow the two prices are the same.
+
+**The change.** With `force_price = "own_ground"` a follower's force cost
+uses its averaged own net force along the body plus its tow, at the same
+scale (0.3 unit weights) and pay (40 mm/s); the front joint is free. The
+head keeps no force price: when every follower carries itself, every joint
+force is zero and the head neither pulls nor is pushed. The rest is cycle
+8's. The tow itself is [tow.md](tow.md).
+
+**Measured as a price.** Under the own ground force stepping beats holding
+at every spread placement from a tow of 0.3; without a tow holding still
+wins while four or fewer segments step, and stepping wins from six: the
+trap at a standstill, and a walk that sustains itself once found. A
+scripted walk of every segment under a tow of 0.3 to 0.7 brakes (G +0.21
+to +0.46) and still scores +58 to +65 mm/s; a learned walk would push
+less. In a body holding still under a tow the soft contacts share the tow
+unevenly along the chain (its own ground force 0.24 to 0.76 at t = 0.5),
+which reads in the logs but changes nothing in the design.
+
 ### Other harms left out
 
 | Candidate | Why |

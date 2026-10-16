@@ -4,7 +4,9 @@ with the task, observations and reward of docs/cooperators/.
 The interaction loop uses ``reset`` and ``step``; the experiment reads the
 same sizes as the main environment's, plus ``neighbour_table`` for the
 agents' critics, and after each update cycle calls ``adjust_level`` and
-reads ``task``.
+reads ``task``. In training with a tow it calls ``start_tow`` and
+``reserve_measuring_worlds`` first, ``adjust_tow`` after each update cycle,
+and reads ``tow.facts``.
 """
 
 from dataclasses import dataclass
@@ -23,6 +25,7 @@ from centipede.environment.cooperative_reward import (
     CooperativeReward,
 )
 from centipede.environment.cooperative_task import CooperativeTask
+from centipede.environment.cooperative_tow import Tow
 from centipede.environment.head import target_under_head
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
@@ -54,7 +57,8 @@ class CooperativeEnvironment:
     (``segment_reward_channels``). An arrival
     never ends an episode: the next target appears at once. The only end is
     the time limit, a cut that the agents bootstrap from; the world then
-    restarts. ``diagnostics`` summarise each step and each episode.
+    restarts. ``diagnostics`` summarise each step and each episode. A
+    started ``tow`` pushes every segment forward (cooperative_tow.py).
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -95,6 +99,8 @@ class CooperativeEnvironment:
             legs,
             body.unit_weight_n,
             self.device,
+            instant_joint_forces=cooperators.observe_instant_joint_forces,
+            tow_input=cooperators.observe_tow,
         )
         self.observation_size = self.observation_builder.observation_size
         self.neighbour_table = self.observation_builder.neighbour_table
@@ -122,6 +128,14 @@ class CooperativeEnvironment:
         )
         self.reward = CooperativeReward(
             cooperators, segment_count, radius, body, commanded_joints
+        )
+        self.tow = Tow(
+            cooperators,
+            self.world_count,
+            body.segment_weights_n,
+            body.unit_weight_n,
+            settings.max_episode_steps,
+            self.device,
         )
         self.reward_channel_count = len(CHANNEL_NAMES)
         self.segment_reward_channels = [(0, 1)] * segment_count
@@ -171,6 +185,23 @@ class CooperativeEnvironment:
         self.task_facts.level.fill_(self.task.level)
         self.task_facts.in_time_share.fill_(torch.nan if share is None else share)
 
+    def start_tow(self, top: float | None = None) -> None:
+        """Tow every segment from the next step on, under the settings'
+        ``tow_start`` or a saved ``top``; only training does."""
+        self.tow.start(self.settings.cooperators.tow_start if top is None else top)
+
+    def reserve_measuring_worlds(self, worlds_per_group: int) -> None:
+        """The last ``2 x worlds_per_group`` worlds measure the agents' mean
+        action, half of them at the tow's top and half without tow; the
+        level no longer counts them."""
+        self.tow.reserve(worlds_per_group)
+        self.task.counted_worlds[self.world_count - 2 * worlds_per_group :] = False
+
+    def adjust_tow(self) -> None:
+        """After an update cycle: move the tow's top by what the towed
+        measuring worlds did, and refresh ``tow.facts``."""
+        self.tow.adjust()
+
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
 
@@ -181,6 +212,7 @@ class CooperativeEnvironment:
         self.simulation.reset(seed=seed)
         if seed is not None:
             self.task.generator.manual_seed(seed)
+            self.tow.generator.manual_seed(seed)
         state = self.simulation.physical_state
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
         self._restart_measures(every_world)
@@ -190,6 +222,7 @@ class CooperativeEnvironment:
                 0, self.settings.max_episode_steps, generator=self.task.generator
             )
         self.task.place_targets(every_world, state, self._steps_left())
+        self.tow.restart(every_world)
         self.last_action.zero_()
         self.diagnostics.new_targets(
             every_world, every_world, state, self.task.target_position
@@ -215,7 +248,16 @@ class CooperativeEnvironment:
 
         legs = self.leg_motor_count
         motor_command = joint_action * self.motor_scale
-        self.simulation.step(motor_command[..., :legs], motor_command[:, :-1, legs])
+        leg_commands = motor_command[..., :legs]
+        spine_commands = motor_command[:, :-1, legs]
+        if self.tow.started:
+            self.simulation.step(
+                leg_commands,
+                spine_commands,
+                body_forces=self.tow.forces(state.body_quaternion),
+            )
+        else:
+            self.simulation.step(leg_commands, spine_commands)
         self.episode_steps += 1
         line_erased, off_line = self.line.update(state)
         averaged_forces = self.forces.update(state)
@@ -235,6 +277,7 @@ class CooperativeEnvironment:
             line_erased,
             off_line,
             averaged_forces,
+            self.tow.unit_weights(),
         )
         truncated = self.episode_steps >= self.settings.max_episode_steps
         self.diagnostics.record_step(
@@ -251,6 +294,7 @@ class CooperativeEnvironment:
             in_time,
             truncated,
         )
+        self.tow.record(self.diagnostics.step)
 
         # Walking on: a reached target is replaced where the head stands.
         self.last_action.copy_(joint_action)
@@ -261,6 +305,7 @@ class CooperativeEnvironment:
             self._restart_measures(truncated)
             self.episode_steps.masked_fill_(truncated, 0)
             task.place_targets(truncated, state, self._steps_left())
+            self.tow.restart(truncated)
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
             observations = self._observations()
         self.diagnostics.new_targets(
@@ -286,4 +331,5 @@ class CooperativeEnvironment:
             self.last_action,
             self.line.view,
             self.forces.values,
+            self.tow.levels(),
         )

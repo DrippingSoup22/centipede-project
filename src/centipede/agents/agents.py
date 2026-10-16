@@ -41,6 +41,7 @@ class Agents:
         reward_channel_count: int = 1,
         neighbour_table: torch.Tensor | None = None,
         segment_reward_channels: list[tuple[int, ...]] | None = None,
+        mean_action_world_count: int = 0,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -54,8 +55,13 @@ class Agents:
         ``advantage_weights``, the head by ``head_advantage_weights`` when
         given); and ``neighbour_table``, the segments each one sees, itself
         first, from which the critics' baselines take the neighbours' actions.
+        In training, the last ``mean_action_world_count`` worlds act with
+        the policies' mean action and are neither stored nor learned from, so
+        that they measure what the policies have learned while the others
+        train.
         """
         self.segment_count = segment_count
+        self.learning_world_count = world_count - mean_action_world_count
         self.observation_size = observation_size
         self.settings = settings
         self.segment_action_sizes = segment_action_sizes
@@ -90,7 +96,7 @@ class Agents:
             SegmentAgent(
                 segment_index=segment_index,
                 observation_size=observation_size,
-                world_count=world_count,
+                world_count=self.learning_world_count,
                 rollout_window_steps=rollout_window_steps,
                 settings=settings,
                 seed=seed * segment_count + segment_index,
@@ -124,18 +130,31 @@ class Agents:
         """The ``(W, N, action_size)`` joint action for the ``(W, N, ...)`` inputs.
 
         A segment with fewer actions than the widest gets zeros after its own,
-        as padding the environment does not use. In training with baselines,
-        once every agent has acted, each stores its neighbours' actions,
-        nearest first as in the neighbour table, a missing one's all zeros.
+        as padding the environment does not use. In training the mean-action
+        worlds act as in evaluation. In training with baselines, once every
+        agent has acted, each stores its neighbours' actions in the learning
+        worlds, nearest first as in the neighbour table, a missing one's all
+        zeros.
         """
+        learning = self.learning_world_count
         actions: list[torch.Tensor] = []
         for segment_index, agent in enumerate(self.segment_agents):
-            segment_actions = agent.act(observations[:, segment_index], training)
+            segment_observations = observations[:, segment_index]
+            segment_actions = agent.act(segment_observations[:learning], training)
+            if learning < observations.shape[0]:
+                segment_actions = torch.cat(
+                    (
+                        segment_actions,
+                        agent.act(segment_observations[learning:], training=False),
+                    )
+                )
             padding = self.action_size - agent.action_size
             actions.append(torch.nn.functional.pad(segment_actions, (0, padding)))
         joint_action = torch.stack(actions, dim=1)
         if training and self.neighbours is not None:
-            with_missing = torch.nn.functional.pad(joint_action, (0, 0, 0, 1))
+            with_missing = torch.nn.functional.pad(
+                joint_action[:learning], (0, 0, 0, 1)
+            )
             neighbour_actions = with_missing[:, self.neighbours].flatten(start_dim=2)
             for segment_index, agent in enumerate(self.segment_agents):
                 agent.store_baseline_inputs(neighbour_actions[:, segment_index])
@@ -149,21 +168,22 @@ class Agents:
         final_observations: torch.Tensor,
     ) -> None:
         """Give each agent its segment's rewards, the channels it learns from,
-        and final observations.
+        and final observations, in the learning worlds.
 
         The episode ends ``(W,)`` belong to the whole body, so every agent gets
         them in full.
         """
+        learning = self.learning_world_count
         for segment_index, agent in enumerate(self.segment_agents):
-            segment_rewards = rewards[:, segment_index]
+            segment_rewards = rewards[:learning, segment_index]
             channels = self.segment_reward_channels[segment_index]
             if len(channels) < self.reward_channel_count:
                 segment_rewards = segment_rewards[:, list(channels)].squeeze(1)
             agent.record(
                 segment_rewards,
-                terminated,
-                truncated,
-                final_observations[:, segment_index],
+                terminated[:learning],
+                truncated[:learning],
+                final_observations[:learning, segment_index],
             )
 
     def set_learning_rate(self, learning_rate: float) -> None:

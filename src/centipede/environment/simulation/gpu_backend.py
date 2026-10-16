@@ -82,6 +82,25 @@ def _apply_spine_actions(
 
 
 @wp.kernel
+def _apply_body_forces(
+    # In
+    body_ids: wp.array1d[wp.int32],
+    body_forces: wp.array2d[wp.vec3],
+    # Out
+    xfrc_applied: wp.array2d[wp.spatial_vector],
+) -> None:
+    """Make each segment's force its body's applied force, with no torque.
+
+    One thread per (world, segment). MuJoCo Warp keeps MuJoCo's order: the
+    force in the spatial vector's top, the torque in its bottom.
+    """
+    world_index, segment_index = wp.tid()
+    xfrc_applied[world_index, body_ids[segment_index]] = wp.spatial_vector(
+        body_forces[world_index, segment_index], wp.vec3(0.0)
+    )
+
+
+@wp.kernel
 def _add_leg_reset_noise(
     # In
     world_mask: wp.array1d[wp.bool],
@@ -714,11 +733,16 @@ class GPUBackend:
         )
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        body_forces: torch.Tensor | None = None,
     ) -> None:
         """Hold the (W, N, M) leg and (W, N - 1) spine actions for 20 ms.
 
-        Without spine actions, the spine motors receive zero.
+        Without spine actions, the spine motors receive zero. ``body_forces``,
+        (W, N, 3) newtons in world axes, become each segment body's applied
+        force, its torque zero, before the physics runs.
 
         The actions are written into ``ctrl`` once, then the physics runs its
         steps for the action (134 for model v3). Launched from Python, each
@@ -752,6 +776,17 @@ class GPUBackend:
             outputs=[self.gpu_data.ctrl],
             device=self.device,
         )
+        if body_forces is not None:
+            wp.launch(
+                kernel=_apply_body_forces,
+                dim=(self.world_count, self.segment_count),
+                inputs=[
+                    self.body_ids,
+                    wp.from_torch(body_forces.contiguous(), dtype=wp.vec3),
+                ],
+                outputs=[self.gpu_data.xfrc_applied],
+                device=self.device,
+            )
         if self._physics_graph is None:
             self._run_physics_steps()
             # Recording only writes the launches down; nothing runs twice.

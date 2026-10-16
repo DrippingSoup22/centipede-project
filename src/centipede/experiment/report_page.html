@@ -564,8 +564,8 @@ const EVALUATION_DETAILS = [
 
 const COOPERATORS = (data.settings.environment || {}).design === "cooperators";
 // The reward's parts that make the goal channel come first, health's after
-// them (environment/cooperative_reward.py).
-const GOAL_PARTS = 5;
+// them from the pushing work on (environment/cooperative_reward.py).
+const FIRST_HEALTH_PART = "pushing";
 
 const COOPERATIVE_METRICS = {
   "episodes.targets_reached": { label: "Targets per episode", unit: "", better: "higher",
@@ -948,6 +948,7 @@ function influenceRows(rows, names, colors, width) {
   rows.forEach((row, index) => {
     const top = 4 + index * (rowHeight + gap);
     const perSecond = row.values.map((value) => value / STEP_SECONDS);
+    const GOAL_PARTS = names.indexOf(FIRST_HEALTH_PART);
     const channels = [[0, GOAL_PARTS], [GOAL_PARTS, names.length]].map(([from, to]) => ({
       size: perSecond.slice(from, to).reduce((sum, value) => sum + Math.abs(value), 0),
       sum: perSecond.slice(from, to).reduce((sum, value) => sum + value, 0),

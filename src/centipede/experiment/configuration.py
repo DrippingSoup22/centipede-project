@@ -50,7 +50,10 @@ class RunSettings:
     worlds, the first ones, are recorded for replay at 25, 50, 75 and 100% of
     the update cycles, one episode each; 0 records nothing.
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
-    with a checkpoint, before a cycle that would end after it. See
+    with a checkpoint, before a cycle that would end after it. With
+    ``mean_action_worlds_per_group`` the cooperators' last worlds act with
+    the agents' mean action and are not learned from: that many at the tow's
+    top, as many without tow (docs/cooperators/tow.md). See
     docs/configuration.md.
     """
 
@@ -62,6 +65,7 @@ class RunSettings:
     start_from: Path | None
     record_worlds: int
     time_limit_hours: float | None
+    mean_action_worlds_per_group: int
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
@@ -87,6 +91,9 @@ class RunSettings:
             start_from=section.path("start_from", default=None),
             record_worlds=section.integer("record_worlds", default=0, minimum=0),
             time_limit_hours=section.positive_number("time_limit_hours", default=None),
+            mean_action_worlds_per_group=section.integer(
+                "mean_action_worlds_per_group", default=0, minimum=0
+            ),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.
@@ -297,7 +304,33 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
             f"[environment.simulation] backend is {backend!r}, got "
             f"{configuration.agents.device!r}"
         )
+    if mode == "train":
+        _check_mean_action_worlds(configuration)
     return configuration
+
+
+def _check_mean_action_worlds(configuration: Configuration) -> None:
+    """Fail clearly where the mean-action worlds or the tow cannot work: the
+    worlds need the cooperators' design and some worlds left to learn from,
+    and the tow fades only by what the towed ones measure."""
+    worlds_per_group = configuration.run.mean_action_worlds_per_group
+    environment = configuration.environment
+    if worlds_per_group and environment.design != "cooperators":
+        raise SettingsError(
+            "[run] mean_action_worlds_per_group needs [environment] design ="
+            ' "cooperators"'
+        )
+    world_count = environment.simulation.world_count
+    if 2 * worlds_per_group >= world_count:
+        raise SettingsError(
+            f"[run] mean_action_worlds_per_group leaves no world to learn from:"
+            f" 2 x {worlds_per_group} of {world_count} worlds"
+        )
+    if environment.cooperators.tow_start > 0 and not worlds_per_group:
+        raise SettingsError(
+            "[environment.cooperators] tow_start fades by what the towed"
+            " mean-action worlds do: set [run] mean_action_worlds_per_group"
+        )
 
 
 # -- Helpers --------------------------------------------------------------------

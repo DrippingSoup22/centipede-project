@@ -184,11 +184,28 @@ worth more than walking; and as the noise shrinks the policy itself must
 carry the walk, so the training's own numbers show whether it does.
 gSDE, the tanh actor and the forces stay as in cycle 8.
 
+**What runs 17 and 18 showed: a shrinking noise only shrinks the walk.**
+Both walked while the noise was wide (run 18's followers erased five times
+run 16's line at cycle 64), then walked less as it shrank: from cycles
+49–64 to 113–128 the head's speed fell from 14 to 7 and 9 mm/s, and the
+mean action stood throughout. Both were stopped at cycle 128 by the user's
+no-gain rule. The noise was never the cause: what makes standing the mean's
+best answer is.
+
+**From cycle 10: the learned spread again, and a tow.** The spreads are
+learned from 0.25 again, as in cycle 8. What made exploring useless was the
+body, not the noise: a segment's own step moved nothing while its
+neighbours' planted feet held the body, and measured on run 16's
+checkpoints its own noise did not change its own goal at all (−4.5 to +5.9
+mm over 3 s, within the measure's spread). Pushed along by a tow of 0.4 of
+its weight, the same noise gained it 18 to 141 mm. The tow fades as the
+mean action learns to walk ([tow.md](tow.md)).
+
 **Later, if needed** (the user, 2026-10-16): a cost curriculum, energy and
 the force prices starting at a fraction and growing over training (as
-Hwangbo et al.'s curriculum factor, Science Robotics 2019), decided from
-what the schedule shows; and, only if nothing else works, noise shared
-between segments, correlated by their distance and only within the
+Hwangbo et al.'s curriculum factor, Science Robotics 2019), the first
+variant to try beside the tow; and, only if nothing else works, noise
+shared between segments, correlated by their distance and only within the
 observation radius, so that what a segment cannot see never shares its
 noise.
 

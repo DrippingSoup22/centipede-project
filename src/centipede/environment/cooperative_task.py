@@ -55,6 +55,9 @@ class CooperativeTask:
         self.target_steps = torch.zeros(world_count, dtype=torch.int32, device=device)
         # Whether each target's stopwatch can run out before its world restarts.
         self.timed = torch.zeros(world_count, dtype=torch.bool, device=device)
+        # The worlds whose stopwatches move the level: all but those the
+        # experiment reserves to measure the mean action.
+        self.counted_worlds = torch.ones(world_count, dtype=torch.bool, device=device)
         self.generator = torch.Generator(device=device)
         # For each of the last episode length of steps: the targets whose
         # stopwatch ended on it reached in time, and all of them.
@@ -118,8 +121,9 @@ class CooperativeTask:
         in_time = arrived & (self.target_steps <= self.stopwatch_steps)
         missed = ~arrived & (self.target_steps == self.stopwatch_steps)
         row = self._recorded_steps % self._stopwatches.shape[0]
-        self._stopwatches[row, 0] = (in_time & self.timed).sum()
-        self._stopwatches[row, 1] = ((in_time | missed) & self.timed).sum()
+        counted = self.timed & self.counted_worlds
+        self._stopwatches[row, 0] = (in_time & counted).sum()
+        self._stopwatches[row, 1] = ((in_time | missed) & counted).sum()
         self._recorded_steps += 1
         return in_time
 

@@ -1,5 +1,5 @@
 """The cooperators' reward: two channels for every segment, goal and health,
-judged apart by a critic each (docs/cooperators/reward.md, cycle 7)."""
+judged apart by a critic each (docs/cooperators/reward.md, cycles 7 and 10)."""
 
 import torch
 
@@ -17,13 +17,14 @@ PART_NAMES = (
     "line",
     "off_line",
     "front_joint",
+    "own_ground",
     "pushing",
     "braking",
     "force",
     "pain",
     "hanging",
 )
-GOAL_PARTS = 5
+GOAL_PARTS = 6
 CHANNEL_NAMES = ("goal", "health")
 
 
@@ -148,6 +149,7 @@ class CooperativeReward:
         line_erased: torch.Tensor,
         off_line: torch.Tensor,
         averaged_forces: torch.Tensor,
+        tow: torch.Tensor,
     ) -> tuple[torch.Tensor, StepRewards, torch.Tensor]:
         """The ``(W, N, 2)`` rewards, goal and health, their parts, and each
         segment's own energy before sharing, ``(W, N, 3)`` in mJ.
@@ -156,10 +158,16 @@ class CooperativeReward:
         to the target and, when it arrives, ``arrival_worth_m``; for each
         follower, the head's line its tail erased on the step, less, each
         squared against its scale and priced at the reference pay: how far
-        its tail lies from the line it has not erased (up to a cap), and its
-        front joint's averaged force, pulled or pushed (``line_erased`` and
-        ``off_line`` ``(W, N)`` in metres, from ``HeadLine.update``;
-        ``averaged_forces``, ``AveragedForces.values``). Health, in
+        its tail lies from the line it has not erased (up to a cap), and, as
+        ``force_price`` says, its front joint's averaged force, pulled or
+        pushed, or its own net ground force: the averaged net force of its
+        joints along its body plus its ``tow`` ``(W, N)``, in unit weights.
+        Along the body the joints' net force is its momentum's change less
+        the floor's force and the tow, so adding the tow back leaves what
+        its own feet and body fail to carry: positive dragged, negative
+        pushing (``line_erased`` and ``off_line`` ``(W, N)`` in metres, from
+        ``HeadLine.update``; ``averaged_forces``,
+        ``AveragedForces.values``). Health, in
         millijoules: each segment's energy, shared, its own pain, and its
         hanging on the neighbours and the floor. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
@@ -187,8 +195,12 @@ class CooperativeReward:
         line = self.is_follower * line_erased * 1e3
         off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
         off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
-        _, up, front, floor = averaged_forces.unbind(dim=-1)
-        joint_cost = self.reference_mm * (front / settings.joint_force_scale) ** 2
+        along, up, front, floor = averaged_forces.unbind(dim=-1)
+        own_ground = settings.force_price == "own_ground"
+        priced = along + tow if own_ground else front
+        force_cost = self.reference_mm * (priced / settings.joint_force_scale) ** 2
+        joint_cost = force_cost * (not own_ground)
+        own_ground_cost = force_cost * own_ground
         hanging = (up - self.free_support).clamp(min=0.0) + floor
 
         squared_commands = context.command_size * self.commanded_joints.sum(dim=-1)
@@ -212,6 +224,7 @@ class CooperativeReward:
                         line,
                         -self.is_follower * off_cost,
                         -self.is_follower * joint_cost,
+                        -self.is_follower * own_ground_cost,
                     ),
                     dim=-1,
                 ),

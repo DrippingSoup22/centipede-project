@@ -27,11 +27,18 @@ class InteractionLoop:
         environment: Environment,
         agents: Agents,
         settings: InteractionLoopSettings,
+        counted_worlds: torch.Tensor | None = None,
     ) -> None:
-        """Keep the two sides and prepare the loop's diagnostics."""
+        """Keep the two sides and prepare the loop's diagnostics.
+
+        ``counted_worlds``, a ``(W,)`` mask, names the worlds whose values the
+        training diagnostics count: the learning worlds, when the agents keep
+        some to act with their mean action; every world when not given.
+        """
         self.environment = environment
         self.agents = agents
         self.settings = settings
+        self.counted_worlds = counted_worlds
         self.diagnostics = LoopDiagnostics(environment)
 
     def train(self, seed: int) -> Iterator[int]:
@@ -56,7 +63,7 @@ class InteractionLoop:
                         truncated=truncated,
                         final_observations=final_observations,
                     )
-                    self.diagnostics.step_taken()
+                    self.diagnostics.step_taken(self.counted_worlds)
             with self.diagnostics.learning():
                 self.agents.update()
             yield cycle_index

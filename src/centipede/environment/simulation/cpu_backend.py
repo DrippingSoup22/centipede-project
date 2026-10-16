@@ -160,15 +160,20 @@ class CPUBackend:
         self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        body_forces: torch.Tensor | None = None,
     ) -> None:
         """Hold each world's leg and spine actions for one 20 ms step.
 
         ``leg_actions`` has shape (W, N, M): every world's segment actions, in
         leg action order (``ModelMapping``). ``spine_actions`` has shape
         (W, N - 1), one command per spine joint from the head back; without it
-        the spine motors receive zero. Stops the run if the physics fails;
-        afterwards the physical state is refreshed.
+        the spine motors receive zero. ``body_forces``, (W, N, 3) newtons in
+        world axes, become each segment body's applied force, its torque
+        zero. Stops the run if the physics fails; afterwards the physical
+        state is refreshed.
         """
         actions = leg_actions.cpu().numpy()
         spine_commands = (
@@ -176,10 +181,14 @@ class CPUBackend:
             if spine_actions is None
             else spine_actions.cpu().numpy()
         )
+        forces = None if body_forces is None else body_forces.cpu().numpy()
 
         for world_index, data in enumerate(self.world_data):
             data.ctrl[self.mapping.leg_actuator_ids] = actions[world_index]
             data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
+            if forces is not None:
+                # MuJoCo's applied force: the force first, then the torque.
+                data.xfrc_applied[self.mapping.body_ids, :3] = forces[world_index]
             if self.measure_effort:
                 self._clear_effort(world_index)
             if self.measure_joint_forces:

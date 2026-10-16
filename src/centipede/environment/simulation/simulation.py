@@ -113,7 +113,10 @@ class PhysicsSimulation:
         self._backend.reset(world_mask, seed)
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        body_forces: torch.Tensor | None = None,
     ) -> None:
         """Hold the (W, N, M) leg and (W, N - 1) spine actions for one step.
 
@@ -122,5 +125,9 @@ class PhysicsSimulation:
         unchanged to its motor, which applies it as a share of its maximum
         torque. Spine command ``i`` drives the joint between segments ``i`` and
         ``i + 1``; without spine actions, the spine motors receive zero.
+        ``body_forces``, (W, N, 3) newtons in world axes, push each segment's
+        body at its centre of mass through the step, as MuJoCo's applied
+        forces do; without them the applied forces are left as they are, zero
+        since the world's last reset unless a step gave some.
         """
-        self._backend.step(leg_actions, spine_actions)
+        self._backend.step(leg_actions, spine_actions, body_forces)

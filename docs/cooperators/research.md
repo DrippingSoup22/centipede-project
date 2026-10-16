@@ -129,6 +129,21 @@ Noise drawn through time is independent of the state, so a step it makes
 cannot be copied by the mean action, which learns the average good action
 of each state; state-dependent noise tries only what a policy can do.
 
+## Standing still as a trap
+
+Why the mean action stood through cycles 7 to 9, and what the literature
+offers against it, for the decision of cycle 10 ([tow.md](tow.md)):
+
+| Mechanism | Source | Verdict | Why |
+| --- | --- | --- | --- |
+| Relative overgeneralization | Wei & Luke, JMLR 2016 | The diagnosis | Independent learners judge their own cooperative action against their partners' random ones; when a step pays only if many step together, standing looks best to each |
+| Assistance that fades | Yu, Turk & Liu, SIGGRAPH 2018; Cao et al., 2025 (preprint) | Kept: the tow | A helping force lets a few steps pay at the start and is taken away as the policy learns |
+| A curriculum moved by success | Rudin et al., CoRL 2021 | Kept | The tow falls only while the mean action walks |
+| Paying each car its own error | Jackiewicz, Railway Engineering Science 2021 | Kept: the own ground force | In trains with a motor in every car, each car's traction set from its own coupler's state brings the coupler forces near zero |
+| Costs that grow from a fraction | Hwangbo et al., Science Robotics 2019 | Next variant | Their stated reason: a high penalty on motion makes standing a good local minimum; every cost but the objective's starts at 0.3. With each critic's advantages normalised alone, it must scale the health weight and the followers' own costs |
+| Optimistic advantages | Zhao et al., ICML 2024 | Later | Negative advantages clipped, so partners' failures stop teaching an agent that its step is bad; a change in RL_lib |
+| Energy shapes a gait once the body moves | Fu et al., CoRL 2021 | Kept | Their robot is given a speed to hold, so energy decides how to move, never whether |
+
 ## Sources
 
 - Schilling, Konen, Ohl & Korthals, 2020, [arXiv 2005.11164](https://arxiv.org/abs/2005.11164)
@@ -179,3 +194,9 @@ of each state; state-dependent noise tries only what a policy can do.
 - Andrychowicz et al., What matters in on-policy reinforcement learning? A large-scale empirical study, ICLR 2021, [arXiv 2006.05990](https://arxiv.org/abs/2006.05990)
 - Anderson, Shultz & Jayne, Axial kinematics and muscle activity during terrestrial locomotion of the centipede Scolopendra heros, J. Exp. Biol. 198, 1995, [PDF](https://jwshultz.weebly.com/uploads/4/6/2/2/46222147/j_exp_biol-1995-anderson-1185-95.pdf)
 - Dallmann, Hoinville, Dürr & Schmitz, A load-based mechanism for inter-leg coordination in insects, Proc. R. Soc. B 284, 2017, [PUB Bielefeld](https://pub.uni-bielefeld.de/record/2915640)
+- Wei & Luke, Lenient learning in independent-learner stochastic cooperative games, JMLR 17, 2016
+- Yu, Turk & Liu, Learning symmetric and low-energy locomotion, ACM Transactions on Graphics 37(4), SIGGRAPH 2018, [arXiv 1801.08093](https://arxiv.org/abs/1801.08093)
+- Cao, Zhang, Nie, Lin, Li & Gao, Learning motion skills with adaptive assistive curriculum force in humanoid robots, 2025 (preprint), [arXiv 2506.23125](https://arxiv.org/abs/2506.23125)
+- Jackiewicz, Coupler force reduction method for multiple-unit trains using a new hierarchical control system, Railway Engineering Science 29, 2021, [doi 10.1007/s40534-021-00239-w](https://doi.org/10.1007/s40534-021-00239-w)
+- Hwangbo et al., Learning agile and dynamic motor skills for legged robots, Science Robotics 4, 2019, [arXiv 1901.08652](https://arxiv.org/abs/1901.08652)
+- Zhao, Zhao, Li, Kannala & Pajarinen, Optimistic multi-agent policy gradient, ICML 2024, [arXiv 2311.01953](https://arxiv.org/abs/2311.01953)

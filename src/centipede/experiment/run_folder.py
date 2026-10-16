@@ -113,14 +113,17 @@ class RunFolder:
         completed_cycles: int,
         agents_state: dict,
         task_level: float | None = None,
+        tow_top: float | None = None,
     ) -> Path:
         """Save the agents after ``completed_cycles`` cycles, and the task's
-        level when it has one; returns the file."""
+        level and the tow's top when it has them; returns the file."""
         self.checkpoints.mkdir(exist_ok=True)
         path = self.checkpoints / f"cycle_{completed_cycles:04d}.pt"
         checkpoint = {"completed_cycles": completed_cycles, "agents": agents_state}
         if task_level is not None:
             checkpoint["task_level"] = task_level
+        if tow_top is not None:
+            checkpoint["tow_top"] = tow_top
         torch.save(checkpoint, path)
         return path
 
@@ -149,7 +152,7 @@ class RunFolder:
         if not isinstance(checkpoint, dict) or not (
             {"completed_cycles", "agents"}
             <= set(checkpoint)
-            <= {"completed_cycles", "agents", "task_level"}
+            <= {"completed_cycles", "agents", "task_level", "tow_top"}
         ):
             raise SettingsError(f"{path} is not a checkpoint of this project")
         return checkpoint

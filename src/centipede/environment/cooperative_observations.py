@@ -15,13 +15,14 @@ from centipede.environment.observation_builder import (
 from centipede.environment.simulation import PhysicalState
 
 
-def block_size(leg_motor_count: int) -> int:
+def block_size(leg_motor_count: int, instant_joint_forces: bool = False) -> int:
     """Values in a segment's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
     legs pressed (1), the front joint's force (1), the net joint force (2),
+    with ``instant_joint_forces`` both along the body again, unaveraged (2),
     its place on the head's line (3), and the last action (M + 1)."""
-    return 24 + 3 * leg_motor_count
+    return 24 + 3 * leg_motor_count + (2 if instant_joint_forces else 0)
 
 
 class CooperativeObservationBuilder:
@@ -41,10 +42,12 @@ class CooperativeObservationBuilder:
     from the line it has not erased; and the action it sent last (the rear's
     last value is padding). Forces are in unit weights, the whole body's
     weight shared by its segments; the joint forces are the averaged ones
-    the reward prices. The blocks are laid end to end in the neighbour
-    table's order, a missing neighbour's all zeros, followed by the target
-    seen from the head's tip, forward and to the left, which is zero for
-    every other segment.
+    the reward prices; with ``instant_joint_forces`` the front joint's and
+    the net force along the body of the step itself follow them, so that a
+    segment feels a pull at once. The blocks are laid end to end in the
+    neighbour table's order, a missing neighbour's all zeros, followed by the
+    target seen from the head's tip, forward and to the left, which is zero
+    for every other segment, and, with ``tow_input``, the world's tow level.
     """
 
     def __init__(
@@ -55,12 +58,16 @@ class CooperativeObservationBuilder:
         leg_motor_count: int,
         unit_weight_n: float,
         device: torch.device | str,
+        instant_joint_forces: bool = False,
+        tow_input: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
         self.segment_count = segment_count
         self.unit_weight_n = unit_weight_n
-        self.block_size = block_size(leg_motor_count)
+        self.instant_joint_forces = instant_joint_forces
+        self.tow_input = tow_input
+        self.block_size = block_size(leg_motor_count, instant_joint_forces)
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
         )
@@ -70,7 +77,9 @@ class CooperativeObservationBuilder:
             device=device,
         )
         self.observation_size = (
-            self.neighbour_table.shape[1] * self.block_size + TARGET_VALUE_COUNT
+            self.neighbour_table.shape[1] * self.block_size
+            + TARGET_VALUE_COUNT
+            + (1 if tow_input else 0)
         )
 
     def build(
@@ -80,13 +89,15 @@ class CooperativeObservationBuilder:
         last_action: torch.Tensor,
         line_view: torch.Tensor,
         averaged_forces: torch.Tensor,
+        tow_levels: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
         ``target_position`` is each world's flat target, ``(W, 2)``,
         ``last_action`` the joint action of the step before, ``(W, N, M + 1)``,
-        ``line_view`` ``HeadLine.view``, ``(W, N, 3)``, and
-        ``averaged_forces`` ``AveragedForces.values``. The gather
+        ``line_view`` ``HeadLine.view``, ``(W, N, 3)``, ``averaged_forces``
+        ``AveragedForces.values``, and ``tow_levels`` each world's tow level,
+        ``(W,)``, read with ``tow_input``. The gather
         creates a new tensor, so a returned observation never changes when
         ``build`` runs again.
         """
@@ -107,14 +118,19 @@ class CooperativeObservationBuilder:
             ),
             dim=-1,
         )
-        forces = torch.cat(
-            (
-                loads / self.unit_weight_n,
-                averaged_forces[..., 2:3],
-                averaged_forces[..., :2],
-            ),
-            dim=-1,
-        )
+        forces = [
+            loads / self.unit_weight_n,
+            averaged_forces[..., 2:3],
+            averaged_forces[..., :2],
+        ]
+        if self.instant_joint_forces:
+            forces.append(
+                torch.stack(
+                    (state.front_joint_force, state.net_joint_force[..., 0]), dim=-1
+                )
+                / self.unit_weight_n
+            )
+        forces = torch.cat(forces, dim=-1)
         self.blocks[:, : self.segment_count] = torch.cat(
             (
                 gravity,
@@ -135,4 +151,7 @@ class CooperativeObservationBuilder:
             (*neighbour_blocks.shape[:2], TARGET_VALUE_COUNT)
         )
         target_values[:, 0] = target_seen_from_head(state, target_position)
-        return torch.cat((neighbour_blocks, target_values), dim=-1)
+        inputs = [neighbour_blocks, target_values]
+        if self.tow_input:
+            inputs.append(tow_levels[:, None, None].expand(-1, self.segment_count, 1))
+        return torch.cat(inputs, dim=-1)

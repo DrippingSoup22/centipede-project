@@ -142,14 +142,24 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
                 assert sum(counts) == 2
 
 
-def test_a_cooperators_run_keeps_its_level_when_continued_and_evaluated(tmp_path):
+def test_a_cooperators_run_keeps_its_level_and_tow_when_continued_and_evaluated(
+    tmp_path,
+):
     """The cooperators' design on model v4: two critics with baselines, the
-    level logged after every cycle, saved, restored and evaluated at."""
+    level and the tow logged after every cycle, saved, restored, and the
+    evaluation at the level without tow. Of four worlds, the last two act
+    with the mean action; the tow moves after every window of two steps."""
     cooperators = (
         TRAINING_FILE.replace("assembly_v3", "assembly_v4")
+        .replace("world_count = 2", "world_count = 4")
+        .replace(
+            'runs_folder = "RUNS"',
+            'runs_folder = "RUNS"\nmean_action_worlds_per_group = 1',
+        )
         .replace(
             "max_episode_steps = 3",
-            'max_episode_steps = 3\nobservation_radius = 2\ndesign = "cooperators"',
+            'max_episode_steps = 3\nobservation_radius = 2\ndesign = "cooperators"\n'
+            "[environment.cooperators]\ntow_start = 0.4\ntow_window_steps = 2",
         )
         .replace(
             "hidden_layers = [8]",
@@ -163,16 +173,23 @@ def test_a_cooperators_run_keeps_its_level_when_continued_and_evaluated(tmp_path
         for line in (folder / "training_log.jsonl").read_text().splitlines()
     ]
     assert list(log[-1]["task"]) == ["level", "in_time_share"]
+    assert len(log[-1]["tow"]["line_erased"]) == 2  # at the tow and without
     assert len(log[-1]["learning"]["baseline_explained_variances"][0]) == 2
     checkpoint = torch.load(folder / "checkpoints" / "cycle_0002.pt", weights_only=True)
     assert checkpoint["task_level"] == log[-1]["task"]["level"]
+    assert checkpoint["tow_top"] == pytest.approx(log[-1]["tow"]["tow"])
 
+    # The continued run tows from the saved top, moved by one window.
+    checkpoint["tow_top"] = 0.1
+    torch.save(checkpoint, folder / "checkpoints" / "cycle_0002.pt")
     continuing = (
         f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
         "[interaction_loop]\nupdate_cycles = 3\n"
     )
     run_file(tmp_path, continuing)
     assert logged_cycles(folder) == [1, 2, 3]
+    checkpoint = torch.load(folder / "checkpoints" / "cycle_0003.pt", weights_only=True)
+    assert checkpoint["tow_top"] == pytest.approx(0.1, abs=0.021)
     evaluation = (
         f'[run]\nmode = "evaluate"\nsource = "{folder.as_posix()}"\n'
         "[evaluation]\nseeds = [7]\nepisodes_per_seed = 2\nrecord = false\n"

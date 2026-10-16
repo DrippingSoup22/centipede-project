@@ -431,24 +431,25 @@ def test_gpu_effort_matches_cpu_effort():
 
 
 def test_gpu_joint_forces_match_cpu_joint_forces(model, mapping):
-    """With the rear segment pushed forward by three body weights, both
-    backends measure each joint's push alike. Near the head the push is
-    small beside the friction, which each solver shares among the feet as it
-    finds, so the joints are compared against the largest push."""
+    """With the rear segment pushed forward by three body weights, as the
+    step's body forces, both backends measure each joint's push alike. Near
+    the head the push is small beside the friction, which each solver shares
+    among the feet as it finds, so the joints are compared against the
+    largest push."""
     cpu = CPUBackend(model, mapping, 1, STEPS, measure_joint_forces=True)
     cpu.reset(seed=0)
     gpu = GPUBackend(
         model, mapping, 1, STEPS, SOLVER, 128, 512, measure_joint_forces=True
     )
     gpu.reset(seed=0)
-    rear_body = int(mapping.body_ids[-1])
-    push = 3 * model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
-    cpu.world_data[0].xfrc_applied[rear_body, 0] = push
-    wp.to_torch(gpu.gpu_data.xfrc_applied)[0, rear_body, 0] = push
+    body_forces = torch.zeros(1, mapping.segment_count, 3)
+    body_forces[0, -1, 0] = (
+        3 * model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    )
     actions = torch.zeros(1, mapping.segment_count, 6)
 
-    cpu.step(actions)
-    gpu.step(actions.cuda())
+    cpu.step(actions, body_forces=body_forces)
+    gpu.step(actions.cuda(), body_forces=body_forces.cuda())
 
     expected = cpu.physical_state.front_joint_force[0]
     actual = gpu.physical_state.front_joint_force[0].cpu()

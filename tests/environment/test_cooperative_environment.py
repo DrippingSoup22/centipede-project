@@ -1,7 +1,7 @@
-"""Tests for the cooperators' environment and its task, observations, reward
-and diagnostics.
+"""Tests for the cooperators' environment and its task, observations, reward,
+tow and diagnostics.
 
-The parts are fed hand-made physical states; one test runs the whole
+The parts are fed hand-made physical states; two tests run the whole
 environment on the CPU.
 """
 
@@ -18,11 +18,13 @@ from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
 from centipede.environment.cooperative_reward import (
+    GOAL_PARTS,
     PART_NAMES,
     AveragedForces,
     CooperativeReward,
 )
 from centipede.environment.cooperative_task import CooperativeTask
+from centipede.environment.cooperative_tow import Tow
 from centipede.environment.environment import create_environment
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.settings import CooperatorsSettings, EnvironmentSettings
@@ -136,6 +138,7 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
         torch.full((1, SEGMENTS), 0.001),
         torch.tensor([[0.005, 0.0, 0.0015, 0.003, 0.012]]),
         forces.values,
+        torch.zeros(1, SEGMENTS),
     )
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
@@ -155,13 +158,105 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
     torch.testing.assert_close(by_name["pushing"], -1e-3 * reward.sharing_weights[:, 2])
     # A full push for one step, priced as one motor fully on.
     torch.testing.assert_close(by_name["pain"], torch.tensor([0, 0, 0, -one_motor, 0]))
-    goal = sum(by_name[name] for name in PART_NAMES[:5])
+    assert not by_name["own_ground"].any()
+    goal = sum(by_name[name] for name in PART_NAMES[:GOAL_PARTS])
     torch.testing.assert_close(
         channels[0], torch.stack((goal, parts.rewards[0] - goal), -1)
     )
 
     state.net_joint_force[0, 2, 1] = 2e-3
     assert forces.update(state)[0, 2, 1] == pytest.approx(1.5)
+
+
+def test_the_own_ground_price_charges_each_follower_its_joints_net_force_and_tow():
+    """Averaged net joint forces along the body, in unit weights: segment 1
+    dragged by 0.3, segment 2 pushing with 0.1, segment 3 held back by its
+    neighbours against a tow of 0.3, segment 4 carrying itself. With the
+    tow added back: 0.3, -0.1, 0 and 0.3, each priced 0.8 mm a step at 0.3;
+    the front joint is free."""
+    settings = CooperatorsSettings.from_section({"force_price": "own_ground"})
+    reward = CooperativeReward(
+        settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
+    )
+    state = resting_state(1)
+    averaged = torch.zeros(1, SEGMENTS, 4)
+    averaged[0, :, 0] = torch.tensor([0.5, 0.3, -0.1, -0.3, 0.0])
+    averaged[0, :, 2] = 1.0  # a front joint force that no longer costs
+    tow = torch.tensor([[0.0, 0.0, 0.0, 0.3, 0.3]])
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+
+    _, parts, _ = reward.compute(
+        state,
+        state.body_planar_position,
+        state.head_tip_position[:, :2],
+        torch.tensor([[0.1, 0.0]]),
+        torch.tensor([False]),
+        0.025,
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS),
+        torch.zeros(1, SEGMENTS),
+        averaged,
+        tow,
+    )
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    torch.testing.assert_close(
+        by_name["own_ground"], -0.8 * torch.tensor([0.0, 1.0, 1 / 9, 0.0, 1.0])
+    )
+    assert not by_name["front_joint"].any()
+
+
+def test_the_tow_pushes_along_the_floor_and_fades_while_the_towed_mean_walks():
+    """Four worlds, the last two reserved: the third always at the top, the
+    fourth never towed. Each segment is pushed by its world's level times its
+    own weight, along its forward axis laid flat. Over each window of two
+    steps the towed worlds' followers erase 0.2 mm a step (10 mm/s) and
+    their feet lift off every other step (25 Hz): the top falls by a step;
+    standing still, it rises again, never above the start."""
+    settings = CooperatorsSettings.from_section(
+        {"tow_start": 0.4, "tow_step": 0.1, "tow_window_steps": 2}
+    )
+    weights_n = (2e-3,) + (1e-3,) * (SEGMENTS - 1)
+    tow = Tow(settings, 4, weights_n, BODY.unit_weight_n, 1000, "cpu")
+    tow.start(0.4)
+    tow.reserve(1)
+    tow.restart(torch.ones(4, dtype=torch.bool))
+    levels = tow.levels()
+    assert 0 <= levels[0] <= 0.4 and 0 <= levels[1] <= 0.4
+    assert levels[2:].tolist() == [pytest.approx(0.4), 0.0]
+
+    # Each segment turned 90 degrees to the left and pitched nose down.
+    state = resting_state(4)
+    turn = torch.tensor([math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)])
+    pitch = torch.tensor([math.cos(0.1), 0.0, math.sin(0.1), 0.0])
+    w1, x1, y1, z1 = turn
+    w2, x2, y2, z2 = pitch
+    state.body_quaternion[:] = torch.tensor(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ]
+    )
+    forces = tow.forces(state.body_quaternion)
+    torch.testing.assert_close(forces[2, 0], torch.tensor([0.0, 0.4 * 2e-3, 0.0]))
+    torch.testing.assert_close(forces[2, 1], torch.tensor([0.0, 0.4 * 1e-3, 0.0]))
+    assert not forces[3].any()
+    torch.testing.assert_close(tow.unit_weights()[2, 1], torch.tensor(0.4))
+
+    step = CooperativeDiagnostics(
+        4, SEGMENTS, BODY.unit_weight_n, HeadOutline(-0.002, 0.002, 0.002), "cpu", None
+    ).step
+    for walking, expected_top in ((True, 0.3), (False, 0.4), (False, 0.4)):
+        step.reward_parts[..., PART_NAMES.index("line")] = 0.2 if walking else 0.0
+        for index in range(2):
+            step.lift_off.fill_(walking and index == 0)
+            tow.record(step)
+            tow.adjust()
+        assert tow.top == pytest.approx(expected_top)
+    assert tow.facts.line_erased.tolist() == [0.0, 0.0]
 
 
 def test_the_head_line_is_erased_by_each_tail_and_measures_how_far_it_is_left():
@@ -231,6 +326,39 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
     assert not head[block : 3 * block].any()
     torch.testing.assert_close(head[-2:], torch.tensor([0.02, 0.01]))
     assert not observations[0, 1:, -2:].any()
+
+
+def test_a_block_can_hold_the_joint_forces_of_the_step_and_the_tow_level():
+    builder = CooperativeObservationBuilder(
+        SEGMENTS,
+        2,
+        2,
+        LEGS,
+        BODY.unit_weight_n,
+        "cpu",
+        instant_joint_forces=True,
+        tow_input=True,
+    )
+    block = builder.block_size
+    assert (block, builder.observation_size) == (50, 5 * 50 + 3)
+    state = resting_state(2)
+    state.front_joint_force[1, 1] = -0.5e-3
+    state.net_joint_force[1, 1] = torch.tensor([0.2e-3, 0.7e-3])
+
+    observations = builder.build(
+        state,
+        torch.zeros(2, 2),
+        torch.zeros(2, SEGMENTS, LEGS + 1),
+        torch.zeros(2, SEGMENTS, 3),
+        torch.zeros(2, SEGMENTS, 4),
+        torch.tensor([0.0, 0.25]),
+    )
+
+    # After the averaged forces: the front joint's and the net along, now.
+    torch.testing.assert_close(observations[1, 1, 36:38], torch.tensor([-0.5, 0.2]))
+    torch.testing.assert_close(
+        observations[:, :, -1], torch.tensor([[0.0], [0.25]]) * torch.ones(2, SEGMENTS)
+    )
 
 
 def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
@@ -336,3 +464,38 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
     assert truncated.all() and not terminated.any()
     assert environment.episode_steps.tolist() == [0, 0]
     assert not torch.equal(final, environment._observations())
+
+
+def test_a_tow_above_the_friction_slides_the_body_along_and_one_below_it_does_not():
+    """The whole environment on v4, its unpowered legs letting it down onto
+    its belly: towed by its own weight, more than the floor's friction of
+    0.8 can hold, the body slides forward along its heading; towed by 0.4,
+    once settled, it creeps a few hundredths of a millimetre in 0.1 s."""
+    settings = EnvironmentSettings.from_section(
+        {
+            "design": "cooperators",
+            "max_episode_steps": 100,
+            "simulation": {
+                "model_path": str(Path("models/assembly_v4.xml").resolve()),
+                "backend": "cpu",
+                "world_count": 2,
+            },
+            "cooperators": {"stagger_first_episodes": False, "tow_start": 1.0},
+        }
+    )
+    environment = create_environment(settings)
+    environment.start_tow()
+    environment.reset(seed=0)
+    environment.tow.shares.copy_(torch.tensor([1.0, 0.4]))
+    state = environment.simulation.physical_state
+    actions = torch.zeros(2, 12, 9)
+    for _ in range(10):  # 0.2 s to settle
+        environment.step(actions)
+    start = state.head_tip_position[:, :2].clone()
+    for _ in range(5):
+        environment.step(actions)
+    moved = state.head_tip_position[:, :2] - start
+    assert moved[0].norm() > 5e-3 and moved[1].norm() < 1e-4
+    w, x, y, z = state.body_quaternion[0, 0]
+    forward = torch.stack((1 - 2 * (y * y + z * z), 2 * (x * y + w * z)))
+    assert (moved[0] @ forward) / moved[0].norm() > 0.9

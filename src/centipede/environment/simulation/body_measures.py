@@ -23,7 +23,8 @@ class BodyMeasures:
     joint bent to its limit. ``segment_lengths_m`` are each segment's length
     from its front end to its rear end in the plane: the head's from its tip
     to its spine joint, the others' from joint to joint, the rear segment's
-    twice the way from its joint to its centre.
+    twice the way from its joint to its centre. ``segment_weights_n`` are
+    each segment's own weight, its body and legs without the segments behind.
     """
 
     unit_weight_n: float
@@ -31,6 +32,7 @@ class BodyMeasures:
     body_length_m: float
     turning_circle_m: float
     segment_lengths_m: tuple[float, ...]
+    segment_weights_n: tuple[float, ...] = ()
 
 
 def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
@@ -39,7 +41,11 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
     mujoco.mj_forward(model, data)
     segment_count = mapping.segment_count
 
-    weight_n = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    gravity = np.linalg.norm(model.opt.gravity)
+    weight_n = model.body_mass.sum() * gravity
+    # A segment's subtree is itself, its legs and every segment behind it.
+    subtree_masses = model.body_subtreemass[mapping.body_ids]
+    own_masses = subtree_masses - np.append(subtree_masses[1:], 0.0)
 
     # The left sweep of the first segment stands for every leg: the model's
     # legs are copies of one another.
@@ -84,6 +90,7 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
         body_length_m=float(body_length),
         turning_circle_m=float(turning_circle),
         segment_lengths_m=tuple(float(length) for length in segment_lengths),
+        segment_weights_n=tuple(float(mass * gravity) for mass in own_masses),
     )
 
 

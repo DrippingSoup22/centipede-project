@@ -163,6 +163,23 @@ values, which nothing pays.
 | An actor: five blocks and the target's two values | 242 |
 | A critic: the actor's input and the four neighbours' actions | 278 |
 
+**Cycle 10: the forces of the moment and the tow** (agreed 2026-10-16;
+[tow.md](tow.md)). Two settings, off by default. With
+`observe_instant_joint_forces` each block adds, after the averaged joint
+forces, the front joint's force and the net joint force along the body of
+the step itself, so that a segment feels a pull at once rather than over
+the 1 s average it is priced by: the signal of a reflex, "I am pulled now,
+step". With `observe_tow` every segment's input ends with its world's tow
+level, a force each segment feels on itself, as it feels gravity; zero in
+every evaluation. The pairing rule holds: the own ground force a follower
+pays is its net joint force, in its block, plus its tow, in its input.
+
+| Input | Size |
+| --- | ---: |
+| A block, with the step's front and net joint forces (2) | 50 |
+| An actor: five blocks, the target's two values and the tow level | 253 |
+| A critic: the actor's input and the four neighbours' actions | 289 |
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
@@ -170,15 +187,17 @@ velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
 others, the front joint's force, the net joint force (along, up), both
-averaged over `averaging_s` as the reward prices them, the tail's place on
+averaged over `averaging_s` as the reward prices them, with
+`observe_instant_joint_forces` the front joint's force and the net joint
+force along of the step itself, the tail's place on
 the head's line (signed distance, angle, distance from the line not yet
 erased), and the last action (9; the rear's ninth is always zero),
 as the policy sent it, before the spine's scale. The
 forces are means over the step's physics steps (40 on v4), in unit weights of
-0.857 mN; after a reset, the starting pose's own. The target comes last,
-forward and to the left of the head's tip, in metres, zeros for the
-followers. Each agent normalises its inputs with running statistics, as on
-main.
+0.857 mN; after a reset, the starting pose's own. The target comes after
+the blocks, forward and to the left of the head's tip, in metres, zeros for
+the followers, and with `observe_tow` the world's tow level last. Each
+agent normalises its inputs with running statistics, as on main.
 
 ## Later experiments
 

@@ -250,6 +250,50 @@ def test_two_reward_channels_and_baselines_that_see_the_neighbours_actions():
     assert torch.isfinite(learning.baseline_explained_variances).all()
 
 
+def test_the_last_worlds_may_act_with_the_mean_action_and_are_never_learned_from():
+    """Of four worlds, the last two measure the policies: they get the mean
+    action, and only the first two are stored, baselines included."""
+    settings = AgentSettings.from_section(
+        {"hidden_layers": [8], "critic_baselines": True, "ppo": {"minibatch_size": 4}}
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        neighbour_table=torch.tensor([[0, 3, 1], [1, 0, 2], [2, 1, 3]]),
+        mean_action_world_count=2,
+    )
+    observations = body_tensor(0, OBSERVATION_SIZE)
+
+    actions = agents.act(observations, training=True)
+
+    mean_actions = agents.act(observations, training=False)
+    assert torch.equal(actions[2:], mean_actions[2:])
+    assert not torch.equal(actions[:2], mean_actions[:2])
+    storage = agents.segment_agents[1].rollout_storage
+    assert storage.baseline_inputs.shape[1] == 2
+    agents.record(
+        body_tensor(100),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(1, OBSERVATION_SIZE),
+    )
+    agents.act(body_tensor(1, OBSERVATION_SIZE), training=True)
+    agents.record(
+        body_tensor(101),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(2, OBSERVATION_SIZE),
+    )
+    agents.update()
+    assert torch.isfinite(agents.diagnostics.learning.approximate_kl).all()
+
+
 def test_followers_without_a_goal_learn_from_their_cost_alone():
     """The head learns from both channels, the followers from the second only:
     one critic each, their cost stored, and no goal critic reported."""

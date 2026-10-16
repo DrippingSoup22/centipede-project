@@ -334,7 +334,26 @@ class CooperatorsSettings:
     with (the head's beyond ``head_free_support`` of its weight) and the
     floor's push on its body, in unit weights, priced as force times
     ``hanging_price``. The forces are averaged over ``averaging_s`` (an
-    exponential average; 0 none).
+    exponential average; 0 none). ``force_price`` chooses the follower's
+    force cost (cycle 10): ``"front_joint"``, its front joint's force, which
+    carries every segment's error behind it too; or ``"own_ground"``, its
+    own net ground force, the net force of its two joints on it plus its tow,
+    which is its own error alone.
+
+    **Tow** (cycle 10, docs/cooperators/tow.md): training wheels that fade. In
+    training each segment is pushed forward along the floor by its world's
+    tow level times its own weight. A training world draws its level from 0
+    to the tow's top at every episode start; the experiment's mean-action
+    worlds keep the top or none. The top starts at ``tow_start`` (0: no tow)
+    and moves by ``tow_step`` after each update cycle once
+    ``tow_window_steps`` steps have passed since it last moved: down while
+    the towed mean-action worlds' followers erase more than
+    ``tow_walk_mm_per_s`` of line each and their feet lift off more than
+    ``tow_lift_off_hz`` times a second, up otherwise, from 0 to
+    ``tow_start``. Evaluations never tow. ``observe_tow`` gives every
+    segment its world's tow level, and ``observe_instant_joint_forces``
+    adds to each block its front and net joint forces of the step itself
+    beside the averaged ones.
 
     **Spine.** Each spine motor receives ``spine_action_scale`` times its
     command, so that the whole command range spans the joint's: on v4 a
@@ -362,6 +381,14 @@ class CooperatorsSettings:
     hanging_price: float
     head_free_support: float
     averaging_s: float
+    force_price: str
+    tow_start: float
+    tow_step: float
+    tow_window_steps: int
+    tow_walk_mm_per_s: float
+    tow_lift_off_hz: float
+    observe_tow: bool
+    observe_instant_joint_forces: bool
     spine_action_scale: float
 
     @classmethod
@@ -417,6 +444,22 @@ class CooperatorsSettings:
                 "head_free_support", default=0.5, minimum=0.0
             ),
             averaging_s=section.number("averaging_s", default=0.2, minimum=0.0),
+            force_price=section.choice(
+                "force_price", ("front_joint", "own_ground"), default="front_joint"
+            ),
+            tow_start=section.number(
+                "tow_start", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            tow_step=section.number("tow_step", default=0.02, minimum=0.0),
+            tow_window_steps=section.positive_integer("tow_window_steps", default=256),
+            tow_walk_mm_per_s=section.number(
+                "tow_walk_mm_per_s", default=5.0, minimum=0.0
+            ),
+            tow_lift_off_hz=section.number("tow_lift_off_hz", default=1.0, minimum=0.0),
+            observe_tow=section.boolean("observe_tow", default=False),
+            observe_instant_joint_forces=section.boolean(
+                "observe_instant_joint_forces", default=False
+            ),
             spine_action_scale=section.number(
                 "spine_action_scale", default=0.35, minimum=0.0, maximum=1.0
             ),

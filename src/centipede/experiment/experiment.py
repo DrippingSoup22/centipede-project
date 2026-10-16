@@ -11,7 +11,9 @@
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
-  a new session. With
+  a new session. A cooperators' run may keep worlds that act with the mean
+  action, and tow its body; the tow's top moves after each cycle and is
+  saved with the checkpoints. With
   ``start_from`` the new run's agents begin from another run's
   checkpoint, for example to continue learning on a harder task.
 - **evaluate** loads a checkpoint, runs every seed with the agents and each
@@ -125,9 +127,18 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # Everything that can fail comes before the run folder is written, so a
     # rejected run leaves nothing behind.
     environment = create_environment(configuration.environment)
-    agents = _agents_for(environment, configuration, loop_settings.rollout_window_steps)
-    # The cooperators' task has a level, which follows the arrivals.
+    worlds_per_group = run_settings.mean_action_worlds_per_group
+    agents = _agents_for(
+        environment,
+        configuration,
+        loop_settings.rollout_window_steps,
+        mean_action_world_count=2 * worlds_per_group,
+    )
+    # The cooperators' task has a level, which follows the arrivals, and may
+    # have a tow, which follows the mean action.
     levelled = isinstance(environment, CooperativeEnvironment)
+    towed = levelled and configuration.environment.cooperators.tow_start > 0
+    saved_tow_top = None
     completed_cycles = 0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
@@ -137,6 +148,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             completed_cycles = checkpoint["completed_cycles"]
             if levelled and "task_level" in checkpoint:
                 environment.set_level(checkpoint["task_level"])
+            saved_tow_top = checkpoint.get("tow_top")
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -145,6 +157,10 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         # it starts from, such as the spine, or wider layers: its agents are
         # then widened.
         agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
+    if towed:
+        environment.start_tow(saved_tow_top)
+    if worlds_per_group:
+        environment.reserve_measuring_worlds(worlds_per_group)
     episode_steps = configuration.environment.max_episode_steps
     record_worlds = min(run_settings.record_worlds, environment.world_count)
     if record_worlds:
@@ -214,12 +230,21 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     # The loop counts the cycles of this session only; the log and checkpoints
     # count from the start of the run. A resumed session draws new episodes.
+    learning_worlds = (
+        torch.arange(environment.world_count, device=environment.device)
+        < agents.learning_world_count
+        if worlds_per_group
+        else None
+    )
     loop = InteractionLoop(
         environment,
         agents,
         replace(loop_settings, update_cycles=total_cycles - completed_cycles),
+        counted_worlds=learning_worlds,
     )
-    categories = _training_categories(loop, agents, environment)
+    categories = _training_categories(
+        loop, agents, environment, measuring=bool(worlds_per_group)
+    )
     transitions_per_cycle = environment.world_count * loop_settings.rollout_window_steps
 
     # Recording: the recorder is armed before a recording's first cycle and
@@ -268,6 +293,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         cycle = completed_cycles + session_cycle + 1
         if levelled:
             environment.adjust_level()
+        if worlds_per_group:
+            environment.adjust_tow()
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
@@ -305,6 +332,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 cycle,
                 agents.state_dict(),
                 task_level=environment.level if levelled else None,
+                tow_top=environment.tow.top if towed else None,
             )
             if run_settings.report and not levelled:
                 _write_training_report(folder, configuration, categories)
@@ -330,9 +358,12 @@ def _agents_for(
     environment: Environment | CooperativeEnvironment,
     configuration: Configuration,
     rollout_window_steps: int,
+    mean_action_world_count: int = 0,
 ) -> Agents:
     """Agents that fit the environment: its body, its reward channels and
-    those each segment learns from, and the segments each segment sees."""
+    those each segment learns from, and the segments each segment sees; in
+    training, the last ``mean_action_world_count`` worlds act with the mean
+    action and are not learned from."""
     return Agents(
         environment.segment_count,
         environment.observation_size,
@@ -345,6 +376,7 @@ def _agents_for(
         environment.reward_channel_count,
         environment.neighbour_table,
         environment.segment_reward_channels,
+        mean_action_world_count,
     )
 
 
@@ -411,9 +443,13 @@ def _check_agents_can_start_from(
 
 
 def _training_categories(
-    loop: InteractionLoop, agents: Agents, environment: Environment
+    loop: InteractionLoop,
+    agents: Agents,
+    environment: Environment,
+    measuring: bool = False,
 ) -> list[LoggedCategory]:
-    """Every diagnostics category logged once per window, in report order."""
+    """Every diagnostics category logged once per window, in report order;
+    ``measuring`` adds the tow and what the mean-action worlds measured."""
     loop_diagnostics = loop.diagnostics
     return [
         LoggedCategory(
@@ -444,6 +480,23 @@ def _training_categories(
         _timing_category(loop),
         _physics_category(loop),
         *_task_category(environment),
+        *(_tow_category(environment) if measuring else []),
+    ]
+
+
+def _tow_category(environment: CooperativeEnvironment) -> list[LoggedCategory]:
+    """The tow's top after each cycle and the mean-action worlds' last window."""
+    facts = environment.tow.facts
+    return [
+        LoggedCategory(
+            "tow",
+            "Tow",
+            "After each update cycle. The mean-action worlds act with the agents'"
+            " mean action, half at the tow's top, half without tow; their values"
+            " are over the window that last moved the top, NaN before one.",
+            descriptions(facts),
+            lambda: values(facts),
+        )
     ]
 
 
