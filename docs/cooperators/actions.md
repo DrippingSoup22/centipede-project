@@ -3,7 +3,8 @@
 **Status (2026-10-14): agreed with the user and built; from cycle 6
 (2026-10-16) the spine motors receive 0.35 of their command
 ([The spine's scale](#the-spines-scale-cycle-6)); from cycle 8 the actions
-explore with state-dependent noise ([How actions explore](#how-actions-explore)).**
+explore with state-dependent noise, from cycle 9 its spread on a fixed
+schedule ([How actions explore](#how-actions-explore)).**
 
 ## What the constraints fix
 
@@ -153,6 +154,43 @@ test and in ours: the same trade-off. Whether the gait now moves into the
 mean is the question runs 15 and 16 answer, each review comparing the
 mean action with training. And the actor's change to tanh changes how it
 learns as well as how it explores.
+
+**What runs 15 and 16 showed: still the noise.** In training run 16 did
+best of the line after run 04 (0.80 targets an episode at cycle 128, 23% in
+time, the level rising), run 15 as run 13; but without noise both stood,
+their legs stepping under 0.7 times a second. In the recordings (the
+user's reading) the head pulls toward its target and the body cannot
+follow: the legs move cautiously, one at a time, their feet held on the
+ground. Two causes, besides the noise doing the walking:
+
+- **Exploring does not pay one segment alone.** A step pays only when many
+  segments step together: the head cannot drag eleven planted segments,
+  and a follower stepping alone only strains its joints. Each agent judges
+  its own stepping against the others' random behaviour, on which standing
+  looks better: relative overgeneralization (Wei and Luke, JMLR 2016).
+- **The noise shrinks before a gait is found.** Each agent learns its
+  spread, and PPO took it from 0.25 to 0.19: noise costs energy and force
+  and almost never pays, so exploring grew more cautious while it should
+  search.
+
+**From cycle 9: the spread on a fixed schedule** (the user's choice,
+2026-10-16). The spreads are not learned: they start at 0.4 and shrink by
+equal ratios to 0.05 at the last of 256 cycles (`action_std_schedule`
+"log_linear"; 0.24 at cycle 64, 0.14 at 128, 0.085 at 192), as the PPO
+paper set its spreads for its humanoid tasks (Schulman et al., 2017). The
+body explores widely first, and the 1 s force average makes that noise
+about a third as costly as in cycle 6, when a spread of 0.5 made standing
+worth more than walking; and as the noise shrinks the policy itself must
+carry the walk, so the training's own numbers show whether it does.
+gSDE, the tanh actor and the forces stay as in cycle 8.
+
+**Later, if needed** (the user, 2026-10-16): a cost curriculum, energy and
+the force prices starting at a fraction and growing over training (as
+Hwangbo et al.'s curriculum factor, Science Robotics 2019), decided from
+what the schedule shows; and, only if nothing else works, noise shared
+between segments, correlated by their distance and only within the
+observation radius, so that what a segment cannot see never shares its
+noise.
 
 ## Not part of the vector
 - **Asymmetric joints**: real muscles push harder toward the ground than
