@@ -114,6 +114,21 @@ hurt; shorter stretches of experience per environment, bootstrapped
 earlier, can. Isaac Gym's runs trained ANYmal for 65 M steps, ANYmal on
 rough terrain for 150 M, the humanoid for 327 M.
 
+## Exploration
+
+How a policy's noise is drawn, for the decision of cycle 8
+([actions.md](actions.md#how-actions-explore)):
+
+| Noise | What it is | Found |
+| --- | --- | --- |
+| White | Fresh at every step | The usual default; the body's inertia filters most of it out |
+| Colored, 1/f^β | Drawn through time, drifting more as β grows: pink β = 1, red β = 2 | Pink best overall with MPO and SAC (Eberhard et al., ICLR 2023); with PPO, β about 0.5 (Hollenstein et al., AAAI 2024) |
+| State-dependent (gSDE) | The policy's last-layer features times a random matrix held for some steps: the same state gets the same noise | Smooth enough to train real robots directly, and competitive with unstructured noise in simulation (Raffin, Kober and Stulp, CoRL 2021); in Stable-Baselines3's PPO (`use_sde`, a new matrix at each rollout by default, tanh features by default) |
+
+Noise drawn through time is independent of the state, so a step it makes
+cannot be copied by the mean action, which learns the average good action
+of each state; state-dependent noise tries only what a policy can do.
+
 ## Sources
 
 - Schilling, Konen, Ohl & Korthals, 2020, [arXiv 2005.11164](https://arxiv.org/abs/2005.11164)
@@ -138,6 +153,10 @@ rough terrain for 150 M, the humanoid for 327 M.
 - Lyu, Xiao, Daley & Amato, AAMAS 2021, [arXiv 2102.04402](https://arxiv.org/abs/2102.04402)
 - de Witt et al., 2020, [arXiv 2011.09533](https://arxiv.org/abs/2011.09533)
 - Yasui, Sakai, Kano, Owaki & Ishiguro, PLOS ONE 2017, [PMC5289600](https://pmc.ncbi.nlm.nih.gov/articles/PMC5289600)
+- Raffin, Kober & Stulp, Smooth exploration for robotic reinforcement learning, CoRL 2021 (PMLR 164), [arXiv 2005.05719](https://arxiv.org/abs/2005.05719)
+- Eberhard, Hollenstein, Pinneri & Martius, Pink noise is all you need, ICLR 2023, [ICLR](https://iclr.cc/virtual/2023/oral/12540)
+- Hollenstein, Martius & Piater, Colored noise in PPO, AAAI 2024, [arXiv 2312.11091](https://arxiv.org/abs/2312.11091)
+- Stable-Baselines3, PPO, [documentation](https://stable-baselines3.readthedocs.io/en/master/modules/ppo.html)
 - Yasui, Takano, Kano & Ishiguro, Frontiers in Robotics and AI 2022, [doi 10.3389/frobt.2022.797566](https://www.frontiersin.org/articles/10.3389/frobt.2022.797566/full)
 - Schilling & Cruse, PLOS Computational Biology 2020, [PMC7205325](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7205325/)
 - Owaki & Ishiguro, Scientific Reports 2017, [doi 10.1038/s41598-017-00348-9](https://doi.org/10.1038/s41598-017-00348-9)

@@ -2,7 +2,8 @@
 
 **Status (2026-10-14): agreed with the user and built; from cycle 6
 (2026-10-16) the spine motors receive 0.35 of their command
-([The spine's scale](#the-spines-scale-cycle-6)).**
+([The spine's scale](#the-spines-scale-cycle-6)); from cycle 8 the actions
+explore with state-dependent noise ([How actions explore](#how-actions-explore)).**
 
 ## What the constraints fix
 
@@ -67,13 +68,93 @@ decision comes about eight times in each step. Physics costs the same per
 simulated second at any rate; a faster rate would only add samples and
 learning time.
 
-## Not part of the vector
+## How actions explore
 
-- **How actions explore**: a choice of learning, made with the agents'
-  settings; white noise planned (the user, 2026-10-14), pink noise
-  (β = 1) from run 01 on, and from cycle 6 a starting spread of 0.25
-  instead of 0.5, since at 0.5 the noise made standing worth more than
-  walking ([reward.md](reward.md#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
+A choice of learning, made with the agents' settings, not part of the
+vector.
+
+**Until cycle 7: noise drawn through time.** White noise was planned (the
+user, 2026-10-14); pink noise (β = 1) ran from run 01 on, and from cycle 6
+with a starting spread of 0.25 instead of 0.5, since at 0.5 the noise made
+standing worth more than walking
+([reward.md](reward.md#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
+
+**What runs 13 and 14 showed: the noise was the gait.** In training their
+targets rose tenfold, but without noise the body stood, its legs stepping
+0.2 to 0.4 times a second. Driven by their cycle-128 actors with the pink
+noise at a part of its learned spread, the body moved the more the larger
+the noise (`analysis/exploration_check.py` in `../Training`, 4 worlds, mm/s):
+
+| Pink noise | Run 13: closing / head speed | Run 14: closing / head speed |
+| --- | --- | --- |
+| None (the mean action) | 0.00 / 1.7 | 0.02 / 2.7 |
+| A quarter | 0.17 / 3.3 | 0.19 / 5.7 |
+| Half | 0.46 / 7.7 | 0.74 / 10.1 |
+| All | 0.60 / 14.2 | 1.22 / 16.2 |
+
+The mean cannot learn a step the noise made. The noise is drawn through
+time, unrelated to the state, and the actor has no clock; PPO moves the
+mean toward the actions that went well in each state, and averaged over the
+noise's random steps that keeps the direction and loses the rhythm. The
+same noise is jitter that the force price charges
+([reward.md](reward.md#cycle-8-only-a-lasting-force-costs-the-users-idea)).
+
+**From cycle 8: noise that depends on the state** (the user's agreement,
+2026-10-16): generalized state-dependent exploration, gSDE (Raffin, Kober
+and Stulp, CoRL 2021; [research.md](research.md#exploration)).
+
+- **How.** Each action's noise is the actor's last hidden layer, scaled to
+  unit length, times an exploration matrix that each world draws and keeps
+  for `state_dependent_noise_steps` steps, then draws again. The matrix's
+  entries have learned spreads, one per feature and action, starting at
+  `initial_action_std` (0.25). For a given state the noise is normal, so
+  PPO's probabilities stay exact (RL_lib's `GaussianPolicyNetwork` and
+  `SquashedGaussianPolicy`).
+- **Why.** While a matrix lasts, the same state gets the same noise: each
+  draw acts as a slightly different policy, and what it tries is a
+  behaviour the actor can learn, such as swinging a leg forward when it is
+  far back. A draw that went well moves the mean toward it.
+- **Unit-length features** (our choice; Raffin et al. use the features as
+  they are): an action's spread is then 0.25 while the spreads are equal,
+  whatever the features' size, and does not drift as the hidden layer
+  learns.
+- **A tanh actor** (`actor_activation`): a held matrix adds the hold's mean
+  direction of the features as a constant push. ReLU's features, never
+  negative, hardly change direction from one state to the next, so held 32
+  steps on run 13's states the constant part is 83% of the noise with its
+  trained actors and 71% with fresh ReLU ones, against 52% with fresh tanh
+  ones, as Raffin et al. and Stable-Baselines3's PPO use.
+- **Held 4 steps, 80 ms.** In Raffin et al.'s PPO test (Walker2D) the
+  interval mattered most: 4 scored best, then 8 and 16; 32 and longer
+  explored too little; 1, unstructured noise, worse. On runs 13 and 14's
+  actors (ReLU, so the held part is large) the same order:
+
+| Run 13 / run 14, mm/s | Closing | Targets a minute | Line erased | Force cost, 0.2 s | 1 s |
+| --- | --- | --- | --- | --- | --- |
+| Their own pink noise | 0.60 / 1.22 | 0.9 / 2.7 | 2.3 / 3.9 | 18 / 27 | 6.5 / 9.9 |
+| gSDE, held 1 step | 3.08 / 0.84 | 8.1 / 1.8 | 7.6 / 4.4 | 10 / 7 | 3.2 / 2.6 |
+| gSDE, held 4 steps | 1.45 / 1.31 | 4.5 / 3.6 | 8.9 / 6.5 | 13 / 11 | 4.5 / 3.2 |
+| gSDE, held 16 steps | 0.81 / 0.94 | 1.8 / 1.8 | 4.1 / 4.0 | 26 / 21 | 8.1 / 6.7 |
+| gSDE, held 64 steps | 0.71 / 0.73 | 1.8 / 0.9 | 1.0 / 1.0 | 27 / 27 | 10.0 / 9.8 |
+
+  Held 4 steps, both actors moved more than with their own pink noise
+  (held 1 step, one did and one did not), at about half its force cost;
+  held 16 or 64 steps, less, at its full cost, the held part acting as a
+  lasting push.
+
+**What it is in practice, and the risks.** Held 4 steps, most of a draw
+is a push that stays for its 80 ms: 78% with fresh tanh features, against
+44% held 64 steps (`analysis/gsde_feature_check.py` in `../Training`). So
+the change is mainly noise redrawn every 80 ms instead of pink's slow
+drifts, with a smaller part that follows the state; a draw is consistent
+within a step's phase, about a sixth of a stride, not over a whole stride.
+Longer holds follow the state more but explored worse, in Raffin et al.'s
+test and in ours: the same trade-off. Whether the gait now moves into the
+mean is the question runs 15 and 16 answer, each review comparing the
+mean action with training. And the actor's change to tanh changes how it
+learns as well as how it explores.
+
+## Not part of the vector
 - **Asymmetric joints**: real muscles push harder toward the ground than
   away from it; v4's motors are symmetric, a known difference without
   centipede data ([forces.md](forces.md)).

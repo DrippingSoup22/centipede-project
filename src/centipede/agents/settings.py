@@ -83,7 +83,8 @@ class AgentSettings:
     made from the last hidden layer, and ReLU's features, never negative,
     hardly change direction from one state to the next, so a held matrix adds
     mostly a constant push (83% of the noise over 32 steps with run 13's
-    actors, 52% with fresh tanh ones; Training's measurement of 2026-10-16).
+    actors, 52% with fresh tanh ones; Training's
+    ``analysis/gsde_feature_check.py``).
     Normalised observations are clipped to plus or minus ``observation_clip``.
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows

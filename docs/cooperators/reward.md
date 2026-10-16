@@ -21,7 +21,12 @@ energy, pain and hanging
 After runs 11 and 12, cycle 7 gives the followers the head's line: each is
 paid the line its tail erases, and charged, squared, for how far its tail
 is left from the line and for the force at its front joint; the head has
-its target alone ([Cycle 7](#cycle-7-the-heads-line-the-users-design)).**
+its target alone ([Cycle 7](#cycle-7-the-heads-line-the-users-design)).
+After runs 13 and 14, cycle 8 keeps that reward and averages the forces
+over 1 s instead of 0.2 s, so that only a lasting push or pull costs
+([Cycle 8](#cycle-8-only-a-lasting-force-costs-the-users-idea)), while the
+agents explore with state-dependent noise
+([actions.md](actions.md#how-actions-explore)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1007,6 +1012,43 @@ the prototype within 0.0001 mm over 300 steps, walking and backward.
   weights of pull. A learned walk must even out the efforts, the
   cooperation sought.
 - **A head walking backward** pushes every follower off its line.
+
+### Cycle 8: only a lasting force costs (the user's idea)
+
+**Why** (2026-10-16, runs 13 and 14, 128 cycles each). Cycle 7 found no
+loophole: the followers stayed on the line and freed their front joints,
+and the head was never carried. In training the targets rose tenfold, from
+0.05 to 0.5 an episode between cycles 66 and 128, but without noise the
+body stood: the exploration noise was the gait
+([actions.md](actions.md#how-actions-explore)). And 95% of the front
+joint's cost was that noise's jitter, not a steady push: at segment 5 the
+averaged force's mean was −0.02 to +0.06 unit weights, its root mean square
+0.26. The cost charged every random shove of exploring, so the agents
+learned that moving costs.
+
+**The change** (the user's idea): charge a force by how hard and how long
+it lasts, not by its instants. The forces are averaged over 1 s
+(`averaging_s` 1) instead of 0.2 s; the prices are unchanged. A walk's own
+push and pull, which alternate within a stride, then cancel, and a segment
+that keeps pushing or dragging still pays in full. The average serves every
+averaged force, so the hanging cost too charges a lasting hang, and each
+segment observes the same averages it pays.
+
+**Measured** (`analysis/exploration_check.py` in `../Training`, the
+followers' front joint cost per follower in mm/s, group mean):
+
+| | Averaged 0.2 s | 1 s | 2 s |
+| --- | ---: | ---: | ---: |
+| Run 13, cycle 128, its pink noise | 17.7 | 5.3 | 2.9 |
+| Run 14, cycle 128, its pink noise | 22.2 | 8.2 | 5.4 |
+| The same with red noise | 32.4 / 71.4 | 14.7 / 51.6 | 10.3 / 39.7 |
+| The scripted walk, clean | 9.9 | 9.1 | 8.7 |
+
+Over 1 s the noise's cost falls by about 70%, about to what the standing
+policy paid over 0.2 s (5.8 and 9.6); red noise costs two to three times
+pink at every window, so it stays out. The scripted walk's own cost hardly
+changes: 95 to 99% of it is a steady push of its unbalanced gait, which a
+learned walk must even out.
 
 ### Other harms left out
 
