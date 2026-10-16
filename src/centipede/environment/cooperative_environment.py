@@ -16,13 +16,17 @@ from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
-from centipede.environment.cooperative_reward import CooperativeReward
+from centipede.environment.cooperative_reward import (
+    AveragedForces,
+    CooperativeReward,
+)
 from centipede.environment.cooperative_task import CooperativeTask
 from centipede.environment.cooperative_trail import TrailMemory
 from centipede.environment.head import target_under_head
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
+from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.settings_section import SettingsError
 
 
@@ -44,13 +48,15 @@ class CooperativeEnvironment:
     segment commands its leg motors and, but the rear, the spine joint behind
     it; ``segment_action_sizes`` and ``action_size`` are as in the main
     environment with spine control. Rewards have two channels, goal and cost,
-    ``(W, N, 2)``, or with ``follow_trail`` three, goal, trail and cost;
+    ``(W, N, 2)``, or with ``follow_trail`` three, goal, trail and cost, or
+    with ``coordination`` four, goal, coordination, trail and health;
     ``segment_reward_channels`` lists those each segment's critics learn
     from: every one, or for a follower without a goal its cost alone, or with
-    the trail its trail and cost. An arrival never ends an episode: the next
-    target appears at once. The only end is the time limit, a cut that the
-    agents bootstrap from; the world then restarts. ``diagnostics`` summarise
-    each step and each episode.
+    the trail its trail and cost, or with coordination the head's goal, trail
+    and health and a follower's coordination, trail and health. An arrival
+    never ends an episode: the next target appears at once. The only end is
+    the time limit, a cut that the agents bootstrap from; the world then
+    restarts. ``diagnostics`` summarise each step and each episode.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -64,7 +70,8 @@ class CooperativeEnvironment:
             measure_effort=True,
             measure_joint_forces=cooperators.chain_price > 0
             or cooperators.carry_price > 0
-            or cooperators.observe_joint_forces,
+            or cooperators.observe_joint_forces
+            or cooperators.coordination,
         )
         self.world_count = self.simulation.world_count
         self.segment_count = segment_count = self.simulation.segment_count
@@ -92,22 +99,44 @@ class CooperativeEnvironment:
             self.world_count,
             legs,
             body.unit_weight_n,
-            cooperators.observe_joint_forces,
+            cooperators.observe_joint_forces or cooperators.coordination,
             self.device,
             trail=cooperators.follow_trail,
-            carry=cooperators.carry_price > 0,
+            carry=cooperators.carry_price > 0 or cooperators.coordination,
         )
         self.observation_size = self.observation_builder.observation_size
         self.neighbour_table = self.observation_builder.neighbour_table
         self.task = CooperativeTask(
             cooperators, body, self.world_count, settings.max_episode_steps, self.device
         )
-        self.trail = TrailMemory(self.world_count, body.segment_lengths_m, self.device)
+        # Each step moves an average this share of the way (1: none).
+        averaging_rate = (
+            min(1.0, ACTION_DURATION_S / cooperators.averaging_s)
+            if cooperators.averaging_s > 0
+            else 1.0
+        )
+        self.trail = TrailMemory(
+            self.world_count, body.segment_lengths_m, self.device, averaging_rate
+        )
+        self.forces = (
+            AveragedForces(
+                self.world_count,
+                segment_count,
+                body.unit_weight_n,
+                averaging_rate,
+                self.device,
+            )
+            if cooperators.coordination
+            else None
+        )
         self.reward = CooperativeReward(
             cooperators, segment_count, radius, body, commanded_joints
         )
         self.reward_channel_count = self.reward.channel_count
-        if cooperators.follow_trail:
+        if cooperators.coordination:
+            channel_names = ("goal", "coordination", "trail", "health")
+            head_channels, follower_channels = (0, 2, 3), (1, 2, 3)
+        elif cooperators.follow_trail:
             channel_names = ("goal", "trail", "cost")
             head_channels, follower_channels = (0, 1, 2), (1, 2)
         else:
@@ -175,7 +204,7 @@ class CooperativeEnvironment:
             self.task.generator.manual_seed(seed)
         state = self.simulation.physical_state
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
-        self.trail.restart(every_world, state)
+        self._restart_measures(every_world)
         self.episode_steps.zero_()
         if self.settings.cooperators.stagger_first_episodes:
             self.episode_steps.random_(
@@ -209,6 +238,7 @@ class CooperativeEnvironment:
         self.simulation.step(joint_action[..., :legs], joint_action[:, :-1, legs])
         self.episode_steps += 1
         trail_offset = self.trail.update(state)
+        averaged_forces = self.forces.update(state) if self.forces else None
 
         arrived = target_under_head(state, task.target_position, self.head_outline)
         in_time = task.time_step(arrived)
@@ -223,6 +253,7 @@ class CooperativeEnvironment:
             self.previous_joint_position,
             joint_action,
             trail_offset,
+            averaged_forces,
         )
         truncated = self.episode_steps >= self.settings.max_episode_steps
         self.diagnostics.record_step(
@@ -245,7 +276,7 @@ class CooperativeEnvironment:
         final_observations = observations = self._observations()
         if truncated.any():
             self.simulation.reset(truncated)
-            self.trail.restart(truncated, state)
+            self._restart_measures(truncated)
             self.episode_steps.masked_fill_(truncated, 0)
             task.place_targets(truncated, state, self._steps_left())
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
@@ -255,6 +286,13 @@ class CooperativeEnvironment:
         )
         never = torch.zeros_like(truncated)
         return observations, rewards, never, truncated, final_observations
+
+    def _restart_measures(self, world_mask: torch.Tensor) -> None:
+        """Start the masked worlds' trails and averaged forces afresh."""
+        state = self.simulation.physical_state
+        self.trail.restart(world_mask, state)
+        if self.forces:
+            self.forces.restart(world_mask, state)
 
     def _steps_left(self) -> torch.Tensor:
         """Each world's steps until its episode's time limit."""
@@ -266,4 +304,5 @@ class CooperativeEnvironment:
             self.task.target_position,
             self.last_action,
             self.trail.offset,
+            self.forces.values if self.forces else None,
         )

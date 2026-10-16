@@ -52,9 +52,9 @@ Set by the user on 2026-10-14.
 
 | Part | File | Status |
 | --- | --- | --- |
-| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL); from cycle 3 the followers have the cost critic only; from cycle 4 a trail critic for every segment, the head's weighed 1 : 0.25 : 1 |
-| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured; cycle 3: only the head has a goal, the followers pay the chain at ten times the force price; cycle 4: run 01's design without the chain, the followers' goal the trail (how far off it, not how far along), each segment paying its own offset and the offset of the one it steers, and carrying itself |
-| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces, 45 with the offset and the net joint force (cycle 4) |
+| Critic | [critic.md](critic.md) | Built: a value and a baseline per critic; how each update learns (batch, minibatches, epochs, a learning rate adapted to KL); from cycle 3 the followers have the cost critic only; from cycle 4 a trail critic for every segment, the head's weighed 1 : 0.25 : 1; from cycle 5 three critics each, one per priority, weighed 40 / 35 / 25 |
+| Reward | [reward.md](reward.md) | Built: goal in millimetres, energy, pain and the chain in millijoules; force and chain prices measured; cycle 3: only the head has a goal, the followers pay the chain at ten times the force price; cycle 4: run 01's design without the chain, the followers' goal the trail (how far off it, not how far along), each segment paying its own offset and the offset of the one it steers, and carrying itself; cycle 5: the followers' coordination first (the averaged net force, pushing ahead counted twice), the trail paid by time, then health; the head's own weight; energy shared by sides |
+| Observations | [observations.md](observations.md) | Built: radius 2, a 42-value block, 43 with the joint forces, 45 with the offset and the net joint force (cycle 4), 46 with both joint forces averaged (cycle 5) |
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
 | Task | [task.md](task.md) | Built, with numbers |

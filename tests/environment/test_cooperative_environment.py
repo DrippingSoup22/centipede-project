@@ -18,6 +18,7 @@ from centipede.environment.cooperative_observations import (
 )
 from centipede.environment.cooperative_reward import (
     PART_NAMES,
+    AveragedForces,
     CooperativeReward,
     energy_sharing_weights,
 )
@@ -423,8 +424,94 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
     assert not torch.equal(final, environment._observations())
 
 
-def test_with_the_trail_the_followers_learn_from_trail_and_cost():
-    """The whole environment on v4: three channels, the followers on two."""
+def test_coordination_charges_who_drives_lags_or_hangs_and_the_trail_pays_time():
+    """Cycle 5, averaged forces in unit weights. Segment 1 drives the body by
+    0.4, 0.3 of it pushing the segment ahead, counted twice; segment 2 lags
+    by 0.5 and hangs by 1; segment 3 drives 0.2 into pulling the one behind;
+    the rear lies on the floor with 0.3, pressed down by its neighbour. The
+    head, held up by 0.8 and on the floor with 0.2, pays the 0.3 beyond half
+    its weight and the floor, priced, in its health. The trail pays each
+    step's duration in full within 5 degrees, less beyond. Energy is shared
+    40% to itself and 30% to each side."""
+    settings = CooperatorsSettings.from_section(
+        {
+            "follower_goal": False,
+            "follow_trail": True,
+            "coordination": True,
+            "carry_price": 1.0,
+            "energy_sharing": "sides",
+        }
+    )
+    reward = CooperativeReward(
+        settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
+    )
+    torch.testing.assert_close(
+        reward.sharing_weights[:2],
+        torch.tensor([[0.4, 0.4, 0.2, 0.0, 0.0], [0.3, 0.4, 0.2, 0.1, 0.0]]),
+    )
+    state = resting_state(1)
+    state.net_joint_force[0] = 1e-3 * torch.tensor(
+        [[-0.5, 0.8], [-0.4, 0.0], [0.5, 1.0], [-0.2, 0.0], [0.0, -0.4]]
+    )
+    state.front_joint_force[0] = 1e-3 * torch.tensor([0.0, -0.3, 0.0, 0.6, 0.0])
+    state.belly_normal_force[0] = 1e-3 * torch.tensor([0.2, 0.0, 0.0, 0.0, 0.3])
+    forces = AveragedForces(1, SEGMENTS, BODY.unit_weight_n, 0.5, "cpu")
+    forces.restart(torch.tensor([True]), state)
+    offset = torch.deg2rad(torch.tensor([[5.0, 0.0, 10.0, 0.0, 20.0]]))
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    head_tip = state.head_tip_position[:, :2]
+    channels, parts, _ = reward.compute(
+        state,
+        state.body_planar_position.clone(),
+        head_tip.clone(),
+        head_tip + 0.1,
+        torch.tensor([False]),
+        0.025,
+        zeros,
+        zeros,
+        offset,
+        forces.values,
+    )
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    torch.testing.assert_close(
+        by_name["coordination"], -torch.tensor([0.0, 0.7, 1.5, 0.2, 0.3])
+    )
+    one_motor = settings.force_price_w * 0.02 * 1e3
+    torch.testing.assert_close(
+        by_name["carry"], -one_motor * torch.tensor([0.5, 0.0, 0.0, 0.0, 0.0])
+    )
+
+    # The head: a quarter of its own 5 degrees, within the dead zone; segment
+    # 2: a quarter of its own 10, at its edge; segments 1, 3 and the rear
+    # 10, 20 and 20 degrees, about 5, 15 and 15 beyond it (an angle counts
+    # as its chord, in degrees: the square root of the squared offset).
+    def chord(degrees: float) -> float:
+        return math.degrees(2 * math.sin(math.radians(degrees) / 2))
+
+    beyond = torch.tensor([0.0, chord(10) - 5, 0.0, chord(20) - 5, chord(20) - 5])
+    torch.testing.assert_close(
+        by_name["trail"], 0.02 * torch.exp(-((beyond / 20) ** 2)), rtol=1e-3, atol=0
+    )
+    assert channels.shape == (1, SEGMENTS, 4)
+    torch.testing.assert_close(channels[0, :, 1], by_name["coordination"])
+    torch.testing.assert_close(channels[0, :, 2], by_name["trail"])
+
+    state.net_joint_force[0, 2, 0] = 1.5e-3
+    assert forces.update(state)[0, 2, 0] == pytest.approx(1.0)
+    with pytest.raises(SettingsError, match="follow_trail"):
+        CooperatorsSettings.from_section({"coordination": True})
+
+
+@pytest.mark.parametrize(
+    ("coordination", "channel_count", "followers", "block"),
+    [(False, 3, (1, 2), 45), (True, 4, (1, 2, 3), 46)],
+)
+def test_with_the_trail_the_followers_learn_from_trail_and_cost(
+    coordination, channel_count, followers, block
+):
+    """The whole environment on v4: three channels, the followers on two; with
+    coordination four, every segment on three."""
     settings = EnvironmentSettings.from_section(
         {
             "design": "cooperators",
@@ -440,6 +527,8 @@ def test_with_the_trail_the_followers_learn_from_trail_and_cost():
                 "follower_goal": False,
                 "follow_trail": True,
                 "carry_price": 0.25,
+                "coordination": coordination,
+                "averaging_s": 0.2,
             },
         }
     )
@@ -448,6 +537,7 @@ def test_with_the_trail_the_followers_learn_from_trail_and_cost():
 
     observations, rewards, *_ = environment.step(torch.zeros(2, 12, 9))
 
-    assert environment.segment_reward_channels[:2] == [(0, 1, 2), (1, 2)]
-    assert rewards.shape == (2, 12, 3) and torch.isfinite(rewards).all()
-    assert observations.shape == (2, 12, 5 * 45 + 2)
+    head = (0, 2, 3) if coordination else (0, 1, 2)
+    assert environment.segment_reward_channels[:2] == [head, followers]
+    assert rewards.shape == (2, 12, channel_count) and torch.isfinite(rewards).all()
+    assert observations.shape == (2, 12, 5 * block + 2)

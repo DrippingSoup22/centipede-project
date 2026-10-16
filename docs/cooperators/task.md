@@ -71,6 +71,17 @@ behind can be reached by turning around. Stated as that rule (the full
 circle once the near end clears one body length plus a turning circle),
 it carries over to the 21-segment model.
 
+**From cycle 5, ±90° at level 0** (the user, 2026-10-16:
+`start_bearing_deg` 90). Turning was the obstacle of every run so far, the
+heading error staying high, and the runs never left level 0, so the ±45°
+start gave little practice at turning. Measured on v4 at the start pose,
+a target 20, 25 or 30 mm away lies clear of every body and leg part by
+7.7, 12.0 and 16.7 mm at 90° to the side, but by only 0.7, 4.0 and 7.3 mm
+at 135° (the user's first idea, 270° in all): there the head would have to
+fold back along its own legs, more than the front joints' 15° each allow
+in so little space. The circle still opens to all directions at level
+0.53.
+
 ## The starting heading (agreed, 2026-10-14)
 
 **Any direction, from the start, not growing with the level.** The floor

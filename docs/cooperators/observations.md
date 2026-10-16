@@ -120,15 +120,30 @@ offsets before it reaches its own.
 | An actor: five blocks and the target's two values | 227 |
 | A critic: the actor's input and the four neighbours' actions | 263 |
 
+**Cycle 5: the forces it pays, averaged** (the user's design, 2026-10-16;
+[reward.md](reward.md#cycle-5-coordination-first-the-users-design)). With
+coordination, each block holds both the front joint's force and the net
+joint force, averaged over 0.2 s as the reward prices them, so that each
+critic sees the very numbers its coordination cost is made of: its own,
+and within its radius those of the segments it pushes or pulls. The
+offset comes from the averaged trail.
+
+| Input | Size |
+| --- | ---: |
+| A block, with the front joint's force, the net joint force and the offset | 46 |
+| An actor: five blocks and the target's two values | 232 |
+| A critic: the actor's input and the four neighbours' actions | 268 |
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
 velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
-others, with `observe_joint_forces` the front joint's force, with
-`carry_price` above 0 the net joint force (along, up), with `follow_trail`
-the offset, and the last action (9; the rear's ninth is always zero). The
+others, with `observe_joint_forces` or `coordination` the front joint's
+force, with `carry_price` above 0 or `coordination` the net joint force
+(along, up), both averaged with `coordination`, with `follow_trail` the
+offset, and the last action (9; the rear's ninth is always zero). The
 forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,
 forward and to the left of the head's tip, in metres, zeros for the

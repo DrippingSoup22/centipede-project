@@ -44,6 +44,21 @@ the head from all three, task, trail and cost weighed **1 : 0.25 : 1**
 reaching targets. Each agent weighs its critics by the weights of the
 channels it learns from.
 
+**From cycle 5 every segment has three critics, one per priority** (the
+user, 2026-10-16): the reward has four channels, goal, coordination, trail
+and health ([reward.md](reward.md#cycle-5-coordination-first-the-users-design)).
+The followers learn from coordination, trail and health, the head from
+goal, trail and health, both weighed **40 / 35 / 25** (1 : 0.875 : 0.625;
+`[agents] advantage_weights` and `head_advantage_weights`, one weight per
+channel, each segment using its own channels'). Separate critics rather
+than one with ratios: a segment's own actions show clearly in its
+coordination cost, half in its shared energy, and hardly at all in its
+trail under the untrained noise; one critic of their sum would let the
+blurred signals hide the clear one, and the weights then set each
+priority whatever its units or the stage of training. A third critic per
+agent adds about 2 to 3% to a cycle's time (learning took 1.9 s of 24 s
+in run 07).
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone

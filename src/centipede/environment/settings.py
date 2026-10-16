@@ -347,6 +347,27 @@ class CooperatorsSettings:
     spine joints put on it, along the body and holding it up, and the head
     the part holding it up, in unit weights, priced as force times
     ``carry_price``; each block then holds that force.
+
+    **Coordination** (off by default; cycle 5 of docs/cooperators/reward.md).
+    With ``coordination``, which needs ``follow_trail``, the rewards have four
+    channels, goal, coordination, trail and health; the head learns from goal,
+    trail and health, the followers from coordination, trail and health. A
+    follower's coordination cost, in unit weights: the net force its joints
+    put on it along the body, its own surplus pushing the segment ahead once
+    more times ``push_factor`` less one, what they hold it up with, and the
+    floor's push on its body. The trail becomes a reward: each step's
+    duration times exp(-(e - ``trail_dead_zone_deg``)^2 /
+    ``trail_width_deg``^2), e being the offsets of the segment steered and,
+    at ``trail_own_weight``, its own, as one angle (the rear's own alone),
+    nothing below the dead zone counted. The head's health adds carrying its
+    own weight: what its neck holds it up with beyond ``head_free_support``
+    of its weight, and the floor's push on its body, priced as force times
+    ``carry_price``. The forces and the trail are averaged over
+    ``averaging_s`` (an exponential average; 0 none), and each block holds
+    the averaged forces. ``energy_sharing`` "sides" shares energy 40% to the
+    segment itself and 30% to each side, a missing neighbour's share going to
+    the nearest one on its side and a missing side's to the other side
+    (``energy_sharing_weights``); "decay" is the earlier halving per segment.
     """
 
     start_near_distance_m: float
@@ -370,6 +391,13 @@ class CooperatorsSettings:
     follow_trail: bool
     trail_own_weight: float
     carry_price: float
+    coordination: bool
+    push_factor: float
+    trail_dead_zone_deg: float
+    trail_width_deg: float
+    head_free_support: float
+    averaging_s: float
+    energy_sharing: str
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -420,12 +448,29 @@ class CooperatorsSettings:
                 "trail_own_weight", default=0.25, minimum=0.0
             ),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
+            coordination=section.boolean("coordination", default=False),
+            push_factor=section.number("push_factor", default=2.0, minimum=1.0),
+            trail_dead_zone_deg=section.number(
+                "trail_dead_zone_deg", default=5.0, minimum=0.0
+            ),
+            trail_width_deg=section.positive_number("trail_width_deg", default=20.0),
+            head_free_support=section.number(
+                "head_free_support", default=0.5, minimum=0.0
+            ),
+            averaging_s=section.number("averaging_s", default=0.0, minimum=0.0),
+            energy_sharing=section.choice(
+                "energy_sharing", ("decay", "sides"), default="decay"
+            ),
         )
         section.reject_unknown_keys()
         if settings.follow_trail and settings.follower_goal:
             raise SettingsError(
                 "[environment.cooperators] follow_trail replaces the followers'"
                 " progress: set follower_goal = false"
+            )
+        if settings.coordination and not settings.follow_trail:
+            raise SettingsError(
+                "[environment.cooperators] coordination needs follow_trail = true"
             )
         return settings
 

@@ -45,7 +45,8 @@ class CooperativeObservationBuilder:
     of its two joints on it, along the body and up; with ``trail``, how far
     its body points off its trail, in radians, positive to the left; and the
     action it sent last (the rear's last value is padding). Forces are in
-    unit weights, the whole body's weight shared by its segments. The blocks
+    unit weights, the whole body's weight shared by its segments; with
+    coordination the joint forces are the averaged ones it pays. The blocks
     are laid end to end in the neighbour table's order, a missing
     neighbour's all zeros, followed by the target seen from the head's tip,
     forward and to the left, which is zero for every other segment.
@@ -89,12 +90,15 @@ class CooperativeObservationBuilder:
         target_position: torch.Tensor,
         last_action: torch.Tensor,
         trail_offset: torch.Tensor,
+        averaged_forces: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
         ``target_position`` is each world's flat target, ``(W, 2)``,
         ``last_action`` the joint action of the step before, ``(W, N, M + 1)``,
-        and ``trail_offset`` each segment's offset, ``(W, N)``. The gather
+        ``trail_offset`` each segment's offset, ``(W, N)``, and
+        ``averaged_forces``, if any, ``AveragedForces.values``, whose joint
+        forces then replace the step's. The gather
         creates a new tensor, so a returned observation never changes when
         ``build`` runs again.
         """
@@ -106,14 +110,25 @@ class CooperativeObservationBuilder:
             (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)),
             dim=-1,
         )
-        forces = torch.cat(
+        if averaged_forces is None:
+            front = state.front_joint_force[..., None] / self.unit_weight_n
+            net = state.net_joint_force / self.unit_weight_n
+        else:
+            front, net = averaged_forces[..., 2:3], averaged_forces[..., :2]
+        loads = torch.cat(
             (
                 state.foot_normal_force,
                 state.foot_forward_force,
                 state.belly_normal_force[..., None],
                 state.leg_leg_force[..., None],
-                *([state.front_joint_force[..., None]] if self.joint_forces else []),
-                *([state.net_joint_force] if self.carry else []),
+            ),
+            dim=-1,
+        )
+        forces = torch.cat(
+            (
+                loads / self.unit_weight_n,
+                *([front] if self.joint_forces else []),
+                *([net] if self.carry else []),
             ),
             dim=-1,
         )
@@ -126,7 +141,7 @@ class CooperativeObservationBuilder:
                 state.leg_joint_velocity,
                 state.spine_yaw_position[..., None],
                 state.spine_yaw_velocity[..., None],
-                forces / self.unit_weight_n,
+                forces,
                 *([trail_offset[..., None]] if self.trail else []),
                 last_action,
             ),
