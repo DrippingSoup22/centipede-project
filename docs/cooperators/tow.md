@@ -69,7 +69,8 @@ tow the followers' noisy body erased 22 to 24 mm/s of line, against 0.8 and
   pilot) act with the agents' mean action and are neither stored nor
   learned from: the first half always at the tow's top, the second never
   towed, the honest measure. The target level ignores them.
-- **The fade.** After each update cycle, once 256 steps have passed since
+- **The fade.** After each update cycle, once `tow_window_steps` steps
+  (256 by default; 128 in the pilot, the user's choice) have passed since
   the top last moved, the top falls by 0.02 if the towed mean-action
   worlds walked, else it rises by 0.02, between 0 and its start of 0.4.
   Walked means both: their followers erased more than 5 mm/s of line each,
