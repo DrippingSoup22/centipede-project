@@ -143,6 +143,26 @@ belly load, the offset of the segment it steers in the block behind, and
 its distance in its own velocity. The settings that chose the earlier
 blocks are gone: the block is always this one.
 
+**Cycle 7: the head's line** (the user's design, 2026-10-16;
+[reward.md](reward.md#cycle-7-the-heads-line-the-users-design)). The trail
+offset gives way to three values of the segment's tail on the head's line
+(`HeadLine.view`): its distance from the line, signed, positive to the
+left; the angle of its body from the line's direction there; and its
+distance from the line it has not erased, which its goal charges. The
+pairing rule holds: what a follower is paid and charged, the line it
+erases and the distance it is left behind, lies in its own block. The line
+is the head's, but a follower sees only its own tail's place on it, inside
+its sphere, never the head; and since its front end is the tail of the
+segment ahead, its five blocks give five samples of the line around it, so
+that a turn shows before it arrives. The head's block holds its neck's
+values, which nothing pays.
+
+| Input | Size |
+| --- | ---: |
+| A block, with the head's line (3) in place of the offset | 48 |
+| An actor: five blocks and the target's two values | 242 |
+| A critic: the actor's input and the four neighbours' actions | 278 |
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
@@ -150,8 +170,9 @@ velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
 others, the front joint's force, the net joint force (along, up), both
-averaged over `averaging_s` as the reward prices them, the offset from the
-averaged trail, and the last action (9; the rear's ninth is always zero),
+averaged over `averaging_s` as the reward prices them, the tail's place on
+the head's line (signed distance, angle, distance from the line not yet
+erased), and the last action (9; the rear's ninth is always zero),
 as the policy sent it, before the spine's scale. The
 forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,

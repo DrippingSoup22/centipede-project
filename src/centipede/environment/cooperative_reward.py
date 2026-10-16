@@ -1,11 +1,8 @@
 """The cooperators' reward: two channels for every segment, goal and health,
-judged apart by a critic each (docs/cooperators/reward.md, cycle 6)."""
-
-import math
+judged apart by a critic each (docs/cooperators/reward.md, cycle 7)."""
 
 import torch
 
-from centipede.environment.cooperative_trail import forward_axis
 from centipede.environment.reward_function import RewardContext, StepRewards
 from centipede.environment.settings import CooperatorsSettings
 from centipede.environment.simulation import PhysicalState
@@ -17,19 +14,17 @@ from centipede.environment.simulation.constants import ACTION_DURATION_S
 PART_NAMES = (
     "progress",
     "arrival",
-    "distance",
-    "squeeze",
+    "line",
+    "off_line",
+    "front_joint",
     "pushing",
     "braking",
     "force",
     "pain",
     "hanging",
 )
-GOAL_PARTS = 4
+GOAL_PARTS = 5
 CHANNEL_NAMES = ("goal", "health")
-# Twice (1 - cos) of an angle, in squared degrees: its square while it is
-# small, levelling off past a right angle.
-SQUARED_DEGREES = (180 / math.pi) ** 2 * 2
 
 
 def energy_sharing_weights(
@@ -132,16 +127,10 @@ class CooperativeReward:
         )
         # Millijoules for a unit weight hanging through a step.
         self.hanging_price_mj = self.force_price_mj * settings.hanging_price
-        # Millimetres of goal for a unit weight squeezed through a step.
-        self.squeeze_price_mm = settings.squeeze_price_mm_per_s * ACTION_DURATION_S
+        # Millimetres of goal a squared cost takes through a step at its scale.
+        self.reference_mm = settings.reference_pay_mm_per_s * ACTION_DURATION_S
         self.is_follower = torch.ones(segment_count, device=device)
         self.is_follower[0] = 0.0
-        # The trail: the offset of the segment it steers at 1 and its own at
-        # its weight; the rear steers none, so its own counts at 1.
-        self.own_offset_weight = torch.full(
-            (segment_count,), settings.trail_own_weight, device=device
-        )
-        self.own_offset_weight[-1] = 1.0
         # The support a segment may take from its neighbours for free.
         self.free_support = torch.zeros(segment_count, device=device)
         self.free_support[0] = settings.head_free_support
@@ -151,13 +140,13 @@ class CooperativeReward:
         physical_state: PhysicalState,
         previous_body_planar_position: torch.Tensor,
         previous_head_tip_position: torch.Tensor,
-        previous_front_end_position: torch.Tensor,
         target_position: torch.Tensor,
         arrived: torch.Tensor,
         arrival_worth_m: float,
         previous_joint_position: torch.Tensor,
         motor_command: torch.Tensor,
-        trail_offset: torch.Tensor,
+        line_erased: torch.Tensor,
+        off_line: torch.Tensor,
         averaged_forces: torch.Tensor,
     ) -> tuple[torch.Tensor, StepRewards, torch.Tensor]:
         """The ``(W, N, 2)`` rewards, goal and health, their parts, and each
@@ -165,16 +154,16 @@ class CooperativeReward:
 
         The goal, in millimetres: for the head, how much closer its tip came
         to the target and, when it arrives, ``arrival_worth_m``; for each
-        follower, how far its front end walked along its body
-        (``previous_front_end_position`` ``(W, N, 2)`` is where it was),
-        times the quality of its trail, from ``trail_offset`` ``(W, N)``
-        (``TrailMemory``). Less the squeeze, from ``averaged_forces``
-        (``AveragedForces.values``): a follower's front joint pushed together,
-        the head pushed forward by its joint. Health, in millijoules: each
-        segment's energy, shared, its own pain, and its hanging on the
-        neighbours and the floor. ``motor_command`` is ``(W, N, M + 1)``, what
-        each motor received; the other arguments are those of
-        ``RewardContext.from_step``.
+        follower, the head's line its tail erased on the step, less, each
+        squared against its scale and priced at the reference pay: how far
+        its tail lies from the line it has not erased (up to a cap), and its
+        front joint's averaged force, pulled or pushed (``line_erased`` and
+        ``off_line`` ``(W, N)`` in metres, from ``HeadLine.update``;
+        ``averaged_forces``, ``AveragedForces.values``). Health, in
+        millijoules: each segment's energy, shared, its own pain, and its
+        hanging on the neighbours and the floor. ``motor_command`` is
+        ``(W, N, M + 1)``, what each motor received; the other arguments are
+        those of ``RewardContext.from_step``.
         """
         context = RewardContext.from_step(
             physical_state,
@@ -194,22 +183,12 @@ class CooperativeReward:
         arrival = torch.zeros_like(progress)
         arrival[:, 0] = context.arrived * arrival_worth_m * 1e3
 
-        # The followers' distance, paid as far as they keep to the trail.
-        walked_m = (
-            (physical_state.front_end_position - previous_front_end_position)
-            * forward_axis(physical_state)
-        ).sum(dim=-1)
-        squared = SQUARED_DEGREES * (1 - trail_offset.cos())
-        error = self.own_offset_weight * squared
-        error[:, :-1] += squared[:, 1:]
-        beyond = (error.sqrt() - settings.trail_dead_zone_deg).clamp(min=0.0)
-        quality = torch.exp(-((beyond / settings.trail_width_deg) ** 2))
-        distance = self.is_follower * walked_m * 1e3 * quality
-
-        along, up, front, floor = averaged_forces.unbind(dim=-1)
-        squeeze = torch.where(
-            self.is_follower.bool(), (-front).clamp(min=0.0), along.clamp(min=0.0)
-        )
+        # The followers' line: paid as erased, charged as left behind.
+        line = self.is_follower * line_erased * 1e3
+        off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
+        off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
+        _, up, front, floor = averaged_forces.unbind(dim=-1)
+        joint_cost = self.reference_mm * (front / settings.joint_force_scale) ** 2
         hanging = (up - self.free_support).clamp(min=0.0) + floor
 
         squared_commands = context.command_size * self.commanded_joints.sum(dim=-1)
@@ -227,7 +206,13 @@ class CooperativeReward:
         parts = torch.cat(
             (
                 torch.stack(
-                    (progress, arrival, distance, -self.squeeze_price_mm * squeeze),
+                    (
+                        progress,
+                        arrival,
+                        line,
+                        -self.is_follower * off_cost,
+                        -self.is_follower * joint_cost,
+                    ),
                     dim=-1,
                 ),
                 -shared_energy,

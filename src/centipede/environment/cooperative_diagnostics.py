@@ -58,7 +58,7 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 9), in the order of reward_part_names: the goal's"
+        "Each reward part, (W, N, 10), in the order of reward_part_names: the goal's"
         " in mm, health's in mJ",
         parts=PART_NAMES,
     )
@@ -96,9 +96,15 @@ class StepFacts:
         " rear, (W, N)",
         "rad",
     )
-    trail_offset: torch.Tensor = measure(
-        "How far the segment's body points off its trail, either way, (W, N)",
-        "rad",
+    off_line: torch.Tensor = measure(
+        "Distance from the segment's tail to the head's line it has not erased, (W, N)",
+        "m",
+    )
+    joint_forces: torch.Tensor = measure(
+        "The averaged force of the segment ahead on the segment and the"
+        " averaged net force of its two joints, along the body, in unit"
+        " weights, (W, N, 2): positive pulls it forward",
+        parts=("front joint", "net"),
     )
     body_height: torch.Tensor = measure("Height of the segment's centre, (W, N)", "m")
     uprightness: torch.Tensor = measure(
@@ -313,7 +319,8 @@ class CooperativeDiagnostics:
             segment_moved=zeros(segment_count),
             own_energy=zeros(segment_count, len(ENERGY_PARTS)),
             spine_bend=zeros(segment_count),
-            trail_offset=zeros(segment_count),
+            off_line=zeros(segment_count),
+            joint_forces=zeros(segment_count, 2),
             body_height=zeros(segment_count),
             uprightness=zeros(segment_count),
             head_distance=zeros(),
@@ -399,7 +406,8 @@ class CooperativeDiagnostics:
         rewards: torch.Tensor,
         step_rewards: StepRewards,
         own_energy: torch.Tensor,
-        trail_offset: torch.Tensor,
+        off_line: torch.Tensor,
+        averaged_forces: torch.Tensor,
         arrived: torch.Tensor,
         in_time: torch.Tensor,
         truncated: torch.Tensor,
@@ -409,8 +417,10 @@ class CooperativeDiagnostics:
         Called once per step, after the rewards are known and before any target
         is replaced or world restarted; the arguments are values the
         environment already has: ``rewards`` by channel, ``(W, N, C)``, the
-        reward's parts, each segment's own energy, its offset from its trail,
-        and ``in_time`` marking the arrivals within their stopwatch.
+        reward's parts, each segment's own energy, its tail's distance from
+        the head's line it has not erased, the averaged forces
+        (``AveragedForces.values``), and ``in_time`` marking the arrivals
+        within their stopwatch.
         """
         state = physical_state
         step = self.step
@@ -443,7 +453,8 @@ class CooperativeDiagnostics:
         )
         step.own_energy.copy_(own_energy)
         step.spine_bend.copy_(state.spine_yaw_position.abs())
-        step.trail_offset.copy_(trail_offset.abs())
+        step.off_line.copy_(off_line)
+        step.joint_forces.copy_(averaged_forces[..., [2, 0]])
         step.body_height.copy_(state.body_height)
         # The z component of each segment's up axis: 1 - 2(x² + y²).
         step.uprightness.copy_(

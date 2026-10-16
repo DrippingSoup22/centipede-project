@@ -17,7 +17,11 @@ and 10, cycle 6 returns to two critics, goal and health: each follower is
 paid the distance it walks on its trail, less its squeeze on the segment
 ahead; the head its target, less being pushed from behind; health is
 energy, pain and hanging
-([Cycle 6](#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).**
+([Cycle 6](#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
+After runs 11 and 12, cycle 7 gives the followers the head's line: each is
+paid the line its tail erases, and charged, squared, for how far its tail
+is left from the line and for the force at its front joint; the head has
+its target alone ([Cycle 7](#cycle-7-the-heads-line-the-users-design)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -61,6 +65,9 @@ what its moving costs.**
 | Distance on the trail (cycle 6) | Each follower | How far its front end walks along its body, times how well it keeps to its trail | Goal critic |
 | Squeeze (cycle 6) | Every segment | A follower pushing the segment ahead; the head pushed from behind; averaged | Goal critic |
 | Hanging (cycle 6) | Every segment | Held up by its neighbours (the head beyond half its weight), or lying on the floor; averaged | Health critic |
+| The head's line (cycle 7) | Each follower | The line the head's tip draws, paid as its tail erases it | Goal critic |
+| Off the line (cycle 7) | Each follower | Its tail's distance from the line it has not erased, squared | Goal critic |
+| Front joint (cycle 7) | Each follower | Its front joint's averaged force, pushed or pulled, squared | Goal critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -906,6 +913,101 @@ directly, so sides were kept: itself 40%, as cycle 5.
   about one unit weight, as cycle 5 measured, it pays about 2 mJ/s).
 - The head's neck is unpaid: a head walking crabwise is not charged.
 
+### Cycle 7: the head's line (the user's design)
+
+**Why** (2026-10-16, runs 11 and 12, stopped by the user at cycles 41 and
+15). The followers learned to brake. The squeeze charged only a front
+joint pushed together, so a follower pulling back on the segment ahead
+paid nothing; with every follower braking, the squeeze fell sixfold and the
+body drifted backward, which cost nothing either, since the distance was
+multiplied by the trail's quality, about 0 for a body walking against its
+trail. Measured afterwards (`analysis/brake_price_check.py` in
+`../Training`, the scripted walk under noise 0.25): one follower braking
+alone gained 12 mm/s over walking. Pricing the front joint both ways closed
+that, but the user stepped back: every price on pushing or pulling had
+found a new loophole, and a trail that each segment's own front end draws
+is redrawn by walking backward.
+
+**The design** (the user's, agreed 2026-10-16; the scales measured below):
+
+- **The head's line.** The head's tip draws a line on the floor. Every
+  follower has its own copy, which its tail erases as it passes, wherever
+  the tail is: a copy runs from the furthest point its tail has reached to
+  the tip. The line is the head's, so no follower can redraw it, and each
+  follower sees it where it lies, inside its observation sphere (the user,
+  2026-10-16: the radius is a sphere around the agent, and everything
+  inside it is visible, never the target).
+- **Paid as erased.** A follower is paid the millimetres of line its tail
+  erases. Ground covered once is never paid twice, so the sway of a stride
+  and the jitter of the noise earn nothing.
+- **Charged as left behind.** Its tail's distance from the nearest point of
+  the line it has not erased: beside the line, the distance sideways;
+  behind its end, the distance back to it. Walking backward leaves the
+  marker by itself, with no rule about direction.
+- **The front joint kept free of force.** The force at a follower's front
+  joint is its own surplus push or drag plus that of everything behind it.
+  Keeping it at zero says all of the user's rules at once: cooperate with
+  what comes from ahead, resist a push from behind, pull along one that
+  drags, and pass nothing forward. The one that misbehaves always shows it
+  at its own front joint; the one that resists keeps its joint clean and
+  pays only the energy. Pushed or pulled cost the same.
+- **One balance, squared.** goal = line erased − 40 mm/s × [(d / 3 mm)² +
+  (F / 0.3)²]: being 3 mm off the line, or 0.3 unit weights at the joint,
+  costs a whole walk's pay. Small errors are almost free and large ones
+  dear (the user's preference); the distance is counted up to 10 mm, so
+  that a few lost worlds do not swamp an update's advantages.
+- **The head** is paid its target and arrivals alone, with no force price
+  (the user's decision); its health is everyone's.
+- **Unchanged:** health (energy shared by sides, pain, hanging), the two
+  critics at 1 : 0.8, the spine at 0.35, the starting noise 0.25 pink. The
+  trail of cycles 4 to 6 leaves the code; each block's trail offset gives
+  way to its tail's place on the head's line
+  ([observations.md](observations.md)).
+
+**Measured before building** (`analysis/marker_check.py` in `../Training`:
+a prototype of the line on the scripted wave walk, v4, CPU, one world,
+noise 0.25 unless clean; the goal per second, mm/s, under the chosen
+balance and, for comparison, a linear one of 3 mm/s per mm and 100 mm/s per
+unit weight):
+
+| Case | Followers, squared | Segment 5 alone, squared | Followers, linear |
+| --- | ---: | ---: | ---: |
+| Walking, clean | 28.1 | 12.3 | 27.5 |
+| Walking | −4.9 | −18.6 | 11.1 |
+| Standing | −111.6 | −101.4 | −19.5 |
+| Everyone backward | about −460 with the cap | | −78 |
+| Followers push a slow head | −8.5 | | 10.4 |
+| A lazy head holding, pushed by the followers | −11.6 | | 4.1 |
+| A lazy head limp, pushed | −17.4 | | 7.7 |
+| The head walks, the followers hold | −92.4 | | −17.9 |
+| Segment 5 brakes, the others walk | | −67.8 | |
+| Segment 5 limp | | −43.5 | |
+| Segment 5 steps too fast | | −38.3 | |
+
+Walking wins in every case, for the group and for one follower alone,
+whose every deviation loses at least 20 mm/s (7 with the linear balance,
+under which pushing a slow head nearly matched walking). Under the noise
+every value is negative; only the differences teach. Two more findings: the
+front joint force peaks in the middle of the body (about 0.2 unit weights
+at segment 5), not at the head, so the head's end is not overloaded; and a
+noisy walk leaves its tails 2 mm off the line, a standing body drifts 5 mm,
+a body walking backward 20 mm and more. Centipede's `HeadLine` reproduces
+the prototype within 0.0001 mm over 300 steps, walking and backward.
+
+**Risks.**
+
+- **A lazy head** (the user's concern): the followers score −4.9 with a
+  head that walks and −11.6 to −17.4 pushing a lazy one, but standing is
+  worse still (−111.6), so a lazy head would be carried. Watch the head's
+  net force (pushed forward), its feet and its energy. The user's idea for
+  later: the tip draws only while the head walks by its own effort.
+- **Turns cost the followers** (−18.1 in an even turn under noise): they
+  cannot avoid them, so it should teach nothing wrong.
+- **The scripted walk is not balanced**: its middle joints carry 0.2 unit
+  weights of pull. A learned walk must even out the efforts, the
+  cooperation sought.
+- **A head walking backward** pushes every follower off its line.
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -966,8 +1068,8 @@ other side ([Cycle 5](#cycle-5-coordination-first-the-users-design)).
 
 | Agent | Goal critic | Trail critic (cycles 4 and 5) | Cost critic (health from cycle 5) |
 | --- | --- | --- | --- |
-| Head | Task; from cycle 6 less being pushed | Its own offset and segment 1's | Energy, pain, chain, and from cycle 4 being held up; from cycle 5 its own weight beyond half; from cycle 6 hanging |
-| Each follower | Path; none from cycle 3; from cycle 5 coordination; from cycle 6 the distance on its trail less its squeeze | The offset of the segment behind, and its own at `trail_own_weight` | Energy, pain, chain, and from cycle 4 carrying itself (cycle 5: in coordination); from cycle 6 energy, pain and hanging |
+| Head | Task; in cycle 6 less being pushed | Its own offset and segment 1's | Energy, pain, chain, and from cycle 4 being held up; from cycle 5 its own weight beyond half; from cycle 6 hanging |
+| Each follower | Path; none from cycle 3; from cycle 5 coordination; in cycle 6 the distance on its trail less its squeeze; from cycle 7 the head's line erased, less its distance from it and its front joint's force | The offset of the segment behind, and its own at `trail_own_weight` | Energy, pain, chain, and from cycle 4 carrying itself (cycle 5: in coordination); from cycle 6 energy, pain and hanging |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
 apart ([critic.md](critic.md)); from cycle 4 the followers' trail and cost
@@ -999,53 +1101,56 @@ force is worth.
 | Squeeze : distance (cycle 6) | 300 mm/s of goal per unit weight squeezed, agreed: measured to make pushing a slow head lose for segments 1 and 2 |
 | Hanging : energy (cycle 6) | A unit weight as one motor fully on, agreed |
 | α, cycle 6 | By sides, kept over equal sharing |
+| Line : off the line : front joint (cycle 7) | Squared against the reference pay, 40 mm/s, at 3 mm or 0.3 unit weights; the distance counted up to 10 mm, agreed |
+| The head's force price (cycle 7) | None, the user's decision |
 
 ## As built
 
 Every quantity is per segment and per 20 ms step; the simulation measures
-forces and work after each of the step's physics steps (40 on v4). From
-cycle 6 the reward has two channels, goal and health
+forces and work after each of the step's physics steps (40 on v4). The
+reward has two channels, goal and health
 (`environment/cooperative_reward.py`), and every segment learns from both
 (the environment's `segment_reward_channels`), weighed by `[agents]
-advantage_weights`. Its parts are logged apart: progress, arrival,
-distance and squeeze in the goal, pushing, braking, force, pain and
+advantage_weights`. Its parts are logged apart: progress, arrival, line,
+off_line and front_joint in the goal, pushing, braking, force, pain and
 hanging in health.
 
 **Averaged measures.** Each step the averages move a share r = 0.02 s /
-`averaging_s` of the way to the step's values (`AveragedForces`; the
-trail's front ends and forward axes in `TrailMemory`), starting at the
-current values when a world restarts. With them, ḡ is the net force of a
+`averaging_s` of the way to the step's values (`AveragedForces`), starting
+at the current values when a world restarts. With them, ḡ is the net force of a
 segment's two spine joints on it, its legs included, along its forward
 axis and up; f̄ the force of the segment ahead on it along the body,
 positive when it pulls, negative when the segment pushes it, zero for the
 head; b̄ the floor's push on its body; all in unit weights, means over the
 step's physics steps before averaging.
 
-**The goal channel**, in millimetres, with q = `squeeze_price_mm_per_s` ×
-0.02 s = 6 mm per unit weight. The head:
+**The head's line** (`environment/cooperative_line.py`, `HeadLine`). The
+tip adds a point to the line each time it has moved 0.5 mm from the last;
+at a restart the line is the body's own centreline, from the rear's tail
+to the tip. A segment's tail is its rear end: the joint behind it, and for
+the rear its front end one segment length back along its body. Each step
+every tail is placed on the line by the nearest point, looked for within
+64 pieces either way of its last place, which gives its arc length along
+the line; its erase point is the furthest arc length it has reached. The
+head's own copy is measured too, unpaid.
 
-> goal = 1000 · (d_before − d_after) + arrival − q · max(ḡ_along, 0)
+**The goal channel**, in millimetres. The head:
+
+> goal = 1000 · (d_before − d_after) + arrival
 
 with d the flat distance from its tip to the target; the arrival, when the
 target comes under the head, is the middle distance of the level's
 targets, (near + far) / 2, in millimetres (`arrival_approaches` = 1
 average approach). A follower:
 
-> goal = 1000 · Δx · Q − q · max(−f̄, 0)
+> goal = 1000 · Δs − R · 0.02 s · [ (min(δ, c) / δ₀)² + (f̄ / F₀)² ]
 
-with Δx how far its front end, its spine joint, moved along its own
-forward axis in the step, in metres, and Q the quality of its trail:
-
-> Q = exp(−(max(e − `trail_dead_zone_deg`, 0) / `trail_width_deg`)²), e = √(s(θᵢ₊₁) + k · s(θᵢ))
-
-with θᵢ segment *i*'s offset from its averaged trail, s(θ) = (180/π)² · 2
-(1 − cos θ), the square of θ in degrees while it is small, and k =
-`trail_own_weight`; the rear's e is √s(θᵢ). Each segment's front end, the
-head's tip or its spine joint, adds a point to its trail each time it has
-moved an eighth of the shortest segment length; θᵢ is the angle between
-the segment's forward axis and the line from the newest point at least
-one segment length (`BodyMeasures.segment_lengths_m`) behind its front end
-to the front end (`environment/cooperative_trail.py`).
+with Δs the line its tail erased on the step (how far its erase point
+moved), in metres; δ its tail's distance from the line from its erase
+point on, in millimetres, counted up to c = `line_distance_cap_mm` (10);
+f̄ its averaged front joint force, in unit weights; R =
+`reference_pay_mm_per_s` (40), δ₀ = `line_distance_scale_mm` (3) and F₀ =
+`joint_force_scale` (0.3).
 
 **The health channel**, in millijoules. Each segment's own energy, over
 its leg motors and the spine motor behind it:
@@ -1104,11 +1209,39 @@ higher, and the task's distances, not energy, will set the pace at first.
 
 ### Earlier cycles, as built
 
-Removed from the code in cycle 6, with their settings; kept as the record
-of what runs 01 to 10 trained with. Every earlier cycle also paid a
+Removed from the code in cycles 6 and 7, with their settings; kept as the
+record of what runs 01 to 12 trained with. Every earlier cycle also paid a
 follower progress toward where the segment ahead's centre was before the
 step (until cycle 3) and shared energy by wᵢⱼ = 0.5^|i−j| over the
-segments it sees (until cycle 5).
+segments it sees (until cycle 5). Cycle 6's goal channel (runs 11 and 12),
+its health being today's:
+
+**The goal channel**, in millimetres, with q = `squeeze_price_mm_per_s` ×
+0.02 s = 6 mm per unit weight. The head:
+
+> goal = 1000 · (d_before − d_after) + arrival − q · max(ḡ_along, 0)
+
+with d the flat distance from its tip to the target; the arrival, when the
+target comes under the head, is the middle distance of the level's
+targets, (near + far) / 2, in millimetres (`arrival_approaches` = 1
+average approach). A follower:
+
+> goal = 1000 · Δx · Q − q · max(−f̄, 0)
+
+with Δx how far its front end, its spine joint, moved along its own
+forward axis in the step, in metres, and Q the quality of its trail:
+
+> Q = exp(−(max(e − `trail_dead_zone_deg`, 0) / `trail_width_deg`)²), e = √(s(θᵢ₊₁) + k · s(θᵢ))
+
+with θᵢ segment *i*'s offset from its averaged trail, s(θ) = (180/π)² · 2
+(1 − cos θ), the square of θ in degrees while it is small, and k =
+`trail_own_weight`; the rear's e is √s(θᵢ). Each segment's front end, the
+head's tip or its spine joint, adds a point to its trail each time it has
+moved an eighth of the shortest segment length; θᵢ is the angle between
+the segment's forward axis and the line from the newest point at least
+one segment length (`BodyMeasures.segment_lengths_m`) behind its front end
+to the front end (`environment/cooperative_trail.py`).
+
 
 **The goal channel**, in millimetres. For segment *i*, with *d* its flat
 distance to its target before and after the step (the head's tip to the

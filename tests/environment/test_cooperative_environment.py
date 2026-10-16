@@ -13,6 +13,7 @@ import torch
 
 from centipede.diagnostics_category import WindowSummary
 from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
+from centipede.environment.cooperative_line import HeadLine
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -22,7 +23,6 @@ from centipede.environment.cooperative_reward import (
     CooperativeReward,
 )
 from centipede.environment.cooperative_task import CooperativeTask
-from centipede.environment.cooperative_trail import TrailMemory
 from centipede.environment.environment import create_environment
 from centipede.environment.reward_function import StepRewards
 from centipede.environment.settings import CooperatorsSettings, EnvironmentSettings
@@ -88,19 +88,16 @@ def test_targets_follow_the_level_and_the_stopwatch_moves_it():
     assert task.level == pytest.approx(0.5 + 0.02 * (1 / 3 - 0.1))
 
 
-def at_yaw(state: PhysicalState, degrees: float) -> None:
-    """Turn every segment of the state to face ``degrees`` from +x."""
-    half = math.radians(degrees) / 2
-    state.body_quaternion[:] = torch.tensor([math.cos(half), 0.0, 0.0, math.sin(half)])
-
-
-def test_the_goal_pays_the_head_progress_and_the_followers_distance_on_the_trail():
-    """The body steps 1 mm forward, the head 1 mm toward its target and onto
-    it; trail offsets of 5, 0, 10, 0 and 20 degrees. Averaged forces, in unit
-    weights: the head pushed forward by 0.4, held up by 0.8 and on the floor
-    with 0.2; segment 1 pushing the head with 0.3; segment 2 held up by 1;
-    the rear on the floor with 0.3, pressed down by its neighbour. Energy is
-    shared 40% to itself and 30% to each side; pain stays with the pressed."""
+def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint():
+    """The head steps 1 mm toward its target and onto it; every tail erases
+    1 mm of line. The followers' tails lie 0, 1.5, 3 and 12 mm from the line
+    they have not erased, the last counted as 10. Averaged forces, in unit
+    weights: segment 1's front joint pushed with 0.3, segment 3's pulled with
+    0.15; the head held up by 0.8 and on the floor with 0.2, segment 2 held
+    up by 1, the rear on the floor with 0.3. A squared cost takes 40 mm/s,
+    0.8 mm a step, at its scale: 3 mm off the line, or 0.3 unit weights.
+    Energy is shared 40% to itself and 30% to each side; pain stays with the
+    pressed."""
     reward = CooperativeReward(
         SETTINGS, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
     )
@@ -118,52 +115,38 @@ def test_the_goal_pays_the_head_progress_and_the_followers_distance_on_the_trail
     state.motor_positive_work[0, 2] = 1e-6  # one microjoule pushing
     state.leg_leg_force_squared[0, 3] = BODY.leg_push_n**2  # a full push
     state.net_joint_force[0] = 1e-3 * torch.tensor(
-        [[0.4, 0.8], [-0.3, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, -0.4]]
+        [[0.0, 0.8], [0.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, -0.4]]
     )
-    state.front_joint_force[0] = 1e-3 * torch.tensor([0.0, -0.3, 0.0, 0.6, 0.0])
+    state.front_joint_force[0] = 1e-3 * torch.tensor([0.0, -0.3, 0.0, 0.15, 0.0])
     state.belly_normal_force[0] = 1e-3 * torch.tensor([0.2, 0.0, 0.0, 0.0, 0.3])
     forces = AveragedForces(1, SEGMENTS, BODY.unit_weight_n, 0.5, "cpu")
     forces.restart(torch.tensor([True]), state)
     head_tip = state.head_tip_position[:, :2]
-    previous_front_end = state.front_end_position.clone()
-    previous_front_end[..., 0] -= 0.001
     zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
 
     channels, parts, _ = reward.compute(
         state,
         state.body_planar_position - torch.tensor([0.001, 0.0]),
         head_tip - torch.tensor([[0.001, 0.0]]),
-        previous_front_end,
         torch.tensor([[0.1, 0.0]]),
         torch.tensor([True]),
         0.025,
         zeros,
         zeros,
-        torch.deg2rad(torch.tensor([[5.0, 0.0, 10.0, 0.0, 20.0]])),
+        torch.full((1, SEGMENTS), 0.001),
+        torch.tensor([[0.005, 0.0, 0.0015, 0.003, 0.012]]),
         forces.values,
     )
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
     torch.testing.assert_close(by_name["progress"], torch.tensor([1.0, 0, 0, 0, 0]))
     torch.testing.assert_close(by_name["arrival"], torch.tensor([25.0, 0, 0, 0, 0]))
-
-    # Each follower's trail: the offset of the one behind and a quarter of
-    # its own squared, the rear's own alone; an angle counts as its chord in
-    # degrees. Segment 2 sits at the dead zone's edge, segments 1, 3 and the
-    # rear about 5, 15 and 15 degrees beyond it.
-    def chord(degrees: float) -> float:
-        return math.degrees(2 * math.sin(math.radians(degrees) / 2))
-
-    beyond = torch.tensor([chord(10) - 5, 0.0, chord(20) - 5, chord(20) - 5])
+    torch.testing.assert_close(by_name["line"], torch.tensor([0.0, 1.0, 1.0, 1.0, 1.0]))
     torch.testing.assert_close(
-        by_name["distance"],
-        torch.tensor([0.0, *torch.exp(-((beyond / 20) ** 2))]),
-        rtol=1e-3,
-        atol=0,
+        by_name["off_line"], -0.8 * torch.tensor([0.0, 0.0, 0.25, 1.0, 100 / 9])
     )
-    # 300 mm/s per unit weight squeezed: 6 mm per 20 ms step.
     torch.testing.assert_close(
-        by_name["squeeze"], -6 * torch.tensor([0.4, 0.3, 0.0, 0.0, 0.0])
+        by_name["front_joint"], -0.8 * torch.tensor([0.0, 1.0, 0.0, 0.25, 0.0])
     )
     one_motor = SETTINGS.force_price_w * 0.02 * 1e3
     torch.testing.assert_close(
@@ -172,7 +155,7 @@ def test_the_goal_pays_the_head_progress_and_the_followers_distance_on_the_trail
     torch.testing.assert_close(by_name["pushing"], -1e-3 * reward.sharing_weights[:, 2])
     # A full push for one step, priced as one motor fully on.
     torch.testing.assert_close(by_name["pain"], torch.tensor([0, 0, 0, -one_motor, 0]))
-    goal = sum(by_name[name] for name in PART_NAMES[:4])
+    goal = sum(by_name[name] for name in PART_NAMES[:5])
     torch.testing.assert_close(
         channels[0], torch.stack((goal, parts.rewards[0] - goal), -1)
     )
@@ -181,28 +164,34 @@ def test_the_goal_pays_the_head_progress_and_the_followers_distance_on_the_trail
     assert forces.update(state)[0, 2, 1] == pytest.approx(1.5)
 
 
-def test_the_trail_is_where_the_front_end_went():
-    """A segment a centimetre long walks 2 cm along x: it lies on its trail.
-    Turned 30 degrees where it stands, it points 30 degrees left of it. Facing
-    and walking a centimetre along y, it lies on its trail again; backing up a
-    centimetre, it points the trail's opposite way."""
-    trail = TrailMemory(1, (0.01,), "cpu")
-    state = PhysicalState.allocate(1, 1, LEGS, "cpu")
-    at_yaw(state, 0.0)
-    trail.restart(torch.tensor([True]), state)
+def test_the_head_line_is_erased_by_each_tail_and_measures_how_far_it_is_left():
+    """The resting body's line runs from the rear's tail, 45 mm behind the
+    origin, to the tip at 5 mm. The body steps 3 mm forward: every tail
+    erases 3 mm. It steps 2 mm back: nothing is erased and every tail is 2 mm
+    behind the end of its line. It moves 1.5 mm to the left: every tail lies
+    2.5 mm from the end of its line and 1.5 mm left of the line, its body
+    along it."""
+    line = HeadLine(1, BODY.segment_lengths_m, episode_steps=10, device="cpu")
+    state = resting_state(1)
+    line.restart(torch.tensor([True]), state)
+    torch.testing.assert_close(line.arc[0, line.count[0] - 1], torch.tensor(0.05))
 
-    def walk(steps: int, dx: float, dy: float) -> float:
-        for _ in range(steps):
-            state.front_end_position[0, 0] += torch.tensor([dx, dy])
-            offset = trail.update(state)
-        return math.degrees(offset[0, 0])
+    def move(dx: float, dy: float) -> tuple[torch.Tensor, torch.Tensor]:
+        state.front_end_position[0] += torch.tensor([dx, dy])
+        erased, off_line = line.update(state)
+        return erased[0], off_line[0]
 
-    assert walk(20, 0.001, 0.0) == pytest.approx(0.0, abs=1e-4)
-    at_yaw(state, 30.0)
-    assert walk(1, 0.0, 0.0) == pytest.approx(30.0, abs=1e-4)
-    at_yaw(state, 90.0)
-    assert walk(12, 0.0, 0.001) == pytest.approx(0.0, abs=1e-4)
-    assert abs(walk(12, 0.0, -0.001)) == pytest.approx(180.0, abs=1e-3)
+    erased, off_line = move(0.003, 0.0)
+    torch.testing.assert_close(erased, torch.full((SEGMENTS,), 0.003))
+    torch.testing.assert_close(off_line, torch.zeros(SEGMENTS), atol=1e-7, rtol=0)
+    erased, off_line = move(-0.002, 0.0)
+    torch.testing.assert_close(erased, torch.zeros(SEGMENTS))
+    torch.testing.assert_close(off_line, torch.full((SEGMENTS,), 0.002))
+    erased, off_line = move(0.0, 0.0015)
+    torch.testing.assert_close(off_line, torch.full((SEGMENTS,), 0.0025))
+    torch.testing.assert_close(
+        line.view[0], torch.tensor([[0.0015, 0.0, 0.0025]] * SEGMENTS)
+    )
 
 
 def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target():
@@ -210,7 +199,7 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
         SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, "cpu"
     )
     block = builder.block_size
-    assert (block, builder.observation_size) == (46, 5 * 46 + 2)
+    assert (block, builder.observation_size) == (48, 5 * 48 + 2)
     state = resting_state(1)
     state.foot_normal_force[0, 1] = torch.tensor([2e-3, 1e-3])
     last_action = torch.rand(1, SEGMENTS, LEGS + 1)
@@ -219,17 +208,20 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
     averaged = torch.zeros(1, SEGMENTS, 4)
     averaged[0, :3, 2] = torch.tensor([0.0, -0.5, 2.0])
     averaged[0, 1, :2] = torch.tensor([0.3, 1.0])
-    offset = torch.deg2rad(torch.tensor([[0.0, 10.0, 0.0, 0.0, 0.0]]))
+    line_view = torch.zeros(1, SEGMENTS, 3)
+    line_view[0, 1] = torch.tensor([0.001, 0.1, 0.002])
 
     observations = builder.build(
-        state, torch.tensor([[0.025, 0.01]]), last_action, offset, averaged
+        state, torch.tensor([[0.025, 0.01]]), last_action, line_view, averaged
     )
 
     own = observations[0, 1, :block]
     torch.testing.assert_close(own[:3], torch.tensor([0.0, 0.0, -1.0]))  # gravity
     torch.testing.assert_close(own[27:29], torch.tensor([2.0, 1.0]))  # unit weights
-    # Front joint, net along and up, trail offset.
-    torch.testing.assert_close(own[33:37], torch.tensor([-0.5, 0.3, 1.0, offset[0, 1]]))
+    # Front joint, net along and up, then its place on the head's line.
+    torch.testing.assert_close(
+        own[33:39], torch.tensor([-0.5, 0.3, 1.0, 0.001, 0.1, 0.002])
+    )
     torch.testing.assert_close(own[-(LEGS + 1) :], last_action[0, 1])
     # Blocks: itself, the segments ahead, those behind; segment 1 sees its
     # rear joint in segment 2's block.
@@ -271,6 +263,7 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
             step_rewards,
             torch.zeros(2, SEGMENTS, 3),
             zeros,
+            torch.zeros(2, SEGMENTS, 4),
             arrived,
             arrived,
             torch.full((2,), step == 39),  # the time limit
@@ -330,7 +323,7 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
 
     assert rewards.shape == (2, 12, 2) and torch.isfinite(rewards).all()
     assert environment.segment_reward_channels == [(0, 1)] * 12
-    assert observations.shape == (2, 12, 5 * 46 + 2)
+    assert observations.shape == (2, 12, 5 * 48 + 2)
     torch.testing.assert_close(spine_commands[0], torch.full((2, 11), 0.35))
     assert not terminated.any() and not truncated.any()
     assert rewards[0, 0, 0] > 1.0 and environment.task.target_steps.tolist() == [0, 1]

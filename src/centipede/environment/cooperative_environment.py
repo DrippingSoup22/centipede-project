@@ -13,6 +13,7 @@ import torch
 
 from centipede.diagnostics_category import measure
 from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
+from centipede.environment.cooperative_line import HeadLine
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -22,7 +23,6 @@ from centipede.environment.cooperative_reward import (
     CooperativeReward,
 )
 from centipede.environment.cooperative_task import CooperativeTask
-from centipede.environment.cooperative_trail import TrailMemory
 from centipede.environment.head import target_under_head
 from centipede.environment.reward_function import joint_angles
 from centipede.environment.settings import EnvironmentSettings
@@ -107,8 +107,11 @@ class CooperativeEnvironment:
             if cooperators.averaging_s > 0
             else 1.0
         )
-        self.trail = TrailMemory(
-            self.world_count, body.segment_lengths_m, self.device, averaging_rate
+        self.line = HeadLine(
+            self.world_count,
+            body.segment_lengths_m,
+            settings.max_episode_steps,
+            self.device,
         )
         self.forces = AveragedForces(
             self.world_count,
@@ -149,7 +152,6 @@ class CooperativeEnvironment:
         self.previous_head_tip_position = torch.zeros_like(
             state.head_tip_position[:, :2]
         )
-        self.previous_front_end_position = torch.zeros_like(state.front_end_position)
         self.previous_joint_position = torch.zeros_like(self.last_action)
 
     @property
@@ -209,14 +211,13 @@ class CooperativeEnvironment:
         task = self.task
         self.previous_body_planar_position.copy_(state.body_planar_position)
         self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
-        self.previous_front_end_position.copy_(state.front_end_position)
         self.previous_joint_position.copy_(joint_angles(state))
 
         legs = self.leg_motor_count
         motor_command = joint_action * self.motor_scale
         self.simulation.step(motor_command[..., :legs], motor_command[:, :-1, legs])
         self.episode_steps += 1
-        trail_offset = self.trail.update(state)
+        line_erased, off_line = self.line.update(state)
         averaged_forces = self.forces.update(state)
 
         arrived = target_under_head(state, task.target_position, self.head_outline)
@@ -226,13 +227,13 @@ class CooperativeEnvironment:
             state,
             self.previous_body_planar_position,
             self.previous_head_tip_position,
-            self.previous_front_end_position,
             task.target_position,
             arrived,
             self.settings.cooperators.arrival_approaches * (near + far) / 2,
             self.previous_joint_position,
             motor_command,
-            trail_offset,
+            line_erased,
+            off_line,
             averaged_forces,
         )
         truncated = self.episode_steps >= self.settings.max_episode_steps
@@ -244,7 +245,8 @@ class CooperativeEnvironment:
             rewards,
             step_rewards,
             own_energy,
-            trail_offset,
+            off_line,
+            averaged_forces,
             arrived,
             in_time,
             truncated,
@@ -268,9 +270,9 @@ class CooperativeEnvironment:
         return observations, rewards, never, truncated, final_observations
 
     def _restart_measures(self, world_mask: torch.Tensor) -> None:
-        """Start the masked worlds' trails and averaged forces afresh."""
+        """Start the masked worlds' lines and averaged forces afresh."""
         state = self.simulation.physical_state
-        self.trail.restart(world_mask, state)
+        self.line.restart(world_mask, state)
         self.forces.restart(world_mask, state)
 
     def _steps_left(self) -> torch.Tensor:
@@ -282,6 +284,6 @@ class CooperativeEnvironment:
             self.simulation.physical_state,
             self.task.target_position,
             self.last_action,
-            self.trail.offset,
+            self.line.view,
             self.forces.values,
         )

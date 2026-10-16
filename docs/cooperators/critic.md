@@ -70,6 +70,16 @@ always present but never outweighs moving. The squeeze sits in the goal
 channel, beside the distance it prices, so that the critic sees one
 trade-off, how far against how hard to push, at the goal's full weight.
 
+**Cycle 7 keeps the two critics and their weights**
+([reward.md](reward.md#cycle-7-the-heads-line-the-users-design)). A
+follower's goal critic now judges the head's line it erases, less its
+distance from the line and its front joint's force, both squared; the
+head's judges its target alone. Why 1 : 0.8 rather than 1 : 1: goal and
+health disagree mainly on moving at all, since energy always prefers a
+body standing still, and with each advantage normalised on its own the
+weights alone decide who wins there; the goal comes first (principle 1 of
+[reward.md](reward.md#principles)).
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone

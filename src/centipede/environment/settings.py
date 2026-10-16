@@ -315,18 +315,17 @@ class CooperatorsSettings:
     ``stagger_first_episodes`` each world's first episode after a full reset
     has a random length, so that the worlds restart at different steps.
 
-    **Reward** (cycle 6 of docs/cooperators/reward.md), two channels for every
+    **Reward** (cycle 7 of docs/cooperators/reward.md), two channels for every
     segment. The goal, in millimetres: for the head, what it gains toward its
     target and, on arrival, ``arrival_approaches`` times the middle distance
-    of the level's targets; for a follower, the distance its front end
-    walks along its body, times how well it keeps to its trail: 1 within
-    ``trail_dead_zone_deg``, falling as exp(-(beyond / ``trail_width_deg``)^2),
-    the offsets being those of the segment it steers and, at
-    ``trail_own_weight``, its own (the rear's own alone). Less, at
-    ``squeeze_price_mm_per_s`` per unit weight, the push a follower passes to
-    the segment ahead (its front joint squeezed) or the head receives from
-    behind. Health, in millijoules: energy, the pushing work, the braking
-    work times ``braking_price`` and the force, each motor's squared command
+    of the level's targets; for a follower, the head's line its tail erases,
+    less two squared costs, each ``reference_pay_mm_per_s`` at its scale:
+    the distance of its tail from the line it has not erased, against
+    ``line_distance_scale_mm`` and counted up to ``line_distance_cap_mm``,
+    and its front joint's force, pulled or pushed, against
+    ``joint_force_scale`` unit weights. Health, in millijoules: energy, the
+    pushing work, the braking work times ``braking_price`` and the force,
+    each motor's squared command
     times its duration times ``force_price_w``, shared with the neighbours a
     segment sees, itself 40% and each side 30% at radius 2 with halving by
     ``energy_sharing_decay`` (``energy_sharing_weights``); pain, the squared
@@ -334,8 +333,8 @@ class CooperatorsSettings:
     as force times ``pain_price``; and hanging, what its neighbours hold it up
     with (the head's beyond ``head_free_support`` of its weight) and the
     floor's push on its body, in unit weights, priced as force times
-    ``hanging_price``. The forces and the trail are averaged over
-    ``averaging_s`` (an exponential average; 0 none).
+    ``hanging_price``. The forces are averaged over ``averaging_s`` (an
+    exponential average; 0 none).
 
     **Spine.** Each spine motor receives ``spine_action_scale`` times its
     command, so that the whole command range spans the joint's: on v4 a
@@ -356,10 +355,10 @@ class CooperatorsSettings:
     force_price_w: float
     pain_price: float
     energy_sharing_decay: float
-    trail_own_weight: float
-    trail_dead_zone_deg: float
-    trail_width_deg: float
-    squeeze_price_mm_per_s: float
+    reference_pay_mm_per_s: float
+    line_distance_scale_mm: float
+    line_distance_cap_mm: float
+    joint_force_scale: float
     hanging_price: float
     head_free_support: float
     averaging_s: float
@@ -403,16 +402,16 @@ class CooperatorsSettings:
             energy_sharing_decay=section.number(
                 "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0
             ),
-            trail_own_weight=section.number(
-                "trail_own_weight", default=0.25, minimum=0.0
+            reference_pay_mm_per_s=section.number(
+                "reference_pay_mm_per_s", default=40.0, minimum=0.0
             ),
-            trail_dead_zone_deg=section.number(
-                "trail_dead_zone_deg", default=5.0, minimum=0.0
+            line_distance_scale_mm=section.positive_number(
+                "line_distance_scale_mm", default=3.0
             ),
-            trail_width_deg=section.positive_number("trail_width_deg", default=20.0),
-            squeeze_price_mm_per_s=section.number(
-                "squeeze_price_mm_per_s", default=300.0, minimum=0.0
+            line_distance_cap_mm=section.positive_number(
+                "line_distance_cap_mm", default=10.0
             ),
+            joint_force_scale=section.positive_number("joint_force_scale", default=0.3),
             hanging_price=section.number("hanging_price", default=1.0, minimum=0.0),
             head_free_support=section.number(
                 "head_free_support", default=0.5, minimum=0.0
