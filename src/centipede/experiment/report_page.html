@@ -563,9 +563,9 @@ const EVALUATION_DETAILS = [
 // =============================================================================
 
 const COOPERATORS = (data.settings.environment || {}).design === "cooperators";
-// The reward's parts that make the goal channel come first, the cost's after
+// The reward's parts that make the goal channel come first, health's after
 // them (environment/cooperative_reward.py).
-const GOAL_PARTS = 2;
+const GOAL_PARTS = 4;
 
 const COOPERATIVE_METRICS = {
   "episodes.targets_reached": { label: "Targets per episode", unit: "", better: "higher",
@@ -932,8 +932,8 @@ function lagTable(records, key, rows, entryNames) {
 }
 
 // One bar per actor of the reward's parts, each as its share of its channel:
-// the goal's to the right of zero, the cost's to the left, each channel 50%
-// in all, since the two critics weigh their channels the same. A part
+// the goal's to the right of zero, health's to the left, each channel 50%
+// in all, as each critic's advantages are normalised on their own. A part
 // against its channel's sign, such as progress while the head walks away,
 // falls on the other side. Each channel's sum per second is written beside.
 function influenceRows(rows, names, colors, width) {
@@ -966,7 +966,7 @@ function influenceRows(rows, names, colors, width) {
     });
     chart.append(svg("text", { x: left - 8, y: top + rowHeight / 2 + 4, "text-anchor": "end", class: "label" }, row.label));
     chart.append(svg("text", { x: px(50) + 8, y: top + rowHeight / 2 + 4, class: "label" },
-      `goal ${withUnit(channels[0].sum, "mm/s")} · cost ${withUnit(channels[1].sum, "mW")}`));
+      `goal ${withUnit(channels[0].sum, "mm/s")} · health ${withUnit(channels[1].sum, "mW")}`));
   });
   return chart;
 }

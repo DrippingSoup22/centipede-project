@@ -12,7 +12,12 @@ followers a new goal, the trail, with a cost for not carrying themselves
 After runs 07 and 08, cycle 5 gives every segment three priorities in
 three critics: for the followers coordination, the trail as a reward, and
 health; for the head its target, its neck's trail and health
-([Cycle 5](#cycle-5-coordination-first-the-users-design)).**
+([Cycle 5](#cycle-5-coordination-first-the-users-design)). After runs 09
+and 10, cycle 6 returns to two critics, goal and health: each follower is
+paid the distance it walks on its trail, less its squeeze on the segment
+ahead; the head its target, less being pushed from behind; health is
+energy, pain and hanging
+([Cycle 6](#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -53,6 +58,9 @@ what its moving costs.**
 | Coordination (cycle 5) | Each follower | The net force its joints put on it, averaged: lagging, driving the body (pushing the one ahead counted twice), held up, lying on the floor | Coordination critic |
 | Trail as a reward (cycle 5) | Every segment | Time spent on the trail: full within 5°, fading beyond | Trail critic |
 | Own weight (cycle 5) | The head | Held up by its neck beyond half its weight, or lying on the floor | Health critic |
+| Distance on the trail (cycle 6) | Each follower | How far its front end walks along its body, times how well it keeps to its trail | Goal critic |
+| Squeeze (cycle 6) | Every segment | A follower pushing the segment ahead; the head pushed from behind; averaged | Goal critic |
+| Hanging (cycle 6) | Every segment | Held up by its neighbours (the head beyond half its weight), or lying on the floor; averaged | Health critic |
 
 ```text
 head      → sees the target   → progress toward the target   (task)
@@ -770,6 +778,134 @@ down and its health weighs 25 against its target's 40. Under the
 untrained noise the trail reward is mostly the noise's wobble, so it is
 learned after coordination, as the priorities intend.
 
+### Cycle 6: distance on the trail, the squeeze its price (the user's design)
+
+**Why** (2026-10-16, runs 09 and 10, seeds 1 and 2, 128 cycles each). In
+training the followers learned in the intended order: coordination fell
+from 0.54 to 0.29 unit weights and the trail reward rose from 13% to 60%
+of its most. But the body learned to stand. The heading error rose to 105
+to 118° and the head drew away from its targets on average; at cycle 128
+the mean action reached 0 to 0.05 targets an episode and walked 34 to 91
+mm in 20 s, the head shaking at 650 to 840°/s with the spine joints pinned
+at their limits and its feet carrying 1.2 to 1.3 of its weight. Every term
+of cycle 5 was lowest standing still, and only the head could start the
+motion: a chicken and egg, since a head that walks drags followers that
+hold still, and only then would they feel a force to follow. Two more
+findings:
+
+- **The noise made standing better than walking.** At the starting spread
+  of 0.5 the body wobbles off its trail and squeezes its joints whatever
+  it does, and a still body wobbles less (measured below).
+- **The spine pinned.** A spine command above about 0.35 holds the joint
+  at its 15° limit, so two thirds of its range did the same thing
+  ([actions.md](actions.md#the-spines-scale-cycle-6)).
+
+**The design** (the user's, agreed 2026-10-16; the numbers are the
+assistant's proposals, measured below, which the user accepted):
+
+- **Two critics, goal and health, 1 : 0.8** for every segment
+  (`[agents] advantage_weights = [1.0, 0.8]`;
+  [critic.md](critic.md)), which the user preferred as cleaner.
+- **A follower's goal: distance on the trail, less its squeeze.** Each step
+  the millimetres its front end walks along its own body, times the
+  trail's quality, cycle 5's shape: 1 within 5°, exp(−(beyond / 20°)²),
+  for the offset of the segment it steers and a quarter of its own. Less,
+  at 300 mm/s per unit weight (`squeeze_price_mm_per_s`, 6 mm a step), the
+  averaged force with which its front joint pushes the segment ahead. Paid
+  for distance, a follower wants to move, and a still body earns nothing;
+  priced for pushing, it gains only by walking as fast as the segment ahead
+  goes. This closes the loophole that made cycle 5 reject paying distance:
+  a follower pushing the body faster pays more for the push than it gains.
+  The user's option 1 of two; option 2, a follower also paying for the
+  pull from behind, was left out: a follower pulled is one the segment
+  behind lags from, and the price would fall on the wrong one.
+- **The head's goal: progress, arrival, less being pushed** (the user's
+  option 3): the same price on the averaged net force of its joint that
+  pushes it forward. It can lose that cost only by walking at the pace the
+  body pushes it to, so the followers' wish to move reaches it as a force.
+  Its neck stays unpaid, to be watched: no trail term for the head, which
+  is free to point where its target is.
+- **Every term is local** (the user's fundamental rule): a segment is paid
+  or charged only for what its own block or its neighbours' show. Its
+  squeeze is its own front joint force; the head's push is its own net
+  force; the offsets are its own and the segment behind's; the distance is
+  its own motion. No follower's reward depends on the head's state.
+- **Health: energy, pain and hanging**, priced as force. Energy is shared
+  by sides as in cycle 5 (itself 40%, each side 30%); pain stays with the
+  pressed. Hanging is what its neighbours hold it up with (the head's
+  beyond half its weight, `head_free_support`) and the floor's push on its
+  body, averaged, at one force price per unit weight (`hanging_price` 1).
+  Being dragged along the body is no longer charged: the rigid chain moves
+  every segment at the same speed, so a dragged follower is still paid its
+  distance, and only hanging and the neighbours' shared energy price
+  going limp.
+- **The forces and the trail averaged over 0.2 s**, as in cycle 5; the
+  actions are never filtered.
+- **The spine's command scaled by 0.35** (`spine_action_scale`), so that
+  the policy's whole range spans the joint's.
+- **Exploration starts at a spread of 0.25** (`initial_action_std`), pink
+  (β = 1), against 0.5 before.
+- **Targets within 90° either side from level 0**, kept from cycle 5 and
+  now the default (`start_bearing_deg` 90). The network stays 64 × 64.
+- The earlier designs' settings are gone from the code: the chain,
+  carrying oneself, coordination, the trail as its own channel, the
+  followers' progress toward the segment ahead, and the old sharing.
+
+**Measured before building** (`analysis/push_price_check.py` in
+`../Training`, CPU, v4: the scripted wave walk, one world, per follower
+and per second, forces averaged over 0.2 s; noise is the untrained
+policy's, pink, added to the walk's commands).
+
+- **Followers pushing a slow head** walk 36 mm/s instead of its 15. Only
+  segments 1 to 3 feel the squeeze at their front joints, 0.13, 0.08 and
+  0.02 unit weights; the rear feel none, since the push they add is
+  passed forward through the chain.
+- **The noise sets the squeeze's floor.** Under noise of spread 0.5 the
+  followers' front joints are squeezed 0.15 to 0.20 on average (90th
+  percentile 0.4 to 0.56) whatever they do.
+- **Chattering does not pay**: a spine flipping every three steps earns 31
+  and 22 mm/s of paid distance against the clean walk's 35.
+- **A limp follower keeps its pay** (36.1 mm/s) and saves energy: only
+  hanging charges it.
+
+The followers' goal per second at 300 mm/s per unit weight, paid distance
+less the squeeze:
+
+| Case | Walking | Standing |
+| --- | ---: | ---: |
+| Noise 0.5, the cycle-5 start | −32.5 | −26.1 |
+| Noise 0.25, cycle 6's start | −0.9 | −23.5 |
+
+At the old spread standing would beat walking; at 0.25 walking wins by 23
+mm/s, about two thirds of the clean walk's pay.
+
+**Energy sharing, by sides or equal?** The user asked whether every
+follower should share its health equally with all the neighbours it sees.
+`analysis/sharing_check.py` in `../Training` (the scripted walk with one
+segment limp; energy per second as that segment pays it):
+
+| Limp segment | Walking | Limp, by sides | Limp, equal |
+| --- | ---: | ---: | ---: |
+| Middle (5) | 0.69 | 0.45 | 0.60 |
+| Head | 0.82 | 0.65 | 0.72 |
+| Rear | 0.74 | 0.77 | 0.87 |
+
+Equal sharing makes going limp save less, but each segment's own energy
+becomes a fifth of its health, the rest its neighbours' noise, so its own
+actions show less in what it learns from. Hanging now charges going limp
+directly, so sides were kept: itself 40%, as cycle 5.
+
+**Risks.**
+
+- The rear followers feel no squeeze, so they learn not to push only
+  through the chain: their push reaches segments 1 to 3, who must brake
+  it, and the shared energy of braking. If the rear push, the front three
+  pay.
+- A limp follower keeps its distance; hanging must stay dearer than the
+  energy it saves (by sides a middle follower saves 0.24 mJ/s; held up by
+  about one unit weight, as cycle 5 measured, it pays about 2 mJ/s).
+- The head's neck is unpaid: a head walking crabwise is not charged.
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -828,16 +964,17 @@ other side ([Cycle 5](#cycle-5-coordination-first-the-users-design)).
 
 ## Critics and balances
 
-| Agent | Goal critic | Trail critic (cycle 4) | Cost critic |
+| Agent | Goal critic | Trail critic (cycles 4 and 5) | Cost critic (health from cycle 5) |
 | --- | --- | --- | --- |
-| Head | Task | Its own offset and segment 1's | Energy, pain, chain, and from cycle 4 being held up; from cycle 5 its own weight beyond half |
-| Each follower | Path; none from cycle 3; from cycle 5 coordination | The offset of the segment behind, and its own at `trail_own_weight` | Energy, pain, chain, and from cycle 4 carrying itself (cycle 5: in coordination) |
+| Head | Task; from cycle 6 less being pushed | Its own offset and segment 1's | Energy, pain, chain, and from cycle 4 being held up; from cycle 5 its own weight beyond half; from cycle 6 hanging |
+| Each follower | Path; none from cycle 3; from cycle 5 coordination; from cycle 6 the distance on its trail less its squeeze | The offset of the segment behind, and its own at `trail_own_weight` | Energy, pain, chain, and from cycle 4 carrying itself (cycle 5: in coordination); from cycle 6 energy, pain and hanging |
 
 Goal and costs count **1 : 1** (agreed), through two advantages normalised
 apart ([critic.md](critic.md)); from cycle 4 the followers' trail and cost
 count 1 : 1, and the head's task, trail and cost 1 : 0.25 : 1; from cycle 5
 every segment's three critics count 40 / 35 / 25 (the followers'
-coordination, trail and health; the head's task, trail and health). Energy and pain share one critic rather
+coordination, trail and health; the head's task, trail and health); from
+cycle 6 every segment's goal and health count 1 : 0.8. Energy and pain share one critic rather
 than one each: pain is rare, and a critic of a signal that is almost
 always zero would have its noise enlarged by the normalisation. Inside the
 cost critic, pain is priced in energy: how much energy a hit of a given
@@ -858,11 +995,120 @@ force is worth.
 | Pushing ahead : other net force | 2 : 1, agreed (cycle 5) |
 | The head's own weight : energy | A unit weight beyond half its weight, or on the floor, as one motor fully on, agreed (cycle 5): limp on its belly costs the head 1.2 mJ/s beside its 0.8 mJ/s walking |
 | α, cycle 5 | By sides: itself 40%, each side 30%, agreed |
+| Goal : health (cycle 6) | 1 : 0.8, agreed |
+| Squeeze : distance (cycle 6) | 300 mm/s of goal per unit weight squeezed, agreed: measured to make pushing a slow head lose for segments 1 and 2 |
+| Hanging : energy (cycle 6) | A unit weight as one motor fully on, agreed |
+| α, cycle 6 | By sides, kept over equal sharing |
 
 ## As built
 
 Every quantity is per segment and per 20 ms step; the simulation measures
-forces and work after each of the step's physics steps (40 on v4).
+forces and work after each of the step's physics steps (40 on v4). From
+cycle 6 the reward has two channels, goal and health
+(`environment/cooperative_reward.py`), and every segment learns from both
+(the environment's `segment_reward_channels`), weighed by `[agents]
+advantage_weights`. Its parts are logged apart: progress, arrival,
+distance and squeeze in the goal, pushing, braking, force, pain and
+hanging in health.
+
+**Averaged measures.** Each step the averages move a share r = 0.02 s /
+`averaging_s` of the way to the step's values (`AveragedForces`; the
+trail's front ends and forward axes in `TrailMemory`), starting at the
+current values when a world restarts. With them, ḡ is the net force of a
+segment's two spine joints on it, its legs included, along its forward
+axis and up; f̄ the force of the segment ahead on it along the body,
+positive when it pulls, negative when the segment pushes it, zero for the
+head; b̄ the floor's push on its body; all in unit weights, means over the
+step's physics steps before averaging.
+
+**The goal channel**, in millimetres, with q = `squeeze_price_mm_per_s` ×
+0.02 s = 6 mm per unit weight. The head:
+
+> goal = 1000 · (d_before − d_after) + arrival − q · max(ḡ_along, 0)
+
+with d the flat distance from its tip to the target; the arrival, when the
+target comes under the head, is the middle distance of the level's
+targets, (near + far) / 2, in millimetres (`arrival_approaches` = 1
+average approach). A follower:
+
+> goal = 1000 · Δx · Q − q · max(−f̄, 0)
+
+with Δx how far its front end, its spine joint, moved along its own
+forward axis in the step, in metres, and Q the quality of its trail:
+
+> Q = exp(−(max(e − `trail_dead_zone_deg`, 0) / `trail_width_deg`)²), e = √(s(θᵢ₊₁) + k · s(θᵢ))
+
+with θᵢ segment *i*'s offset from its averaged trail, s(θ) = (180/π)² · 2
+(1 − cos θ), the square of θ in degrees while it is small, and k =
+`trail_own_weight`; the rear's e is √s(θᵢ). Each segment's front end, the
+head's tip or its spine joint, adds a point to its trail each time it has
+moved an eighth of the shortest segment length; θᵢ is the angle between
+the segment's forward axis and the line from the newest point at least
+one segment length (`BodyMeasures.segment_lengths_m`) behind its front end
+to the front end (`environment/cooperative_trail.py`).
+
+**The health channel**, in millijoules. Each segment's own energy, over
+its leg motors and the spine motor behind it:
+
+> e = 1000 · (W⁺ + ¼ W⁻) + p · Σ a²
+
+with W⁺ and W⁻ the step's pushing and braking work in joules (torque times
+joint speed times the timestep, by its sign), a each motor's command as
+the motor receives it (a spine motor's scaled by `spine_action_scale`),
+and p = 1.98 mJ/s × 0.02 s = 0.0396 mJ, the force price of one motor fully
+on for a step. A segment pays its neighbourhood's energy, shared, its own
+pain, and its own hanging:
+
+> health = −Σⱼ wᵢⱼ eⱼ − p · mean(F²) / F_push² − p · h · (max(ḡ_up − u, 0) + b̄)
+
+where w are the sharing weights by sides (`energy_sharing_weights`: itself
+1 and each side 0.5 + 0.25 spread over that side's neighbours by
+distance, a missing neighbour's weight to the nearest one on its side, a
+missing side's to the other side, each row scaled to add up to one), F
+the force with which its legs press other legs, F_push the strongest push
+of a leg's sweep at its foot, 0.94 mN on v4, h = `hanging_price`, and u
+the support it may take for free, `head_free_support` (0.5) for the head
+and 0 for the followers.
+
+**The force price, measured** (`analysis/energy_check.py` in
+`../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature
+and a 0.5 ms timestep; before it the price was 2.19 mJ/s). Scripted gaits on
+v4: each sweep driven along a
+sine by a feedforward command, the lifts pressing in stance and rising in
+swing, a wave over five segments. The reference is a raised walk at the
+level-1 pace, 2.5 strides a second; the price makes force 90% of its energy.
+The 90%: a 1 g animal's speed-dependent metabolic cost (Taylor, Heglund and
+Maloiy, J. Exp. Biol. 1982) and its mechanical power (Heglund et al., J.
+Exp. Biol. 1982), extrapolated to a gram at 35 mm/s, leave the work at 25%
+muscle efficiency about 12% of the cost; force takes the rest, in line with
+Kram and Taylor (1990), who found the cost of running set by the force the
+legs make. An estimate, not a measurement of centipedes.
+
+| Gait | Speed | Height | Feet carry | Energy | Per mm walked |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Rest on the belly | 0 | 1.7 mm | 3% | 0 | |
+| Stand | 0 | 7.8 mm | 100% | 5.9 mJ/s | |
+| Raised walk, 2 Hz | 27 mm/s | 7.8 mm | 100% | 8.4 mJ/s | 315 µJ |
+| Raised walk, 2.5 Hz (reference) | 36 mm/s | 7.6 mm | 100% | 9.3 mJ/s | 257 µJ |
+| Raised walk, 6 Hz | 93 mm/s | 7.6 mm | 100% | 14.7 mJ/s | 157 µJ |
+| Belly drag, 2.5 Hz | 2.2 mm/s | 1.7 mm | 51% | 6.7 mJ/s | 3,025 µJ |
+| Belly drag, 6 Hz | 8.1 mm/s | 1.7 mm | 54% | 12.0 mJ/s | 1,490 µJ |
+
+The check of realism passes: walking raised costs 6 to 12 times less per
+millimetre than dragging the belly, and a still centipede saves by resting
+on its belly, as a real one does. Two lessons: the scripted walks' work is
+mostly the joints' damping (fast leg swings), not the body's motion; and
+with force dominant, a faster walk is cheaper per millimetre up to the
+fastest tried, 1.7 body lengths a second, so the preferred speed lies
+higher, and the task's distances, not energy, will set the pace at first.
+
+### Earlier cycles, as built
+
+Removed from the code in cycle 6, with their settings; kept as the record
+of what runs 01 to 10 trained with. Every earlier cycle also paid a
+follower progress toward where the segment ahead's centre was before the
+step (until cycle 3) and shared energy by wᵢⱼ = 0.5^|i−j| over the
+segments it sees (until cycle 5).
 
 **The goal channel**, in millimetres. For segment *i*, with *d* its flat
 distance to its target before and after the step (the head's tip to the
@@ -957,38 +1203,6 @@ with k = `trail_own_weight` for every segment but the rear, whose e is
 `energy_sharing_weights(..., sides=True)` with `energy_sharing = "sides"`.
 Each observation block holds the front joint force and the net joint
 force, averaged ([observations.md](observations.md)).
-
-**The force price, measured** (`analysis/energy_check.py` in
-`../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature
-and a 0.5 ms timestep; before it the price was 2.19 mJ/s). Scripted gaits on
-v4: each sweep driven along a
-sine by a feedforward command, the lifts pressing in stance and rising in
-swing, a wave over five segments. The reference is a raised walk at the
-level-1 pace, 2.5 strides a second; the price makes force 90% of its energy.
-The 90%: a 1 g animal's speed-dependent metabolic cost (Taylor, Heglund and
-Maloiy, J. Exp. Biol. 1982) and its mechanical power (Heglund et al., J.
-Exp. Biol. 1982), extrapolated to a gram at 35 mm/s, leave the work at 25%
-muscle efficiency about 12% of the cost; force takes the rest, in line with
-Kram and Taylor (1990), who found the cost of running set by the force the
-legs make. An estimate, not a measurement of centipedes.
-
-| Gait | Speed | Height | Feet carry | Energy | Per mm walked |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Rest on the belly | 0 | 1.7 mm | 3% | 0 | |
-| Stand | 0 | 7.8 mm | 100% | 5.9 mJ/s | |
-| Raised walk, 2 Hz | 27 mm/s | 7.8 mm | 100% | 8.4 mJ/s | 315 µJ |
-| Raised walk, 2.5 Hz (reference) | 36 mm/s | 7.6 mm | 100% | 9.3 mJ/s | 257 µJ |
-| Raised walk, 6 Hz | 93 mm/s | 7.6 mm | 100% | 14.7 mJ/s | 157 µJ |
-| Belly drag, 2.5 Hz | 2.2 mm/s | 1.7 mm | 51% | 6.7 mJ/s | 3,025 µJ |
-| Belly drag, 6 Hz | 8.1 mm/s | 1.7 mm | 54% | 12.0 mJ/s | 1,490 µJ |
-
-The check of realism passes: walking raised costs 6 to 12 times less per
-millimetre than dragging the belly, and a still centipede saves by resting
-on its belly, as a real one does. Two lessons: the scripted walks' work is
-mostly the joints' damping (fast leg swings), not the body's motion; and
-with force dominant, a faster walk is cheaper per millimetre up to the
-fastest tried, 1.7 body lengths a second, so the preferred speed lies
-higher, and the task's distances, not energy, will set the pace at first.
 
 **The chain's price, measured** (`analysis/chain_check.py` in
 `../CentipedeTraining`, 2026-10-15): the force on each joint along the

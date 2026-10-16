@@ -17,6 +17,7 @@ from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
 from centipede.environment.cooperative_reward import (
+    CHANNEL_NAMES,
     AveragedForces,
     CooperativeReward,
 )
@@ -47,31 +48,22 @@ class CooperativeEnvironment:
     Every tensor passed in or out has the worlds as its first dimension. Every
     segment commands its leg motors and, but the rear, the spine joint behind
     it; ``segment_action_sizes`` and ``action_size`` are as in the main
-    environment with spine control. Rewards have two channels, goal and cost,
-    ``(W, N, 2)``, or with ``follow_trail`` three, goal, trail and cost, or
-    with ``coordination`` four, goal, coordination, trail and health;
-    ``segment_reward_channels`` lists those each segment's critics learn
-    from: every one, or for a follower without a goal its cost alone, or with
-    the trail its trail and cost, or with coordination the head's goal, trail
-    and health and a follower's coordination, trail and health. An arrival
+    environment with spine control; each spine motor receives
+    ``spine_action_scale`` times its command. Rewards have two channels, goal
+    and health, ``(W, N, 2)``, and every segment's critics learn from both
+    (``segment_reward_channels``). An arrival
     never ends an episode: the next target appears at once. The only end is
     the time limit, a cut that the agents bootstrap from; the world then
     restarts. ``diagnostics`` summarise each step and each episode.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
-        """Create the simulation, measuring effort, and the joint forces when
-        the chain or carrying oneself prices them or the observations use
-        them, and the design's parts."""
+        """Create the simulation, measuring effort and the joint forces, and
+        the design's parts."""
         self.settings = settings
         cooperators = settings.cooperators
         self.simulation = PhysicsSimulation(
-            settings.simulation,
-            measure_effort=True,
-            measure_joint_forces=cooperators.chain_price > 0
-            or cooperators.carry_price > 0
-            or cooperators.observe_joint_forces
-            or cooperators.coordination,
+            settings.simulation, measure_effort=True, measure_joint_forces=True
         )
         self.world_count = self.simulation.world_count
         self.segment_count = segment_count = self.simulation.segment_count
@@ -91,6 +83,9 @@ class CooperativeEnvironment:
             (segment_count, legs + 1), dtype=torch.float32, device=self.device
         )
         commanded_joints[-1, -1] = 0.0
+        # What each motor receives for a command of 1: the spine's scaled.
+        self.motor_scale = torch.ones(legs + 1, device=self.device)
+        self.motor_scale[-1] = cooperators.spine_action_scale
         self.head_outline = self.simulation.head_outline
 
         self.observation_builder = CooperativeObservationBuilder(
@@ -99,10 +94,7 @@ class CooperativeEnvironment:
             self.world_count,
             legs,
             body.unit_weight_n,
-            cooperators.observe_joint_forces or cooperators.coordination,
             self.device,
-            trail=cooperators.follow_trail,
-            carry=cooperators.carry_price > 0 or cooperators.coordination,
         )
         self.observation_size = self.observation_builder.observation_size
         self.neighbour_table = self.observation_builder.neighbour_table
@@ -118,34 +110,18 @@ class CooperativeEnvironment:
         self.trail = TrailMemory(
             self.world_count, body.segment_lengths_m, self.device, averaging_rate
         )
-        self.forces = (
-            AveragedForces(
-                self.world_count,
-                segment_count,
-                body.unit_weight_n,
-                averaging_rate,
-                self.device,
-            )
-            if cooperators.coordination
-            else None
+        self.forces = AveragedForces(
+            self.world_count,
+            segment_count,
+            body.unit_weight_n,
+            averaging_rate,
+            self.device,
         )
         self.reward = CooperativeReward(
             cooperators, segment_count, radius, body, commanded_joints
         )
-        self.reward_channel_count = self.reward.channel_count
-        if cooperators.coordination:
-            channel_names = ("goal", "coordination", "trail", "health")
-            head_channels, follower_channels = (0, 2, 3), (1, 2, 3)
-        elif cooperators.follow_trail:
-            channel_names = ("goal", "trail", "cost")
-            head_channels, follower_channels = (0, 1, 2), (1, 2)
-        else:
-            channel_names = ("goal", "cost")
-            head_channels = (0, 1)
-            follower_channels = (0, 1) if cooperators.follower_goal else (1,)
-        self.segment_reward_channels = [head_channels] + [follower_channels] * (
-            segment_count - 1
-        )
+        self.reward_channel_count = len(CHANNEL_NAMES)
+        self.segment_reward_channels = [(0, 1)] * segment_count
         self.diagnostics = CooperativeDiagnostics(
             self.world_count,
             segment_count,
@@ -153,7 +129,7 @@ class CooperativeEnvironment:
             self.head_outline,
             self.device,
             self.simulation.diagnostics.facts,
-            channel_names,
+            CHANNEL_NAMES,
         )
         self.task_facts = TaskFacts(
             level=torch.tensor(self.task.level), in_time_share=torch.tensor(torch.nan)
@@ -173,6 +149,7 @@ class CooperativeEnvironment:
         self.previous_head_tip_position = torch.zeros_like(
             state.head_tip_position[:, :2]
         )
+        self.previous_front_end_position = torch.zeros_like(state.front_end_position)
         self.previous_joint_position = torch.zeros_like(self.last_action)
 
     @property
@@ -232,13 +209,15 @@ class CooperativeEnvironment:
         task = self.task
         self.previous_body_planar_position.copy_(state.body_planar_position)
         self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
+        self.previous_front_end_position.copy_(state.front_end_position)
         self.previous_joint_position.copy_(joint_angles(state))
 
         legs = self.leg_motor_count
-        self.simulation.step(joint_action[..., :legs], joint_action[:, :-1, legs])
+        motor_command = joint_action * self.motor_scale
+        self.simulation.step(motor_command[..., :legs], motor_command[:, :-1, legs])
         self.episode_steps += 1
         trail_offset = self.trail.update(state)
-        averaged_forces = self.forces.update(state) if self.forces else None
+        averaged_forces = self.forces.update(state)
 
         arrived = target_under_head(state, task.target_position, self.head_outline)
         in_time = task.time_step(arrived)
@@ -247,11 +226,12 @@ class CooperativeEnvironment:
             state,
             self.previous_body_planar_position,
             self.previous_head_tip_position,
+            self.previous_front_end_position,
             task.target_position,
             arrived,
             self.settings.cooperators.arrival_approaches * (near + far) / 2,
             self.previous_joint_position,
-            joint_action,
+            motor_command,
             trail_offset,
             averaged_forces,
         )
@@ -291,8 +271,7 @@ class CooperativeEnvironment:
         """Start the masked worlds' trails and averaged forces afresh."""
         state = self.simulation.physical_state
         self.trail.restart(world_mask, state)
-        if self.forces:
-            self.forces.restart(world_mask, state)
+        self.forces.restart(world_mask, state)
 
     def _steps_left(self) -> torch.Tensor:
         """Each world's steps until its episode's time limit."""
@@ -304,5 +283,5 @@ class CooperativeEnvironment:
             self.task.target_position,
             self.last_action,
             self.trail.offset,
-            self.forces.values if self.forces else None,
+            self.forces.values,
         )

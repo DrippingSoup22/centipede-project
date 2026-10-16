@@ -30,7 +30,7 @@ import torch
 from torch.nn.functional import one_hot
 
 from centipede.diagnostics_category import measure
-from centipede.environment.cooperative_reward import PART_NAMES
+from centipede.environment.cooperative_reward import CHANNEL_NAMES, PART_NAMES
 from centipede.environment.diagnostics import SHARE_EDGES
 from centipede.environment.head import head_forward_direction, target_seen_from_head
 from centipede.environment.reward_function import StepRewards
@@ -40,7 +40,6 @@ from centipede.environment.simulation.model_mapping import HeadOutline
 
 LEGS = ("left", "right")
 ENERGY_PARTS = ("pushing", "braking", "force")
-CHANNELS = ("goal", "cost")
 # A foot stands while the floor carries at least this share of a unit's weight
 # on it, so that a graze is not a stance.
 STANCE_LOAD_SHARE = 0.1
@@ -59,8 +58,8 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 9), in the order of reward_part_names: the goal"
-        " in mm, the trail in squared degrees, the cost in mJ",
+        "Each reward part, (W, N, 9), in the order of reward_part_names: the goal's"
+        " in mm, health's in mJ",
         parts=PART_NAMES,
     )
     contact_flags: torch.Tensor = measure(
@@ -196,9 +195,8 @@ class EpisodeSummary:
     )
     segment_return: torch.Tensor = measure(
         "Each segment's summed rewards by channel, (W, N, C), in the order of"
-        " channel_names: the goal in mm, the trail in squared degrees, the cost"
-        " in mJ",
-        parts=CHANNELS,
+        " channel_names: the goal in mm, health in mJ",
+        parts=CHANNEL_NAMES,
     )
     energy: torch.Tensor = measure(
         "Every segment's own energy over the episode, added up, (W, 3)",
@@ -288,7 +286,7 @@ class CooperativeDiagnostics:
         head_outline: HeadOutline,
         device: torch.device | str,
         simulation_facts: SimulationFacts,
-        channel_names: tuple[str, ...] = CHANNELS,
+        channel_names: tuple[str, ...] = CHANNEL_NAMES,
     ) -> None:
         """Allocate both categories and the running totals, all zero."""
         self.simulation = simulation_facts

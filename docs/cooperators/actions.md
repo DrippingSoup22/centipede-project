@@ -1,6 +1,8 @@
 # Actions
 
-**Status (2026-10-14): agreed with the user and built.**
+**Status (2026-10-14): agreed with the user and built; from cycle 6
+(2026-10-16) the spine motors receive 0.35 of their command
+([The spine's scale](#the-spines-scale-cycle-6)).**
 
 ## What the constraints fix
 
@@ -49,6 +51,16 @@ toward the target it alone sees, and each later segment sets how the
 segment behind follows, seeing that bend in its neighbours' orientations
 ([environment.md](../environment.md#actions-and-timing)).
 
+**The spine's scale (cycle 6).** On v4 a spine motor of 15 µN·m meets the
+joint's limit spring, 5.2 µN·m at 15°, so any command above about 0.35
+holds the joint at its limit: two thirds of the command's range did the
+same thing, and runs 09 and 10 learned to pin their spines there. Each
+spine motor now receives `spine_action_scale` (0.35) times its command,
+so that the whole range −1 to 1 spans the joint's. The action itself stays
+the policy's, unfiltered and unclipped (the user's rule): only the motor's
+gain changes, as a weaker motor would. Energy prices the command the motor
+receives, and each segment observes the action it sent.
+
 **The decision rate: every 20 ms**, 50 a second, as main and as legged_gym
 (Rudin et al.'s 50 Hz). A real centipede steps at about 6 Hz, so a
 decision comes about eight times in each step. Physics costs the same per
@@ -58,7 +70,10 @@ learning time.
 ## Not part of the vector
 
 - **How actions explore**: a choice of learning, made with the agents'
-  settings; white noise to start (the user, 2026-10-14), main's default.
+  settings; white noise planned (the user, 2026-10-14), pink noise
+  (β = 1) from run 01 on, and from cycle 6 a starting spread of 0.25
+  instead of 0.5, since at 0.5 the noise made standing worth more than
+  walking ([reward.md](reward.md#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
 - **Asymmetric joints**: real muscles push harder toward the ground than
   away from it; v4's motors are symmetric, a known difference without
   centipede data ([forces.md](forces.md)).

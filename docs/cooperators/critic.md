@@ -59,6 +59,17 @@ priority whatever its units or the stage of training. A third critic per
 agent adds about 2 to 3% to a cycle's time (learning took 1.9 s of 24 s
 in run 07).
 
+**From cycle 6 every segment has two critics again, goal and health** (the
+user, 2026-10-16): the reward has two channels
+([reward.md](reward.md#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
+For the head the goal is its target, less being pushed; for a follower the
+distance it walks on its trail, less its squeeze on the segment ahead.
+Health is energy, pain and hanging for both. Every segment weighs them
+**1 : 0.8** (`[agents] advantage_weights = [1.0, 0.8]`), so that health is
+always present but never outweighs moving. The squeeze sits in the goal
+channel, beside the distance it prices, so that the critic sees one
+trade-off, how far against how hard to push, at the goal's full weight.
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone
@@ -181,14 +192,15 @@ window ends on, where learning must look ahead. So each critic is:
 The baseline regresses the return on the state and the neighbours' actions,
 so it learns the return's expectation over the segment's own action: Wu et
 al.'s action-dependent baseline. Every segment has four such networks, goal
-and cost, value and baseline, each 2 × 64, and an actor of 2 × 64.
+and health (cost before cycle 3), value and baseline, each 2 × 64, and an
+actor of 2 × 64.
 
 - **Value normalisation** (MAPPO's first advice, Yu et al., NeurIPS 2022):
   every critic's value and baseline learn its return targets standardised
   by their running mean and spread, so millimetres and millijoules never set
   the scale the networks learn.
 - **The combination**: each critic's advantage normalised over the batch on
-  its own, then added 1 : 1 (`advantage_weights`).
+  its own, then added by `advantage_weights` (1 : 0.8 from cycle 6).
 - **Logged**: every critic's and every baseline's explained variance after
   each update. A baseline explaining much more than its value shows the
   neighbours' actions at work.

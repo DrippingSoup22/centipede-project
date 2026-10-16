@@ -315,59 +315,31 @@ class CooperatorsSettings:
     ``stagger_first_episodes`` each world's first episode after a full reset
     has a random length, so that the worlds restart at different steps.
 
-    **Reward.** The goal: millimetres each segment gains toward its target,
-    and for the head's arrival ``arrival_approaches`` times the middle
-    distance of the level's targets. The cost, in millijoules: energy, the
-    pushing work, the braking work times ``braking_price`` and the force,
-    each motor's squared command times its duration times ``force_price_w``,
-    shared among a segment and the neighbours it sees with weights that fall
-    by ``energy_sharing_decay`` per segment; and pain, the squared force of
-    its legs pressed by others over a leg's strongest push, priced as force
-    times ``pain_price``.
+    **Reward** (cycle 6 of docs/cooperators/reward.md), two channels for every
+    segment. The goal, in millimetres: for the head, what it gains toward its
+    target and, on arrival, ``arrival_approaches`` times the middle distance
+    of the level's targets; for a follower, the distance its front end
+    walks along its body, times how well it keeps to its trail: 1 within
+    ``trail_dead_zone_deg``, falling as exp(-(beyond / ``trail_width_deg``)^2),
+    the offsets being those of the segment it steers and, at
+    ``trail_own_weight``, its own (the rear's own alone). Less, at
+    ``squeeze_price_mm_per_s`` per unit weight, the push a follower passes to
+    the segment ahead (its front joint squeezed) or the head receives from
+    behind. Health, in millijoules: energy, the pushing work, the braking
+    work times ``braking_price`` and the force, each motor's squared command
+    times its duration times ``force_price_w``, shared with the neighbours a
+    segment sees, itself 40% and each side 30% at radius 2 with halving by
+    ``energy_sharing_decay`` (``energy_sharing_weights``); pain, the squared
+    force of its legs pressed by others over a leg's strongest push, priced
+    as force times ``pain_price``; and hanging, what its neighbours hold it up
+    with (the head's beyond ``head_free_support`` of its weight) and the
+    floor's push on its body, in unit weights, priced as force times
+    ``hanging_price``. The forces and the trail are averaged over
+    ``averaging_s`` (an exponential average; 0 none).
 
-    **The chain** (off by default): each segment's own cost for the force on
-    the joints that join it to its neighbours, along the body, in unit
-    weights, priced as force times ``chain_price``: the size of its front
-    joint's force, push or lag, and the square of its rear joint's force
-    where it pulls the segment behind, paid by ``chain_rear_pull``: every
-    segment, only the head, or none (docs/cooperators/reward.md). With
-    ``observe_joint_forces`` each observation block also holds its segment's
-    front joint force (docs/cooperators/observations.md).
-
-    Without ``follower_goal`` the followers are paid no progress: only the
-    head has a goal, and each follower learns from its cost alone.
-
-    **The trail** (off by default; cycle 4 of docs/cooperators/reward.md).
-    With ``follow_trail``, which needs ``follower_goal`` off, a third channel
-    pays each segment for keeping its body on its trail, the path its front
-    end traced: the segment it steers through the spine joint behind it at
-    weight 1, its own body at ``trail_own_weight``, the head's own at 1. Each
-    observation block then holds its segment's offset. **Carry yourself**:
-    with ``carry_price`` above 0, each follower pays the net force its two
-    spine joints put on it, along the body and holding it up, and the head
-    the part holding it up, in unit weights, priced as force times
-    ``carry_price``; each block then holds that force.
-
-    **Coordination** (off by default; cycle 5 of docs/cooperators/reward.md).
-    With ``coordination``, which needs ``follow_trail``, the rewards have four
-    channels, goal, coordination, trail and health; the head learns from goal,
-    trail and health, the followers from coordination, trail and health. A
-    follower's coordination cost, in unit weights: the net force its joints
-    put on it along the body, its own surplus pushing the segment ahead once
-    more times ``push_factor`` less one, what they hold it up with, and the
-    floor's push on its body. The trail becomes a reward: each step's
-    duration times exp(-(e - ``trail_dead_zone_deg``)^2 /
-    ``trail_width_deg``^2), e being the offsets of the segment steered and,
-    at ``trail_own_weight``, its own, as one angle (the rear's own alone),
-    nothing below the dead zone counted. The head's health adds carrying its
-    own weight: what its neck holds it up with beyond ``head_free_support``
-    of its weight, and the floor's push on its body, priced as force times
-    ``carry_price``. The forces and the trail are averaged over
-    ``averaging_s`` (an exponential average; 0 none), and each block holds
-    the averaged forces. ``energy_sharing`` "sides" shares energy 40% to the
-    segment itself and 30% to each side, a missing neighbour's share going to
-    the nearest one on its side and a missing side's to the other side
-    (``energy_sharing_weights``); "decay" is the earlier halving per segment.
+    **Spine.** Each spine motor receives ``spine_action_scale`` times its
+    command, so that the whole command range spans the joint's: on v4 a
+    command above about 0.35 holds it at its limit.
     """
 
     start_near_distance_m: float
@@ -384,20 +356,14 @@ class CooperatorsSettings:
     force_price_w: float
     pain_price: float
     energy_sharing_decay: float
-    chain_price: float
-    chain_rear_pull: str
-    observe_joint_forces: bool
-    follower_goal: bool
-    follow_trail: bool
     trail_own_weight: float
-    carry_price: float
-    coordination: bool
-    push_factor: float
     trail_dead_zone_deg: float
     trail_width_deg: float
+    squeeze_price_mm_per_s: float
+    hanging_price: float
     head_free_support: float
     averaging_s: float
-    energy_sharing: str
+    spine_action_scale: float
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -415,7 +381,7 @@ class CooperatorsSettings:
                 "far_to_near_ratio", default=1.5, minimum=1.0
             ),
             start_bearing_deg=section.number(
-                "start_bearing_deg", default=45.0, minimum=0.0, maximum=180.0
+                "start_bearing_deg", default=90.0, minimum=0.0, maximum=180.0
             ),
             stopwatch_s=section.positive_number("stopwatch_s", default=7.0),
             start_level=section.number(
@@ -437,41 +403,26 @@ class CooperatorsSettings:
             energy_sharing_decay=section.number(
                 "energy_sharing_decay", default=0.5, minimum=0.0, maximum=1.0
             ),
-            chain_price=section.number("chain_price", default=0.0, minimum=0.0),
-            chain_rear_pull=section.choice(
-                "chain_rear_pull", ("every", "head", "none"), default="every"
-            ),
-            observe_joint_forces=section.boolean("observe_joint_forces", default=False),
-            follower_goal=section.boolean("follower_goal", default=True),
-            follow_trail=section.boolean("follow_trail", default=False),
             trail_own_weight=section.number(
                 "trail_own_weight", default=0.25, minimum=0.0
             ),
-            carry_price=section.number("carry_price", default=0.0, minimum=0.0),
-            coordination=section.boolean("coordination", default=False),
-            push_factor=section.number("push_factor", default=2.0, minimum=1.0),
             trail_dead_zone_deg=section.number(
                 "trail_dead_zone_deg", default=5.0, minimum=0.0
             ),
             trail_width_deg=section.positive_number("trail_width_deg", default=20.0),
+            squeeze_price_mm_per_s=section.number(
+                "squeeze_price_mm_per_s", default=300.0, minimum=0.0
+            ),
+            hanging_price=section.number("hanging_price", default=1.0, minimum=0.0),
             head_free_support=section.number(
                 "head_free_support", default=0.5, minimum=0.0
             ),
-            averaging_s=section.number("averaging_s", default=0.0, minimum=0.0),
-            energy_sharing=section.choice(
-                "energy_sharing", ("decay", "sides"), default="decay"
+            averaging_s=section.number("averaging_s", default=0.2, minimum=0.0),
+            spine_action_scale=section.number(
+                "spine_action_scale", default=0.35, minimum=0.0, maximum=1.0
             ),
         )
         section.reject_unknown_keys()
-        if settings.follow_trail and settings.follower_goal:
-            raise SettingsError(
-                "[environment.cooperators] follow_trail replaces the followers'"
-                " progress: set follower_goal = false"
-            )
-        if settings.coordination and not settings.follow_trail:
-            raise SettingsError(
-                "[environment.cooperators] coordination needs follow_trail = true"
-            )
         return settings
 
 

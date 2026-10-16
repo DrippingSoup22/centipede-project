@@ -1,7 +1,8 @@
 # Observations
 
-**Status (2026-10-15): agreed with the user and built; the joint forces
-added with the chain ([The joints around it](#the-joints-around-it-agreed-2026-10-15)).**
+**Status (2026-10-16): agreed with the user and built; the joint forces
+added with the chain ([The joints around it](#the-joints-around-it-agreed-2026-10-15)),
+and from cycle 6 the 46-value block of cycle 5 is the only one.**
 
 ## Decided
 
@@ -134,16 +135,24 @@ offset comes from the averaged trail.
 | An actor: five blocks and the target's two values | 232 |
 | A critic: the actor's input and the four neighbours' actions | 268 |
 
+**Cycle 6 keeps it** ([reward.md](reward.md#cycle-6-distance-on-the-trail-the-squeeze-its-price-the-users-design)).
+Every term a segment is paid or charged is in its own block or its
+neighbours': its front joint's squeeze in its own block, the head's push
+from behind in its net joint force, its hanging in its net joint force and
+belly load, the offset of the segment it steers in the block behind, and
+its distance in its own velocity. The settings that chose the earlier
+blocks are gone: the block is always this one.
+
 ## As built
 
 The block's values in order: gravity's direction (3), velocity (3), angular
 velocity (3), the eight leg angles, the eight leg speeds, the spine joint's
 angle and speed, the feet's forces pressing down (left, right) and along the
 segment (left, right), the belly's force, the force of its legs pressed by
-others, with `observe_joint_forces` or `coordination` the front joint's
-force, with `carry_price` above 0 or `coordination` the net joint force
-(along, up), both averaged with `coordination`, with `follow_trail` the
-offset, and the last action (9; the rear's ninth is always zero). The
+others, the front joint's force, the net joint force (along, up), both
+averaged over `averaging_s` as the reward prices them, the offset from the
+averaged trail, and the last action (9; the rear's ninth is always zero),
+as the policy sent it, before the spine's scale. The
 forces are means over the step's physics steps (40 on v4), in unit weights of
 0.857 mN; after a reset, the starting pose's own. The target comes last,
 forward and to the left of the head's tip, in metres, zeros for the

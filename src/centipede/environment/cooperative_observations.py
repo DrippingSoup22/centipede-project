@@ -15,19 +15,13 @@ from centipede.environment.observation_builder import (
 from centipede.environment.simulation import PhysicalState
 
 
-def block_size(
-    leg_motor_count: int,
-    joint_forces: bool = False,
-    trail: bool = False,
-    carry: bool = False,
-) -> int:
+def block_size(leg_motor_count: int) -> int:
     """Values in a segment's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
-    legs pressed (1), with ``joint_forces`` the front joint's force (1), with
-    ``carry`` the net joint force (2), with ``trail`` the offset from the
-    trail (1), and the last action (M + 1)."""
-    return 18 + joint_forces + 2 * carry + trail + 3 * leg_motor_count
+    legs pressed (1), the front joint's force (1), the net joint force (2),
+    the offset from the trail (1), and the last action (M + 1)."""
+    return 22 + 3 * leg_motor_count
 
 
 class CooperativeObservationBuilder:
@@ -38,15 +32,14 @@ class CooperativeObservationBuilder:
     angles, then their speeds; the angle and speed of the spine joint behind
     it (zero for the rear); each foot's force from the floor, pressing down
     (left, right), then along the segment (left, right); the belly's force
-    from the floor; the force of its legs pressed by others; with
-    ``joint_forces``, the force of the segment ahead on it, along the body
-    (positive pulls it, negative is it pushing; zero for the head), so that
-    the blocks seen hold the joints around it; with ``carry``, the net force
-    of its two joints on it, along the body and up; with ``trail``, how far
-    its body points off its trail, in radians, positive to the left; and the
-    action it sent last (the rear's last value is padding). Forces are in
-    unit weights, the whole body's weight shared by its segments; with
-    coordination the joint forces are the averaged ones it pays. The blocks
+    from the floor; the force of its legs pressed by others; the force of
+    the segment ahead on it, along the body (positive pulls it, negative is
+    it pushing; zero for the head), so that the blocks seen hold the joints
+    around it; the net force of its two joints on it, along the body and up;
+    how far its body points off its trail, in radians, positive to the left;
+    and the action it sent last (the rear's last value is padding). Forces
+    are in unit weights, the whole body's weight shared by its segments; the
+    joint forces are the averaged ones the reward prices. The blocks
     are laid end to end in the neighbour table's order, a missing
     neighbour's all zeros, followed by the target seen from the head's tip,
     forward and to the left, which is zero for every other segment.
@@ -59,19 +52,13 @@ class CooperativeObservationBuilder:
         world_count: int,
         leg_motor_count: int,
         unit_weight_n: float,
-        joint_forces: bool,
         device: torch.device | str,
-        trail: bool = False,
-        carry: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
         self.segment_count = segment_count
         self.unit_weight_n = unit_weight_n
-        self.joint_forces = joint_forces
-        self.trail = trail
-        self.carry = carry
-        self.block_size = block_size(leg_motor_count, joint_forces, trail, carry)
+        self.block_size = block_size(leg_motor_count)
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
         )
@@ -90,15 +77,14 @@ class CooperativeObservationBuilder:
         target_position: torch.Tensor,
         last_action: torch.Tensor,
         trail_offset: torch.Tensor,
-        averaged_forces: torch.Tensor | None = None,
+        averaged_forces: torch.Tensor,
     ) -> torch.Tensor:
         """Every segment's observation, ``(W, N, observation_size)``.
 
         ``target_position`` is each world's flat target, ``(W, 2)``,
         ``last_action`` the joint action of the step before, ``(W, N, M + 1)``,
         ``trail_offset`` each segment's offset, ``(W, N)``, and
-        ``averaged_forces``, if any, ``AveragedForces.values``, whose joint
-        forces then replace the step's. The gather
+        ``averaged_forces`` ``AveragedForces.values``. The gather
         creates a new tensor, so a returned observation never changes when
         ``build`` runs again.
         """
@@ -110,11 +96,6 @@ class CooperativeObservationBuilder:
             (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)),
             dim=-1,
         )
-        if averaged_forces is None:
-            front = state.front_joint_force[..., None] / self.unit_weight_n
-            net = state.net_joint_force / self.unit_weight_n
-        else:
-            front, net = averaged_forces[..., 2:3], averaged_forces[..., :2]
         loads = torch.cat(
             (
                 state.foot_normal_force,
@@ -127,8 +108,8 @@ class CooperativeObservationBuilder:
         forces = torch.cat(
             (
                 loads / self.unit_weight_n,
-                *([front] if self.joint_forces else []),
-                *([net] if self.carry else []),
+                averaged_forces[..., 2:3],
+                averaged_forces[..., :2],
             ),
             dim=-1,
         )
@@ -142,7 +123,7 @@ class CooperativeObservationBuilder:
                 state.spine_yaw_position[..., None],
                 state.spine_yaw_velocity[..., None],
                 forces,
-                *([trail_offset[..., None]] if self.trail else []),
+                trail_offset[..., None],
                 last_action,
             ),
             dim=-1,
