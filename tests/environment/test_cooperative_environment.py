@@ -250,7 +250,7 @@ def test_the_tow_pushes_along_the_floor_and_fades_while_the_towed_mean_walks():
             w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
         ]
     )
-    forces = tow.forces(state.body_quaternion)
+    forces = tow.forces(state.body_quaternion, torch.zeros(4, SEGMENTS))
     torch.testing.assert_close(forces[2, 0], torch.tensor([0.0, 0.4 * 2e-3, 0.0]))
     torch.testing.assert_close(forces[2, 1], torch.tensor([0.0, 0.4 * 1e-3, 0.0]))
     assert not forces[3].any()
@@ -267,6 +267,51 @@ def test_the_tow_pushes_along_the_floor_and_fades_while_the_towed_mean_walks():
             tow.adjust()
         assert tow.top == pytest.approx(expected_top)
     assert tow.facts.line_erased.tolist() == [0.0, 0.0]
+
+
+def test_the_speed_dependent_tow_pushes_less_as_each_segment_walks_faster():
+    """A help speed of 10 mm/s and a tow of 0.4: a segment at rest is pushed
+    fully, one at 5 mm/s by half, one at 10 mm/s or faster not at all, and
+    one walking backward fully; the price adds back what was pushed."""
+    settings = CooperatorsSettings.from_section(
+        {"tow_start": 0.4, "tow_help_speed_mm_per_s": 10.0}
+    )
+    tow = Tow(settings, 1, (1e-3,) * SEGMENTS, 1e-3, 1000, "cpu")
+    tow.start(0.4)
+    tow.shares.fill_(1.0)
+    speed = torch.tensor([[0.0, 0.005, 0.010, 0.020, -0.005]])
+    forces = tow.forces(resting_state(1).body_quaternion, speed)
+    expected = 0.4 * torch.tensor([[1.0, 0.5, 0.0, 0.0, 1.0]])
+    torch.testing.assert_close(forces[..., 0], 1e-3 * expected)
+    torch.testing.assert_close(tow.unit_weights(), expected)
+
+
+def test_the_tow_can_fade_on_the_untowed_walk_and_draw_from_a_floor():
+    """Fading on the untowed mean-action worlds: their followers erase line
+    and step above the bars, the towed ones stand, and the top falls. Training
+    worlds draw from half the top to the top."""
+    settings = CooperatorsSettings.from_section(
+        {
+            "tow_start": 0.4,
+            "tow_step": 0.1,
+            "tow_window_steps": 1,
+            "tow_fade_group": "untowed",
+            "tow_draw_floor": 0.5,
+        }
+    )
+    tow = Tow(settings, 8, (1e-3,) * SEGMENTS, 1e-3, 1000, "cpu")
+    tow.start(0.4)
+    tow.reserve(1)
+    tow.restart(torch.ones(8, dtype=torch.bool))
+    assert ((tow.levels()[:6] >= 0.2) & (tow.levels()[:6] <= 0.4)).all()
+    step = CooperativeDiagnostics(
+        8, SEGMENTS, BODY.unit_weight_n, HeadOutline(-0.002, 0.002, 0.002), "cpu", None
+    ).step
+    step.reward_parts[7, :, PART_NAMES.index("line")] = 0.2
+    step.lift_off[7] = True
+    tow.record(step)
+    tow.adjust()
+    assert tow.top == pytest.approx(0.3)
 
 
 def test_the_head_line_is_erased_by_each_tail_and_measures_how_far_it_is_left():

@@ -344,13 +344,17 @@ class CooperatorsSettings:
 
     **Tow** (cycle 10, docs/cooperators/tow.md): training wheels that fade. In
     training each segment is pushed forward along the floor by its world's
-    tow level times its own weight. A training world draws its level from 0
-    to the tow's top at every episode start; the experiment's mean-action
+    tow level times its own weight; with ``tow_help_speed_mm_per_s`` (cycle
+    12; 0: a constant push) the push shrinks with the segment's own forward
+    speed over the step before, to none at and above that speed. A training
+    world draws its level from ``tow_draw_floor`` of the tow's top (0 by
+    default) to the top at every episode start; the experiment's mean-action
     worlds keep the top or none. The top starts at ``tow_start`` (0: no tow)
     and moves by ``tow_step`` after each update cycle once
     ``tow_window_steps`` steps have passed since it last moved: down while
-    the towed mean-action worlds' followers erase more than
-    ``tow_walk_mm_per_s`` of line each and their feet lift off more than
+    the mean-action worlds ``tow_fade_group`` names (``"towed"``, at the
+    top, or ``"untowed"``) walk, their followers erasing more than
+    ``tow_walk_mm_per_s`` of line each and their feet lifting off more than
     ``tow_lift_off_hz`` times a second, up otherwise, from 0 to
     ``tow_start``. Evaluations never tow. ``observe_tow`` gives every
     segment its world's tow level, and ``observe_instant_joint_forces``
@@ -389,6 +393,9 @@ class CooperatorsSettings:
     tow_window_steps: int
     tow_walk_mm_per_s: float
     tow_lift_off_hz: float
+    tow_help_speed_mm_per_s: float
+    tow_fade_group: str
+    tow_draw_floor: float
     observe_tow: bool
     observe_instant_joint_forces: bool
     spine_action_scale: float
@@ -460,6 +467,15 @@ class CooperatorsSettings:
                 "tow_walk_mm_per_s", default=5.0, minimum=0.0
             ),
             tow_lift_off_hz=section.number("tow_lift_off_hz", default=1.0, minimum=0.0),
+            tow_help_speed_mm_per_s=section.number(
+                "tow_help_speed_mm_per_s", default=0.0, minimum=0.0
+            ),
+            tow_fade_group=section.choice(
+                "tow_fade_group", ("towed", "untowed"), default="towed"
+            ),
+            tow_draw_floor=section.number(
+                "tow_draw_floor", default=0.0, minimum=0.0, maximum=1.0
+            ),
             observe_tow=section.boolean("observe_tow", default=False),
             observe_instant_joint_forces=section.boolean(
                 "observe_instant_joint_forces", default=False

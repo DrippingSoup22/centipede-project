@@ -15,7 +15,7 @@ import torch
 
 from centipede.diagnostics_category import measure
 from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
-from centipede.environment.cooperative_line import HeadLine
+from centipede.environment.cooperative_line import HeadLine, forward_axis
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -167,6 +167,9 @@ class CooperativeEnvironment:
             state.head_tip_position[:, :2]
         )
         self.previous_joint_position = torch.zeros_like(self.last_action)
+        # Each segment's speed along its forward axis over the last step, m/s,
+        # which a speed-dependent tow reads.
+        self.forward_speed = torch.zeros_like(state.body_planar_position[..., 0])
 
     @property
     def level(self) -> float:
@@ -223,6 +226,7 @@ class CooperativeEnvironment:
             )
         self.task.place_targets(every_world, state, self._steps_left())
         self.tow.restart(every_world)
+        self.forward_speed.zero_()
         self.last_action.zero_()
         self.diagnostics.new_targets(
             every_world, every_world, state, self.task.target_position
@@ -254,7 +258,11 @@ class CooperativeEnvironment:
             self.simulation.step(
                 leg_commands,
                 spine_commands,
-                body_forces=self.tow.forces(state.body_quaternion),
+                body_forces=self.tow.forces(state.body_quaternion, self.forward_speed),
+            )
+            moved = state.body_planar_position - self.previous_body_planar_position
+            self.forward_speed.copy_(
+                (moved * forward_axis(state)).sum(dim=-1) / ACTION_DURATION_S
             )
         else:
             self.simulation.step(leg_commands, spine_commands)
@@ -306,6 +314,7 @@ class CooperativeEnvironment:
             self.episode_steps.masked_fill_(truncated, 0)
             task.place_targets(truncated, state, self._steps_left())
             self.tow.restart(truncated)
+            self.forward_speed.masked_fill_(truncated[:, None], 0.0)
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
             observations = self._observations()
         self.diagnostics.new_targets(

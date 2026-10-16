@@ -120,12 +120,80 @@ tow the followers' noisy body erased 22 to 24 mm/s of line, against 0.8 and
   target ahead comes free, which pays turning toward it, and the heading
   error (70° to 117° in runs 15 to 18) is read in every review.
 
+## Cycle 12: a tow that tracks a speed (the user agreed, 2026-10-17)
+
+**Why.** Runs 19 and 21 showed two flaws of the constant push.
+
+- **It must be braked.** A push the same at every speed must be held back
+  by some feet in any steady walk, so the policies learned to brake. Under
+  the own ground force the followers passed their tows to the head (its
+  neck pushed it with 0.55 unit weights by cycle 67 of run 19 seed 1, 0.61
+  by 130), under the own joint force every follower braked its own (feet
+  −0.11 to −0.35 in run 21 seed 1 at cycle 69), and in both the head could
+  not steer. The braking outlived the tow: at run 19 seed 1's cycle-128
+  review, without any tow, its rear feet still braked (−0.30 to −0.34).
+- **It was taken away on the strength of a walk that needed it.** The top
+  fell from 0.35 to 0.10 between cycles 64 and 130 of run 19 seed 1 because
+  the towed mean-action worlds walked (10 to 21 mm/s of line), while the
+  untowed ones never passed 2.4 mm/s. Training worlds drew from 0 to the
+  top, so from cycle 110 most trained almost unhelped, and the untowed walk
+  shrank (2.37 to 1.22 mm/s of line, 1.11 to 0.86 Hz) with the spread
+  (0.211 to 0.182).
+
+The sources avoid both. Yu, Turk and Liu's propelling assistance is a
+controller on the character's forward speed toward a target speed: it
+pushes only while the character is slower, and vanishes at the target, so
+nothing need be braked; it relaxes on performance at the current
+assistance. Cao et al.'s assistive agent is rewarded for using less force
+and is switched off at random, because a large and persistent force made the
+policy depend on it.
+
+**The change**, three settings, each off by default:
+
+- **The servo** (`tow_help_speed_mm_per_s`, 0: the constant push). Each
+  segment's push is the tow t times its weight times max(0, 1 − v/v_help),
+  v its own speed along its forward axis over the step before: full at a
+  standstill, none at and above the help speed, and never a hold back,
+  since a brake above the help speed would be one more thing to lean on.
+  The own ground force adds back the push actually applied. The level a
+  segment observes stays its world's t, the push's ceiling.
+- **The fade on the honest walk** (`tow_fade_group = "untowed"`). The top
+  falls only while the mean-action worlds without tow walk: their followers
+  erase more than `tow_walk_mm_per_s` of line each and their feet lift off
+  more than `tow_lift_off_hz` times a second. The towed group stays a
+  read.
+- **The draw floor** (`tow_draw_floor`). Training worlds draw their level
+  from that share of the top to the top, so that none trains almost
+  unhelped until the top itself is small.
+
+**Measured** on the scripted wave walk (`analysis/servo_check.py` in
+`../Training`, v4, CPU, one world, 6 s; the body's speed in mm/s and the
+mean push per segment in unit weights, at a tow of 0.4):
+
+| Case | Constant push | Help speed 15 mm/s | 25 mm/s | 36 mm/s |
+| --- | --- | --- | --- | --- |
+| Every leg holding | 0.9 (0.40) | 0.8 (0.34) | 0.9 (0.39) | 0.9 (0.39) |
+| 3 segments stepping, spread | 8.3 (0.40) | 7.0 (0.22) | 6.5 (0.30) | 6.8 (0.32) |
+| 8 segments stepping | 46.1 (0.40) | 14.6 (0.07) | 19.0 (0.11) | 22.1 (0.15) |
+| Everyone walking | 113.3 (0.40) | 36.2 (0.00) | 36.3 (0.00) | 39.0 (0.01) |
+| Every leg holding, pink noise 0.25 | 25.7 (0.40) | 13.3 (0.12) | 12.2 (0.21) | 13.8 (0.25) |
+| Everyone walking, pink noise 0.25 | 70.2 (0.40) | 23.7 (0.03) | 26.7 (0.05) | 30.4 (0.08) |
+
+At every help speed the walk keeps its own pace, 36 mm/s, with no push
+left, where the constant push drove it to 113; a noisy body that holds its
+legs rides half as fast. A segment's speed over one 20 ms step jumps with
+each footfall, and the clamp cuts only the high side, so a small help speed
+loses push even at a standstill (0.34 of 0.40 at 15 mm/s, 0.27 at 10); from
+25 mm/s the standstill keeps almost all of it, and the body needs three
+spread steppers to move faster than 5 mm/s, as under the constant push of
+0.3. The help speed is 25 mm/s.
+
 ## In the code
 
 | Part | Where | Settings |
 | --- | --- | --- |
-| The tow | `environment/cooperative_tow.py`: each world's level, the forces, the measuring worlds' sums and the fade; started and reserved by the experiment in training only | `[environment.cooperators]` `tow_start`, `tow_step`, `tow_window_steps`, `tow_walk_mm_per_s`, `tow_lift_off_hz`, `observe_tow` |
-| The push | `environment/simulation`: `step`'s `body_forces`, MuJoCo's applied force on each segment's body, CPU and GPU | |
+| The tow | `environment/cooperative_tow.py`: each world's level, the forces, the measuring worlds' sums and the fade; started and reserved by the experiment in training only | `[environment.cooperators]` `tow_start`, `tow_step`, `tow_window_steps`, `tow_walk_mm_per_s`, `tow_lift_off_hz`, `tow_help_speed_mm_per_s`, `tow_fade_group`, `tow_draw_floor`, `observe_tow` |
+| The push | `environment/simulation`: `step`'s `body_forces`, MuJoCo's applied force on each segment's body, CPU and GPU; each segment's forward speed over the last step, which the servo reads, in `environment/cooperative_environment.py` | |
 | Mean-action worlds | `agents/agents.py` acts and stores; `interaction_loop` counts only the learning worlds; `experiment/` reserves them, moves the tow, logs the `tow` category and keeps the top in checkpoints | `[run] mean_action_worlds_per_group` |
 | Each segment's own weight | `environment/simulation/body_measures.py`: `segment_weights_n` | |
 
@@ -137,11 +205,13 @@ configurations keep their meaning.
 - Yu, Turk and Liu, "Learning Symmetric and Low-energy Locomotion", ACM
   Transactions on Graphics 37(4), SIGGRAPH 2018 (arXiv 1801.08093): a
   curriculum of physical assistance toward balance and forward movement,
-  relaxed until the character moves without help.
+  relaxed until the character moves without help; the propelling force a
+  controller on the forward speed toward a target speed (section 4.1).
 - Cao, Zhang, Nie, Lin, Li and Gao, "Learning Motion Skills with Adaptive
   Assistive Curriculum Force in Humanoid Robots", arXiv 2506.23125 (2025,
   preprint): an agent that applies guiding forces and lowers them as the
-  robot improves.
+  robot improves, rewarded for less force and switched off at random
+  against dependence.
 - Rudin, Hoeller, Reist and Hutter, "Learning to Walk in Minutes Using
   Massively Parallel Deep Reinforcement Learning", CoRL 2021: a curriculum
   moved by each robot's own success.

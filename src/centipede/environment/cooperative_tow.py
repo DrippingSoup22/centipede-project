@@ -4,11 +4,14 @@ A standing body moves only when most of its segments step at once: a planted
 foot holds about 0.8 of its segment's weight back. In training every segment
 is pushed forward along the floor by its world's tow level times its own
 weight, so that a few stepping segments move the body and a segment's own
-step pays. Each training world draws its level, as a share of the tow's top,
-at every episode start, so that the agents always train at small tows too.
-The worlds the experiment reserves act with the agents' mean action: half of
-them keep the top, half have no tow, which is the honest measure. The top
-falls while the towed half walks and rises while it does not.
+step pays. A constant push must be braked by some feet in any steady walk;
+from cycle 12 the push can shrink with each segment's own forward speed, to
+none at a help speed, as Yu, Turk and Liu's propelling assistance does.
+Each training world draws its level, as a share of the tow's top, at every
+episode start, so that the agents train at smaller tows too. The worlds the
+experiment reserves act with the agents' mean action: half of them keep the
+top, half have no tow, which is the honest measure. The top falls while the
+chosen half walks and rises while it does not.
 
 The cooperators' environment owns one, applies its forces before each step
 and adds its push back into the own ground force price; the experiment
@@ -39,7 +42,7 @@ class TowFacts:
 
     tow: torch.Tensor = measure(
         "The tow's top: each segment's push in its own weights; training"
-        " worlds draw theirs from 0 to it"
+        " worlds draw theirs under it"
     )
     line_erased: torch.Tensor = measure(
         "Line each follower's tail erased", "mm/s", parts=GROUPS
@@ -79,6 +82,9 @@ class Tow:
         self.started = False
         self.weights_n = torch.tensor(segment_weights_n, device=device)
         self.weights = self.weights_n / unit_weight_n
+        self.unit_weight_n = unit_weight_n
+        # Each segment's push of the last step, in unit weights.
+        self.pushes = torch.zeros((world_count, len(segment_weights_n)), device=device)
         # Each world's level as a share of the top, and the worlds that draw
         # theirs at every episode start rather than keep it.
         self.shares = torch.zeros(world_count, device=device)
@@ -119,8 +125,10 @@ class Tow:
         self.worlds_per_group = worlds_per_group
 
     def restart(self, world_mask: torch.Tensor) -> None:
-        """Draw a new share for the masked worlds that draw theirs."""
-        draws = torch.rand(
+        """Draw a new share for the masked worlds that draw theirs, from
+        ``tow_draw_floor`` to 1."""
+        floor = self.settings.tow_draw_floor
+        draws = floor + (1.0 - floor) * torch.rand(
             self.shares.shape, generator=self.generator, device=self.shares.device
         )
         self.shares.copy_(torch.where(world_mask & self.drawing, draws, self.shares))
@@ -130,12 +138,22 @@ class Tow:
         return self.shares * self.top
 
     def unit_weights(self) -> torch.Tensor:
-        """Each segment's push, ``(W, N)``, in unit weights."""
-        return self.levels()[:, None] * self.weights
+        """Each segment's push of the last step, ``(W, N)``, in unit weights."""
+        return self.pushes
 
-    def forces(self, body_quaternion: torch.Tensor) -> torch.Tensor:
+    def forces(
+        self, body_quaternion: torch.Tensor, forward_speed: torch.Tensor
+    ) -> torch.Tensor:
         """Each segment's push, ``(W, N, 3)`` newtons in world axes, along its
-        forward axis laid flat on the floor."""
+        forward axis laid flat on the floor. With ``tow_help_speed_mm_per_s``
+        the push shrinks with ``forward_speed`` ``(W, N)``, each segment's
+        speed along its forward axis over the step before in m/s, to none at
+        and above the help speed; it never holds a segment back."""
+        help_speed = self.settings.tow_help_speed_mm_per_s * 1e-3
+        share = (
+            (1.0 - forward_speed / help_speed).clamp(0.0, 1.0) if help_speed else 1.0
+        )
+        self.pushes.copy_(self.levels()[:, None] * self.weights * share)
         w, x, y, z = body_quaternion.unbind(dim=-1)
         # The first column of each rotation matrix, without its height.
         flat = torch.stack(
@@ -143,7 +161,7 @@ class Tow:
             dim=-1,
         )
         flat = flat / flat.norm(dim=-1, keepdim=True).clamp(min=1e-9)
-        size = self.levels()[:, None] * self.weights_n
+        size = self.pushes * self.unit_weight_n
         return size[..., None] * flat
 
     def record(self, step: StepFacts) -> None:
@@ -165,9 +183,10 @@ class Tow:
 
     def adjust(self) -> None:
         """After an update cycle: once ``tow_window_steps`` steps have passed
-        since the top last moved, lower it by ``tow_step`` if the towed
-        measuring worlds walked, followers erasing line and feet lifting off
-        above the settings' bars, else raise it, within 0 and ``tow_start``;
+        since the top last moved, lower it by ``tow_step`` if the measuring
+        worlds ``tow_fade_group`` names walked, followers erasing line and
+        feet lifting off above the settings' bars, else raise it, within 0
+        and ``tow_start``;
         then start a new window. The measures become ``facts``. This waits
         for the GPU once a window."""
         settings = self.settings
@@ -177,9 +196,12 @@ class Tow:
             self.worlds_per_group * self._steps * ACTION_DURATION_S
         )
         line, closing, lift_offs, targets, head_speed = per_second.cpu().unbind(dim=-1)
+        group = GROUPS.index(
+            "at the tow" if settings.tow_fade_group == "towed" else "without tow"
+        )
         walked = (
-            line[0] > settings.tow_walk_mm_per_s
-            and lift_offs[0] > settings.tow_lift_off_hz
+            line[group] > settings.tow_walk_mm_per_s
+            and lift_offs[group] > settings.tow_lift_off_hz
         )
         if self.started:
             step = -settings.tow_step if walked else settings.tow_step
