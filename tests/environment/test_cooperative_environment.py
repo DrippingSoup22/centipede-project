@@ -289,7 +289,8 @@ def test_the_speed_dependent_tow_pushes_less_as_each_segment_walks_faster():
 def test_the_tow_can_fade_on_the_untowed_walk_and_draw_from_a_floor():
     """Fading on the untowed mean-action worlds: their followers erase line
     and step above the bars, the towed ones stand, and the top falls. Training
-    worlds draw from half the top to the top."""
+    worlds draw from half the top to the top, and at rest are pushed by their
+    level, the mean the tow logs."""
     settings = CooperatorsSettings.from_section(
         {
             "tow_start": 0.4,
@@ -309,9 +310,12 @@ def test_the_tow_can_fade_on_the_untowed_walk_and_draw_from_a_floor():
     ).step
     step.reward_parts[7, :, PART_NAMES.index("line")] = 0.2
     step.lift_off[7] = True
+    levels = tow.levels()
+    tow.forces(resting_state(8).body_quaternion, torch.zeros(8, SEGMENTS))
     tow.record(step)
     tow.adjust()
     assert tow.top == pytest.approx(0.3)
+    assert tow.facts.push.item() == pytest.approx(levels[:6].mean().item())
 
 
 def test_the_head_line_is_erased_by_each_tail_and_measures_how_far_it_is_left():

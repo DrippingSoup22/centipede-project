@@ -57,6 +57,10 @@ class TowFacts:
     head_speed: torch.Tensor = measure(
         "The head's speed along the ground", "mm/s", parts=GROUPS
     )
+    push: torch.Tensor = measure(
+        "The push applied to each segment of the training worlds, in unit"
+        " weights: under a tow that tracks a speed it falls as the body walks"
+    )
 
 
 class Tow:
@@ -94,6 +98,9 @@ class Tow:
         self.groups = torch.zeros((len(GROUPS), world_count), device=device)
         self.worlds_per_group = 0
         self._sums = torch.zeros((len(GROUPS), 5), device=device)
+        # The training worlds' share in the mean push, and its sum.
+        self._training_share = torch.zeros(world_count, device=device)
+        self._push_sum = torch.zeros((), device=device)
         self._steps = 0
         self.generator = torch.Generator(device=device)
         nothing = torch.full((len(GROUPS),), math.nan)
@@ -104,6 +111,7 @@ class Tow:
             lift_offs=nothing.clone(),
             targets=nothing.clone(),
             head_speed=nothing.clone(),
+            push=torch.tensor(math.nan),
         )
 
     def start(self, top: float) -> None:
@@ -123,6 +131,8 @@ class Tow:
             self.shares[start : start + worlds_per_group] = share
         self.drawing[first:] = False
         self.worlds_per_group = worlds_per_group
+        segment_count = self.weights.shape[0]
+        self._training_share.copy_(self.drawing / (self.drawing.sum() * segment_count))
 
     def restart(self, world_mask: torch.Tensor) -> None:
         """Draw a new share for the masked worlds that draw theirs, from
@@ -179,6 +189,7 @@ class Tow:
             dim=-1,
         )
         self._sums += self.groups @ measures
+        self._push_sum += self._training_share @ self.pushes.sum(dim=1)
         self._steps += 1
 
     def adjust(self) -> None:
@@ -212,5 +223,7 @@ class Tow:
         self.facts.lift_offs.copy_(lift_offs)
         self.facts.targets.copy_(targets * self.episode_s)
         self.facts.head_speed.copy_(head_speed)
+        self.facts.push.copy_(self._push_sum / self._steps)
         self._sums.zero_()
+        self._push_sum.zero_()
         self._steps = 0
