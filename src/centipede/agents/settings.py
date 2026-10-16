@@ -1,11 +1,12 @@
 import math
 from dataclasses import dataclass
 
-from centipede.settings_section import SettingsSection
+from centipede.settings_section import SettingsError, SettingsSection
 
 OPTIMIZERS = ("adam", "adamw", "sgd")
 LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine", "adaptive")
 ACTION_STD_SCHEDULES = ("learned", "log_linear")
+ACTIVATIONS = ("relu", "tanh")
 
 
 @dataclass(frozen=True)
@@ -68,7 +69,21 @@ class AgentSettings:
     al., 2017). ``exploration_noise_beta`` colors the exploration noise over
     time: 0 is white noise, fresh at every step; 0.5 is the PPO default of
     Hollenstein et al. (AAAI 2024) and 1 pink noise (RL_lib's
-    ``SquashedGaussianPolicy``).
+    ``SquashedGaussianPolicy``). With ``state_dependent_noise_steps`` above 0
+    the agents explore instead with generalized state-dependent exploration
+    (gSDE; Raffin, Kober and Stulp, CoRL 2021): the noise is the actor's
+    features times an exploration matrix each world keeps for that many
+    steps, so that the same state gets the same noise and exploration tries
+    behaviours the actor can learn, rather than a drift through time it
+    cannot copy; the noise is then not colored. Its spreads, one per feature
+    and action, start at ``initial_action_std``, which an action's spread is
+    while they are equal (RL_lib's ``GaussianPolicyNetwork``).
+    ``actor_activation`` is the actor's hidden activation, ReLU or tanh. gSDE
+    wants tanh, as Raffin et al. and Stable-Baselines3's PPO use: the noise is
+    made from the last hidden layer, and ReLU's features, never negative,
+    hardly change direction from one state to the next, so a held matrix adds
+    mostly a constant push (83% of the noise over 32 steps with run 13's
+    actors, 52% with fresh tanh ones; Training's measurement of 2026-10-16).
     Normalised observations are clipped to plus or minus ``observation_clip``.
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
@@ -89,10 +104,12 @@ class AgentSettings:
 
     device: str
     hidden_layers: tuple[int, ...]
+    actor_activation: str
     initial_action_std: float
     action_std_schedule: str
     final_action_std: float
     exploration_noise_beta: float
+    state_dependent_noise_steps: int
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
@@ -152,6 +169,9 @@ class AgentSettings:
             hidden_layers=section.integer_list(
                 "hidden_layers", default=(64, 64), minimum=1
             ),
+            actor_activation=section.choice(
+                "actor_activation", ACTIVATIONS, default="relu"
+            ),
             initial_action_std=initial_action_std,
             action_std_schedule=section.choice(
                 "action_std_schedule", ACTION_STD_SCHEDULES, default="learned"
@@ -161,6 +181,9 @@ class AgentSettings:
             ),
             exploration_noise_beta=section.number(
                 "exploration_noise_beta", default=0.0, minimum=0.0, maximum=2.0
+            ),
+            state_dependent_noise_steps=section.integer(
+                "state_dependent_noise_steps", default=0, minimum=0
             ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,
@@ -188,4 +211,9 @@ class AgentSettings:
             ppo=PPOSettings.from_section(section.table("ppo")),
         )
         section.reject_unknown_keys()
+        if settings.state_dependent_noise_steps and settings.exploration_noise_beta:
+            raise SettingsError(
+                "[agents] state_dependent_noise_steps and exploration_noise_beta"
+                " are two kinds of noise: set only one"
+            )
         return settings

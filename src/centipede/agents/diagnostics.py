@@ -140,7 +140,11 @@ class AgentDiagnostics:
                     agent.ppo.actor_optimizer.param_groups[0]["lr"]
                 )
                 # The policy clamps the log spread to [-20, 2] before using it.
+                # gSDE's has one per feature and action: an action's spread
+                # when its features weigh equally is their root mean square.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
+                if spread.dim() == 2:
+                    spread = spread.square().mean(dim=0).sqrt()
                 legs = self.leg_motor_count
                 self.learning.action_std[segment_index].copy_(spread[:legs])
                 if agent.action_size > legs:

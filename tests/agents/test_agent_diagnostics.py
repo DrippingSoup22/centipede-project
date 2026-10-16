@@ -17,12 +17,24 @@ from centipede.diagnostics_category import descriptions, values
 
 def test_each_segment_row_gets_its_own_summary_and_spreads():
     settings = AgentSettings.from_section({"hidden_layers": [4]})
-    # Segment 0 also commands the spine joint behind it.
+    # Segment 0 also commands the spine joint behind it; segment 1 explores
+    # with gSDE, one spread per feature of its last hidden layer and action.
+    gsde = AgentSettings.from_section(
+        {
+            "hidden_layers": [4],
+            "state_dependent_noise_steps": 8,
+            "actor_activation": "tanh",
+        }
+    )
     segment_agents = [
-        SegmentAgent(index, 2, 3, 1, settings, index, 7 - index) for index in range(2)
+        SegmentAgent(index, 2, 3, 1, (settings, gsde)[index], index, 7 - index)
+        for index in range(2)
     ]
     with torch.no_grad():
         segment_agents[1].ppo.actor_network.log_std.fill_(math.log(0.25))
+    gsde_actor = segment_agents[1].ppo.actor_network
+    assert gsde_actor.log_std.shape == (4, 6)
+    assert isinstance(gsde_actor.mean_network[1], torch.nn.Tanh)
     summaries = [
         PPOUpdateSummary(
             *(10.0 * index + part for part in range(6)),

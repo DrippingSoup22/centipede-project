@@ -16,10 +16,12 @@ def test_an_empty_section_gives_the_agreed_first_values():
     assert settings == AgentSettings(
         device="cpu",
         hidden_layers=(64, 64),
+        actor_activation="relu",
         initial_action_std=0.5,
         action_std_schedule="learned",
         final_action_std=0.5,
         exploration_noise_beta=0.0,
+        state_dependent_noise_steps=0,
         optimizer="adam",
         learning_rate=3e-4,
         learning_rate_schedule="constant",
@@ -104,6 +106,10 @@ def test_a_scheduled_action_spread_moves_by_equal_ratios_and_a_learned_has_none(
         ({"ppo": {"clip_ratio": 1.0}}, "clip_ratio"),
         ({"ppo": {"entropy_coefficient": -0.1}}, "entropy_coefficient"),
         ({"ppo": {"learning_rate": 1e-3}}, r"\[agents.ppo\] has unknown"),
+        (
+            {"state_dependent_noise_steps": 8, "exploration_noise_beta": 1.0},
+            "set only one",
+        ),
     ],
 )
 def test_invalid_values_and_unknown_keys_name_their_section(values, problem):

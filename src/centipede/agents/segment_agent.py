@@ -63,7 +63,8 @@ class SegmentAgent:
                 action_size=action_size,
                 hidden_sizes=settings.hidden_layers,
                 initial_std=settings.initial_action_std,
-                std_mode="global",
+                std_mode="gsde" if settings.state_dependent_noise_steps else "global",
+                activation=settings.actor_activation,
             )
             critic_networks = [
                 StateValueNetwork(observation_size, settings.hidden_layers)
@@ -101,6 +102,7 @@ class SegmentAgent:
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
+            exploration_matrix_steps=max(settings.state_dependent_noise_steps, 1),
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
             advantage_weights=(advantage_weights or None) if several_critics else None,
             baseline_networks=baseline_networks,
