@@ -181,6 +181,27 @@ The pattern: the task's gain is shared, effort is often shared with it,
 and each agent's duties stay its own, often judged by a critic of their
 own; and agents that share a load coordinate through the force each feels.
 
+## Turning
+
+How a long, many-legged body turns, for the decision of cycle 15
+([reward.md](reward.md#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).
+No study found measures a Scolopendra's turn directly, its radius or how
+closely the trunk follows the head's path; the closest evidence:
+
+| Source | What it shows |
+| --- | --- |
+| Anderson, Shultz & Jayne 1995 (*Scolopendra heros*) | Lateral bending is active, by the axial muscles, and its waves travel from head to tail at every speed tried, growing with speed |
+| Rieu, Delanoë-Ayari, Barentin, Nakagaki & Kuroda 2024 (traction forces of walking centipedes) | The trunk stays fairly straight while the first three to five segments turn the front left or right (from its summary) |
+| Pierce et al. 2026 (centipedes in lattices) | Centipedes follow channels and turn more than 60°, some reorienting the head alone first |
+| Garcia, Priya & Marek 2015, cited by Mingchinda et al. 2023 (millipedes) | Going round an obstacle, the front segments bend first and the bend is passed backward |
+| Padmanabhan et al. 2012 (*C. elegans*) | In a long undulating body the head makes the curvature and it travels back |
+
+The head and the front decide and the bend travels back: the body follows
+the head's path. A scripted check on v4 adds the legs' part: joints that
+repeat the neck's bend where the body reaches it still skid unless the
+legs steer, the inner stride shorter (`analysis/follow_check.py` in
+`../Training`).
+
 ## Sources
 
 - Schilling, Konen, Ohl & Korthals, 2020, [arXiv 2005.11164](https://arxiv.org/abs/2005.11164)
@@ -238,6 +259,10 @@ own; and agents that share a load coordinate through the force each feels.
 - Hwangbo et al., Learning agile and dynamic motor skills for legged robots, Science Robotics 4, 2019, [arXiv 1901.08652](https://arxiv.org/abs/1901.08652)
 - Zhao, Zhao, Li, Kannala & Pajarinen, Optimistic multi-agent policy gradient, ICML 2024, [arXiv 2311.01953](https://arxiv.org/abs/2311.01953)
 - Agogino & Tumer, Analyzing and visualizing multiagent rewards in dynamic and stochastic domains, JAAMAS 17(2), 2008, [Oregon State](https://web.engr.oregonstate.edu/~ktumer/publications/b2hd-tumer-agogino_jaamas08.html)
+- Rieu, Delanoë-Ayari, Barentin, Nakagaki & Kuroda, Dynamics of centipede locomotion revealed by large-scale traction force microscopy, J. R. Soc. Interface 21, 2024, [doi 10.1098/rsif.2023.0439](https://royalsocietypublishing.org/rsif/article/21/214/20230439/90575/Dynamics-of-centipede-locomotion-revealed-by-large)
+- Pierce et al., Legged locomotion in lattices: centipede traversal of obstacle-rich environments, Annals of the New York Academy of Sciences 1555, 2026, [PMC12831010](https://pmc.ncbi.nlm.nih.gov/articles/PMC12831010/)
+- Mingchinda, Jaiton, Leung & Manoonpong, Leg-body coordination strategies for obstacle avoidance and narrow space navigation of multi-segmented, legged robots, Frontiers in Neurorobotics 17, 2023, [doi 10.3389/fnbot.2023.1214248](https://www.frontiersin.org/journals/neurorobotics/articles/10.3389/fnbot.2023.1214248/full)
+- Padmanabhan et al., The head leads the body: a curvature-based kinematic description of C. elegans, 2012 (preprint), [arXiv 1202.2832](https://arxiv.org/abs/1202.2832)
 - Mao, Gong & Xiao, Reward design in cooperative multi-agent reinforcement learning for packet routing, 2020, [arXiv 2003.03433](https://arxiv.org/abs/2003.03433)
 - Sunehag et al., Value-decomposition networks for cooperative multi-agent learning, AAMAS 2018, [arXiv 1706.05296](https://arxiv.org/abs/1706.05296)
 - Berner et al., Dota 2 with large scale deep reinforcement learning (OpenAI Five), 2019, [arXiv 1912.06680](https://arxiv.org/abs/1912.06680)

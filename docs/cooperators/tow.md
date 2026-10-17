@@ -188,6 +188,46 @@ loses push even at a standstill (0.34 of 0.40 at 15 mm/s, 0.27 at 10); from
 spread steppers to move faster than 5 mm/s, as under the constant push of
 0.3. The help speed is 25 mm/s.
 
+## Cycle 15: a gentle tow beside the squeeze (2026-10-17)
+
+The squeeze of cycle 15 charges every follower the chain's push
+([reward.md](reward.md#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).
+The user's worry: a tow pushes every segment first, so a body whose head
+does not walk would be squeezed by its own tows and learn to brake. The
+squeeze adds back the tows of the segments behind each joint, so it
+charges only what the legs push: under any tow it stays about zero (−0.1
+to −0.3 mm/s a follower on fresh networks). Braking stays the own force
+share's to price (the ground force: feet holding against the push).
+Measured on run 24's environment (`analysis/ledger_check.py` in
+`../Training`), each follower per second, team + 0.8 own:
+
+| Under the servo tow | Total |
+| --- | ---: |
+| A well-behaved walk, tow 0.2 (off at its speed) | +19.9 |
+| Standing, no tow | −11.1 |
+| Standing, braking a tow of 0.2 | −26.6 |
+| Lying limp, riding a tow of 0.2 | −33.3 |
+| Standing, braking a tow of 0.4 | −74.9 |
+
+Braking is the dearest answer to a tow, the more so the stronger it is,
+and stepping with it the only way out. On fresh networks, priced as a run
+starts:
+
+| Spread, tow | Line erased a follower | Its feet dragging (force share) | Total |
+| --- | ---: | ---: | ---: |
+| 0.25, none | 0.3 mm/s | −3.4 | −30.9 |
+| 0.25, 0.1 | 2.4 | −6.2 | −25.4 |
+| 0.25, 0.2 | 4.1 | −15.7 | −32.2 |
+| 0.25, 0.4 | 7.7 | −38.1 | −46.4 |
+| 0.4, none | 0.7 | −4.9 | −45.9 |
+| 0.4, 0.2 | 10.2 | −10.1 | −36.9 |
+
+A tow of 0.4 makes the dragging feet's cost swamp the line it pays; a
+gentle one, 0.2, with the wider spread, 0.4, gives the line two and a half
+times the signal at 0.25 with less dragging. Run 25's choice: the servo tow
+at a top of 0.2, each world drawing from half of it to it, fading on the
+untowed walk, and the spread from 0.4.
+
 ## In the code
 
 | Part | Where | Settings |

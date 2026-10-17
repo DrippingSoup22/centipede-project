@@ -30,6 +30,7 @@ import torch
 from torch.nn.functional import one_hot
 
 from centipede.diagnostics_category import measure
+from centipede.environment.cooperative_line import HeadLine
 from centipede.environment.cooperative_reward import CHANNEL_NAMES, PART_NAMES
 from centipede.environment.diagnostics import SHARE_EDGES
 from centipede.environment.head import head_forward_direction, target_seen_from_head
@@ -58,7 +59,7 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 11), in the order of reward_part_names: the goal's"
+        "Each reward part, (W, N, 12), in the order of reward_part_names: the goal's"
         " in mm, health's in mJ",
         parts=PART_NAMES,
     )
@@ -98,6 +99,16 @@ class StepFacts:
     )
     off_line: torch.Tensor = measure(
         "Distance from the segment's tail to the head's line it has not erased, (W, N)",
+        "m",
+    )
+    head_sideslip: torch.Tensor = measure(
+        "The head's sideslip, either way: the angle between where it points"
+        " and where its centre goes, each averaged over a step cycle, (W,)",
+        "rad",
+    )
+    line_drift: torch.Tensor = measure(
+        "How far to the side of the tip the head's line is drawn, either way"
+        " (cycle 15; 0 without a drift), (W,)",
         "m",
     )
     joint_forces: torch.Tensor = measure(
@@ -320,6 +331,8 @@ class CooperativeDiagnostics:
             own_energy=zeros(segment_count, len(ENERGY_PARTS)),
             spine_bend=zeros(segment_count),
             off_line=zeros(segment_count),
+            head_sideslip=zeros(),
+            line_drift=zeros(),
             joint_forces=zeros(segment_count, 2),
             body_height=zeros(segment_count),
             uprightness=zeros(segment_count),
@@ -408,6 +421,7 @@ class CooperativeDiagnostics:
         own_energy: torch.Tensor,
         off_line: torch.Tensor,
         averaged_forces: torch.Tensor,
+        line: HeadLine,
         arrived: torch.Tensor,
         in_time: torch.Tensor,
         truncated: torch.Tensor,
@@ -419,8 +433,8 @@ class CooperativeDiagnostics:
         environment already has: ``rewards`` by channel, ``(W, N, C)``, the
         reward's parts, each segment's own energy, its tail's distance from
         the head's line it has not erased, the averaged forces
-        (``AveragedForces.values``), and ``in_time`` marking the arrivals
-        within their stopwatch.
+        (``AveragedForces.values``), the head's line (its sideslip and
+        drift), and ``in_time`` marking the arrivals within their stopwatch.
         """
         state = physical_state
         step = self.step
@@ -454,6 +468,8 @@ class CooperativeDiagnostics:
         step.own_energy.copy_(own_energy)
         step.spine_bend.copy_(state.spine_yaw_position.abs())
         step.off_line.copy_(off_line)
+        step.head_sideslip.copy_(line.sideslip.abs())
+        step.line_drift.copy_(line.drift.abs())
         step.joint_forces.copy_(averaged_forces[..., [2, 0]])
         step.body_height.copy_(state.body_height)
         # The z component of each segment's up axis: 1 - 2(x² + y²).

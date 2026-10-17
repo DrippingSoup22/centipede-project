@@ -35,7 +35,11 @@ run 23, cycle 14 splits the reward by owner: a team critic for the
 followers' mean line and distance from it, the head's target and the body's
 mean energy; an own critic for each segment's force share, pain and hanging;
 pain from half its weight
-([Cycle 14](#cycle-14-the-teams-and-each-ones-own-the-users-split-2026-10-17)).**
+([Cycle 14](#cycle-14-the-teams-and-each-ones-own-the-users-split-2026-10-17)).
+After run 24, cycle 15 pays the line near it instead of charging the
+distance, draws it where the head keeps pointing, and charges every
+follower the chain's squeeze; energy and the squeeze are ramped in with
+pain ([Cycle 15](#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1415,6 +1419,98 @@ each agent's share of a force; the share comes from the physics.
   conflict with the team only on the way there, as costs of exploring,
   measured above.
 
+### Cycle 15: the line where the head points, and the squeeze (the user's design, 2026-10-17)
+
+**Why** (run 24). Seed 2's mean action walked a body length a second with
+the work shared and no segment hanging, but the head never steered
+(closing on its targets at −3.7 mm/s, its heading 98° off) and was pushed
+by the body. Measured on scripted walks, fresh networks and run 24's
+checkpoints (the scripts in `../Training/analysis`):
+
+- **The force** (`chain_force_check.py`). A clean scripted wave walk pulls
+  every joint a little, +0.02 to +0.21 unit weights averaged over 1 s, and
+  never squeezes one. Run 24 squeezed its front joints, −0.13 to −0.17, 95%
+  of the time, while every segment's own force stayed near zero: the own
+  price rated run 24's walk (0.3 mm/s) above the clean walk (1.2). Most of
+  that squeeze came from the crooked front, sideways forces turned along the
+  body by the bent joints (about 70%) and the weight carried through tilted
+  ones (about 40%), not from pushes along the body; no own force sees it.
+- **Turning** (`follow_check.py`, `turn_force_check.py`). The line paid the
+  followers for resisting the head. The head alone cannot turn the body: with
+  its neck bent 10° and the followers holding straight it turned 4°, so the
+  line stayed straight and the resisting followers followed it best, 34 to
+  36 mm/s against 28 for following. In run 24 the neck's bend never
+  travelled back (each joint's bend against the neck's earlier one:
+  correlation about 0 from joint 2 on). Forces do not tell a resisting body:
+  it pushes and drags nothing, it goes the wrong way. A clean turn costs no
+  force once averaged over 1 s: its step peaks, up to 1.6 unit weights,
+  alternate and cancel. A body that follows also needs its legs to steer,
+  the inner stride shorter: without it even perfectly following joints skid,
+  the head slipping 7° sideways.
+- **The ledger** (`ledger_check.py`, run 24's environment driven by a
+  scripted well-behaved centipede and by each fault). Under cycle 14 the
+  followers earned more for resisting the head (+21.5 mm/s, team + 0.8 own)
+  than for walking well (+7.4), and the distance cost made exploring a
+  bigger loss than standing (−41 to −138 mm/s per follower, at spreads 0.25
+  and 0.4).
+
+**The design** (the user's, 2026-10-17):
+
+- **The line paid near it.** A follower's line is paid as the line its
+  tail erases times its closeness, max(0, 1 − (d / 5 mm)²), d its distance
+  from the line it has not erased; the distance cost goes. One term instead
+  of two, never negative: exploring and standing earn about 0 instead of a
+  large cost, a clean walk 0.5 to 2 mm from the line keeps 85 to 99% of its
+  pay, and a tail beyond 5 mm earns nothing.
+- **The line where the head keeps pointing.** The head's sideslip, the
+  angle between where it points and where its centre goes, both averaged
+  over a step cycle (0.4 s), moves the line: the tip draws it to the side
+  by a drift that grows by the head's speed times the sine of the sideslip
+  each step and leaks away over 2 s. A rigid head following a curve has no
+  sideslip, so a body that follows leaves the line at the tip; a body that
+  ignores a bend the head holds leaves the head slipping, and the line
+  moves away from it the longer it does, while a wag or a quick swing to a
+  new target leaks away. No tolerance: a 5° one let run 24's sloppy steering
+  (4.6° of sideslip on average) tie a good walk.
+- **The squeeze, the team's.** Every follower pays alike the squeeze of the
+  chain: at every joint, what the legs push, the force along the body with
+  the tows of the segments behind it added back, a pull free, squared
+  against the force share's scale (40 mm/s at 0.3 unit weights) and
+  averaged over the joints. Whoever pushes, everyone pays: a push is an
+  error that reaches the whole chain (the user). The healthy slight pull is
+  free, and a tow's own push is not charged, so braking it gains nothing.
+- **Ramps.** Pain, energy and the squeeze rise from half their weight at
+  the first update cycle to full at cycle 129 (`ramp_team_costs`).
+- **Nothing on the legs.** A lifted leg gains its segment nothing and costs
+  it a little (its share and hanging); a rule on how legs step would
+  prescribe the gait (the user).
+
+The biology of a turn: [research.md](research.md#turning).
+
+**Measured** (`ledger_check.py`, 7 s, each follower per second, team +
+0.8 own, at full weights; the culprit's own total where one segment errs):
+
+| Behaviour | Cycle 15 | The line as in cycle 14, paid near it |
+| --- | ---: | ---: |
+| A well-behaved centipede | +13.3 | +19.0 |
+| Run 24's walk, fast and not steering | +4.7 | +23.5 |
+| The followers resisting the head | −2.1 | +25.4 |
+| Standing | −11.1 | −11.1 |
+| Limp | −24.8 | −24.8 |
+| Legs almost in step (the wave over 12) | −42.5 | −41.5 |
+| The head holding, the body pushing it | −97.4 | −97.3 |
+| The braking segment, its own total | −100 | |
+| The dragged segment, its own total (+17 walking well) | +2 | |
+| The segment with a leg held up, its own total (+14 walking well) | +14 | |
+
+A well-behaved centipede wins against every fault and against standing;
+the lifted leg is a near tie that gains nothing. Under a servo tow of 0.2
+the well-behaved walk earns +19.9 (the tow is off at its speed), standing
+braking it −26.6 and lying limp riding it −33.3; braking a tow of 0.4
+−74.9: braking is the dearest answer to a tow. Fresh networks at spread
+0.4 under a tow of 0.2 erase 10.2 mm/s of line a follower against 4.1 at
+spread 0.25 and 0.3 with neither ([tow.md](tow.md)).
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -1515,6 +1611,10 @@ force is worth.
 | Team : own (cycle 14) | 1 : 0.8, as goal and health |
 | Millimetres per millijoule inside a channel (cycle 14) | 10: the reference walk's energy a fifth of its line; hanging and pain beside the force share |
 | Pain's ramp (cycle 14) | Half at the first update cycle, full from cycle 129, the user's |
+| The line's closeness (cycle 15) | Paid in full on the line, nothing beyond 5 mm, squared between |
+| The line's drift (cycle 15) | The head's sideslip, averaged over 0.4 s, no tolerance, leaking over 2 s |
+| Squeeze (cycle 15) | The force share's price, 40 mm/s at 0.3 unit weights squared, the joints' mean, every follower alike |
+| Energy's and the squeeze's ramp (cycle 15) | Pain's: half at the first update cycle, full from cycle 129 |
 
 ## As built
 
@@ -1606,6 +1706,21 @@ millijoule counted as `mm_per_mj` millimetres; the parts are logged in their
 own units. Pain's weight starts at `pain_ramp_start`: s + (1 − s) ·
 min(1, (cycle − 1) / `pain_ramp_cycles`). The sharing settings of cycle 13
 belong to the two channels by kind (`"goal_health"`, the default).
+
+**The line near it, drifting, and the squeeze** (cycle 15). With
+`line_closeness_mm` c, a follower's line part is its erased line times
+max(0, 1 − (d / c)²) and the off-line part is zero. With
+`line_drift_leak_s` τ, `HeadLine` keeps the head's forward axis and its
+centre's step, each averaged at 0.05 a step (0.4 s); the sideslip s is the
+angle from the averaged step to the averaged axis, and the drift D grows
+by the averaged step's length times sin s and shrinks by 0.02 / τ of itself
+each step; the tip's new points lie D to the left of the averaged step. A
+restart sets both averages and the drift afresh. The squeeze part, team
+channel, every follower's: −0.8 mm a step × `squeeze_weight` × the mean
+over the joints k ≥ 1 of (min(0, Tₖ + Σⱼ≥ₖ tⱼ) / `joint_force_scale`)², Tₖ
+the averaged front joint force of segment k and tⱼ the tows, in unit
+weights. With `ramp_team_costs` energy and the squeeze are weighed by
+pain's ramp. The diagnostics log the head's sideslip and the drift.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

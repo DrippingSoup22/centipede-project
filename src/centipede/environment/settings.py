@@ -386,6 +386,19 @@ class CooperatorsSettings:
     parts are logged in their own units. It fixes the sharing itself, so
     ``goal_team_share`` and ``health_sharing = "all"`` belong to
     ``"goal_health"``, the two channels of cycles 6 to 13.
+
+    **The line as the head keeps pointing, and the squeeze** (cycle 15,
+    docs/cooperators/reward.md). With ``line_closeness_mm`` a follower's line
+    is paid as erased times its closeness, max(0, 1 - (distance /
+    line_closeness_mm)^2), the distance from the line it has not erased, and
+    no distance cost is charged (0: cycle 7's line and distance cost). With
+    ``line_drift_leak_s`` the tip draws the line to the side by the head's
+    sideslip, the drift leaking away over that time (0: at the tip;
+    cooperative_line.py). ``squeeze_weight`` weighs the squeeze, paid alike
+    by every follower: every joint's averaged push along the body, the tows
+    of the segments behind it taken out and a pull free, priced as the force
+    share is and averaged over the joints (0: none). With
+    ``ramp_team_costs`` pain's ramp weighs energy and the squeeze too.
     """
 
     start_near_distance_m: float
@@ -427,6 +440,10 @@ class CooperatorsSettings:
     pain_ramp_start: float
     reward_channels: str
     mm_per_mj: float
+    line_closeness_mm: float
+    line_drift_leak_s: float
+    squeeze_weight: float
+    ramp_team_costs: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -525,6 +542,14 @@ class CooperatorsSettings:
                 "reward_channels", ("goal_health", "team_own"), default="goal_health"
             ),
             mm_per_mj=section.positive_number("mm_per_mj", default=10.0),
+            line_closeness_mm=section.number(
+                "line_closeness_mm", default=0.0, minimum=0.0
+            ),
+            line_drift_leak_s=section.number(
+                "line_drift_leak_s", default=0.0, minimum=0.0
+            ),
+            squeeze_weight=section.number("squeeze_weight", default=0.0, minimum=0.0),
+            ramp_team_costs=section.boolean("ramp_team_costs", default=False),
         )
         section.reject_unknown_keys()
         if settings.reward_channels == "team_own" and (

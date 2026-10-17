@@ -1,6 +1,6 @@
 """The cooperators' reward: two channels for every segment, goal and health,
 or from cycle 14 the team's and its own, judged apart by a critic each
-(docs/cooperators/reward.md, cycles 7, 10 and 14)."""
+(docs/cooperators/reward.md, cycles 7, 10, 14 and 15)."""
 
 import torch
 
@@ -18,6 +18,7 @@ PART_NAMES = (
     "arrival",
     "line",
     "off_line",
+    "squeeze",
     "front_joint",
     "own_force",
     "pushing",
@@ -26,8 +27,17 @@ PART_NAMES = (
     "pain",
     "hanging",
 )
-GOAL_PARTS = 6
-TEAM_PARTS = ("progress", "arrival", "line", "off_line", "pushing", "braking", "force")
+GOAL_PARTS = 7
+TEAM_PARTS = (
+    "progress",
+    "arrival",
+    "line",
+    "off_line",
+    "squeeze",
+    "pushing",
+    "braking",
+    "force",
+)
 CHANNEL_NAMES = ("goal", "health")
 
 
@@ -219,8 +229,15 @@ class CooperativeReward:
         head its target and every follower the followers' mean line and
         distance from it, and charges every segment the body's mean energy;
         each segment's own channel charges its force cost, pain and hanging;
-        a channel counts a millijoule as ``mm_per_mj`` millimetres. The
-        parts are as paid, after sharing, in their own units. ``motor_command`` is
+        a channel counts a millijoule as ``mm_per_mj`` millimetres. Cycle 15:
+        with ``line_closeness_mm`` the line is paid as erased times its
+        closeness and the distance costs nothing; ``squeeze_weight`` charges
+        every follower the squeeze, every joint's averaged push with the tows
+        of the segments behind it added back (what the legs push), a pull
+        free, squared against the force's scale and averaged over the
+        joints; with ``ramp_team_costs`` energy and the squeeze are weighed
+        as pain is. The parts are as paid, after sharing, in their own
+        units. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
         those of ``RewardContext.from_step``.
         """
@@ -242,11 +259,29 @@ class CooperativeReward:
         arrival = torch.zeros_like(progress)
         arrival[:, 0] = context.arrived * arrival_worth_m * 1e3
 
-        # The followers' line: paid as erased, charged as left behind.
+        # The followers' line: paid as erased, charged as left behind, or
+        # paid as erased near it (cycle 15).
         line = self.is_follower * line_erased * 1e3
-        off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
-        off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
+        if settings.line_closeness_mm:
+            closeness = 1 - (off_line * 1e3 / settings.line_closeness_mm) ** 2
+            line = line * closeness.clamp(min=0.0)
+            off_cost = torch.zeros_like(line)
+        else:
+            off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
+            off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
         along, up, front, floor = averaged_forces.unbind(dim=-1)
+        # Energy and the squeeze, weighed as pain is with ramp_team_costs.
+        team_cost_weight = self.pain_weight if settings.ramp_team_costs else 1.0
+        # The squeeze: what the legs push at each joint, the tows behind it
+        # added back, a pull free, the joints' mean for every follower.
+        legs_push = front + tow.flip(-1).cumsum(dim=-1).flip(-1)
+        pushed = (legs_push[:, 1:].clamp(max=0.0) / settings.joint_force_scale) ** 2
+        squeeze = (
+            self.reference_mm
+            * settings.squeeze_weight
+            * team_cost_weight
+            * pushed.mean(dim=-1, keepdim=True)
+        )
         priced = {
             "front_joint": front,
             "own_joint": along,
@@ -267,7 +302,9 @@ class CooperativeReward:
             ),
             dim=-1,
         )
-        shared_energy = torch.einsum("ij,wjp->wip", self.energy_weights, own_energy)
+        shared_energy = team_cost_weight * torch.einsum(
+            "ij,wjp->wip", self.energy_weights, own_energy
+        )
         pain = (
             physical_state.leg_leg_force_squared * self.pain_price_mj * self.pain_weight
         )
@@ -282,6 +319,7 @@ class CooperativeReward:
                 arrival,
                 line,
                 -self.is_follower * off_cost,
+                -self.is_follower * squeeze,
                 -self.is_follower * joint_cost,
                 -self.is_follower * own_cost,
             ),
@@ -290,9 +328,9 @@ class CooperativeReward:
 
         parts = torch.cat(
             (
-                torch.einsum("ij,wjp->wip", self.goal_weights, goal_parts[..., :4]),
+                torch.einsum("ij,wjp->wip", self.goal_weights, goal_parts[..., :5]),
                 torch.einsum(
-                    "ij,wjp->wip", self.force_cost_weights, goal_parts[..., 4:]
+                    "ij,wjp->wip", self.force_cost_weights, goal_parts[..., 5:]
                 ),
                 -shared_energy,
                 -pain_and_hanging,

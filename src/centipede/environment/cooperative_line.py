@@ -8,6 +8,14 @@ charged for how far its tail lies from the line it has not erased yet,
 beside it or behind its end. The line is kept as points, one each time the
 tip has moved SPACING_M, with their arc lengths along the line; a world's
 line starts at each restart as the body's own centreline.
+
+With a drift (cycle 15) the line goes where the head keeps pointing: the
+tip draws it to the side by a drift that grows with the head's sideslip,
+the angle between where the head points and where its centre goes, both
+averaged over a step cycle, and leaks away. A body that follows the head
+leaves it none, so the line is the tip's path; a body that ignores a bend
+the head holds leaves the head slipping sideways, and the line moves away
+from the body the longer it does.
 """
 
 import math
@@ -15,12 +23,16 @@ import math
 import torch
 
 from centipede.environment.simulation import PhysicalState
+from centipede.environment.simulation.constants import ACTION_DURATION_S
 
 # The tip adds a point once it has moved this far from the last one, so a
 # head standing still draws nothing.
 SPACING_M = 0.0005
 # A tail looks for itself this many pieces either way of where it was last.
 WINDOW_PIECES = 64
+# The head's pointing and its centre's travel are averaged over a step cycle
+# (0.4 s at the walk's 2.5 Hz), so that the wag of each step cancels.
+POINTING_AVERAGE_S = 0.4
 
 
 def heading(body_quaternion: torch.Tensor) -> torch.Tensor:
@@ -43,6 +55,9 @@ class HeadLine:
     line's direction), the angle of its body from the line's direction
     there (rad, positive to the left), and its distance from the line it has
     not erased (m). The head's own copy, erased by its neck, is measured too.
+    ``sideslip`` ``(W,)`` holds the head's averaged sideslip (rad, positive
+    when it points left of where it goes) and ``drift`` ``(W,)`` how far to
+    its left the tip draws (m; zero without a drift).
     """
 
     def __init__(
@@ -51,9 +66,13 @@ class HeadLine:
         segment_lengths_m: tuple[float, ...],
         episode_steps: int,
         device: torch.device | str,
+        drift_leak_s: float = 0.0,
     ) -> None:
         """Room for the starting centreline and one point per step of an
-        episode, the most the tip can add before the world restarts."""
+        episode, the most the tip can add before the world restarts. With
+        ``drift_leak_s`` the line drifts with the head's sideslip, the drift
+        leaking away over that time; 0 draws it at the tip."""
+        self.drift_leak_s = drift_leak_s
         self.segment_count = segment_count = len(segment_lengths_m)
         self.rear_length_m = segment_lengths_m[-1]
         # The centreline's pieces, rear first: each segment from its tail to
@@ -80,6 +99,12 @@ class HeadLine:
         self.erased_point = torch.zeros((world_count, segment_count, 2), device=device)
         self.view = torch.zeros((world_count, segment_count, 3), device=device)
         self.window = torch.arange(-WINDOW_PIECES, WINDOW_PIECES, device=device)
+        # The head's averaged pointing and its centre's averaged step.
+        self.pointing = torch.zeros((world_count, 2), device=device)
+        self.travel = torch.zeros((world_count, 2), device=device)
+        self.last_centre = torch.zeros((world_count, 2), device=device)
+        self.sideslip = torch.zeros(world_count, device=device)
+        self.drift = torch.zeros(world_count, device=device)
 
     def tails(self, state: PhysicalState) -> torch.Tensor:
         """Each segment's rear end, ``(W, N, 2)``: the joint behind it, and
@@ -121,13 +146,46 @@ class HeadLine:
         self.erased.copy_(torch.where(mask, arc[:, self.tail_point], self.erased))
         self.erased_point.copy_(torch.where(mask[..., None], tails, self.erased_point))
         self.view.masked_fill_(mask[..., None], 0.0)
+        mask_2d = world_mask[:, None]
+        self.pointing.copy_(
+            torch.where(mask_2d, forward_axis(state)[:, 0], self.pointing)
+        )
+        self.travel.masked_fill_(mask_2d, 0.0)
+        self.last_centre.copy_(
+            torch.where(mask_2d, state.body_planar_position[:, 0], self.last_centre)
+        )
+        self.sideslip.masked_fill_(world_mask, 0.0)
+        self.drift.masked_fill_(world_mask, 0.0)
+
+    def _drawn_tip(self, state: PhysicalState) -> torch.Tensor:
+        """Where the tip draws, ``(W, 2)``: the tip, moved to the left of the
+        head's travel by the drift. Refreshes ``sideslip`` and ``drift``."""
+        rate = ACTION_DURATION_S / POINTING_AVERAGE_S
+        self.pointing += rate * (forward_axis(state)[:, 0] - self.pointing)
+        centre = state.body_planar_position[:, 0]
+        self.travel += rate * ((centre - self.last_centre) - self.travel)
+        self.last_centre.copy_(centre)
+        speed = self.travel.norm(dim=-1)
+        going = self.travel / speed.clamp(min=1e-12)[:, None]
+        pointing = self.pointing / self.pointing.norm(dim=-1, keepdim=True).clamp(
+            min=1e-12
+        )
+        sideways = going[:, 0] * pointing[:, 1] - going[:, 1] * pointing[:, 0]
+        self.sideslip.copy_(torch.asin(sideways.clamp(-1.0, 1.0)))
+        tip = state.front_end_position[:, 0]
+        if not self.drift_leak_s:
+            return tip
+        leak = ACTION_DURATION_S / self.drift_leak_s
+        self.drift += speed * sideways - leak * self.drift
+        left = torch.stack((-going[:, 1], going[:, 0]), dim=-1)
+        return tip + self.drift[:, None] * left
 
     def update(self, state: PhysicalState) -> tuple[torch.Tensor, torch.Tensor]:
         """Extend the lines with the tips, measure every tail, and return the
         line each tail erased on the step and its distance from the line it
         has not erased, both ``(W, N)`` in metres; ``view`` is refreshed."""
         worlds = torch.arange(self.count.shape[0], device=self.count.device)
-        tip = state.front_end_position[:, 0]
+        tip = self._drawn_tip(state)
         newest = self.count - 1
         step = (tip - self.points[worlds, newest]).norm(dim=-1)
         moved = step >= SPACING_M

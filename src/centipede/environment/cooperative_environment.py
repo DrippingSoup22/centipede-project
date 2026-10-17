@@ -119,6 +119,7 @@ class CooperativeEnvironment:
             body.segment_lengths_m,
             settings.max_episode_steps,
             self.device,
+            drift_leak_s=cooperators.line_drift_leak_s,
         )
         self.forces = AveragedForces(
             self.world_count,
@@ -304,6 +305,7 @@ class CooperativeEnvironment:
             own_energy,
             off_line,
             averaged_forces,
+            self.line,
             arrived,
             in_time,
             truncated,

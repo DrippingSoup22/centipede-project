@@ -229,7 +229,7 @@ def test_the_team_and_own_channels_share_the_line_and_energy_and_keep_the_duties
 
     paid = parts.reward_parts[0]
     index = {name: i for i, name in enumerate(PART_NAMES)}
-    line, forces = slice(0, 4), slice(4, GOAL_PARTS)
+    line, forces = slice(0, 5), slice(5, GOAL_PARTS)
     energy, harm = slice(GOAL_PARTS, index["pain"]), slice(index["pain"], None)
     torch.testing.assert_close(paid[0, line], own[0, line])
     torch.testing.assert_close(
@@ -247,6 +247,74 @@ def test_the_team_and_own_channels_share_the_line_and_energy_and_keep_the_duties
     with pytest.raises(SettingsError, match="team_own"):
         CooperatorsSettings.from_section(
             {"reward_channels": "team_own", "goal_team_share": 1.0}
+        )
+
+
+def test_cycle_15_pays_the_line_near_it_and_charges_every_follower_the_squeeze():
+    """goal_step priced as cycle 15: each follower's 1 mm erased paid by its
+    closeness at 5 mm, 1, 0.91, 0.64 and 0 at 0, 1.5, 3 and 12 mm, the
+    followers' mean 0.6375, and no distance cost. The squeeze: segment 1's
+    front joint pushed with 0.3 unit weights, a full price of 0.8 mm a step
+    over four joints, 0.2 for every follower; under a tow of 0.1 per segment
+    the legs pull at that joint (0.4 behind it added back), so nothing.
+    Ramped, energy and the squeeze are weighed as pain is."""
+    settings = CooperatorsSettings.from_section(
+        {
+            "reward_channels": "team_own",
+            "line_closeness_mm": 5.0,
+            "squeeze_weight": 1.0,
+            "ramp_team_costs": True,
+        }
+    )
+    reward = CooperativeReward(settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, 9))
+    arguments = goal_step()[2]
+
+    _, parts, own_energy = reward.compute(*arguments)
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    followers = torch.tensor([0.0, 1, 1, 1, 1])
+    torch.testing.assert_close(by_name["line"], 0.6375 * followers)
+    assert not by_name["off_line"].any()
+    torch.testing.assert_close(by_name["squeeze"], -0.2 * followers)
+    towed = reward.compute(*arguments[:-1], torch.full((1, SEGMENTS), 0.1))[1]
+    assert not towed.reward_parts[0, :, PART_NAMES.index("squeeze")].any()
+    reward.pain_weight = 0.5
+    halved = reward.compute(*arguments)[1].reward_parts[0]
+    energy = slice(PART_NAMES.index("pushing"), PART_NAMES.index("pain"))
+    torch.testing.assert_close(halved[:, energy], parts.reward_parts[0, :, energy] / 2)
+    torch.testing.assert_close(halved[:, PART_NAMES.index("squeeze")], -0.1 * followers)
+    torch.testing.assert_close(
+        parts.reward_parts[0, :, energy], -own_energy[0].mean(0).expand(SEGMENTS, -1)
+    )
+
+
+def test_the_line_drifts_where_the_head_keeps_pointing_and_not_where_it_goes():
+    """The body walks along +x at 20 mm/s with the head turned 10° to the
+    left: its sideslip is 10° and, leaking over 1 s, the drift settles at
+    20 mm/s x sin 10° x 1 s, 3.47 mm, the tip drawing that far to the left
+    of the body's travel. Pointing where it goes, the line stays at the
+    tip."""
+    angle = math.radians(10.0)
+    for turned, drift in ((angle, 0.02 * math.sin(angle)), (0.0, 0.0)):
+        state = resting_state(1)
+        state.body_quaternion[0, 0] = torch.tensor(
+            [math.cos(turned / 2), 0.0, 0.0, math.sin(turned / 2)]
+        )
+        line = HeadLine(1, BODY.segment_lengths_m, 400, "cpu", drift_leak_s=1.0)
+        line.restart(torch.tensor([True]), state)
+        for _ in range(400):
+            state.front_end_position[..., 0] += 0.0004
+            state.body_planar_position[..., 0] += 0.0004
+            line.update(state)
+        torch.testing.assert_close(line.sideslip, torch.tensor([turned]))
+        torch.testing.assert_close(
+            line.drift, torch.tensor([drift]), rtol=1e-3, atol=1e-7
+        )
+        torch.testing.assert_close(
+            line.points[0, line.count[0] - 1],
+            torch.stack((state.front_end_position[0, 0, 0], torch.tensor(drift))),
+            rtol=1e-3,
+            atol=1e-6,
         )
 
 
@@ -519,6 +587,7 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
         zeros, torch.zeros(2, SEGMENTS, len(PART_NAMES)), zeros, zeros
     )
     delay = torch.arange(SEGMENTS)[:, None] + torch.tensor([0, 4])
+    line = HeadLine(2, BODY.segment_lengths_m, episode_steps=40, device="cpu")
     for step in range(40):
         standing = (step - delay) % 8 < 4
         state.foot_normal_force.copy_(standing * BODY.unit_weight_n)
@@ -533,6 +602,7 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
             torch.zeros(2, SEGMENTS, 3),
             zeros,
             torch.zeros(2, SEGMENTS, 4),
+            line,
             arrived,
             arrived,
             torch.full((2,), step == 39),  # the time limit

@@ -183,7 +183,9 @@ teammates' actions to the target, this one subtracts them out.
   0.82 at run 22's cycle 64). Health stays within the radius. From cycle 14
   the team critic carries the body's mean energy too, every segment's
   beyond the radius, an average over twelve; the own critic's terms all
-  lie in the segment's own block.
+  lie in the segment's own block. From cycle 15 it carries the squeeze too,
+  the mean over all eleven joints, of which a follower sees the five in its
+  window; like the line, the push of a joint reaches the whole chain.
 - **The head is different.** It alone sees the target, so its goal and its
   goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.
