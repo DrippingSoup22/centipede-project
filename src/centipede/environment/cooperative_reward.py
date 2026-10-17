@@ -121,6 +121,20 @@ class CooperativeReward:
         self.sharing_weights = energy_sharing_weights(
             segment_count, observation_radius, settings.energy_sharing_decay
         ).to(device)
+        # Pain and hanging shared as energy is, or each segment's own.
+        self.pain_and_hanging_weights = (
+            self.sharing_weights
+            if settings.health_sharing == "all"
+            else torch.eye(segment_count, device=device)
+        )
+        # Each segment's shares of the segments' goals: the head its own, a
+        # follower goal_team_share the followers' mean and the rest its own.
+        share = settings.goal_team_share
+        self.goal_weights = (1 - share) * torch.eye(segment_count, device=device)
+        self.goal_weights[0, 0] = 1.0
+        self.goal_weights[1:, 1:] += share / (segment_count - 1)
+        # Pain's weight in this update cycle (CooperatorsSettings.pain_weight_at).
+        self.pain_weight = 1.0
         # Millijoules for one motor fully commanded through a step.
         self.force_price_mj = settings.force_price_w * ACTION_DURATION_S * 1e3
         self.pain_price_mj = (
@@ -169,9 +183,12 @@ class CooperativeReward:
         own feet and body fail to carry, positive dragged, negative pushing
         (``line_erased`` and ``off_line`` ``(W, N)`` in metres, from
         ``HeadLine.update``; ``averaged_forces``,
-        ``AveragedForces.values``). Health, in
-        millijoules: each segment's energy, shared, its own pain, and its
-        hanging on the neighbours and the floor. ``motor_command`` is
+        ``AveragedForces.values``); each follower's goal is shared with the
+        other followers by ``goal_team_share`` (cycle 13). Health, in
+        millijoules: each segment's energy, shared, its pain, at
+        ``pain_weight``, and its hanging on the neighbours and the floor,
+        both its own or shared as energy is (``health_sharing``). The parts
+        are as paid, after sharing. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
         those of ``RewardContext.from_step``.
         """
@@ -219,24 +236,31 @@ class CooperativeReward:
             dim=-1,
         )
         shared_energy = torch.einsum("ij,wjp->wip", self.sharing_weights, own_energy)
-        pain = physical_state.leg_leg_force_squared * self.pain_price_mj
+        pain = (
+            physical_state.leg_leg_force_squared * self.pain_price_mj * self.pain_weight
+        )
+        pain_and_hanging = torch.einsum(
+            "ij,wjp->wip",
+            self.pain_and_hanging_weights,
+            torch.stack((pain, self.hanging_price_mj * hanging), dim=-1),
+        )
+        goal_parts = torch.stack(
+            (
+                progress,
+                arrival,
+                line,
+                -self.is_follower * off_cost,
+                -self.is_follower * joint_cost,
+                -self.is_follower * own_cost,
+            ),
+            dim=-1,
+        )
 
         parts = torch.cat(
             (
-                torch.stack(
-                    (
-                        progress,
-                        arrival,
-                        line,
-                        -self.is_follower * off_cost,
-                        -self.is_follower * joint_cost,
-                        -self.is_follower * own_cost,
-                    ),
-                    dim=-1,
-                ),
+                torch.einsum("ij,wjp->wip", self.goal_weights, goal_parts),
                 -shared_energy,
-                -pain[..., None],
-                -(self.hanging_price_mj * hanging)[..., None],
+                -pain_and_hanging,
             ),
             dim=-1,
         )

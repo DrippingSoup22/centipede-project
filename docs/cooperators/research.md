@@ -144,6 +144,22 @@ offers against it, for the decision of cycle 10 ([tow.md](tow.md)):
 | Optimistic advantages | Zhao et al., ICML 2024 | Later | Negative advantages clipped, so partners' failures stop teaching an agent that its step is bad; a change in RL_lib |
 | Energy shapes a gait once the body moves | Fu et al., CoRL 2021 | Kept | Their robot is given a speed to hold, so energy decides how to move, never whether |
 
+## Shared rewards
+
+Why each segment's own reward kept the body still, and how cooperative
+learning shares a reward, for the decision of cycle 13
+([reward.md](reward.md#cycle-13-the-shared-reward-the-users-design-2026-10-17)):
+
+| Mechanism | Source | Verdict | Why |
+| --- | --- | --- | --- |
+| One team reward for every agent | Schilling et al. 2020 (the body's mean velocity, no costs); Multi-Agent MuJoCo; SMAC, Samvelyan et al. 2019 (damage, kills, wins) | Kept for the followers' goal | The gain of a step reaches the whole chain; so must its bill |
+| Factoredness and learnability | Agogino & Tumer, JAAMAS 2008 | The measure | A reward aligned with the team's is noisy, one that is clear is selfish; both measured on paired worlds without training |
+| Lazy and selfish agents | Mao, Gong & Xiao, 2020; Sunehag et al., VDN, AAMAS 2018 | The risk watched | A global reward breeds lazy agents, a local one selfish agents; mixed rewards did best |
+| Own and team reward mixed | OpenAI Five, Berner et al. 2019 (the team's share raised from 0.3 to 1); Durugkar, Liebman & Stone, IJCAI 2020 | A dial kept (`goal_team_share`) | The share can stop short of the whole body if the followers turn lazy |
+| Sharing with the neighbours | MA2C, Chu et al. 2019 | Kept for health | Energy, pain and hanging are local; shared, their learnability doubled |
+| Learned sharing with the neighbours | LToS, Yi et al., NeurIPS 2022 | Later | Each agent learns how much reward to share; a change in the learning |
+| Costs that grow from a fraction | Hwangbo et al., Science Robotics 2019 | Kept for pain | A high cost on motion makes standing a good local minimum |
+
 ## Sources
 
 - Schilling, Konen, Ohl & Korthals, 2020, [arXiv 2005.11164](https://arxiv.org/abs/2005.11164)
@@ -200,3 +216,11 @@ offers against it, for the decision of cycle 10 ([tow.md](tow.md)):
 - Jackiewicz, Coupler force reduction method for multiple-unit trains using a new hierarchical control system, Railway Engineering Science 29, 2021, [doi 10.1007/s40534-021-00239-w](https://doi.org/10.1007/s40534-021-00239-w)
 - Hwangbo et al., Learning agile and dynamic motor skills for legged robots, Science Robotics 4, 2019, [arXiv 1901.08652](https://arxiv.org/abs/1901.08652)
 - Zhao, Zhao, Li, Kannala & Pajarinen, Optimistic multi-agent policy gradient, ICML 2024, [arXiv 2311.01953](https://arxiv.org/abs/2311.01953)
+- Agogino & Tumer, Analyzing and visualizing multiagent rewards in dynamic and stochastic domains, JAAMAS 17(2), 2008, [Oregon State](https://web.engr.oregonstate.edu/~ktumer/publications/b2hd-tumer-agogino_jaamas08.html)
+- Mao, Gong & Xiao, Reward design in cooperative multi-agent reinforcement learning for packet routing, 2020, [arXiv 2003.03433](https://arxiv.org/abs/2003.03433)
+- Sunehag et al., Value-decomposition networks for cooperative multi-agent learning, AAMAS 2018, [arXiv 1706.05296](https://arxiv.org/abs/1706.05296)
+- Berner et al., Dota 2 with large scale deep reinforcement learning (OpenAI Five), 2019, [arXiv 1912.06680](https://arxiv.org/abs/1912.06680)
+- Durugkar, Liebman & Stone, Balancing individual preferences and shared objectives in multiagent reinforcement learning, IJCAI 2020, [IJCAI](https://www.ijcai.org/proceedings/2020/347)
+- Samvelyan et al., The StarCraft multi-agent challenge, AAMAS 2019, [arXiv 1902.04043](https://arxiv.org/abs/1902.04043)
+- Multi-Agent MuJoCo (MaMuJoCo), Farama Foundation, [documentation](https://robotics.farama.org/envs/MaMuJoCo)
+- Yi, Li, Wang & Lu, Learning to share in networked multi-agent reinforcement learning (LToS), NeurIPS 2022, [arXiv 2112.08702](https://arxiv.org/abs/2112.08702)

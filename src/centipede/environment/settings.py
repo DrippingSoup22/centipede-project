@@ -364,6 +364,17 @@ class CooperatorsSettings:
     **Spine.** Each spine motor receives ``spine_action_scale`` times its
     command, so that the whole command range spans the joint's: on v4 a
     command above about 0.35 holds it at its limit.
+
+    **Shared reward** (cycle 13, docs/cooperators/reward.md): a step's gain
+    reaches the whole chain, so its bill is shared too. Each follower's goal
+    is ``goal_team_share`` the followers' mean goal and the rest its own (0:
+    its own alone); the head keeps its own, the target only it sees.
+    ``health_sharing`` ``"all"`` shares pain and hanging with the neighbours
+    as energy is shared (``"energy"``: energy alone). Pain's weight rises
+    evenly from 0 over the first ``pain_ramp_cycles`` update cycles
+    (``pain_weight_at``; 0: full from the start), so that the legs can try
+    wide sweeps before pain teaches their timing; evaluations count it in
+    full.
     """
 
     start_near_distance_m: float
@@ -399,6 +410,9 @@ class CooperatorsSettings:
     observe_tow: bool
     observe_instant_joint_forces: bool
     spine_action_scale: float
+    goal_team_share: float
+    health_sharing: str
+    pain_ramp_cycles: int
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -483,9 +497,24 @@ class CooperatorsSettings:
             spine_action_scale=section.number(
                 "spine_action_scale", default=0.35, minimum=0.0, maximum=1.0
             ),
+            goal_team_share=section.number(
+                "goal_team_share", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            health_sharing=section.choice(
+                "health_sharing", ("energy", "all"), default="energy"
+            ),
+            pain_ramp_cycles=section.integer("pain_ramp_cycles", default=0, minimum=0),
         )
         section.reject_unknown_keys()
         return settings
+
+    def pain_weight_at(self, cycle: int) -> float:
+        """Pain's weight in update cycle ``cycle``, counted from 1: rising
+        evenly from 0 over the first ``pain_ramp_cycles`` cycles, then 1;
+        always 1 without a ramp."""
+        if not self.pain_ramp_cycles:
+            return 1.0
+        return min(1.0, (cycle - 1) / self.pain_ramp_cycles)
 
 
 @dataclass(frozen=True)

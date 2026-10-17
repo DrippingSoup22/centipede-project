@@ -26,7 +26,11 @@ After runs 13 and 14, cycle 8 keeps that reward and averages the forces
 over 1 s instead of 0.2 s, so that only a lasting push or pull costs
 ([Cycle 8](#cycle-8-only-a-lasting-force-costs-the-users-idea)), while the
 agents explore with state-dependent noise
-([actions.md](actions.md#how-actions-explore)).**
+([actions.md](actions.md#how-actions-explore)). After runs 19 to 22, cycle
+13 shares the reward: each follower is paid the followers' mean goal, pain
+and hanging are shared with the neighbours as energy is, and pain is ramped
+in over the first 128 cycles
+([Cycle 13](#cycle-13-the-shared-reward-the-users-design-2026-10-17)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1161,6 +1165,132 @@ tow, price alike; only what the tow teaches changes. Under N each segment
 learns to brake its own tow, which turns into carrying itself as the tow
 fades; under G the followers learn a walk that leans on the head.
 
+### Cycle 13: the shared reward (the user's design, 2026-10-17)
+
+**Why** (after runs 19 to 22). The reward has no loophole left, so the
+only way to a good reward is a wave in time, and the wave does not emerge:
+the mean action stands in every run. The user named two causes, a reward
+that is individual in a system of many agents, and pain, which keeps each
+segment's legs in their own space before they can learn where to move.
+Both were measured.
+
+**A step's gain is shared, its bill is not.** Paired worlds as in M2
+(`analysis/reward_shape_check.py` in `../Training`: common random numbers,
+40 pairs, segments 1, 5 and 10 in turn acting with their mean for 3 s,
+pooled), on run 22 seed 1's checkpoints, without a tow. The effect of one
+follower's exploration over the 3 s:
+
+| | Cycle 64 | Cycle 128 |
+| --- | --- | --- |
+| The line its own tail erased | +5.2 ± 1.5 mm | +5.6 ± 1.3 mm |
+| Its own goal costs, off the line and its force price | −7.5 ± 3.4 mm | −3.7 ± 2.4 mm |
+| The line the whole body erased | +51 ± 15 mm | +64 ± 14 mm |
+
+The chain shares a step's gain by itself: every follower's tail moves with
+the body, so each erases about the same line, and the segment that stepped
+sees a twelfth of what its step did. Its bill, its own force price and its
+distance from the line, it pays alone. A step that helps the body is, for
+the segment that makes it, a loss or close to none, and so is every
+other segment's: standing still is each one's best answer. This is the
+public goods dilemma of cooperative learning: a pure team reward breeds lazy
+agents, a purely local one selfish agents (Mao, Gong and Xiao, 2020).
+
+**Reward shapes compared**, with Agogino and Tumer's two measures of a
+multi-agent reward (JAAMAS 2008): *factoredness*, how often a segment's
+reward moves the way the body's does (here the share of pairs in which a
+segment's exploration changes its reward and the body's, the sum of every
+segment's own, with the same sign); and *learnability*, how clearly a
+segment's own effect stands out of everything else that moves its reward
+(here the mean size of the effect over the reward's spread across the
+pairs). On run 22's cycle-64 policy, and in brackets on fresh networks, as
+a run starts:
+
+| Shape | Goal: factoredness, learnability | Health: factoredness, learnability |
+| --- | --- | --- |
+| As built | 78%, 0.82 (72%, 0.66) | 86%, 1.82 (62%, 0.88) |
+| The whole reward shared like energy (itself 40%, each side 30%) | 82%, 0.77 (77%, 0.66) | 89%, 3.40 (65%, 1.09) |
+| Half own, half the body's mean | 92%, 0.80 (88%, 0.73) | 88%, 1.96 (74%, 0.94) |
+| The body's mean | 100%, 0.78 (100%, 0.75) | 100%, 1.68 (100%, 0.94) |
+
+Factoredness carries an error of about ±3 to 4 points. Sharing with the
+neighbours aligns the goal only a little: their weights add up to one and
+every follower erases about the same line, so it captures no more of a
+step's gain; it only lowers the own share of the bill from all of it to
+40%. The gain of a step is the whole chain's, so its bill must be the
+whole chain's too. Learnability of the goal does not suffer from the
+body's mean: its main part is the line, and every follower feels the
+body's line through its own tail, which its critic sees. Health is
+different: energy, pain and hanging are local, set by a segment and its
+neighbours, and shared like energy they are about twice as learnable, the
+neighbours' noisy terms averaged out while the own share stays 40%.
+
+**Pain teaches sweeping less before timing.** In run 22's training worlds,
+pain was half of every segment's health at the start and was learned away
+first:
+
+| Cycle | 1 | 8 | 16 | 32 | 64 | 128 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Pain's share of health | 52% | 44% | 24% | 15% | 5% | 0.7% |
+
+The scripted wave walk at 2.5 Hz (`analysis/pain_check.py`, one world, 5 s)
+pays pain per segment as follows:
+
+| Gait | Pain | Steps with legs touching | Speed |
+| --- | --- | --- | --- |
+| Wave over 5 segments, sweep 20° | 0.09 mJ/s | 3.6% | 36 mm/s |
+| The same, sweep 30° | 0.51 mJ/s | 18.5% | 51 mm/s |
+| Wave over 3 or 12 segments, sweep 20° | 0.26 to 0.33 mJ/s | 10 to 12% | 33 to 38 mm/s |
+| Every leg of a side in phase | 0 | 0% | 1 mm/s |
+| Random actions, spread 0.25 | 0.83 mJ/s | 31% | 0.5 mm/s |
+
+A well-timed wave costs almost no pain, and standing costs none; wide
+sweeps and random legs cost much. Pain selects the wave's timing, as
+designed ([Pain](#pain-legs-hitting-legs-the-users-design)), but a sweep is
+painless only when the neighbours' timing is right, and at the start it is
+random: the legs learn to sweep less long before they could learn when. On
+fresh networks, pain is also health's noisiest part: shared like energy,
+health's learnability is 1.09 with pain and 2.52 without.
+
+**The design** (the user's, agreed 2026-10-17):
+
+- **The goal, the body's.** Every follower is paid the followers' mean
+  goal, part by part: the line, its distance and its force price
+  (`goal_team_share` 1). A step's gain and its bill are then shared alike,
+  and a segment feels a twelfth of each. The head keeps its own goal: it
+  alone sees the target, and its steering would weigh a twelfth in a goal
+  of the body's mean; the followers take nothing of its target progress,
+  which their critics do not see (the pairing rule).
+- **Health, the neighbourhood's.** Pain and hanging are shared with the
+  neighbours as energy is, itself 40% and each side 30% at radius 2
+  (`health_sharing = "all"`). Pain stays mutual inside the share.
+- **Pain, ramped in.** Pain's weight rises evenly from 0 in the first
+  update cycle to full at cycle 129 (`pain_ramp_cycles` 128), a schedule of
+  cycles as the first try; a ramp moved by measures of the gait is for
+  later. Hwangbo et al. (Science Robotics 2019) raised every cost from 0.3
+  of its weight for the same reason, a high cost on motion making standing
+  a good local minimum. Evaluations count pain in full.
+- **No tow, gSDE as before.** The test is the reward alone (the user):
+  pink noise and the tow return once cooperation is seen.
+
+Cooperative learning pays this way: one outcome of the team for all, the
+hexapod's legs the body's velocity (Schilling et al., 2020), Multi-Agent
+MuJoCo's segments the robot's reward, StarCraft's units the damage, kills
+and wins of the team; OpenAI Five mixed each hero's reward with the team's
+mean, the team's share raised from 0.3 to 1 in training (Berner et al.,
+2019).
+
+**What it gives up.** A follower that does nothing is paid the same goal as
+one that walks: the lazy agent of a shared reward (Sunehag et al., 2018).
+Its own costs still bind it in health (40%), and its goal costs a
+twelfth. Hanging, shared, costs the hanger 40% of itself: the tail's
+escape of run 22, hanging on segment 10, may grow, and the per-segment
+reads (feet carry, stance) watch it. With pain at zero at first, legs may
+push off other legs, which pain exists to forbid; the leg contacts are
+logged. And the parts logged per segment are as paid, after sharing: the
+followers' goal parts are one value, and each segment's own measures are
+read from the step facts (its line, off-line distance, joint forces, feet
+push and carry).
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -1177,7 +1307,9 @@ harm enters only when we see it.
 
 A segment's energy also counts its neighbours', as far as it sees them
 (the user, 2026-10-14). Only energy is shared: pain stays between the two
-segments of a contact, and each follower's path is its own. It is essential, not optional: if each
+segments of a contact, and each follower's path is its own (until cycle
+13, which shares pain and hanging the same way and the followers' goal
+over all of them). It is essential, not optional: if each
 segment paid only its own energy, laziness would pay, since a segment that
 hangs from its neighbours saves its own energy while they carry it. That
 is what the oscillators' followers learned (no foot down in 42 to 54% of
@@ -1327,6 +1459,15 @@ the force with which its legs press other legs, F_push the strongest push
 of a leg's sweep at its foot, 0.94 mN on v4, h = `hanging_price`, and u
 the support it may take for free, `head_free_support` (0.5) for the head
 and 0 for the followers.
+
+**Sharing** (cycle 13). With `goal_team_share` s, each follower's goal
+parts are (1 − s) its own and s the followers' mean, part by part; the head
+keeps its own. With `health_sharing = "all"`, pain and hanging are shared
+with the weights w as energy is: −Σⱼ wᵢⱼ (painⱼ + hangingⱼ). Pain is
+weighed by the ramp of the update cycle, min(1, (cycle − 1) /
+`pain_ramp_cycles`), which the experiment sets before each cycle
+(`set_pain_weight`); evaluations weigh it 1. The logged parts are as paid,
+after sharing.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

@@ -276,7 +276,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     progress.header()
     # The learning rate of each update follows the schedule over the run's
     # cycles (an adaptive one is each agent's own), and so do scheduled action
-    # spreads; the loop pauses after every cycle, before the next window.
+    # spreads and the cooperators' pain ramp; the loop pauses after every
+    # cycle, before the next window.
     agent_settings = configuration.agents
 
     def follow_schedules(cycle: int) -> None:
@@ -286,6 +287,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)
+        if levelled:
+            cooperators = configuration.environment.cooperators
+            environment.set_pain_weight(cooperators.pain_weight_at(cycle))
 
     follow_schedules(completed_cycles + 1)
     cycles_start = time.monotonic()

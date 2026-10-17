@@ -90,15 +90,49 @@ def test_targets_follow_the_level_and_the_stopwatch_moves_it():
     assert task.level == pytest.approx(0.5 + 0.02 * (1 / 3 - 0.1))
 
 
+def goal_step() -> tuple[PhysicalState, AveragedForces, tuple]:
+    """A step to price: the head steps 1 mm toward its target and onto it;
+    every tail erases 1 mm of line. The followers' tails lie 0, 1.5, 3 and
+    12 mm from the line they have not erased, the last counted as 10.
+    Averaged forces, in unit weights: segment 1's front joint pushed with
+    0.3, segment 3's pulled with 0.15; the head held up by 0.8 and on the
+    floor with 0.2, segment 2 held up by 1, the rear on the floor with 0.3.
+    Segment 2 pushes with a microjoule of work, segment 3's legs are pressed
+    with a full push. Returns the state, the averages and ``compute``'s
+    arguments."""
+    state = resting_state(1)
+    state.motor_positive_work[0, 2] = 1e-6
+    state.leg_leg_force_squared[0, 3] = BODY.leg_push_n**2
+    state.net_joint_force[0] = 1e-3 * torch.tensor(
+        [[0.0, 0.8], [0.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, -0.4]]
+    )
+    state.front_joint_force[0] = 1e-3 * torch.tensor([0.0, -0.3, 0.0, 0.15, 0.0])
+    state.belly_normal_force[0] = 1e-3 * torch.tensor([0.2, 0.0, 0.0, 0.0, 0.3])
+    forces = AveragedForces(1, SEGMENTS, BODY.unit_weight_n, 0.5, "cpu")
+    forces.restart(torch.tensor([True]), state)
+    head_tip = state.head_tip_position[:, :2]
+    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    arguments = (
+        state,
+        state.body_planar_position - torch.tensor([0.001, 0.0]),
+        head_tip - torch.tensor([[0.001, 0.0]]),
+        torch.tensor([[0.1, 0.0]]),
+        torch.tensor([True]),
+        0.025,
+        zeros,
+        zeros,
+        torch.full((1, SEGMENTS), 0.001),
+        torch.tensor([[0.005, 0.0, 0.0015, 0.003, 0.012]]),
+        forces.values,
+        torch.zeros(1, SEGMENTS),
+    )
+    return state, forces, arguments
+
+
 def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint():
-    """The head steps 1 mm toward its target and onto it; every tail erases
-    1 mm of line. The followers' tails lie 0, 1.5, 3 and 12 mm from the line
-    they have not erased, the last counted as 10. Averaged forces, in unit
-    weights: segment 1's front joint pushed with 0.3, segment 3's pulled with
-    0.15; the head held up by 0.8 and on the floor with 0.2, segment 2 held
-    up by 1, the rear on the floor with 0.3. A squared cost takes 40 mm/s,
-    0.8 mm a step, at its scale: 3 mm off the line, or 0.3 unit weights.
-    Energy is shared 40% to itself and 30% to each side; pain stays with the
+    """goal_step priced as built. A squared cost takes 40 mm/s, 0.8 mm a
+    step, at its scale: 3 mm off the line, or 0.3 unit weights. Energy is
+    shared 40% to itself and 30% to each side; pain stays with the
     pressed."""
     reward = CooperativeReward(
         SETTINGS, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
@@ -113,33 +147,9 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
             ]
         ),
     )
-    state = resting_state(1)
-    state.motor_positive_work[0, 2] = 1e-6  # one microjoule pushing
-    state.leg_leg_force_squared[0, 3] = BODY.leg_push_n**2  # a full push
-    state.net_joint_force[0] = 1e-3 * torch.tensor(
-        [[0.0, 0.8], [0.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, -0.4]]
-    )
-    state.front_joint_force[0] = 1e-3 * torch.tensor([0.0, -0.3, 0.0, 0.15, 0.0])
-    state.belly_normal_force[0] = 1e-3 * torch.tensor([0.2, 0.0, 0.0, 0.0, 0.3])
-    forces = AveragedForces(1, SEGMENTS, BODY.unit_weight_n, 0.5, "cpu")
-    forces.restart(torch.tensor([True]), state)
-    head_tip = state.head_tip_position[:, :2]
-    zeros = torch.zeros(1, SEGMENTS, LEGS + 1)
+    state, forces, arguments = goal_step()
 
-    channels, parts, _ = reward.compute(
-        state,
-        state.body_planar_position - torch.tensor([0.001, 0.0]),
-        head_tip - torch.tensor([[0.001, 0.0]]),
-        torch.tensor([[0.1, 0.0]]),
-        torch.tensor([True]),
-        0.025,
-        zeros,
-        zeros,
-        torch.full((1, SEGMENTS), 0.001),
-        torch.tensor([[0.005, 0.0, 0.0015, 0.003, 0.012]]),
-        forces.values,
-        torch.zeros(1, SEGMENTS),
-    )
+    channels, parts, _ = reward.compute(*arguments)
 
     by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
     torch.testing.assert_close(by_name["progress"], torch.tensor([1.0, 0, 0, 0, 0]))
@@ -166,6 +176,36 @@ def test_the_goal_pays_the_line_erased_and_charges_the_tail_off_it_and_the_joint
 
     state.net_joint_force[0, 2, 1] = 2e-3
     assert forces.update(state)[0, 2, 1] == pytest.approx(1.5)
+
+
+def test_the_shared_reward_pays_followers_the_mean_goal_and_shares_pain_and_hanging():
+    """goal_step priced as built and shared (cycle 13): the head keeps its
+    goal, every follower is paid the followers' mean of each goal part;
+    energy is shared as before, pain, at the ramp's half weight, and hanging
+    as energy is. The ramp over 128 cycles: 0, 0.5, 1 at cycles 1, 65, 129."""
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    built = CooperativeReward(SETTINGS, SEGMENTS, 2, BODY, commanded)
+    settings = CooperatorsSettings.from_section(
+        {"goal_team_share": 1.0, "health_sharing": "all", "pain_ramp_cycles": 128}
+    )
+    shared = CooperativeReward(settings, SEGMENTS, 2, BODY, commanded)
+    shared.pain_weight = settings.pain_weight_at(65)
+
+    own = built.compute(*goal_step()[2])[1].reward_parts[0]
+    paid = shared.compute(*goal_step()[2])[1].reward_parts[0]
+
+    torch.testing.assert_close(paid[0, :GOAL_PARTS], own[0, :GOAL_PARTS])
+    torch.testing.assert_close(
+        paid[1:, :GOAL_PARTS], own[1:, :GOAL_PARTS].mean(0).expand(SEGMENTS - 1, -1)
+    )
+    energy = slice(PART_NAMES.index("pushing"), PART_NAMES.index("pain"))
+    torch.testing.assert_close(paid[:, energy], own[:, energy])
+    weights = built.sharing_weights
+    pain, hanging = PART_NAMES.index("pain"), PART_NAMES.index("hanging")
+    torch.testing.assert_close(paid[:, pain], 0.5 * weights @ own[:, pain])
+    torch.testing.assert_close(paid[:, hanging], weights @ own[:, hanging])
+    assert [settings.pain_weight_at(c) for c in (1, 65, 129, 200)] == [0, 0.5, 1, 1]
+    assert SETTINGS.pain_weight_at(1) == 1.0
 
 
 @pytest.mark.parametrize(

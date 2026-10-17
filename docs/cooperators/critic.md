@@ -161,6 +161,14 @@ teammates' actions to the target, this one subtracts them out.
   they can see. Trouble caused by far segments is fixed in the reward, by
   keeping each term within the radius its critic sees, not by a larger
   critic.
+- **The followers' goal is the body's** (cycle 13,
+  [reward.md](reward.md#cycle-13-the-shared-reward-the-users-design-2026-10-17)).
+  Each follower is paid the followers' mean goal, beyond its radius. Its
+  main part, the line, is the same for every follower, since the chain
+  moves together, and a follower sees it through its own tail; the far
+  segments' own costs are the noise, averaged over eleven. Measured on
+  paired worlds, the goal's learnability stayed what it was (0.78 against
+  0.82 at run 22's cycle 64). Health stays within the radius.
 - **The head is different.** It alone sees the target, so its goal and its
   goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.

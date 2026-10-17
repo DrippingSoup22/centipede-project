@@ -4,7 +4,8 @@ with the task, observations and reward of docs/cooperators/.
 The interaction loop uses ``reset`` and ``step``; the experiment reads the
 same sizes as the main environment's, plus ``neighbour_table`` for the
 agents' critics, and after each update cycle calls ``adjust_level`` and
-reads ``task``. In training with a tow it calls ``start_tow`` and
+reads ``task``. Before each update cycle of training it calls
+``set_pain_weight``. In training with a tow it calls ``start_tow`` and
 ``reserve_measuring_worlds`` first, ``adjust_tow`` after each update cycle,
 and reads ``tow.facts``.
 """
@@ -187,6 +188,11 @@ class CooperativeEnvironment:
         share = self.task.in_time_share
         self.task_facts.level.fill_(self.task.level)
         self.task_facts.in_time_share.fill_(torch.nan if share is None else share)
+
+    def set_pain_weight(self, weight: float) -> None:
+        """Weigh pain by ``weight`` from the next step on, as the pain ramp
+        of the coming update cycle says (cycle 13)."""
+        self.reward.pain_weight = weight
 
     def start_tow(self, top: float | None = None) -> None:
         """Tow every segment from the next step on, under the settings'
