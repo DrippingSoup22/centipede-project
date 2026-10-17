@@ -30,7 +30,12 @@ agents explore with state-dependent noise
 13 shares the reward: each follower is paid the followers' mean goal, pain
 and hanging are shared with the neighbours as energy is, and pain is ramped
 in over the first 128 cycles
-([Cycle 13](#cycle-13-the-shared-reward-the-users-design-2026-10-17)).**
+([Cycle 13](#cycle-13-the-shared-reward-the-users-design-2026-10-17)). After
+run 23, cycle 14 splits the reward by owner: a team critic for the
+followers' mean line and distance from it, the head's target and the body's
+mean energy; an own critic for each segment's force share, pain and hanging;
+pain from half its weight
+([Cycle 14](#cycle-14-the-teams-and-each-ones-own-the-users-split-2026-10-17)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1291,6 +1296,125 @@ followers' goal parts are one value, and each segment's own measures are
 read from the step facts (its line, off-line distance, joint forces, feet
 push and carry).
 
+### Cycle 14: the team's and each one's own (the user's split, 2026-10-17)
+
+**Why** (run 23). The shared reward made the noisy body walk without a
+tow, and seed 2's mean action walked: the followers erased 7.2 mm/s of
+line, every leg stepping 1 to 4.4 times a second. But it shared too much.
+A follower's own force cost was paid as the followers' mean, so a segment
+that braked paid an eleventh of its brake: by cycle 256 segments 1 and 3
+braked (their feet −0.27 unit weights) while 7 and 8 pushed (+0.12 and
++0.22), squeezing the chain between them (front joints −0.37 to −0.58).
+Hanging, shared like energy, cost the hanger 40%: seed 1's tail hung, its
+feet down 2 to 5% of the time. In the recordings some legs did not move and
+were dragged, and the legs behind overlapped them. The user's principle:
+every segment has a duty to the team and duties of its own. What the body
+achieves and spends is shared; what a segment does to its neighbours, and
+what it suffers, is its own.
+
+**Who pays what** (the user's split):
+
+| Who pays | Term | Why |
+| --- | --- | --- |
+| The team, the same for every follower | The line erased and the distance from it, the followers' mean | The chain moves together: every tail erases about the same line, and where a tail lies depends on the whole body's shape. In run 22 the distance was nine tenths of a stepping follower's own bill (−7.2 of −7.5 mm over 3 s at cycle 64) |
+| The team, the same for every segment | Energy, the body's mean | One animal's budget |
+| The head | Its target and arrivals | It alone sees the target |
+| Each segment, its own | Its force share: its joints' averaged net force along the body, pushing or dragged | The exact split of the chain's force (below) |
+| Each segment, its own | Hanging: held up by its neighbours (the head beyond half its weight), or lying on the floor | Being carried is the carried one's doing (the user) |
+| Each segment, its own | Pain, both segments of a contact paying, from half its weight at the first update cycle to full at cycle 129 | Under run 23's ramp from zero, legs overlapped (the user) |
+
+**The force share.** The force at segment k's front joint is the sum of
+the net joint forces of every segment from k back: T_k = N_k + N_(k+1) +
+… + N_last (cycle 10). The chain's push or pull at any joint is built of
+the shares behind it, and for a sum every fair split of the credit gives
+each its own term, so N_k is segment k's share of the force the body
+carries at every joint ahead of it. Each segment sees both: its share in
+its own block, and the chain's force at the five front joints of its
+window, its own front joint summing everything behind it
+([observations.md](observations.md)). Pushing and being dragged cost the
+same, squared, at cycle 7's price (40 mm/s at 0.3 unit weights): if braking
+against a push were free, the fight of run 23's seed 2, the front braking
+against a pushing rear, would be free for one side of it. A segment that
+lets a push through pays nothing; the one that pushes pays.
+
+**Two critics, by owner.** Every segment learns from a team critic and an
+own critic, weighed 1 : 0.8 as goal and health were, each advantage
+normalised on its own ([critic.md](critic.md)). Inside a channel the terms
+speak in proportion to their sizes; across channels, a channel's weight and
+how clearly a segment's own actions show in it decide.
+
+**One exchange rate, 10 mm per mJ.** Inside a channel millimetres and
+millijoules are added, a millijoule counting as 10 mm of line
+(`mm_per_mj`). In the team channel the reference walk's energy, 0.78 mJ/s
+for a segment (9.3 for the body, [As built](#as-built)), costs about a
+fifth of the line it erases, 8 against 36 mm/s; standing raised costs
+5 mm/s and resting nothing, so walking stays first. In the own channel,
+hanging and pain are priced as force, in millijoules: a unit weight held
+up, or a leg pressed with a full push, costs 20 mm/s, as being dragged by
+0.2 unit weights does. Measured on run 22's policy, the force share's
+spread across worlds over 3 s is 1 to 5 mm at segments 1, 5 and 10,
+hanging's 2.5 to 6 mm at this rate; on fresh networks the force share's 6
+to 40 mm, pain's, at half, 7 to 51 mm. At 1 mm per mJ pain and hanging
+would be lost beside the force share.
+
+**Energy was the loudest voice against exploring.** Measured on cycle 13's
+paired worlds (the sums `analysis/reward_shape_check.py` in `../Training`
+saved: fresh networks, run 22 seed 1 at cycles 64 and 128; segments 1, 5
+and 10 pooled). A channel's pull is how much a segment's exploring for 3 s
+changes it, against acting with its mean, in units of the channel's spread
+across worlds; with every channel normalised on its own, it is about the
+push the channel gives exploring, before its weight:
+
+| Channel | Fresh | Cycle 64 | Cycle 128 |
+| --- | ---: | ---: | ---: |
+| Run 22's goal: its line, less its distance and force costs | +0.08 | −0.05 | +0.07 |
+| Run 22's health: energy shared with the neighbours, its pain and hanging | −0.57 | −1.77 | −1.69 |
+| Run 23's goal: the followers' mean | −0.07 | +0.04 | +0.27 |
+| Run 23's health: all shared with the neighbours | −0.86 | −3.40 | −3.40 |
+| Its own energy, alone | −13.2 | −9.3 | −6.1 |
+| Team: the followers' mean line and distance, the body's energy at 10 mm/mJ | −0.10 | −0.03 | +0.18 |
+| Own: the force share, pain at the new ramp's weight, hanging | −0.08 | −0.08 | −0.21 |
+
+Exploring costs a segment energy in every pair, since noise always adds
+force: alone in a channel, energy is the clearest signal a segment
+receives. At cycle 128 run 23's health pulled against exploring thirteen
+times harder than its goal pulled for it. Cycle 13 had doubled health's
+learnability by sharing it with the neighbours, which made it clearer in
+that same direction. Weighed 1 : 0.8, the new channels give exploring a
+push of about zero (−0.16, −0.09, +0.01), against −0.38, −1.47 and −1.28
+for run 22 and −0.76, −2.68 and −2.45 for run 23. The line alone would pull
+for exploring (+0.38 to +0.53), but the distance from it, shared, adds its
+noise to the team channel.
+
+**Checked against the closest projects** ([research.md](research.md#team-and-own)):
+
+| Choice | Done the same way |
+| --- | --- |
+| The task's gain shared | Multi-Agent MuJoCo gives every agent of one robot the robot's single reward; the hexapod's legs the body's velocity; MASQ's four legs one reward |
+| Energy shared, in the same reward as progress, at a fixed rate | Multi-Agent MuJoCo: ManyAgent Swimmer pays Δx/Δt − 0.0001 ‖u‖², every agent's commands in the one team reward; MASQ's torque costs are summed in its shared reward |
+| Each agent's duties its own, as costs | The bodyguards of the escort problem each keep their own distance, 0 or −1, beside the team's reward (Sheikh and Bölöni, 2020); each quadruped carrying a box keeps its own place on it |
+| One critic per owner, weighed | Sheikh and Bölöni: a team critic and a local critic for every agent, their gradients added; one critic of the mixed reward swung between the two |
+| Coordination through the force each feels | Ants carrying food align their pull with the force they feel through the load (Gelblum et al., 2015); robots carrying an object read its motion at their own grip (Wang and Schwager, 2016); trains with a motor in every car (Jackiewicz, 2021) |
+
+Where it differs: those team critics see every agent (MADDPG's, MASQ's);
+ours sees its neighbourhood, so the team's far terms are noise to it, the
+accepted limit of cycle 13 ([critic.md](critic.md)). And no project prices
+each agent's share of a force; the share comes from the physics.
+
+**What it gives up.**
+
+- A segment that wastes energy feels a twelfth of it, so energy will shape
+  the gait late. Laziness is caught by the own duties instead: a segment
+  that does not keep up is dragged and pays its share; one that hangs pays
+  its hanging.
+- The force is averaged over 1 s, so it teaches carrying oneself, not when
+  to step: the wave's timing is still left to pain, support and speed.
+- An individual reward that conflicts with the team's can hurt it (Wang et
+  al., ICML 2022). At the team's best, a wave walking on the line with
+  every segment carrying itself, every own duty is about zero; they
+  conflict with the team only on the way there, as costs of exploring,
+  measured above.
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -1388,6 +1512,9 @@ force is worth.
 | α, cycle 6 | By sides, kept over equal sharing |
 | Line : off the line : front joint (cycle 7) | Squared against the reference pay, 40 mm/s, at 3 mm or 0.3 unit weights; the distance counted up to 10 mm, agreed |
 | The head's force price (cycle 7) | None, the user's decision |
+| Team : own (cycle 14) | 1 : 0.8, as goal and health |
+| Millimetres per millijoule inside a channel (cycle 14) | 10: the reference walk's energy a fifth of its line; hanging and pain beside the force share |
+| Pain's ramp (cycle 14) | Half at the first update cycle, full from cycle 129, the user's |
 
 ## As built
 
@@ -1468,6 +1595,17 @@ weighed by the ramp of the update cycle, min(1, (cycle − 1) /
 `pain_ramp_cycles`), which the experiment sets before each cycle
 (`set_pain_weight`); evaluations weigh it 1. The logged parts are as paid,
 after sharing.
+
+**Team and own** (cycle 14). With `reward_channels = "team_own"` the
+channels are the team's and each segment's own. The head's progress and
+arrival, every follower's line and off-line cost, the followers' mean, and
+energy, the body's mean, Σⱼ eⱼ / N for every segment, go to the team
+channel; the front-joint and own force costs, each segment's own, and its
+own pain and hanging to the own channel. Each channel adds its parts with a
+millijoule counted as `mm_per_mj` millimetres; the parts are logged in their
+own units. Pain's weight starts at `pain_ramp_start`: s + (1 − s) ·
+min(1, (cycle − 1) / `pain_ramp_cycles`). The sharing settings of cycle 13
+belong to the two channels by kind (`"goal_health"`, the default).
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

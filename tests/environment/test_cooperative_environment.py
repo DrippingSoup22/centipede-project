@@ -31,6 +31,7 @@ from centipede.environment.settings import CooperatorsSettings, EnvironmentSetti
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.model_mapping import HeadOutline
+from centipede.settings_section import SettingsError
 
 SETTINGS = CooperatorsSettings.from_section({})
 BODY = BodyMeasures(
@@ -206,6 +207,47 @@ def test_the_shared_reward_pays_followers_the_mean_goal_and_shares_pain_and_hang
     torch.testing.assert_close(paid[:, hanging], weights @ own[:, hanging])
     assert [settings.pain_weight_at(c) for c in (1, 65, 129, 200)] == [0, 0.5, 1, 1]
     assert SETTINGS.pain_weight_at(1) == 1.0
+
+
+def test_the_team_and_own_channels_share_the_line_and_energy_and_keep_the_duties():
+    """goal_step priced by owner (cycle 14): the head keeps its target, every
+    follower is paid the followers' mean line and distance, every segment
+    the body's mean energy, all in the team channel; each keeps its force
+    costs, its pain, at the ramp's weight, and its hanging in its own. A
+    channel counts a millijoule as 10 mm. The ramp from half over 128
+    cycles: 0.5, 0.75, 1 at cycles 1, 65, 129."""
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    built = CooperativeReward(SETTINGS, SEGMENTS, 2, BODY, commanded)
+    settings = CooperatorsSettings.from_section(
+        {"reward_channels": "team_own", "pain_ramp_cycles": 128, "pain_ramp_start": 0.5}
+    )
+    split = CooperativeReward(settings, SEGMENTS, 2, BODY, commanded)
+    split.pain_weight = settings.pain_weight_at(65)
+
+    own = built.compute(*goal_step()[2])[1].reward_parts[0]
+    channels, parts, own_energy = split.compute(*goal_step()[2])
+
+    paid = parts.reward_parts[0]
+    index = {name: i for i, name in enumerate(PART_NAMES)}
+    line, forces = slice(0, 4), slice(4, GOAL_PARTS)
+    energy, harm = slice(GOAL_PARTS, index["pain"]), slice(index["pain"], None)
+    torch.testing.assert_close(paid[0, line], own[0, line])
+    torch.testing.assert_close(
+        paid[1:, line], own[1:, line].mean(0).expand(SEGMENTS - 1, -1)
+    )
+    torch.testing.assert_close(paid[:, forces], own[:, forces])
+    torch.testing.assert_close(
+        paid[:, energy], -own_energy[0].mean(0).expand(SEGMENTS, -1)
+    )
+    torch.testing.assert_close(paid[:, harm], own[:, harm] * torch.tensor([0.75, 1]))
+    team = paid[:, line].sum(-1) + 10 * paid[:, energy].sum(-1)
+    kept = paid[:, forces].sum(-1) + 10 * paid[:, harm].sum(-1)
+    torch.testing.assert_close(channels[0], torch.stack((team, kept), -1))
+    assert [settings.pain_weight_at(c) for c in (1, 65, 129)] == [0.5, 0.75, 1]
+    with pytest.raises(SettingsError, match="team_own"):
+        CooperatorsSettings.from_section(
+            {"reward_channels": "team_own", "goal_team_share": 1.0}
+        )
 
 
 @pytest.mark.parametrize(

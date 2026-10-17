@@ -371,10 +371,21 @@ class CooperatorsSettings:
     its own alone); the head keeps its own, the target only it sees.
     ``health_sharing`` ``"all"`` shares pain and hanging with the neighbours
     as energy is shared (``"energy"``: energy alone). Pain's weight rises
-    evenly from 0 over the first ``pain_ramp_cycles`` update cycles
-    (``pain_weight_at``; 0: full from the start), so that the legs can try
-    wide sweeps before pain teaches their timing; evaluations count it in
-    full.
+    evenly from ``pain_ramp_start`` over the first ``pain_ramp_cycles``
+    update cycles (``pain_weight_at``; 0: full from the start), so that the
+    legs can try wide sweeps before pain teaches their timing; evaluations
+    count it in full.
+
+    **Team and own** (cycle 14, docs/cooperators/reward.md):
+    ``reward_channels = "team_own"`` splits the reward by who owns each term
+    rather than by its kind. The first channel, the team's: for every
+    follower the followers' mean line erased and distance from it, for the
+    head its target, and for every segment the body's mean energy. The
+    second, each segment's own: its force cost, its pain and its hanging.
+    Millijoules count ``mm_per_mj`` millimetres in a channel's sum; the
+    parts are logged in their own units. It fixes the sharing itself, so
+    ``goal_team_share`` and ``health_sharing = "all"`` belong to
+    ``"goal_health"``, the two channels of cycles 6 to 13.
     """
 
     start_near_distance_m: float
@@ -413,6 +424,9 @@ class CooperatorsSettings:
     goal_team_share: float
     health_sharing: str
     pain_ramp_cycles: int
+    pain_ramp_start: float
+    reward_channels: str
+    mm_per_mj: float
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -504,17 +518,33 @@ class CooperatorsSettings:
                 "health_sharing", ("energy", "all"), default="energy"
             ),
             pain_ramp_cycles=section.integer("pain_ramp_cycles", default=0, minimum=0),
+            pain_ramp_start=section.number(
+                "pain_ramp_start", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            reward_channels=section.choice(
+                "reward_channels", ("goal_health", "team_own"), default="goal_health"
+            ),
+            mm_per_mj=section.positive_number("mm_per_mj", default=10.0),
         )
         section.reject_unknown_keys()
+        if settings.reward_channels == "team_own" and (
+            settings.goal_team_share or settings.health_sharing == "all"
+        ):
+            raise SettingsError(
+                '[environment.cooperators] reward_channels = "team_own" shares'
+                " the reward itself; goal_team_share and health_sharing belong"
+                ' to "goal_health"'
+            )
         return settings
 
     def pain_weight_at(self, cycle: int) -> float:
         """Pain's weight in update cycle ``cycle``, counted from 1: rising
-        evenly from 0 over the first ``pain_ramp_cycles`` cycles, then 1;
-        always 1 without a ramp."""
+        evenly from ``pain_ramp_start`` over the first ``pain_ramp_cycles``
+        cycles, then 1; always 1 without a ramp."""
         if not self.pain_ramp_cycles:
             return 1.0
-        return min(1.0, (cycle - 1) / self.pain_ramp_cycles)
+        start = self.pain_ramp_start
+        return start + (1 - start) * min(1.0, (cycle - 1) / self.pain_ramp_cycles)
 
 
 @dataclass(frozen=True)

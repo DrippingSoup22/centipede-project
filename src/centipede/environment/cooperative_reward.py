@@ -1,5 +1,6 @@
 """The cooperators' reward: two channels for every segment, goal and health,
-judged apart by a critic each (docs/cooperators/reward.md, cycles 7 and 10)."""
+or from cycle 14 the team's and its own, judged apart by a critic each
+(docs/cooperators/reward.md, cycles 7, 10 and 14)."""
 
 import torch
 
@@ -9,8 +10,9 @@ from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 
-# The reward's parts, signed: the goal's in millimetres, health's in
-# millijoules. The goal channel adds the first GOAL_PARTS, health the rest.
+# The reward's parts, signed: the first GOAL_PARTS in millimetres, the rest
+# in millijoules. The goal channel adds the first GOAL_PARTS, health the
+# rest; the team channel adds TEAM_PARTS, each segment's own channel the rest.
 PART_NAMES = (
     "progress",
     "arrival",
@@ -25,6 +27,7 @@ PART_NAMES = (
     "hanging",
 )
 GOAL_PARTS = 6
+TEAM_PARTS = ("progress", "arrival", "line", "off_line", "pushing", "braking", "force")
 CHANNEL_NAMES = ("goal", "health")
 
 
@@ -100,7 +103,8 @@ class AveragedForces:
 
 
 class CooperativeReward:
-    """Every segment's goal and health for the step just taken."""
+    """Every segment's goal and health, or team and own, for the step just
+    taken."""
 
     def __init__(
         self,
@@ -118,9 +122,16 @@ class CooperativeReward:
         self.settings = settings
         self.commanded_joints = commanded_joints
         device = commanded_joints.device
+        team_own = settings.reward_channels == "team_own"
         self.sharing_weights = energy_sharing_weights(
             segment_count, observation_radius, settings.energy_sharing_decay
         ).to(device)
+        # Energy shared with the neighbours, or with team and own the body's.
+        self.energy_weights = (
+            torch.full((segment_count, segment_count), 1 / segment_count, device=device)
+            if team_own
+            else self.sharing_weights
+        )
         # Pain and hanging shared as energy is, or each segment's own.
         self.pain_and_hanging_weights = (
             self.sharing_weights
@@ -128,11 +139,26 @@ class CooperativeReward:
             else torch.eye(segment_count, device=device)
         )
         # Each segment's shares of the segments' goals: the head its own, a
-        # follower goal_team_share the followers' mean and the rest its own.
-        share = settings.goal_team_share
+        # follower goal_team_share the followers' mean and the rest its own;
+        # with team and own, the line and its distance the followers' mean
+        # and the force costs its own.
+        share = 1.0 if team_own else settings.goal_team_share
         self.goal_weights = (1 - share) * torch.eye(segment_count, device=device)
         self.goal_weights[0, 0] = 1.0
         self.goal_weights[1:, 1:] += share / (segment_count - 1)
+        self.force_cost_weights = (
+            torch.eye(segment_count, device=device) if team_own else self.goal_weights
+        )
+        # Each part's rate into each channel: by kind, or by owner with
+        # millijoules counted as mm_per_mj millimetres.
+        self.part_channels = torch.zeros(len(PART_NAMES), 2, device=device)
+        for index, name in enumerate(PART_NAMES):
+            if team_own:
+                channel = 0 if name in TEAM_PARTS else 1
+                rate = 1.0 if index < GOAL_PARTS else settings.mm_per_mj
+            else:
+                channel, rate = int(index >= GOAL_PARTS), 1.0
+            self.part_channels[index, channel] = rate
         # Pain's weight in this update cycle (CooperatorsSettings.pain_weight_at).
         self.pain_weight = 1.0
         # Millijoules for one motor fully commanded through a step.
@@ -165,8 +191,9 @@ class CooperativeReward:
         averaged_forces: torch.Tensor,
         tow: torch.Tensor,
     ) -> tuple[torch.Tensor, StepRewards, torch.Tensor]:
-        """The ``(W, N, 2)`` rewards, goal and health, their parts, and each
-        segment's own energy before sharing, ``(W, N, 3)`` in mJ.
+        """The ``(W, N, 2)`` rewards, goal and health or team and own, their
+        parts, and each segment's own energy before sharing, ``(W, N, 3)`` in
+        mJ.
 
         The goal, in millimetres: for the head, how much closer its tip came
         to the target and, when it arrives, ``arrival_worth_m``; for each
@@ -187,8 +214,13 @@ class CooperativeReward:
         other followers by ``goal_team_share`` (cycle 13). Health, in
         millijoules: each segment's energy, shared, its pain, at
         ``pain_weight``, and its hanging on the neighbours and the floor,
-        both its own or shared as energy is (``health_sharing``). The parts
-        are as paid, after sharing. ``motor_command`` is
+        both its own or shared as energy is (``health_sharing``). With
+        ``reward_channels = "team_own"`` (cycle 14) the team channel pays the
+        head its target and every follower the followers' mean line and
+        distance from it, and charges every segment the body's mean energy;
+        each segment's own channel charges its force cost, pain and hanging;
+        a channel counts a millijoule as ``mm_per_mj`` millimetres. The
+        parts are as paid, after sharing, in their own units. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
         those of ``RewardContext.from_step``.
         """
@@ -235,7 +267,7 @@ class CooperativeReward:
             ),
             dim=-1,
         )
-        shared_energy = torch.einsum("ij,wjp->wip", self.sharing_weights, own_energy)
+        shared_energy = torch.einsum("ij,wjp->wip", self.energy_weights, own_energy)
         pain = (
             physical_state.leg_leg_force_squared * self.pain_price_mj * self.pain_weight
         )
@@ -258,19 +290,16 @@ class CooperativeReward:
 
         parts = torch.cat(
             (
-                torch.einsum("ij,wjp->wip", self.goal_weights, goal_parts),
+                torch.einsum("ij,wjp->wip", self.goal_weights, goal_parts[..., :4]),
+                torch.einsum(
+                    "ij,wjp->wip", self.force_cost_weights, goal_parts[..., 4:]
+                ),
                 -shared_energy,
                 -pain_and_hanging,
             ),
             dim=-1,
         )
-        channels = torch.stack(
-            (
-                parts[..., :GOAL_PARTS].sum(dim=-1),
-                parts[..., GOAL_PARTS:].sum(dim=-1),
-            ),
-            dim=-1,
-        )
+        channels = parts @ self.part_channels
         step_rewards = StepRewards(
             rewards=channels.sum(dim=-1),
             reward_parts=parts,

@@ -80,6 +80,18 @@ body standing still, and with each advantage normalised on its own the
 weights alone decide who wins there; the goal comes first (principle 1 of
 [reward.md](reward.md#principles)).
 
+**From cycle 14 the two critics are the team's and each one's own** (the
+user's split, 2026-10-17;
+[reward.md](reward.md#cycle-14-the-teams-and-each-ones-own-the-users-split-2026-10-17)).
+The team critic judges what the body achieves and spends: for a follower
+the followers' mean line erased and distance from it, for the head its
+target, for every segment the body's mean energy. The own critic judges
+what a segment does to its neighbours and suffers: its force share, its
+pain and its hanging. They keep the goal and health's weights, 1 : 0.8,
+and their places in the code and the logs (`goal` the team's, `health` the
+own). A critic per owner is what Sheikh and Bölöni (IJCNN 2020) found
+steadier than one critic of a mixed team and individual reward.
+
 **How the two are combined.** Each critic's advantage is normalised over
 the batch on its own, and the two are added with one weight, the same for
 every segment: goal and costs count **1 : 1** to start. The weight alone
@@ -168,7 +180,10 @@ teammates' actions to the target, this one subtracts them out.
   moves together, and a follower sees it through its own tail; the far
   segments' own costs are the noise, averaged over eleven. Measured on
   paired worlds, the goal's learnability stayed what it was (0.78 against
-  0.82 at run 22's cycle 64). Health stays within the radius.
+  0.82 at run 22's cycle 64). Health stays within the radius. From cycle 14
+  the team critic carries the body's mean energy too, every segment's
+  beyond the radius, an average over twelve; the own critic's terms all
+  lie in the segment's own block.
 - **The head is different.** It alone sees the target, so its goal and its
   goal critic differ from the followers'. Each agent has its own reward, so
   this keeps independence.

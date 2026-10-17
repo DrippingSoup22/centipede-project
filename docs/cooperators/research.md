@@ -160,6 +160,27 @@ learning shares a reward, for the decision of cycle 13
 | Learned sharing with the neighbours | LToS, Yi et al., NeurIPS 2022 | Later | Each agent learns how much reward to share; a change in the learning |
 | Costs that grow from a fraction | Hwangbo et al., Science Robotics 2019 | Kept for pain | A high cost on motion makes standing a good local minimum |
 
+## Team and own
+
+How cooperative learning gives agents one job together and duties of their
+own, for the decision of cycle 14
+([reward.md](reward.md#cycle-14-the-teams-and-each-ones-own-the-users-split-2026-10-17)):
+
+| Project | Shared by the team | Each agent's own |
+| --- | --- | --- |
+| Multi-Agent MuJoCo (Peng et al., NeurIPS 2021) | The single robot's reward, repurposed as the team's: ManyAgent Swimmer Δx/Δt − 0.0001 ‖u‖², every agent's commands in its control cost | Nothing |
+| MASQ (2024), a quadruped's legs as agents | One reward, its torque and joint-speed costs summed over the legs; one central critic | Nothing |
+| Escort (Sheikh and Bölöni, IJCNN 2020) | Protecting the VIP, learned by a central critic | Keeping its own distance from the VIP, 0 or −1, learned by a local critic; the two critics' gradients added, steadier and better than one critic of the mixed reward |
+| IRAT (Wang et al., ICML 2022) | A sparse team reward | A dense individual reward, learned by a second policy kept close to the team's; it helped even where the individual reward conflicted |
+| Mixing preferences and the task (Durugkar, Liebman and Stone, IJCAI 2020) | The task | A preference of its own, mixed in linearly; some mixes learned better than the task alone |
+| Quadrupeds carrying a box (arXiv 2509.14342) | The box's height, speed and tilt | Its own place on the box, its torque and its joint motion |
+| Ants carrying food (Gelblum et al., Nature Communications 2015) | The load's motion | Each ant feels the group's force through the load and aligns with it; neither conformity nor individuality alone, but a balance, steered best |
+| Force-ANTS (Wang and Schwager, IJRR 2016) | The object | No messages: each robot reads the object's motion at its grip and aligns its force with it |
+
+The pattern: the task's gain is shared, effort is often shared with it,
+and each agent's duties stay its own, often judged by a critic of their
+own; and agents that share a load coordinate through the force each feels.
+
 ## Sources
 
 - Schilling, Konen, Ohl & Korthals, 2020, [arXiv 2005.11164](https://arxiv.org/abs/2005.11164)
@@ -224,3 +245,10 @@ learning shares a reward, for the decision of cycle 13
 - Samvelyan et al., The StarCraft multi-agent challenge, AAMAS 2019, [arXiv 1902.04043](https://arxiv.org/abs/1902.04043)
 - Multi-Agent MuJoCo (MaMuJoCo), Farama Foundation, [documentation](https://robotics.farama.org/envs/MaMuJoCo)
 - Yi, Li, Wang & Lu, Learning to share in networked multi-agent reinforcement learning (LToS), NeurIPS 2022, [arXiv 2112.08702](https://arxiv.org/abs/2112.08702)
+- Sheikh & Bölöni, Multi-agent reinforcement learning for problems with combined individual and team reward, IJCNN 2020, [arXiv 2003.10598](https://arxiv.org/abs/2003.10598)
+- Wang, Zhang, Hu, Wang, Zhang, Gao, Hao, Lv & Fan, Individual reward assisted multi-agent reinforcement learning (IRAT), ICML 2022, [PMLR 162](https://proceedings.mlr.press/v162/wang22ao.html)
+- Multi-quadruped cooperative object transport: learning decentralized pinch-lift-move, 2025, [arXiv 2509.14342](https://arxiv.org/abs/2509.14342)
+- Liu, Guo, Lin, Ma, Zhu & Li, MASQ: multi-agent reinforcement learning for single quadruped robot locomotion, 2024, [arXiv 2408.13759](https://arxiv.org/abs/2408.13759)
+- Gelblum, Pinkoviezky, Fonio, Ghosh, Gov & Feinerman, Ant groups optimally amplify the effect of transiently informed individuals, Nature Communications 6, 2015, [PMC4525283](https://pmc.ncbi.nlm.nih.gov/articles/PMC4525283/)
+- Wang & Schwager, Force-amplifying N-robot transport system (Force-ANTS) for cooperative planar manipulation without communication, IJRR 35(13), 2016, [Stanford MSL](https://msl.stanford.edu/bibliography/wang_force-amplifying_2016.html)
+- Gymnasium, HalfCheetah: reward = forward reward − 0.1 ‖a‖², [documentation](https://gymnasium.farama.org/environments/mujoco/half_cheetah/)
