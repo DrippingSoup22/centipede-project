@@ -25,7 +25,7 @@ training had used it, by the user's decision
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `c3c4cc99686bdb5aeece162d9de436c120fec6561301251a3043fff304391bad` |
+| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `8212ad15e0261bcf1832abdf9a3be386500f37b066e155cc960c42be0759b2d9` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -478,14 +478,21 @@ model of Dionne, Giardina and Mahadevan (2026) does. The last pair is an
 ordinary leg: in the animal it does not walk (Kenning et al. 2017), and
 the agents may learn to hold it.
 
-**The head** is part of the first unit's body (0.874 g with it): v4's head
-shape, its front stretched 10 mm beyond the unit's front end and narrowing
-to 0.85 of the width and 0.8 of the height there (an estimate). It cannot
-turn on its own. The program finds its outline and its tip, `head_tip`, on
-the first segment, as for v1 to v4. The antennae, a fifth of the body
-long, and the forcipules, the venom claws under the head, are shown but
-weigh nothing and touch nothing: like the membranes, they are visual
-shapes (category 5).
+**The head** is part of the first unit's body (0.874 g with it): one
+collision shape, v4's head shape, its front stretched 10 mm beyond the
+unit's front end and narrowing to 0.85 of the width and 0.8 of the height
+there (an estimate). It cannot turn on its own. The program finds its
+outline and its tip, `head_tip`, on the first segment, as for v1 to v4.
+That shape is drawn as two: a trunk unit like the others, carrying the
+first legs, and the red head ahead of it, which has none. The antennae and
+the forcipules, the venom claws under the head, are shown too. Each
+antenna is 12 tapering pieces, two of *S. heros*' 24 to 26 articles each
+(Shelley 2002), about a fifth of the body long (an estimate), reaching
+forward and out and drooping toward its tip; each forcipule is a claw
+curving forward and in to a dark point. Everything drawn and not the
+collision shape weighs nothing and touches nothing: like the membranes,
+these are visual shapes (category 5), which MuJoCo Warp leaves out of its
+collision pairs.
 
 **Joints and motors** are v4's: every unit owns eight leg motors and every
 unit after the first the yaw motor joining it to the unit ahead, 8 × 21 +
@@ -560,3 +567,7 @@ body under random commands.
   functional variability. *PeerJ* 5, e4023.
 - Dionne, A., Giardina, F. and Mahadevan, L. (2026). Embodied intelligence
   solves the centipede's dilemma. arXiv:2603.08409.
+- Shelley, R. M. (2002). A synopsis of the North American centipedes of the
+  order Scolopendromorpha (Chilopoda). *Virginia Museum of Natural History
+  Memoir* 5; *S. heros*' antennae as Myriatrix summarises it
+  (myriatrix.myspecies.info, *Scolopendra heros*).
