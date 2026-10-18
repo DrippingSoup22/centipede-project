@@ -22,12 +22,15 @@ separately.
 
 ## Status
 
-- **Model: complete and frozen.** The newest body, v4, twelve units whose
+- **Model: complete and frozen.** The newest body, v5, is that of the
+  centipede *Scolopendra heros*: a head without legs and 21 leg-bearing
+  units at the animal's measured size, in
+  [`models/assembly_v5.xml`](models/assembly_v5.xml). v4, twelve units whose
   legs have an ankle, is in [`models/assembly_v4.xml`](models/assembly_v4.xml);
   the example configurations use v3, eight units with three-joint legs, in
-  [`models/assembly_v3.xml`](models/assembly_v3.xml). Both are described in
-  [`docs/model.md`](docs/model.md), and the program runs either without
-  change.
+  [`models/assembly_v3.xml`](models/assembly_v3.xml). All are described in
+  [`docs/model.md`](docs/model.md), and the program runs any of them
+  without change.
 - **Design: agreed.** The program structure, the environment, and the agents are
   described in the documents below.
 - **Code: complete.** The physics simulation runs batches of worlds on the CPU
