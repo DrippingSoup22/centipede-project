@@ -74,7 +74,8 @@ class CooperativeTask:
         """How far either side of straight ahead a target may lie."""
         opening = min(1.0, self.level / self.full_circle_level)
         start = self.settings.start_bearing_deg
-        return math.radians(start + opening * (180.0 - start))
+        bearing = start + opening * (180.0 - start)
+        return math.radians(min(bearing, self.settings.bearing_limit_deg))
 
     def place_targets(
         self,

@@ -1,7 +1,10 @@
 # Task
 
 **Status (2026-10-14): agreed with the user and built
-([As built](#as-built)).** The
+([As built](#as-built)). Cycle 17 (2026-10-18) keeps every target ahead
+for a first stage, the straight walk
+([Cycle 17](#cycle-17-the-straight-walk-first-the-users-decision-2026-10-18)).**
+The
 task is the environment's side of the problem: the targets, the episodes,
 how the difficulty grows, and what happens after an arrival.
 
@@ -257,6 +260,47 @@ reach 10%, the walk being learned from progress; middle is the level
 rising; late is the level at 1 or no longer rising. They are measured,
 not set.
 
+## Cycle 17: the straight walk first (the user's decision, 2026-10-18)
+
+**Why.** Run 25's best walk (`circling_check.py` in `../Training`) never
+changed its pace (131 to 152 mm/s for 80% of the time), turned left 64 to
+92% of the time in every world, reached 60 to 95% of the targets on its
+right the long way round, and walked 2.7 times the straight distance; its
+heading error stayed near 70°. Run 26 steered far better (heading error
+35°, the path 1.5 times the distance closed, 11 to 12 targets an episode),
+but on five fast legs while nine feet barely lifted, and without a wave.
+The levels follow the arrivals, so the bearings opened to the full circle
+(at level 0.53) long before any wave formed: the body learned to reach its
+targets with whatever gait it had. Locomotion research widens a task only
+where the robot already succeeds: Margolis et al. (RSS 2022) widen the
+commanded speeds and turns cell by cell as each is tracked, and sampling
+the whole range from the start failed; Rudin et al. (CoRL 2021) move each
+robot to harder terrain once it crosses its own (curricula in general:
+Narvekar et al., JMLR 2020).
+
+**The design** (the user's):
+
+- **Stage 1, a long straight walk.** Every target within 15° of straight
+  ahead (`bearing_limit_deg`), the next placed ahead the moment one is
+  reached. The episode goes on after an arrival: ending it there would cut
+  the followers' line pay, paid every step, so they would gain by keeping
+  the head from its target and by every detour.
+- **Far targets.** From 20 to 30 mm at level 0, where a stumbling body
+  still arrives, to 20 to 30 body lengths at level 1, 1.1 to 1.6 m
+  (`final_near_body_lengths = 20`). The 7 s stopwatch lets the level, and
+  so the distance, rise only as the walk gets faster: at level 1 a target
+  in time asks 160 to 235 mm/s, more than any walk so far.
+- **The arrival as it is**, worth the target's distance (the user).
+- **The gate is the gait, not the arrivals.** The next stage, wider
+  bearings and then turning, starts from stage 1's checkpoint only once
+  the wave and the legs pass their signs. The wave is read, never paid:
+  a reward on its consistency would pay its form, and the ledger already
+  pays the wave (legs in step or in random phase lose).
+- **No range circle.** With far targets it could not be left within an
+  episode (2.5 × 1.1 to 1.6 m), and at level 0 it would cut short the first
+  walks at 5 to 7.5 cm. The safeguard to watch is the near miss: a target
+  passed just beside the head after a long walk asks for a turn back.
+
 ## As built
 
 - **The full circle from the model.** The near end must clear the body's
@@ -278,6 +322,8 @@ not set.
   is the `task` log's.
 - The settings are `[environment.cooperators]`, with the values above as
   defaults; the episode is main's `max_episode_steps`, 1,000.
+- **Cycle 17**: `bearing_limit_deg` (180, no limit, by default) caps the
+  bearing at every level (`CooperativeTask.half_bearing_rad`).
 
 ## A point to weigh (answered in the reward)
 

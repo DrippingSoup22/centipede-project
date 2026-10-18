@@ -58,7 +58,7 @@ Set by the user on 2026-10-14.
 | Actions | [actions.md](actions.md) | Built: 8 leg torques and the spine joint behind, every 20 ms; from cycle 6 the spine motors receive 0.35 of their command; how actions explore: pink noise, gSDE from cycle 8, a fixed spread schedule in cycle 9, gSDE's learned spread again from cycle 10 |
 | Tow | [tow.md](tow.md) | Built (cycle 10): every segment pushed forward by a share of its weight in training, fading as the mean action, measured in worlds of its own, learns to walk; cycle 12: the push shrinks with each segment's speed to none at a help speed, the fade reads the untowed walk, and the training worlds draw from a floor; cycle 15: braking a tow measured the dearest answer to it, a gentle top of 0.2 |
 | Forces | [forces.md](forces.md) | Model v4's forces checked against biology; no change proposed |
-| Task | [task.md](task.md) | Built, with numbers |
+| Task | [task.md](task.md) | Built, with numbers; cycle 17: every target ahead (`bearing_limit_deg`) and up to 20 to 30 body lengths away, the straight walk first |
 | Research | [research.md](research.md) | The projects and mechanisms the design draws on; how a long body turns (cycle 15) |
 
 ## In the code

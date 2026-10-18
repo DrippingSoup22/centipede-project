@@ -6,6 +6,7 @@ environment on the CPU.
 """
 
 import math
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -72,6 +73,16 @@ def test_targets_follow_the_level_and_the_stopwatch_moves_it():
         assert distance.min() >= near and distance.max() <= 1.5 * near
         assert bearing.max() <= half_bearing + 1e-3
         assert bearing.max() > 0.95 * half_bearing
+
+    # Cycle 17: the targets kept within 15 degrees of straight ahead.
+    ahead = CooperativeTask(
+        replace(SETTINGS, bearing_limit_deg=15.0), BODY, 4096, 400, "cpu"
+    )
+    ahead.level = 1.0
+    ahead.place_targets(every_world, state, torch.full((4096,), 400))
+    offset = ahead.target_position - state.head_tip_position[:, :2]
+    bearing = torch.rad2deg(torch.atan2(offset[:, 1], offset[:, 0])).abs()
+    assert 0.95 * 15.0 < bearing.max() <= 15.0 + 1e-3
 
     # Over one episode length, a third of the timed targets reached within
     # their stopwatch of 350 steps: the level rises by 0.02 x (1/3 - 0.10).

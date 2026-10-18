@@ -306,8 +306,11 @@ class CooperatorsSettings:
     ``start_bearing_deg`` either side of straight ahead; at level 1 its near
     end is ``final_near_body_lengths`` body lengths. Both ends grow in a
     straight line with the level, and the bearing opens to the full circle at
-    the level where the near end clears a body length and a turning circle.
-    A target stays until the head reaches it, and the next appears at once.
+    the level where the near end clears a body length and a turning circle,
+    never wider than ``bearing_limit_deg`` either side (cycle 17: 180, no
+    limit, unless a run keeps its targets ahead to learn a straight walk
+    first). A target stays until the head reaches it, and the next appears
+    at once.
     **Level.** Each target's stopwatch of ``stopwatch_s`` tells whether it was
     reached in time; after each update cycle the level, from ``start_level``,
     moves by ``level_rate`` times the share reached in time over the last
@@ -418,6 +421,7 @@ class CooperatorsSettings:
     final_near_body_lengths: float
     far_to_near_ratio: float
     start_bearing_deg: float
+    bearing_limit_deg: float
     stopwatch_s: float
     start_level: float
     level_set_point: float
@@ -477,6 +481,9 @@ class CooperatorsSettings:
             ),
             start_bearing_deg=section.number(
                 "start_bearing_deg", default=90.0, minimum=0.0, maximum=180.0
+            ),
+            bearing_limit_deg=section.number(
+                "bearing_limit_deg", default=180.0, minimum=0.0, maximum=180.0
             ),
             stopwatch_s=section.positive_number("stopwatch_s", default=7.0),
             start_level=section.number(
