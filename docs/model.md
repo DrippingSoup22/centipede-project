@@ -25,7 +25,7 @@ training had used it, by the user's decision
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `c3c4cc99686bdb5aeece162d9de436c120fec6561301251a3043fff304391bad` |
+| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 25 physics steps per action | `8be8e71e9b0ba9c9269be842e5d49b078c7e21fbe08e4495fdc84fc9ffbc3316` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -478,14 +478,21 @@ model of Dionne, Giardina and Mahadevan (2026) does. The last pair is an
 ordinary leg: in the animal it does not walk (Kenning et al. 2017), and
 the agents may learn to hold it.
 
-**The head** is part of the first unit's body (0.874 g with it): v4's head
-shape, its front stretched 10 mm beyond the unit's front end and narrowing
-to 0.85 of the width and 0.8 of the height there (an estimate). It cannot
-turn on its own. The program finds its outline and its tip, `head_tip`, on
-the first segment, as for v1 to v4. The antennae, a fifth of the body
-long, and the forcipules, the venom claws under the head, are shown but
-weigh nothing and touch nothing: like the membranes, they are visual
-shapes (category 5).
+**The head** is part of the first unit's body (0.874 g with it): one
+collision shape, v4's head shape, its front stretched 10 mm beyond the
+unit's front end and narrowing to 0.85 of the width and 0.8 of the height
+there (an estimate). It cannot turn on its own. The program finds its
+outline and its tip, `head_tip`, on the first segment, as for v1 to v4.
+That shape is drawn as two: a trunk unit like the others, carrying the
+first legs, and the red head ahead of it, which has none. The antennae and
+the forcipules, the venom claws under the head, are shown too. Each
+antenna is 12 tapering pieces, two of *S. heros*' 24 to 26 articles each
+(Shelley 2002), about a fifth of the body long (an estimate), reaching
+forward and out and drooping toward its tip; each forcipule is a claw
+curving forward and in to a dark point. Everything drawn and not the
+collision shape weighs nothing and touches nothing: like the membranes,
+these are visual shapes (category 5), which MuJoCo Warp leaves out of its
+collision pairs.
 
 **Joints and motors** are v4's: every unit owns eight leg motors and every
 unit after the first the yaw motor joining it to the unit ahead, 8 × 21 +
@@ -499,8 +506,8 @@ not collide, as in v2 to v4.
 
 v4's physics, scaled to the new size by dynamic similarity, as motion under
 gravity scales (Froude): with lengths L times v4's and masses M times,
-forces scale with M, torques and stiffnesses with M L, times with √L, and
-damping, a torque per speed, with M L √L. L is the legs' length ratio, M a
+forces scale with M, torques and stiffnesses with M L, times with √L (the
+timestep apart, below), and damping, a torque per speed, with M L √L. L is the legs' length ratio, M a
 unit's mass ratio (the whole body's mass over its units).
 
 | Property | v4 | v5 | Scale |
@@ -510,15 +517,44 @@ unit's mass ratio (the whole body's mass over its units).
 | Maximum torques: sweep, lift, knee, ankle, spine yaw | 8, 18, 10, 5, 15 µN·m | 89, 201, 111, 56, 167 µN·m | M L = 11.14 |
 | Spine stiffness: yaw, pitch | 2e-5, 1e-4 N·m/rad | 2.2e-4, 1.1e-3 N·m/rad | M L |
 | Damping | | | M L √L = 14.81 |
-| Physics timestep | 0.5 ms, 40 steps per action | 0.667 ms, 30 steps per action | √L ≈ 1.33 |
+| Physics timestep | 0.5 ms, 40 steps per action | 0.8 ms, 25 steps per action | 1.6, beyond √L ≈ 1.33 (below) |
 | A leg joint's transient (inertia over damping) | 2 ms | 2.66 ms | √L |
-| Contacts' and joint limits' response | 1 ms | 1.33 ms | twice the timestep, as in v4 |
+| Contacts' and joint limits' response | 1 ms | 1.6 ms | twice the timestep, as in v4 |
 
 So the motors keep v4's strength for the body's weight, and a leg's top
 speed, torque over damping, is v4's over √L, 30 to 75 rad/s. Each leg
 joint's armature makes its transient 2.66 ms, given the legs' own inertia
 at the model's pose; the spine's armature is v4's times M L². Contacts,
 friction and solver settings are v4's.
+
+**The timestep.** Scaled like the other times, it would be 0.667 ms, 30
+steps per action. The GPU's work per action grows with its physics steps
+(on v4, 40 steps took 337 ms and 25 took 228), so the timestep is longer
+still: 0.8 ms, 25 steps (the user's decision, 2026-10-18). The contacts and
+limits, at twice the timestep, are then a little softer than v4's scaled.
+Compared on the CPU (`archive/model_v5_heros/timestep_check.py` in the main
+folder; each with its contacts and limits at twice its timestep):
+
+| Steps per action | Timestep | A sine walk (3.5 Hz, wave over 9) | Deepest penetration, random commands | Joint-limit excess |
+| ---: | ---: | ---: | ---: | ---: |
+| 30 (scaled) | 0.667 ms | 85.4 mm/s, 9.4 mm high | 0.63 to 0.72 mm | 2.8° |
+| **25 (v5)** | **0.8 ms** | **77.4 mm/s, 9.5 mm high** | **0.76 to 0.91 mm** | **3.6°** |
+| 20 | 1 ms | 71.8 mm/s, 8.5 mm high | 0.99 to 1.14 mm | 4.6° |
+
+The same walk is 9% slower at 25 steps, its feet sinking and slipping a
+little more; at 20 steps 16%, and the body walks 0.9 mm lower. On v4 the
+GPU's 32-bit arithmetic lost a world at what corresponds on v5 to
+1.33 ms; v4's 0.8 ms variant, which corresponds to 0.6 ms here, trained
+without one.
+
+**The GPU's reserves.** MuJoCo Warp reserves room for each world's contacts
+and constraint rows once, and the program stops rather than drop any
+([environment.md](environment.md)). A v5 world needs at most 103 contacts
+and 618 constraint rows, when the whole body lies on the floor (each
+contact several rows of its friction cone), 252 rows in a walk
+(`archive/model_v5_heros/contact_budget.py`): more than the default 512
+rows per world, so configurations of v5 set `[environment.simulation]
+constraints_per_world` to 768.
 
 ### Validation of v5
 
@@ -528,12 +564,12 @@ folder's archive):
 
 | Check | Result |
 | --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.038 mm deepest penetration; no solver warning |
-| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.2 to 10.6 mm high, 0.03 to 0.13 mm deep |
-| Random full-strength motor commands, 2 s, 3 runs | 0.63 to 0.72 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 2.8° (v4: 3.2°); no solver warning |
-| Leg closest to a body under the random commands | 0.13 mm |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.051 mm deepest penetration; no solver warning |
+| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.1 to 10.5 mm high, 0.07 to 0.13 mm deep |
+| Random full-strength motor commands, 2 s, 3 runs | 0.76 to 0.91 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 3.6° (v4: 3.2°); no solver warning |
+| Leg closest to a body under the random commands | 0.15 mm |
 | Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs |
-| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
+| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.06 mm of its heights; joint-limit excess at most 3.0° |
 
 As in v1 to v4, the body cannot hold itself up with its motors off. The
 GPU backend reads v5's state as CPU MuJoCo computes it
@@ -542,7 +578,8 @@ environment runs it on both backends without change. Its speed on a
 training GPU, and the Newton solver's iterations there, are not yet
 measured. The automated tests in `tests/models/test_model_v5.py` check the
 size and mass, that every torque and damping is v4's times one scale and
-the timestep and transients its square root, that the body sinks with its
+the transients its square root, the 0.8 ms timestep with contacts and
+limits at twice it, that the body sinks with its
 motors off and stands on its lift motors, and that no leg passes through a
 body under random commands.
 
@@ -560,3 +597,7 @@ body under random commands.
   functional variability. *PeerJ* 5, e4023.
 - Dionne, A., Giardina, F. and Mahadevan, L. (2026). Embodied intelligence
   solves the centipede's dilemma. arXiv:2603.08409.
+- Shelley, R. M. (2002). A synopsis of the North American centipedes of the
+  order Scolopendromorpha (Chilopoda). *Virginia Museum of Natural History
+  Memoir* 5; *S. heros*' antennae as Myriatrix summarises it
+  (myriatrix.myspecies.info, *Scolopendra heros*).

@@ -17,7 +17,7 @@ FLOOR, BODY, LEG, LEFT_FOOT, RIGHT_FOOT = range(5)
 LIMBS = (LEG, LEFT_FOOT, RIGHT_FOOT)
 LEG_ROLES = ("sweep", "lift", "knee", "ankle")
 UNITS = 21
-STEPS_PER_ACTION = 30
+STEPS_PER_ACTION = 25
 
 
 @pytest.fixture(scope="module")
@@ -40,10 +40,10 @@ def by_role(model, names, values):
 
 def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     """The animal's size and mass; v4's joint ranges but the knee's, which
-    bends 10 degrees less; every torque one factor times v4's, and times
-    (the timestep, the leg transient, the contacts' response) and damping,
-    over that factor, about the square root of the length scale, as the
-    timestep's 30 steps per action make it."""
+    bends 10 degrees less; every torque one factor, M L, times v4's, and
+    the leg transient and damping, over that factor, the square root of
+    the length scale L; a 0.8 ms timestep, 25 steps per action, with the
+    contacts and limits responding in twice it."""
     data = mujoco.MjData(v5)
     mujoco.mj_forward(v5, data)
     assert v5.body_subtreemass[1] == pytest.approx(0.01156, rel=1e-3)
@@ -55,7 +55,6 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     # The first unit's legs, and no other joint: the head has no legs.
     assert sum("segment_00" in name for name in names) == len(LEG_ROLES) * 2
 
-    time_scale = v5.opt.timestep / v4.opt.timestep
     assert STEPS_PER_ACTION * v5.opt.timestep == pytest.approx(0.020, abs=1e-12)
     response = (2 * v5.opt.timestep, 1.0)
     assert {tuple(row) for row in v5.geom_solref} == {response}
@@ -68,6 +67,8 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     v4_torques, v5_torques = motors(v4), motors(v5)
     (sweep4,), (sweep5,) = v4_torques["sweep"], v5_torques["sweep"]
     torque_scale = sweep5 / sweep4
+    mass_scale = (v5.body_subtreemass[1] / UNITS) / (v4.body_subtreemass[1] / 12)
+    time_scale = np.sqrt(torque_scale / mass_scale)
     for role, (torque,) in v4_torques.items():
         (torque5,) = v5_torques[role]
         assert torque5 == pytest.approx(torque * torque_scale, rel=1e-3)
@@ -164,7 +165,7 @@ def test_no_leg_passes_through_a_body_under_random_commands(v5):
         if step >= 10 * STEPS_PER_ACTION and step % STEPS_PER_ACTION == 0:
             data.ctrl[:] = rng.uniform(-1.0, 1.0, v5.nu)
         mujoco.mj_step(v5, data)
-        if step % 3 == 0:  # every 2 ms
+        if step % 2 == 0:  # every 1.6 ms
             for a, b in pairs:
                 distance = mujoco.mj_geomDistance(v5, data, a, b, 1e-3, None)
                 closest = min(closest, distance)
