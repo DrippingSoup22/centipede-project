@@ -3,12 +3,12 @@
        Scolopendra heros, a head without legs and 21 leg-bearing units,
        v4's physics scaled to its size. -->
   <compiler angle="degree" autolimits="true" />
-  <option timestep="0.0008" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" tolerance="1e-6" cone="elliptic" />
+  <option timestep="0.0006666666666666666" integrator="implicitfast" gravity="0 0 -9.81" iterations="80" tolerance="1e-6" cone="elliptic" />
   <size nuser_geom="2" nuser_actuator="1" />
   <statistic center="-0.0660869565217 0 0.006" extent="0.1061" />
   <default>
-    <joint limited="true" solreflimit="0.0016 1" solimplimit="0.95 0.99 0.001" />
-    <geom density="686.832" friction="0.8 0.0001 1e-05" condim="3" solref="0.0016 1" solimp="0.95 0.99 0.0001" margin="0" contype="1" conaffinity="1" />
+    <joint limited="true" solreflimit="0.0013333333333333333 1" solimplimit="0.95 0.99 0.001" />
+    <geom density="686.832" friction="0.8 0.0001 1e-05" condim="3" solref="0.0013333333333333333 1" solimp="0.95 0.99 0.0001" margin="0" contype="1" conaffinity="1" />
   </default>
   <visual>
     <global offwidth="1200" offheight="900" />
