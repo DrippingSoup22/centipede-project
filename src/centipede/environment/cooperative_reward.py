@@ -1,6 +1,6 @@
 """The cooperators' reward: two channels for every segment, goal and health,
 or from cycle 14 the team's and its own, judged apart by a critic each
-(docs/cooperators/reward.md, cycles 7, 10, 14 and 15)."""
+(docs/cooperators/reward.md, cycles 7, 10, 14, 15 and 16)."""
 
 import torch
 
@@ -39,6 +39,38 @@ TEAM_PARTS = (
     "force",
 )
 CHANNEL_NAMES = ("goal", "health")
+# Energy's parts, the team's until cycle 16 moves them to each segment's own.
+ENERGY_PARTS = ("pushing", "braking", "force")
+
+
+def team_part_names(energy_own: bool) -> tuple[str, ...]:
+    """The parts the team channel adds; with ``energy_own`` (cycle 16's
+    ``energy_side_shares``) energy's are each segment's own."""
+    return tuple(
+        name for name in TEAM_PARTS if not (energy_own and name in ENERGY_PARTS)
+    )
+
+
+def side_share_weights(
+    segment_count: int, side_shares: tuple[float, ...]
+) -> torch.Tensor:
+    """Each segment's shares of its own and its neighbours' energy, ``(N, N)``
+    (the user's rule, cycle 16): each side's neighbours ``side_shares`` by
+    distance, the segment itself the rest; a missing neighbour's share goes to
+    the nearest one on its side, a missing side's to the other side. With
+    ``(0.25, 0.05)`` a middle segment pays 40% of its own energy, 25% of each
+    nearest neighbour's and 5% of each next one's; the head 40% of its own,
+    50% of segment 1's and 10% of segment 2's."""
+    weights = torch.eye(segment_count) * (1 - 2 * sum(side_shares))
+    reach = len(side_shares)
+    for i in range(segment_count):
+        ahead = [i - d for d in range(1, reach + 1) if i - d >= 0]
+        behind = [i + d for d in range(1, reach + 1) if i + d < segment_count]
+        for side, other in ((ahead, behind), (behind, ahead)):
+            neighbours = side or other
+            for distance, share in enumerate(side_shares):
+                weights[i, neighbours[min(distance, len(neighbours) - 1)]] += share
+    return weights
 
 
 def energy_sharing_weights(
@@ -71,10 +103,11 @@ def energy_sharing_weights(
 
 class AveragedForces:
     """The forces on each segment that the reward prices, averaged through
-    time, ``values`` ``(W, N, 4)`` in unit weights: the net force its joints
-    put on it along the body and up, the front joint's force, and the
-    floor's push on its body. Each step moves the average ``averaging_rate``
-    of the way to the step's value; 1 keeps the step's."""
+    time, ``values`` ``(W, N, 5)`` in unit weights: the net force its joints
+    put on it along the body and up, the front joint's force, the floor's
+    push on its body, and the force with which its legs press on other legs.
+    Each step moves the average ``averaging_rate`` of the way to the step's
+    value; 1 keeps the step's."""
 
     def __init__(
         self,
@@ -86,7 +119,7 @@ class AveragedForces:
     ) -> None:
         self.unit_weight_n = unit_weight_n
         self.averaging_rate = averaging_rate
-        self.values = torch.zeros((world_count, segment_count, 4), device=device)
+        self.values = torch.zeros((world_count, segment_count, 5), device=device)
 
     def _current(self, state: PhysicalState) -> torch.Tensor:
         return (
@@ -95,6 +128,7 @@ class AveragedForces:
                     state.net_joint_force,
                     state.front_joint_force[..., None],
                     state.belly_normal_force[..., None],
+                    state.leg_leg_force[..., None],
                 ),
                 dim=-1,
             )
@@ -136,12 +170,19 @@ class CooperativeReward:
         self.sharing_weights = energy_sharing_weights(
             segment_count, observation_radius, settings.energy_sharing_decay
         ).to(device)
-        # Energy shared with the neighbours, or with team and own the body's.
-        self.energy_weights = (
-            torch.full((segment_count, segment_count), 1 / segment_count, device=device)
-            if team_own
-            else self.sharing_weights
-        )
+        # Energy shared with the neighbours; with team and own the body's
+        # mean, or from cycle 16 each segment's own, shared by neighbourhood.
+        energy_own = team_own and bool(settings.energy_side_shares)
+        if energy_own:
+            self.energy_weights = side_share_weights(
+                segment_count, settings.energy_side_shares
+            ).to(device)
+        elif team_own:
+            self.energy_weights = torch.full(
+                (segment_count, segment_count), 1 / segment_count, device=device
+            )
+        else:
+            self.energy_weights = self.sharing_weights
         # Pain and hanging shared as energy is, or each segment's own.
         self.pain_and_hanging_weights = (
             self.sharing_weights
@@ -162,9 +203,10 @@ class CooperativeReward:
         # Each part's rate into each channel: by kind, or by owner with
         # millijoules counted as mm_per_mj millimetres.
         self.part_channels = torch.zeros(len(PART_NAMES), 2, device=device)
+        team_names = team_part_names(energy_own)
         for index, name in enumerate(PART_NAMES):
             if team_own:
-                channel = 0 if name in TEAM_PARTS else 1
+                channel = 0 if name in team_names else 1
                 rate = 1.0 if index < GOAL_PARTS else settings.mm_per_mj
             else:
                 channel, rate = int(index >= GOAL_PARTS), 1.0
@@ -176,6 +218,7 @@ class CooperativeReward:
         self.pain_price_mj = (
             self.force_price_mj * settings.pain_price / body.leg_push_n**2
         )
+        self.unit_weight_n = body.unit_weight_n
         # Millijoules for a unit weight hanging through a step.
         self.hanging_price_mj = self.force_price_mj * settings.hanging_price
         # Millimetres of goal a squared cost takes through a step at its scale.
@@ -236,8 +279,10 @@ class CooperativeReward:
         of the segments behind it added back (what the legs push), a pull
         free, squared against the force's scale and averaged over the
         joints; with ``ramp_team_costs`` energy and the squeeze are weighed
-        as pain is. The parts are as paid, after sharing, in their own
-        units. ``motor_command`` is
+        as pain is. Cycle 16: with ``energy_side_shares`` energy is each
+        segment's own, shared by neighbourhood (``side_share_weights``); with
+        ``pain_averaged`` pain prices the legs' averaged press. The parts are
+        as paid, after sharing, in their own units. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
         those of ``RewardContext.from_step``.
         """
@@ -269,7 +314,7 @@ class CooperativeReward:
         else:
             off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
             off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2
-        along, up, front, floor = averaged_forces.unbind(dim=-1)
+        along, up, front, floor, legs_pressed = averaged_forces.unbind(dim=-1)
         # Energy and the squeeze, weighed as pain is with ramp_team_costs.
         team_cost_weight = self.pain_weight if settings.ramp_team_costs else 1.0
         # The squeeze: what the legs push at each joint, the tows behind it
@@ -305,9 +350,14 @@ class CooperativeReward:
         shared_energy = team_cost_weight * torch.einsum(
             "ij,wjp->wip", self.energy_weights, own_energy
         )
-        pain = (
-            physical_state.leg_leg_force_squared * self.pain_price_mj * self.pain_weight
+        # Pain: the legs' press on other legs squared, as it is or averaged
+        # (cycle 16).
+        pressed_squared = (
+            (legs_pressed * self.unit_weight_n) ** 2
+            if settings.pain_averaged
+            else physical_state.leg_leg_force_squared
         )
+        pain = pressed_squared * self.pain_price_mj * self.pain_weight
         pain_and_hanging = torch.einsum(
             "ij,wjp->wip",
             self.pain_and_hanging_weights,

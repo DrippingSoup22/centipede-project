@@ -35,6 +35,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         head_advantage_weights=(),
         critic_baselines=False,
         value_normalization=False,
+        value_normalization_horizon=0,
         ppo=PPOSettings(
             discount=0.999,
             gae_lambda=0.95,

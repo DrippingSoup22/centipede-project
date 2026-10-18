@@ -399,6 +399,19 @@ class CooperatorsSettings:
     of the segments behind it taken out and a pull free, priced as the force
     share is and averaged over the joints (0: none). With
     ``ramp_team_costs`` pain's ramp weighs energy and the squeeze too.
+
+    **Energy shared with the neighbours, and pain averaged** (cycle 16,
+    docs/cooperators/reward.md). With ``reward_channels = "team_own"``,
+    ``energy_side_shares`` moves energy from the team's body mean into each
+    segment's own channel, shared by neighbourhood: each side's neighbours
+    get these shares by distance, the segment itself the rest (``[0.25,
+    0.05]``: itself 40%, each nearest neighbour 25%, each next one 5%), a
+    missing neighbour's share going to the nearest one on its side and a
+    missing side's to the other side (empty: the body's mean, cycle 14).
+    With ``pain_averaged`` pain prices the force with which a segment's legs
+    press on other legs averaged over ``averaging_s``, squared, so that a
+    brief brush costs little and a lasting press as before (false: the
+    instant force, squared).
     """
 
     start_near_distance_m: float
@@ -444,6 +457,8 @@ class CooperatorsSettings:
     line_drift_leak_s: float
     squeeze_weight: float
     ramp_team_costs: bool
+    energy_side_shares: tuple[float, ...]
+    pain_averaged: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -550,8 +565,22 @@ class CooperatorsSettings:
             ),
             squeeze_weight=section.number("squeeze_weight", default=0.0, minimum=0.0),
             ramp_team_costs=section.boolean("ramp_team_costs", default=False),
+            energy_side_shares=section.number_list(
+                "energy_side_shares", default=(), minimum=0.0
+            ),
+            pain_averaged=section.boolean("pain_averaged", default=False),
         )
         section.reject_unknown_keys()
+        if sum(settings.energy_side_shares) > 0.5:
+            raise SettingsError(
+                "[environment.cooperators] energy_side_shares give both sides more"
+                f" than the whole: {list(settings.energy_side_shares)}"
+            )
+        if settings.energy_side_shares and settings.reward_channels != "team_own":
+            raise SettingsError(
+                "[environment.cooperators] energy_side_shares belong to"
+                ' reward_channels = "team_own"'
+            )
         if settings.reward_channels == "team_own" and (
             settings.goal_team_share or settings.health_sharing == "all"
         ):

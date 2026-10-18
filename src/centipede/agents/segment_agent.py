@@ -107,6 +107,7 @@ class SegmentAgent:
             advantage_weights=(advantage_weights or None) if several_critics else None,
             baseline_networks=baseline_networks,
             value_normalization=settings.value_normalization,
+            value_normalization_horizon=settings.value_normalization_horizon,
         )
         # Scheduled spreads are set by the experiment, never learned.
         if settings.action_std_schedule != "learned":

@@ -39,7 +39,11 @@ pain from half its weight
 After run 24, cycle 15 pays the line near it instead of charging the
 distance, draws it where the head keeps pointing, and charges every
 follower the chain's squeeze; energy and the squeeze are ramped in with
-pain ([Cycle 15](#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).**
+pain ([Cycle 15](#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).
+After run 25, cycle 16 moves energy into each segment's own channel,
+shared with its neighbours (40% itself, 25% each nearest, 5% each next),
+and prices pain on the legs' press averaged over 1 s
+([Cycle 16](#cycle-16-energy-shared-with-the-neighbours-pain-averaged-the-users-design-2026-10-18)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1511,6 +1515,93 @@ braking it −26.6 and lying limp riding it −33.3; braking a tow of 0.4
 0.4 under a tow of 0.2 erase 10.2 mm/s of line a follower against 4.1 at
 spread 0.25 and 0.3 with neither ([tow.md](tow.md)).
 
+### Cycle 16: energy shared with the neighbours, pain averaged (the user's design, 2026-10-18)
+
+**Why** (run 25). Both seeds' mean actions walked to their targets for the
+first time, 2.7 to 4.5 targets an episode at the hardest level, but limped:
+some legs held up or used as props while others stepped at 5 to 7 Hz, and
+the rear did little. Measured (the scripts in `../Training/analysis`):
+
+- **Energy's credit** (`ledger_energy_check.py`). As the body's mean in
+  the team channel, energy gave each segment a twelfth of its own, mixed
+  with eleven others' noise, and broke the pairing rule: a critic sees five
+  segments, the mean depends on twelve. Energy alone cannot be the own
+  cost: a dragged or limp tail, a held-up leg and a limp rear half gain
+  under energy and pain alone (+0.2 to +9.6 mm/s for the culprit), because
+  a segment carried by its neighbours saves its holding force, 85% of its
+  energy, while dragging it costs them little friction at walking speed.
+  Hanging closes those holes; the force share keeps braking and being
+  dragged dear (the tail braking −51 mm/s, dragged −61).
+- **The critics' scale** (`critic_check.py`). Each critic standardised its
+  targets by every target since cycle 1. Late in run 25 the followers' team
+  targets spread over 0.29 to 0.50 of the stored scale and the head's own
+  over 0.08 to 0.20, their mean 1.4 stored spreads off: the scale lagged the
+  returns, which drift about 1% an update (team) and 0.3% (own).
+- **Pain's bursts** (`critic_check.py`). The rarest 1% of steps held 92 to
+  100% of pain's variance, a rare collision squared; under the design below
+  pain would make 74 to 100% of the own channel's spread in segments 3 to 7,
+  a single collision setting a whole batch's own advantages.
+- **One normalisation of the summed advantages** (`critic_check.py`), once
+  proposed for the head's nearly empty own channel, would leave the own
+  channel 2 to 16% of the advantage variance and cut its pull on the policy
+  five- to tenfold against run 25's, where per-critic normalisation weighed
+  an own millimetre as 1.5 to 9 team millimetres. Not taken: with energy in
+  it, no own channel is empty (the head's is 99 to 100% energy).
+
+**The design** (the user's, 2026-10-18):
+
+- **Energy, each segment's own, shared by neighbourhood**
+  (`energy_side_shares = [0.25, 0.05]`): 40% of its own, 25% of each nearest
+  neighbour's and 5% of each next one's, a missing side's shares going to
+  the other side (the head 40% itself, 50% segment 1, 10% segment 2; the
+  tail likewise). A segment pays for what it spends and for what it makes
+  its neighbours spend, within what its critic sees; the team channel keeps
+  no energy. Still ramped in with pain.
+- **The own channel keeps the force share, pain and hanging**: energy
+  alone leaves the rear's holes open.
+- **Pain on the averaged press** (`pain_averaged`): the force with which a
+  segment's legs press on other legs, averaged over 1 s like every other
+  priced force, squared. A lasting press costs as before; a brush of one
+  step costs 0.02² of what it did.
+- **The critics**: each one's scale an average over about the last 10
+  updates ([critic.md](critic.md#as-built)); the advantages still
+  normalised per critic, 1 : 0.8.
+
+**Measured** (`ledger_cycle16_check.py`: run 26's environment as built, 16
+worlds, 7 s, a scripted centipede steering through its turns with a wave
+over 5 segments, head to tail; each fault's culprits' total, team + 0.8
+own, minus the same segments' in that walk, mm/s; in brackets at an own
+weight of 4.6, the largest boost per-critic normalisation gave run 25):
+
+| Behaviour | Culprits | Total minus the good walk |
+| --- | --- | ---: |
+| The followers holding straight through the turns | followers | −18.3 (−7.5) |
+| The head holding still | head | −38.8 |
+| Legs almost in step (a wave over 12) | followers | −66.2 |
+| **The wave running backward, tail to head** | followers | **+4.9 (+12.5)** |
+| Legs in random phase | followers | −22.1 |
+| Everyone standing | followers | −25.8 (−18.4) |
+| Everyone limp | followers | −42.4 |
+| Segment 5 braking | segment 5 | −136 |
+| Segment 5 dragged | segment 5 | −10.3 |
+| Segment 6's left leg held up | segment 6 | −2.3 (−24.6) |
+| The tail braking | tail | −54.9 |
+| The tail dragged | tail | −61.7 |
+| The tail's left leg held up | tail | −20.6 |
+| The rear half braking | segments 6 to 11 | −39.6 |
+| The rear half limp | segments 6 to 11 | −66.6 |
+
+The well-behaved walk earns each follower +27 mm/s from the team and pays
+10 to 18 of its own; at the ramps' start, pain, energy and the squeeze at
+half, the order is the same. Every fault pays less, the held-up leg of
+segment 6 least so. The one exception is no fault: a wave running the other
+way, tail to head, walks this body faster (line +6 to +7 mm/s a follower
+over three sets of starts, +4.9, +7.2 and +8.3 in all, with slightly lower
+own costs). Scolopendromorph centipedes walk with waves running head to
+tail, scutigeromorphs, lithobiomorphs and millipedes tail to head; why an
+animal chooses one is not well understood (Kuroda et al., 2014, as cited by
+Ambe et al., 2021).
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -1721,6 +1812,16 @@ over the joints k ≥ 1 of (min(0, Tₖ + Σⱼ≥ₖ tⱼ) / `joint_force_scale
 the averaged front joint force of segment k and tⱼ the tows, in unit
 weights. With `ramp_team_costs` energy and the squeeze are weighed by
 pain's ramp. The diagnostics log the head's sideslip and the drift.
+
+**Energy shared by neighbourhood, and pain averaged** (cycle 16). With
+`energy_side_shares` s₁, s₂, … (team and own only), segment i's energy
+parts are Σⱼ wᵢⱼ Eⱼ, wᵢᵢ = 1 − 2 Σ s, the neighbours at distance d on each
+side s_d, a missing neighbour's share to the nearest on its side and a
+missing side's to the other side (`side_share_weights`), in the own
+channel. `AveragedForces` keeps a fifth average, the force with which a
+segment's legs press on other legs (`leg_leg_force`), and with
+`pain_averaged` pain is that average squared, in newtons, times the pain
+price.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

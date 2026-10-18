@@ -31,7 +31,11 @@ from torch.nn.functional import one_hot
 
 from centipede.diagnostics_category import measure
 from centipede.environment.cooperative_line import HeadLine
-from centipede.environment.cooperative_reward import CHANNEL_NAMES, PART_NAMES
+from centipede.environment.cooperative_reward import (
+    CHANNEL_NAMES,
+    ENERGY_PARTS,
+    PART_NAMES,
+)
 from centipede.environment.diagnostics import SHARE_EDGES
 from centipede.environment.head import head_forward_direction, target_seen_from_head
 from centipede.environment.reward_function import StepRewards
@@ -40,7 +44,6 @@ from centipede.environment.simulation.diagnostics import SimulationFacts
 from centipede.environment.simulation.model_mapping import HeadOutline
 
 LEGS = ("left", "right")
-ENERGY_PARTS = ("pushing", "braking", "force")
 # A foot stands while the floor carries at least this share of a unit's weight
 # on it, so that a graze is not a stance.
 STANCE_LOAD_SHARE = 0.1

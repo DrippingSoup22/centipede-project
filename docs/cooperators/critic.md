@@ -233,9 +233,24 @@ actor of 2 × 64.
 - **Value normalisation** (MAPPO's first advice, Yu et al., NeurIPS 2022):
   every critic's value and baseline learn its return targets standardised
   by their running mean and spread, so millimetres and millijoules never set
-  the scale the networks learn.
+  the scale the networks learn. Until cycle 16 every target since cycle 1
+  weighed alike, and the scale lagged returns that drift as the policy
+  learns: late in run 25 the followers' team targets spread over 0.29 to
+  0.50 of it, the head's own over 0.08 to 0.20 (`analysis/critic_check.py`
+  in `../Training`). From cycle 16 (`[agents] value_normalization_horizon`)
+  the mean and spread are an exponential average over about the last 10
+  updates: the team critics' scale drifts about 1% an update, so 10 keeps
+  its lag near 10%, each update's 131,000 targets measure it precisely, and
+  it moves about 1% an update, slowly enough for the critic to follow.
 - **The combination**: each critic's advantage normalised over the batch on
-  its own, then added by `advantage_weights` (1 : 0.8 from cycle 6).
+  its own, then added by `advantage_weights` (1 : 0.8 from cycle 6). A
+  normalisation of the sum instead would weigh each channel by its size in
+  millimetres, and the own channel's advantages are several times smaller
+  than the team's: it would hold 2 to 16% of the variance (measured for
+  cycle 16's channels). Per critic, a channel's weight is its share
+  whatever its size; the risk, a nearly empty channel's noise blown up to
+  full size (run 25's head), goes with cycle 16, which puts energy in every
+  own channel.
 - **Logged**: every critic's and every baseline's explained variance after
   each update. A baseline explaining much more than its value shows the
   neighbours' actions at work.

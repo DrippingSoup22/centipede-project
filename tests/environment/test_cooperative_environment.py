@@ -288,6 +288,47 @@ def test_cycle_15_pays_the_line_near_it_and_charges_every_follower_the_squeeze()
     )
 
 
+def test_cycle_16_shares_energy_by_neighbourhood_in_the_own_channel_and_averages_pain():
+    """goal_step priced as cycle 16: segment 2's microjoule of pushing work
+    shared 40% to itself, 25% to each nearest neighbour and 5% to each next
+    one, the ends taking a missing side's shares (the head 10%: 5% from each
+    side), all in the own channel. Pain averaged: segment 3's legs pressed
+    with a full push for good cost what the instant press did; a press that
+    only began this step, averaged at 0.02 a step, costs 0.02 squared of it."""
+    settings = CooperatorsSettings.from_section(
+        {
+            "reward_channels": "team_own",
+            "energy_side_shares": [0.25, 0.05],
+            "pain_averaged": True,
+        }
+    )
+    reward = CooperativeReward(settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, 9))
+    state, forces, arguments = goal_step()
+    state.leg_leg_force[0, 3] = BODY.leg_push_n
+    forces.restart(torch.tensor([True]), state)
+
+    channels, parts, _ = reward.compute(*arguments)
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    shares = torch.tensor([0.1, 0.25, 0.4, 0.25, 0.1])
+    torch.testing.assert_close(by_name["pushing"], -1e-3 * shares)
+    one_motor = SETTINGS.force_price_w * 0.02 * 1e3
+    torch.testing.assert_close(by_name["pain"], torch.tensor([0, 0, 0, -one_motor, 0]))
+    team = sum(by_name[name] for name in PART_NAMES[:5])
+    torch.testing.assert_close(channels[0, :, 0], team)
+
+    brief = AveragedForces(1, SEGMENTS, BODY.unit_weight_n, 0.02, "cpu")
+    pressed = state.leg_leg_force.clone()
+    state.leg_leg_force.zero_()
+    brief.restart(torch.tensor([True]), state)
+    state.leg_leg_force.copy_(pressed)
+    brushed = reward.compute(*arguments[:-2], brief.update(state), arguments[-1])[1]
+    torch.testing.assert_close(
+        brushed.reward_parts[0, 3, PART_NAMES.index("pain")],
+        torch.tensor(-(0.02**2) * one_motor),
+    )
+
+
 def test_the_line_drifts_where_the_head_keeps_pointing_and_not_where_it_goes():
     """The body walks along +x at 20 mm/s with the head turned 10° to the
     left: its sideslip is 10° and, leaking over 1 s, the drift settles at
@@ -339,7 +380,7 @@ def test_the_own_prices_charge_each_follower_its_joints_net_force_with_or_withou
         settings, SEGMENTS, 2, BODY, torch.ones(SEGMENTS, LEGS + 1)
     )
     state = resting_state(1)
-    averaged = torch.zeros(1, SEGMENTS, 4)
+    averaged = torch.zeros(1, SEGMENTS, 5)
     averaged[0, :, 0] = torch.tensor([0.5, 0.3, -0.1, -0.3, 0.0])
     averaged[0, :, 2] = 1.0  # a front joint force that no longer costs
     tow = torch.tensor([[0.0, 0.0, 0.0, 0.3, 0.3]])
@@ -509,7 +550,7 @@ def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target
     last_action = torch.rand(1, SEGMENTS, LEGS + 1)
     # Averaged forces: along, up, front joint, floor; segment 1 pushes the
     # head with 0.5 and pulls segment 2 with 2.
-    averaged = torch.zeros(1, SEGMENTS, 4)
+    averaged = torch.zeros(1, SEGMENTS, 5)
     averaged[0, :3, 2] = torch.tensor([0.0, -0.5, 2.0])
     averaged[0, 1, :2] = torch.tensor([0.3, 1.0])
     line_view = torch.zeros(1, SEGMENTS, 3)
@@ -559,7 +600,7 @@ def test_a_block_can_hold_the_joint_forces_of_the_step_and_the_tow_level():
         torch.zeros(2, 2),
         torch.zeros(2, SEGMENTS, LEGS + 1),
         torch.zeros(2, SEGMENTS, 3),
-        torch.zeros(2, SEGMENTS, 4),
+        torch.zeros(2, SEGMENTS, 5),
         torch.tensor([0.0, 0.25]),
     )
 
@@ -601,7 +642,7 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
             step_rewards,
             torch.zeros(2, SEGMENTS, 3),
             zeros,
-            torch.zeros(2, SEGMENTS, 4),
+            torch.zeros(2, SEGMENTS, 5),
             line,
             arrived,
             arrived,

@@ -100,7 +100,9 @@ class AgentSettings:
     when given, are the head's own. With ``critic_baselines``
     each critic also has a baseline that sees the actions the neighbours took
     at the same step (RL_lib's PPO), and with ``value_normalization`` the
-    critics learn standardised return targets.
+    critics learn standardised return targets, standardised by every target
+    since the start or, with ``value_normalization_horizon``, by about that
+    many latest updates' (cycle 16, docs/cooperators/critic.md).
     """
 
     device: str
@@ -124,6 +126,7 @@ class AgentSettings:
     head_advantage_weights: tuple[float, ...]
     critic_baselines: bool
     value_normalization: bool
+    value_normalization_horizon: int
     ppo: PPOSettings
 
     def learning_rate_at(self, cycle: int, total_cycles: int) -> float | None:
@@ -209,6 +212,9 @@ class AgentSettings:
             ),
             critic_baselines=section.boolean("critic_baselines", default=False),
             value_normalization=section.boolean("value_normalization", default=False),
+            value_normalization_horizon=section.integer(
+                "value_normalization_horizon", default=0, minimum=0
+            ),
             ppo=PPOSettings.from_section(section.table("ppo")),
         )
         section.reject_unknown_keys()
