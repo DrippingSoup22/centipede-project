@@ -7,13 +7,17 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The newest model is **v4**: twelve body units, and legs of three links with a
-fourth joint, the ankle, with v3's torque motors, leg armature, and a 0.5 ms
-physics timestep (see [Model v4](#model-v4)). **v3**, which the example configurations use, is v2
-with a longer physics timestep (see [Model v3](#model-v3)). v2 has exactly the
-body and physics of the original **v1 flat-ground baseline**. v2 and v1 are kept
-unchanged for reference. All four are frozen: training work may change
-observations, rewards, targets, and learning, but never a model. A physical
+The newest model is **v5**, the body of a real species, *Scolopendra
+heros*: a head without legs and 21 leg-bearing units at the animal's
+measured length and mass, with v4's physics scaled to its size (see
+[Model v5](#model-v5)). **v4** has twelve body units, and legs of three
+links with a fourth joint, the ankle, with v3's torque motors, leg armature,
+and a 0.5 ms physics timestep (see [Model v4](#model-v4)). **v3**, which the
+example configurations use, is v2 with a longer physics timestep (see
+[Model v3](#model-v3)). v2 has exactly the body and physics of the original
+**v1 flat-ground baseline**. v2 and v1 are kept unchanged for reference. All
+five are frozen: training work may change observations, rewards, targets,
+and learning, but never a model. A physical
 change requires a new, separately named version with its own validation. The
 one exception: v4's physics were revised in place on 2026-10-15, before any
 training had used it, by the user's decision
@@ -21,6 +25,7 @@ training had used it, by the user's decision
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
+| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `c3c4cc99686bdb5aeece162d9de436c120fec6561301251a3043fff304391bad` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -437,3 +442,121 @@ joints, and torques carry over except the timestep, the response times, and
 the leg armature, which they check too; that the body sinks with its motors
 off and stands on its lift motors; and that no leg passes through a body
 under random commands.
+
+## Model v5
+
+v5 is the body of a real species, *Scolopendra heros*, the giant desert
+centipede of North America: a head without legs and 21 leg-bearing units,
+at the length and mass its animals were measured at. Of the *Scolopendra*
+species whose walking has been studied, it is the largest: Anderson,
+Shultz and Jayne (1995) measured its length, its mass and its gait at
+three speeds. Where they measured nothing, v5 follows *S. polymorpha*, a
+close relative of the same deserts and the best-studied species. Its
+physics are v4's, scaled to the new size.
+
+### The body
+
+| Property | v4 | v5 | Source |
+| --- | ---: | ---: | --- |
+| Units with legs | 12, the head's included | 21, behind a head without legs | *S. heros* has 21 leg-bearing segments (Anderson et al. 1995); neither the head nor the forcipular segment behind it carries walking legs (Kenning et al. 2017) |
+| Length, the head's tip to the rear's end | 54.8 mm | 150 mm | the animals' mean length, 15.2 cm (Anderson et al. 1995) |
+| Distance between leg pairs | 4.3 mm | 6.61 mm | 152 mm over 23 units, the head and the forcipular segment counted as one unit each (an estimate) |
+| Body width / height | 8.0 / 3.4 mm | 14.1 / 7.8 mm | *S. polymorpha*'s width over its length, 0.8 over 8.6 cm (Pierce et al. 2026), times 152 mm; the height 0.55 of the width, as in Anderson et al.'s cross-section of *S. heros* (their Fig. 2A) |
+| Leg length | 10.4 mm | 18.4 mm | 1.3 body widths, as in *S. polymorpha* (Pierce et al. 2026) |
+| Leg thickness: femur, tibia, tarsus | 0.60, 0.44, 0.36 mm | 1.83, 1.41, 0.99 mm | 0.13, 0.10 and 0.07 body widths: measured on photographs of *S. polymorpha* with scale bars (Pierce et al. 2026, Figs 1A and 2A), 0.12 to 0.18 widths near the body, and on Anderson et al.'s drawing, 0.09 |
+| Leg pose | the femur level, the tibia 35° and the tarsus 60° below the horizontal | the femur rising 30°, the tibia 75° and the tarsus 60° below the horizontal | between the photographs and the drawing: the knee near the top of the body, the foot about 0.75 body widths beyond its side, the belly half the body's height above the floor |
+| Mass | 1047.9 mg | 11.56 g | the animals' mean, 11.56 g (Anderson et al. 1995) |
+| Motors / position coordinates | 107 / 125 | 188 / 215 | |
+
+Every unit and leg keeps v4's shapes, scaled along each axis. The mass has
+one density throughout (687 kg/m³ of the convex shapes), so a part weighs
+as its volume: a trunk unit's body 0.477 g, the legs 10% of the whole (v4:
+6%). The units and their legs are all alike. In the animal the legs grow
+longer toward the rear and the back plates alternate long and short
+(Anderson et al. 1995; Pierce et al. 2026); v5 leaves this out, as the
+model of Dionne, Giardina and Mahadevan (2026) does. The last pair is an
+ordinary leg: in the animal it does not walk (Kenning et al. 2017), and
+the agents may learn to hold it.
+
+**The head** is part of the first unit's body (0.874 g with it): v4's head
+shape, its front stretched 10 mm beyond the unit's front end and narrowing
+to 0.85 of the width and 0.8 of the height there (an estimate). It cannot
+turn on its own. The program finds its outline and its tip, `head_tip`, on
+the first segment, as for v1 to v4. The antennae, a fifth of the body
+long, and the forcipules, the venom claws under the head, are shown but
+weigh nothing and touch nothing: like the membranes, they are visual
+shapes (category 5).
+
+**Joints and motors** are v4's: every unit owns eight leg motors and every
+unit after the first the yaw motor joining it to the unit ahead, 8 × 21 +
+20 = 188. The joint ranges are v4's around the new pose, but the knee's,
+which bends 10° less, to +40°: folded at the corners of their ranges, and
+3° past them as the soft limits allow, a foot then stays 1.05 mm clear of
+its own body (at +50° it went 0.68 mm into it). Legs and bodies still do
+not collide, as in v2 to v4.
+
+### Physics of v5
+
+v4's physics, scaled to the new size by dynamic similarity, as motion under
+gravity scales (Froude): with lengths L times v4's and masses M times,
+forces scale with M, torques and stiffnesses with M L, times with √L, and
+damping, a torque per speed, with M L √L. L is the legs' length ratio, M a
+unit's mass ratio (the whole body's mass over its units).
+
+| Property | v4 | v5 | Scale |
+| --- | ---: | ---: | --- |
+| Leg length (L) | 10.4 mm | 18.4 mm | 1.767 |
+| A unit's mass (M) | 87.3 mg | 550 mg | 6.304 |
+| Maximum torques: sweep, lift, knee, ankle, spine yaw | 8, 18, 10, 5, 15 µN·m | 89, 201, 111, 56, 167 µN·m | M L = 11.14 |
+| Spine stiffness: yaw, pitch | 2e-5, 1e-4 N·m/rad | 2.2e-4, 1.1e-3 N·m/rad | M L |
+| Damping | | | M L √L = 14.81 |
+| Physics timestep | 0.5 ms, 40 steps per action | 0.667 ms, 30 steps per action | √L ≈ 1.33 |
+| A leg joint's transient (inertia over damping) | 2 ms | 2.66 ms | √L |
+| Contacts' and joint limits' response | 1 ms | 1.33 ms | twice the timestep, as in v4 |
+
+So the motors keep v4's strength for the body's weight, and a leg's top
+speed, torque over damping, is v4's over √L, 30 to 75 rad/s. Each leg
+joint's armature makes its transient 2.66 ms, given the legs' own inertia
+at the model's pose; the spine's armature is v4's times M L². Contacts,
+friction and solver settings are v4's.
+
+### Validation of v5
+
+The checks of [Validation](#validation), on v5 (CPU MuJoCo, the model's
+timestep unless stated; `archive/model_v5_heros/validate.py` in the main
+folder's archive):
+
+| Check | Result |
+| --- | --- |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.038 mm deepest penetration; no solver warning |
+| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.2 to 10.6 mm high, 0.03 to 0.13 mm deep |
+| Random full-strength motor commands, 2 s, 3 runs | 0.63 to 0.72 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 2.8° (v4: 3.2°); no solver warning |
+| Leg closest to a body under the random commands | 0.13 mm |
+| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs |
+| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
+
+As in v1 to v4, the body cannot hold itself up with its motors off. The
+GPU backend reads v5's state as CPU MuJoCo computes it
+(`tests/environment/simulation/test_gpu_backend.py`), and the main
+environment runs it on both backends without change. Its speed on a
+training GPU, and the Newton solver's iterations there, are not yet
+measured. The automated tests in `tests/models/test_model_v5.py` check the
+size and mass, that every torque and damping is v4's times one scale and
+the timestep and transients its square root, that the body sinks with its
+motors off and stands on its lift motors, and that no leg passes through a
+body under random commands.
+
+### Sources for v5
+
+- Anderson, B. D., Shultz, J. W. and Jayne, B. C. (1995). Axial kinematics
+  and muscle activity during terrestrial locomotion of the centipede
+  *Scolopendra heros*. *Journal of Experimental Biology* 198, 1185–1195.
+- Pierce, C. J., Soto, D., Erickson, E., Diaz, K., Iaschi, M., Lay, A. and
+  Goldman, D. I. (2026). Legged locomotion in lattices: centipede
+  traversal of obstacle-rich environments. *Annals of the New York Academy
+  of Sciences* 1555, e70187.
+- Kenning, M., Müller, C. H. G. and Sombke, A. (2017). The ultimate legs of
+  Chilopoda (Myriapoda): a review on their morphological disparity and
+  functional variability. *PeerJ* 5, e4023.
+- Dionne, A., Giardina, F. and Mahadevan, L. (2026). Embodied intelligence
+  solves the centipede's dilemma. arXiv:2603.08409.
