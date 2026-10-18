@@ -16,7 +16,11 @@ import torch
 
 from centipede.diagnostics_category import measure
 from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
-from centipede.environment.cooperative_line import HeadLine, forward_axis
+from centipede.environment.cooperative_line import (
+    HeadLine,
+    StraightLine,
+    forward_axis,
+)
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -60,6 +64,11 @@ class CooperativeEnvironment:
     the time limit, a cut that the agents bootstrap from; the world then
     restarts. ``diagnostics`` summarise each step and each episode. A
     started ``tow`` pushes every segment forward (cooperative_tow.py).
+    With ``task = "line"`` (cycle 18) there are no targets: every segment
+    walks along a straight line laid through its world's start pose, and the
+    target's values in the head's observation stay zero; with
+    ``line_restart_mm`` a world whose segments have strayed that far from
+    their line on average restarts, as at the time limit.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -81,6 +90,11 @@ class CooperativeEnvironment:
                 f"{segment_count} segments, got {radius}"
             )
         body = self.simulation.body_measures
+        self.has_targets = cooperators.task == "targets"
+        # On the straight line, the distance at which a strayed world restarts.
+        self.line_restart_m = (
+            0.0 if self.has_targets else cooperators.line_restart_mm * 1e-3
+        )
 
         self.segment_action_sizes = [legs + 1] * (segment_count - 1) + [legs]
         self.action_size = legs + 1
@@ -102,6 +116,7 @@ class CooperativeEnvironment:
             self.device,
             instant_joint_forces=cooperators.observe_instant_joint_forces,
             tow_input=cooperators.observe_tow,
+            target_input=self.has_targets,
         )
         self.observation_size = self.observation_builder.observation_size
         self.neighbour_table = self.observation_builder.neighbour_table
@@ -114,12 +129,16 @@ class CooperativeEnvironment:
             if cooperators.averaging_s > 0
             else 1.0
         )
-        self.line = HeadLine(
-            self.world_count,
-            body.segment_lengths_m,
-            settings.max_episode_steps,
-            self.device,
-            drift_leak_s=cooperators.line_drift_leak_s,
+        self.line = (
+            HeadLine(
+                self.world_count,
+                body.segment_lengths_m,
+                settings.max_episode_steps,
+                self.device,
+                drift_leak_s=cooperators.line_drift_leak_s,
+            )
+            if self.has_targets
+            else StraightLine(self.world_count, segment_count, self.device)
         )
         self.forces = AveragedForces(
             self.world_count,
@@ -149,6 +168,7 @@ class CooperativeEnvironment:
             self.device,
             self.simulation.diagnostics.facts,
             CHANNEL_NAMES,
+            line_task=not self.has_targets,
         )
         self.task_facts = TaskFacts(
             level=torch.tensor(self.task.level), in_time_share=torch.tensor(torch.nan)
@@ -217,7 +237,8 @@ class CooperativeEnvironment:
 
         A ``seed`` restarts the starting poses' and the targets' random
         sequences. With ``stagger_first_episodes`` every world starts its
-        episode at a random step of it, drawn before the targets.
+        episode at a random step of it, drawn before the targets. On the
+        straight line no target is placed.
         """
         self.simulation.reset(seed=seed)
         if seed is not None:
@@ -231,12 +252,16 @@ class CooperativeEnvironment:
             self.episode_steps.random_(
                 0, self.settings.max_episode_steps, generator=self.task.generator
             )
-        self.task.place_targets(every_world, state, self._steps_left())
+        if self.has_targets:
+            self.task.place_targets(every_world, state, self._steps_left())
         self.tow.restart(every_world)
         self.forward_speed.zero_()
         self.last_action.zero_()
         self.diagnostics.new_targets(
-            every_world, every_world, state, self.task.target_position
+            every_world & self.has_targets,
+            every_world,
+            state,
+            self.task.target_position,
         )
         return self._observations()
 
@@ -277,7 +302,11 @@ class CooperativeEnvironment:
         line_erased, off_line = self.line.update(state)
         averaged_forces = self.forces.update(state)
 
-        arrived = target_under_head(state, task.target_position, self.head_outline)
+        arrived = (
+            target_under_head(state, task.target_position, self.head_outline)
+            if self.has_targets
+            else torch.zeros_like(self.episode_steps, dtype=torch.bool)
+        )
         in_time = task.time_step(arrived)
         near, far = task.distance_range_m()
         rewards, step_rewards, own_energy = self.reward.compute(
@@ -293,8 +322,11 @@ class CooperativeEnvironment:
             off_line,
             averaged_forces,
             self.tow.unit_weights(),
+            self.line.view[..., 1],
         )
         truncated = self.episode_steps >= self.settings.max_episode_steps
+        if self.line_restart_m:
+            truncated |= off_line.mean(dim=1) > self.line_restart_m
         self.diagnostics.record_step(
             state,
             self.previous_body_planar_position,
@@ -314,19 +346,24 @@ class CooperativeEnvironment:
 
         # Walking on: a reached target is replaced where the head stands.
         self.last_action.copy_(joint_action)
-        task.place_targets(arrived & ~truncated, state, self._steps_left())
+        if self.has_targets:
+            task.place_targets(arrived & ~truncated, state, self._steps_left())
         final_observations = observations = self._observations()
         if truncated.any():
             self.simulation.reset(truncated)
             self._restart_measures(truncated)
             self.episode_steps.masked_fill_(truncated, 0)
-            task.place_targets(truncated, state, self._steps_left())
+            if self.has_targets:
+                task.place_targets(truncated, state, self._steps_left())
             self.tow.restart(truncated)
             self.forward_speed.masked_fill_(truncated[:, None], 0.0)
             self.last_action.masked_fill_(truncated[:, None, None], 0.0)
             observations = self._observations()
         self.diagnostics.new_targets(
-            arrived | truncated, truncated, state, task.target_position
+            arrived | (truncated & self.has_targets),
+            truncated,
+            state,
+            task.target_position,
         )
         never = torch.zeros_like(truncated)
         return observations, rewards, never, truncated, final_observations

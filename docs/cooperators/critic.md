@@ -256,6 +256,14 @@ actor of 2 × 64.
   The risk of a nearly empty channel's noise blown up to full size stays
   with the head, whose own channel holds only its pain and hanging (run
   25: it tilts the head's updates 20 to 40°, `analysis/head_own_check.py`).
+  That noise is what made the own critics look spiky: the head's own
+  critic's explained variance fell to −3.5 in runs 25 and 26 and −1.0 in
+  run 27, jumping by up to 3.8 between updates, while the followers' own
+  critics have been steady since run 26. On the straight line (cycle 18)
+  the head is a segment like the others, paying its own force share and
+  every bit of hanging beyond its extra weight, so its own channel fills
+  as theirs does: with fresh networks its rarest 1% of steps hold 18% of
+  its variance, the least of any segment ([reward.md](reward.md#cycle-18-the-straight-line-every-segment-alike-the-users-design-2026-10-18)).
 - **Logged**: every critic's and every baseline's explained variance after
   each update. A baseline explaining much more than its value shows the
   neighbours' actions at work.

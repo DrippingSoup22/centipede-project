@@ -16,6 +16,10 @@ averaged over a step cycle, and leaks away. A body that follows the head
 leaves it none, so the line is the tip's path; a body that ignores a bend
 the head holds leaves the head slipping sideways, and the line moves away
 from the body the longer it does.
+
+The straight line (cycle 18) is a fixed line through the body's start pose,
+which every segment's centre walks along; it offers the same ``restart``,
+``update`` and ``view``.
 """
 
 import math
@@ -45,6 +49,45 @@ def forward_axis(state: PhysicalState) -> torch.Tensor:
     """Each segment's forward axis in the plane, ``(W, N, 2)``."""
     yaw = heading(state.body_quaternion)
     return torch.stack((yaw.cos(), yaw.sin()), dim=-1)
+
+
+class HeadSideslip:
+    """The head's sideslip in every world, ``sideslip`` ``(W,)``: the angle
+    between where it points and where its centre goes, both averaged over a
+    step cycle (rad, positive when it points left of where it goes)."""
+
+    def __init__(self, world_count: int, device: torch.device | str) -> None:
+        self.pointing = torch.zeros((world_count, 2), device=device)
+        self.travel = torch.zeros((world_count, 2), device=device)
+        self.last_centre = torch.zeros((world_count, 2), device=device)
+        self.sideslip = torch.zeros(world_count, device=device)
+
+    def restart(self, world_mask: torch.Tensor, state: PhysicalState) -> None:
+        """Start the masked worlds pointing as the head does, not moving."""
+        mask = world_mask[:, None]
+        self.pointing.copy_(torch.where(mask, forward_axis(state)[:, 0], self.pointing))
+        self.travel.masked_fill_(mask, 0.0)
+        self.last_centre.copy_(
+            torch.where(mask, state.body_planar_position[:, 0], self.last_centre)
+        )
+        self.sideslip.masked_fill_(world_mask, 0.0)
+
+    def update(self, state: PhysicalState) -> tuple[torch.Tensor, torch.Tensor]:
+        """Average in the step; return the head's averaged speed ``(W,)`` and
+        the direction it goes, ``(W, 2)``."""
+        rate = ACTION_DURATION_S / POINTING_AVERAGE_S
+        self.pointing += rate * (forward_axis(state)[:, 0] - self.pointing)
+        centre = state.body_planar_position[:, 0]
+        self.travel += rate * ((centre - self.last_centre) - self.travel)
+        self.last_centre.copy_(centre)
+        speed = self.travel.norm(dim=-1)
+        going = self.travel / speed.clamp(min=1e-12)[:, None]
+        pointing = self.pointing / self.pointing.norm(dim=-1, keepdim=True).clamp(
+            min=1e-12
+        )
+        sideways = going[:, 0] * pointing[:, 1] - going[:, 1] * pointing[:, 0]
+        self.sideslip.copy_(torch.asin(sideways.clamp(-1.0, 1.0)))
+        return speed, going
 
 
 class HeadLine:
@@ -99,11 +142,8 @@ class HeadLine:
         self.erased_point = torch.zeros((world_count, segment_count, 2), device=device)
         self.view = torch.zeros((world_count, segment_count, 3), device=device)
         self.window = torch.arange(-WINDOW_PIECES, WINDOW_PIECES, device=device)
-        # The head's averaged pointing and its centre's averaged step.
-        self.pointing = torch.zeros((world_count, 2), device=device)
-        self.travel = torch.zeros((world_count, 2), device=device)
-        self.last_centre = torch.zeros((world_count, 2), device=device)
-        self.sideslip = torch.zeros(world_count, device=device)
+        self.head = HeadSideslip(world_count, device)
+        self.sideslip = self.head.sideslip
         self.drift = torch.zeros(world_count, device=device)
 
     def tails(self, state: PhysicalState) -> torch.Tensor:
@@ -146,37 +186,18 @@ class HeadLine:
         self.erased.copy_(torch.where(mask, arc[:, self.tail_point], self.erased))
         self.erased_point.copy_(torch.where(mask[..., None], tails, self.erased_point))
         self.view.masked_fill_(mask[..., None], 0.0)
-        mask_2d = world_mask[:, None]
-        self.pointing.copy_(
-            torch.where(mask_2d, forward_axis(state)[:, 0], self.pointing)
-        )
-        self.travel.masked_fill_(mask_2d, 0.0)
-        self.last_centre.copy_(
-            torch.where(mask_2d, state.body_planar_position[:, 0], self.last_centre)
-        )
-        self.sideslip.masked_fill_(world_mask, 0.0)
+        self.head.restart(world_mask, state)
         self.drift.masked_fill_(world_mask, 0.0)
 
     def _drawn_tip(self, state: PhysicalState) -> torch.Tensor:
         """Where the tip draws, ``(W, 2)``: the tip, moved to the left of the
         head's travel by the drift. Refreshes ``sideslip`` and ``drift``."""
-        rate = ACTION_DURATION_S / POINTING_AVERAGE_S
-        self.pointing += rate * (forward_axis(state)[:, 0] - self.pointing)
-        centre = state.body_planar_position[:, 0]
-        self.travel += rate * ((centre - self.last_centre) - self.travel)
-        self.last_centre.copy_(centre)
-        speed = self.travel.norm(dim=-1)
-        going = self.travel / speed.clamp(min=1e-12)[:, None]
-        pointing = self.pointing / self.pointing.norm(dim=-1, keepdim=True).clamp(
-            min=1e-12
-        )
-        sideways = going[:, 0] * pointing[:, 1] - going[:, 1] * pointing[:, 0]
-        self.sideslip.copy_(torch.asin(sideways.clamp(-1.0, 1.0)))
+        speed, going = self.head.update(state)
         tip = state.front_end_position[:, 0]
         if not self.drift_leak_s:
             return tip
         leak = ACTION_DURATION_S / self.drift_leak_s
-        self.drift += speed * sideways - leak * self.drift
+        self.drift += speed * self.sideslip.sin() - leak * self.drift
         left = torch.stack((-going[:, 1], going[:, 0]), dim=-1)
         return tip + self.drift[:, None] * left
 
@@ -254,3 +275,63 @@ class HeadLine:
 
         self.view.copy_(torch.stack((offset, angle, off_line), dim=-1))
         return erased, off_line
+
+
+class StraightLine:
+    """A straight line in every world and every segment's place on it
+    (cycle 18): through the centre of the body's segments at each restart,
+    along the head's heading there.
+
+    After each ``update``, ``view`` ``(W, N, 3)`` holds for each segment's
+    centre its signed distance from the line (m, positive to the left of the
+    line's direction), the angle of its body from the line's direction (rad,
+    positive to the left), and 0. ``sideslip`` is the head's
+    (``HeadSideslip``) and ``drift`` stays zero, as HeadLine's without one.
+    """
+
+    def __init__(
+        self, world_count: int, segment_count: int, device: torch.device | str
+    ) -> None:
+        self.origin = torch.zeros((world_count, 2), device=device)
+        self.direction = torch.zeros((world_count, 2), device=device)
+        # Each centre's place along the line after the last step.
+        self.along = torch.zeros((world_count, segment_count), device=device)
+        self.view = torch.zeros((world_count, segment_count, 3), device=device)
+        self.head = HeadSideslip(world_count, device)
+        self.sideslip = self.head.sideslip
+        self.drift = torch.zeros(world_count, device=device)
+
+    def _measure(self, state: PhysicalState) -> torch.Tensor:
+        """Each centre's place along the line, then its view, ``(W, N, 4)``."""
+        relative = state.body_planar_position - self.origin[:, None]
+        x, y = self.direction[:, None].unbind(dim=-1)
+        along = relative[..., 0] * x + relative[..., 1] * y
+        left = x * relative[..., 1] - y * relative[..., 0]
+        angle = heading(state.body_quaternion) - torch.atan2(y, x)
+        angle = torch.remainder(angle + math.pi, 2 * math.pi) - math.pi
+        return torch.stack((along, left, angle, torch.zeros_like(along)), dim=-1)
+
+    def restart(self, world_mask: torch.Tensor, state: PhysicalState) -> None:
+        """Lay the masked worlds' lines through the body as it stands."""
+        mask = world_mask[:, None]
+        self.origin.copy_(
+            torch.where(mask, state.body_planar_position.mean(dim=1), self.origin)
+        )
+        self.direction.copy_(
+            torch.where(mask, forward_axis(state)[:, 0], self.direction)
+        )
+        measured = self._measure(state)
+        self.along.copy_(torch.where(mask, measured[..., 0], self.along))
+        self.view.copy_(torch.where(mask[..., None], measured[..., 1:], self.view))
+        self.head.restart(world_mask, state)
+
+    def update(self, state: PhysicalState) -> tuple[torch.Tensor, torch.Tensor]:
+        """Measure every centre; return how far it went along the line on the
+        step (m, negative backward) and its distance from the line (m), both
+        ``(W, N)``; ``view`` is refreshed."""
+        self.head.update(state)
+        measured = self._measure(state)
+        progress = measured[..., 0] - self.along
+        self.along.copy_(measured[..., 0])
+        self.view.copy_(measured[..., 1:])
+        return progress, measured[..., 1].abs()

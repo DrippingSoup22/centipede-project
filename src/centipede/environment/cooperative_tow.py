@@ -45,10 +45,16 @@ class TowFacts:
         " worlds draw theirs under it"
     )
     line_erased: torch.Tensor = measure(
-        "Line each follower's tail erased", "mm/s", parts=GROUPS
+        "Line each follower's tail erased (on the straight line: the line"
+        " paid, the followers' mean)",
+        "mm/s",
+        parts=GROUPS,
     )
     closing: torch.Tensor = measure(
-        "How fast the head's tip closed on its target", "mm/s", parts=GROUPS
+        "How fast the head's tip closed on its target (on the straight line:"
+        " how fast the first segment walked along it)",
+        "mm/s",
+        parts=GROUPS,
     )
     lift_offs: torch.Tensor = measure(
         "Each foot's lift-offs after a stance of at least 60 ms", "1/s", parts=GROUPS

@@ -47,7 +47,9 @@ class CooperativeObservationBuilder:
     segment feels a pull at once. The blocks are laid end to end in the
     neighbour table's order, a missing neighbour's all zeros, followed by the
     target seen from the head's tip, forward and to the left, which is zero
-    for every other segment, and, with ``tow_input``, the world's tow level.
+    for every other segment and, without ``target_input`` (the straight line
+    of cycle 18), for the head too, and, with ``tow_input``, the world's tow
+    level.
     """
 
     def __init__(
@@ -60,6 +62,7 @@ class CooperativeObservationBuilder:
         device: torch.device | str,
         instant_joint_forces: bool = False,
         tow_input: bool = False,
+        target_input: bool = True,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -67,6 +70,7 @@ class CooperativeObservationBuilder:
         self.unit_weight_n = unit_weight_n
         self.instant_joint_forces = instant_joint_forces
         self.tow_input = tow_input
+        self.target_input = target_input
         self.block_size = block_size(leg_motor_count, instant_joint_forces)
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
@@ -150,7 +154,8 @@ class CooperativeObservationBuilder:
         target_values = neighbour_blocks.new_zeros(
             (*neighbour_blocks.shape[:2], TARGET_VALUE_COUNT)
         )
-        target_values[:, 0] = target_seen_from_head(state, target_position)
+        if self.target_input:
+            target_values[:, 0] = target_seen_from_head(state, target_position)
         inputs = [neighbour_blocks, target_values]
         if self.tow_input:
             inputs.append(tow_levels[:, None, None].expand(-1, self.segment_count, 1))

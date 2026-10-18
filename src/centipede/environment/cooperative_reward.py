@@ -1,6 +1,6 @@
 """The cooperators' reward: two channels for every segment, goal and health,
 or from cycle 14 the team's and its own, judged apart by a critic each
-(docs/cooperators/reward.md, cycles 7, 10, 14, 15 and 16)."""
+(docs/cooperators/reward.md, cycles 7, 10, 14, 15, 16 and 18)."""
 
 import torch
 
@@ -193,10 +193,15 @@ class CooperativeReward:
         # follower goal_team_share the followers' mean and the rest its own;
         # with team and own, the line and its distance the followers' mean
         # and the force costs its own.
+        # On the straight line (cycle 18) the head is a segment like the
+        # others: every segment is paid the segments' mean.
+        self.line_task = settings.task == "line"
         share = 1.0 if team_own else settings.goal_team_share
         self.goal_weights = (1 - share) * torch.eye(segment_count, device=device)
         self.goal_weights[0, 0] = 1.0
         self.goal_weights[1:, 1:] += share / (segment_count - 1)
+        if self.line_task:
+            self.goal_weights.fill_(1 / segment_count)
         self.force_cost_weights = (
             torch.eye(segment_count, device=device) if team_own else self.goal_weights
         )
@@ -224,10 +229,20 @@ class CooperativeReward:
         # Millimetres of goal a squared cost takes through a step at its scale.
         self.reference_mm = settings.reference_pay_mm_per_s * ACTION_DURATION_S
         self.is_follower = torch.ones(segment_count, device=device)
-        self.is_follower[0] = 0.0
-        # The support a segment may take from its neighbours for free.
+        # The support a segment may take from its neighbours for free: the
+        # head's set share or, on the straight line, the weight the first
+        # segment carries beyond the others' mean, such as v5's head.
         self.free_support = torch.zeros(segment_count, device=device)
-        self.free_support[0] = settings.head_free_support
+        if self.line_task:
+            weights = torch.tensor(body.segment_weights_n)
+            beyond = (weights[0] - weights[1:].mean()) / body.unit_weight_n
+            self.free_support[0] = max(0.0, beyond.item())
+        else:
+            self.is_follower[0] = 0.0
+            self.free_support[0] = settings.head_free_support
+        # The most a centre's step along the straight line pays, mm.
+        cap = settings.line_speed_cap_body_lengths_per_s * body.body_length_m
+        self.line_cap_mm = cap * ACTION_DURATION_S * 1e3 if cap else torch.inf
 
     def compute(
         self,
@@ -243,6 +258,7 @@ class CooperativeReward:
         off_line: torch.Tensor,
         averaged_forces: torch.Tensor,
         tow: torch.Tensor,
+        line_angle: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, StepRewards, torch.Tensor]:
         """The ``(W, N, 2)`` rewards, goal and health or team and own, their
         parts, and each segment's own energy before sharing, ``(W, N, 3)`` in
@@ -281,7 +297,16 @@ class CooperativeReward:
         joints; with ``ramp_team_costs`` energy and the squeeze are weighed
         as pain is. Cycle 16: with ``energy_side_shares`` energy is each
         segment's own, shared by neighbourhood (``side_share_weights``); with
-        ``pain_averaged`` pain prices the legs' averaged press. The parts are
+        ``pain_averaged`` pain prices the legs' averaged press. Cycle 18, ``task =
+        "line"``: no target; ``line_erased`` is how far each segment's centre
+        went along the straight line on the step, negative backward, and
+        ``off_line`` its distance from it (``StraightLine.update``); a step
+        forward pays up to the speed cap, times its closeness and the cosine
+        of ``line_angle`` ``(W, N)``, the body's angle from the line (nothing
+        when facing away); a step backward is charged in full; every segment,
+        the head too, is paid the segments' mean and pays the squeeze and its
+        own force share; only the first may take the weight it carries beyond
+        the others' mean from its neighbours for free. The parts are
         as paid, after sharing, in their own units. ``motor_command`` is
         ``(W, N, M + 1)``, what each motor received; the other arguments are
         those of ``RewardContext.from_step``.
@@ -300,17 +325,27 @@ class CooperativeReward:
         settings = self.settings
         progress_m = context.distance_before - context.distance_after
         progress = torch.zeros_like(progress_m)
-        progress[:, 0] = progress_m[:, 0] * 1e3
         arrival = torch.zeros_like(progress)
-        arrival[:, 0] = context.arrived * arrival_worth_m * 1e3
+        if self.line_task:
+            progress_m = line_erased
+        else:
+            progress[:, 0] = progress_m[:, 0] * 1e3
+            arrival[:, 0] = context.arrived * arrival_worth_m * 1e3
 
         # The followers' line: paid as erased, charged as left behind, or
-        # paid as erased near it (cycle 15).
+        # paid as erased near it (cycle 15); on the straight line, each step
+        # forward up to the cap, near it and facing along it, and each step
+        # back in full (cycle 18).
         line = self.is_follower * line_erased * 1e3
         if settings.line_closeness_mm:
             closeness = 1 - (off_line * 1e3 / settings.line_closeness_mm) ** 2
             line = line * closeness.clamp(min=0.0)
             off_cost = torch.zeros_like(line)
+            if self.line_task:
+                forward = (line_erased * 1e3).clamp(min=0.0, max=self.line_cap_mm)
+                facing = line_angle.cos().clamp(min=0.0)
+                backward = (line_erased * 1e3).clamp(max=0.0)
+                line = forward * closeness.clamp(min=0.0) * facing + backward
         else:
             off = (off_line * 1e3).clamp(max=settings.line_distance_cap_mm)
             off_cost = self.reference_mm * (off / settings.line_distance_scale_mm) ** 2

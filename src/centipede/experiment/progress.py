@@ -76,7 +76,8 @@ COOPERATIVE_NAMES = {
 }
 COOPERATIVE_LEGEND = (
     "speed: the head's, along the ground; toward: how fast it closes on its"
-    " target.\nwave: each foot's lag behind the same-side foot ahead, in degrees,"
+    " target\n(on the straight line, how fast the first segment goes along it)."
+    "\nwave: each foot's lag behind the same-side foot ahead, in degrees,"
     " then its consistency\nfrom 0 (none) to 1; left-right: the same between a"
     " segment's two feet, 180 when they\nalternate. body down: share of steps"
     " with a body on the ground."

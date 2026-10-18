@@ -30,7 +30,7 @@ import torch
 from torch.nn.functional import one_hot
 
 from centipede.diagnostics_category import measure
-from centipede.environment.cooperative_line import HeadLine
+from centipede.environment.cooperative_line import HeadLine, StraightLine
 from centipede.environment.cooperative_reward import (
     CHANNEL_NAMES,
     ENERGY_PARTS,
@@ -125,14 +125,19 @@ class StepFacts:
         "1 upright, 0 on its side, -1 upside down, (W, N)"
     )
     head_distance: torch.Tensor = measure(
-        "Flat distance from the head's tip to the target, (W,)", "m"
+        "Flat distance from the head's tip to the target; on the straight line,"
+        " from the first segment's centre to the line, (W,)",
+        "m",
     )
     heading_error: torch.Tensor = measure(
-        "Angle between the head's forward direction and the target, (W,)", "rad"
+        "Angle between the head's forward direction and the target; on the"
+        " straight line, the line's direction, (W,)",
+        "rad",
     )
     on_course: torch.Tensor = measure(
         "The target lies ahead of the head's tip, within the head's width of"
-        " its forward line, (W,)",
+        " its forward line; on the straight line, the first segment's centre"
+        " lies within the head's width of it, (W,)",
         summary="share",
     )
     support: torch.Tensor = measure(
@@ -208,7 +213,9 @@ class EpisodeSummary:
         "Targets the head reached within their stopwatch, (W,)"
     )
     head_progress: torch.Tensor = measure(
-        "Distance the head's tip closed on its targets over the episode, (W,)", "m"
+        "Distance the head's tip closed on its targets over the episode; on the"
+        " straight line, how far the first segment's centre went along it, (W,)",
+        "m",
     )
     head_path_length: torch.Tensor = measure(
         "Total distance the head's tip travelled, (W,)", "m"
@@ -292,7 +299,9 @@ class CooperativeDiagnostics:
     ``step`` and ``episode`` are the categories the experiment reads, and
     ``simulation`` is the physics simulation's. ``reward_part_names`` labels
     the reward's parts and ``channel_names`` its channels; a recording scores
-    each world by ``recording_score``, named ``score_name``.
+    each world by ``recording_score``, named ``score_name``. With
+    ``line_task`` (the straight line of cycle 18) the head's course is
+    measured from the line, and a recording scores the line paid.
     """
 
     reward_part_names = list(PART_NAMES)
@@ -307,8 +316,12 @@ class CooperativeDiagnostics:
         device: torch.device | str,
         simulation_facts: SimulationFacts,
         channel_names: tuple[str, ...] = CHANNEL_NAMES,
+        line_task: bool = False,
     ) -> None:
         """Allocate both categories and the running totals, all zero."""
+        self.line_task = line_task
+        if line_task:
+            self.score_name = "line paid"
         self.simulation = simulation_facts
         self.channel_names = list(channel_names)
         self.unit_weight_n = unit_weight_n
@@ -386,6 +399,8 @@ class CooperativeDiagnostics:
 
     def recording_score(self) -> torch.Tensor:
         """Each world's score for the step just taken, ``(W,)``."""
+        if self.line_task:
+            return self.step.reward_parts[..., PART_NAMES.index("line")].mean(dim=1)
         return self.step.target_reached.float()
 
     def new_targets(
@@ -424,7 +439,7 @@ class CooperativeDiagnostics:
         own_energy: torch.Tensor,
         off_line: torch.Tensor,
         averaged_forces: torch.Tensor,
-        line: HeadLine,
+        line: HeadLine | StraightLine,
         arrived: torch.Tensor,
         in_time: torch.Tensor,
         truncated: torch.Tensor,
@@ -479,16 +494,22 @@ class CooperativeDiagnostics:
         step.uprightness.copy_(
             1 - 2 * (quaternion[..., 1] ** 2 + quaternion[..., 2] ** 2)
         )
-        step.head_distance.copy_(to_target.norm(dim=-1))
-        step.heading_error.copy_(
-            torch.atan2(
-                forward[:, 0] * to_target[:, 1] - forward[:, 1] * to_target[:, 0],
-                (forward * to_target).sum(dim=-1),
-            ).abs()
-        )
-        step.on_course.copy_(
-            (seen[:, 0] > 0) & (seen[:, 1].abs() <= self.head_outline.half_width_m)
-        )
+        if self.line_task:
+            offset, angle = line.view[:, 0, 0].abs(), line.view[:, 0, 1].abs()
+            step.head_distance.copy_(offset)
+            step.heading_error.copy_(angle)
+            step.on_course.copy_(offset <= self.head_outline.half_width_m)
+        else:
+            step.head_distance.copy_(to_target.norm(dim=-1))
+            step.heading_error.copy_(
+                torch.atan2(
+                    forward[:, 0] * to_target[:, 1] - forward[:, 1] * to_target[:, 0],
+                    (forward * to_target).sum(dim=-1),
+                ).abs()
+            )
+            step.on_course.copy_(
+                (seen[:, 0] > 0) & (seen[:, 1].abs() <= self.head_outline.half_width_m)
+            )
         step.target_reached.copy_(arrived)
 
         standing = state.foot_normal_force >= STANCE_LOAD_SHARE * unit

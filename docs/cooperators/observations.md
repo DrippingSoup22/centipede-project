@@ -199,6 +199,13 @@ the blocks, forward and to the left of the head's tip, in metres, zeros for
 the followers, and with `observe_tow` the world's tow level last. Each
 agent normalises its inputs with running statistics, as on main.
 
+**On the straight line** (cycle 18, `task = "line"`) a block's three line
+values describe the segment's centre against the line: its distance from
+it, positive to the left, its body's angle from the line's direction, and
+0. The target's two values stay zero for the head too, so the layout is
+unchanged: on model v5 with radius 2, the joint forces of the step and the
+tow, 5 × 50 + 2 + 1 = 253 values for each of the 21 segments.
+
 ## Later experiments
 
 The radius changed, to show how much seeing the neighbours matters for

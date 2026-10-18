@@ -3,7 +3,9 @@
 **Status (2026-10-14): checked; no model change proposed.** Once the reward
 prices forces ([reward.md](reward.md)), the forces the model can make must
 be believable. This file checks model v4's against biology
-([model.md](../model.md#model-v4)).
+([model.md](../model.md#model-v4)). From cycle 18 (2026-10-18) the body is model v5, *Scolopendra heros*,
+whose forces are v4's scaled by dynamic similarity, so every comparison
+below holds for it in proportion ([model.md](../model.md#model-v5)).
 
 ## The body's weight
 

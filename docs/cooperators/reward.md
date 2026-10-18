@@ -44,7 +44,12 @@ After run 25, cycle 16 prices pain on the legs' press averaged over 1 s and
 hanging at twice its price, and run 26 trains on from run 25's walk; energy
 in each segment's own channel, shared with its neighbours, was built and
 measured, and left out: at a walk it pays every segment to do less
-([Cycle 16](#cycle-16-pain-averaged-hanging-dearer-energy-left-with-the-team-2026-10-18)).**
+([Cycle 16](#cycle-16-pain-averaged-hanging-dearer-energy-left-with-the-team-2026-10-18)).
+After run 27, cycle 18 replaces the targets with a straight line: every
+segment, the head too, is paid the segments' mean of how far each centre
+goes along it, up to a speed cap, near it and facing along it, on model
+v5, the body of *Scolopendra heros*
+([Cycle 18](#cycle-18-the-straight-line-every-segment-alike-the-users-design-2026-10-18)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1660,6 +1665,125 @@ under run 25's reward as under this one, the body's preference, not this
 design's. The built environment pays exactly what `start_check.py` prices
 (within 2·10⁻⁶ mm a step).
 
+### Cycle 18: the straight line, every segment alike (the user's design, 2026-10-18)
+
+**Why** (run 27). Both seeds circled one way on a head that walked on one
+leg ([task.md](task.md#cycle-18-the-straight-line-the-users-design-2026-10-18)).
+The head's role made its limp cheap: its own target, its own reward, and
+half its weight carried for free. Its own critic was the spiky one: its
+explained variance fell to −3.5 in runs 25 and 26 and −1.0 in run 27,
+jumping by up to 3.8 between updates, while the followers' own critics
+have been steady since run 26. Its own channel held only rare pain and
+hanging, energy being in the team channel and the force share the
+followers', and per-critic normalisation scales such a channel's noise to
+full size ([critic.md](critic.md#as-built)).
+
+**The design** (the user's: a straight line, the head a segment like the
+others, and a speed cap from biology, so that once speed earns nothing
+more only walking better pays). Each segment, each step, with Δs how far
+its centre went along the line (mm), d its centre's distance from it
+(mm), θ its body's angle from the line's direction:
+
+> line = min(Δs, c) · max(0, 1 − (d / b)²) · max(0, cos θ) for Δs ≥ 0,
+> and Δs for a step back
+
+with c the cap, `line_speed_cap_body_lengths_per_s` times the body's
+length, over a 20 ms step, and b = `line_closeness_mm`. The team channel
+pays every segment the 21 segments' mean, less the squeeze and the body's
+mean energy; the own channel charges each segment its force share, its
+pain and its hanging, as in cycle 16.
+
+- **The cap.** *S. heros* walked a treadmill at 0.5, 1 and 1.5 body lengths
+  a second (Anderson, Shultz & Jayne 1995); *S. polymorpha* chose 0.64 on
+  flat ground (Diaz et al. 2023). On v5 a clean wave walk reaches 0.6 at a
+  moderate 3.5 Hz and 0.78 at best (below), so the cap is 0.6 body lengths
+  a second, 91 mm/s (proposed; 1 was proposed on v4, where the same walk
+  reached it). It is a step's most: a step faster than the cap pays the
+  cap, so an uneven walk is paid a little less than a steady one at the
+  same mean speed.
+- **Near the line**, within b = 20 mm, about 1.4 body widths (proposed):
+  a centre 10 mm off is paid 0.75, one 20 mm off nothing, and the body's
+  own sway as it walks, 2.5 to 7 mm, costs 2 to 12%.
+- **Facing along it**: the cosine of the body's angle, nothing when it
+  faces away, so a crabbing or turned body is paid less.
+- **A step back in full**, so that rocking back and forth never pays.
+- **A strayed world restarts** once its segments are on average beyond the
+  band, so that no batch fills with steps that pay only costs
+  ([task.md](task.md#cycle-18-the-straight-line-the-users-design-2026-10-18)).
+- **The head is a segment like the others**: paid the mean, charged its
+  force share, the squeeze, pain and hanging. Only its weight differs: the
+  first unit carries the legless head, 1.69 unit weights against 0.97, so
+  it may hang the 0.72 beyond the others' mean on its neighbours for free.
+- **The prices scaled to v5** by the dynamic similarity that scales the
+  model ([model.md](../model.md#model-v5); legs L = 1.767 times v4's, a
+  unit's mass M = 6.304 times), so every trade between millimetres and
+  millijoules stays run 27's: speeds by √L (`reference_pay_mm_per_s` 40 →
+  53, the tow's help speed 25 → 33 mm/s and its walk bar 2 → 2.7), power
+  by M√L (`force_price_w` 0.00198 → 0.0166), millimetres per millijoule by
+  1/M (`mm_per_mj` 10 → 1.59).
+
+**Measured** (`analysis/line_check.py` in `../Training`, run 28's
+environment on v5, 8 worlds, 7 s, a scripted wave walk steering for a
+point 40 mm ahead on the line; each fault's culprits' total, team + w ×
+own, minus the same segments' in the good walk, mm/s):
+
+- **The walk's speed on v5.** A wave over 9 units walks 56 to 67 mm/s at
+  2.5 Hz, 82 to 94 at 3.5 Hz and 106 to 117 at 4.5 Hz (sweeps of 25 to
+  35°); over 5 units slower. Above 4.5 Hz the sweep motors lag and the feet
+  slip (5.5 Hz: 49 to 54 mm/s). The good walk is 3.5 Hz, 35°, a wave over
+  9 units, the head's unit driving its legs 1.74 times harder, by its
+  weight: with the others' commands the body behind pushed it (0.38 unit
+  weights at its joint), which made the whole squeeze, the pushed head of
+  runs 01 and 04.
+- **Speed must pay up to the cap.** Within a 10 mm band it did not: from
+  65 to 93 mm/s the line paid 10 mm/s more while the squeeze, energy and
+  the sway's cost took as much, so a walk at 0.43 body lengths a second
+  earned as much as one at the cap, whatever the cap (0.6 or 1). Within
+  20 mm, the good walk's total climbs with its rate to the cap (0.5 to 1
+  times its step rate: +12, +32, +46, +50 at w = 0.8) and no further (1.2
+  times, 106 mm/s: +49; 1.4: +39); with a cap of 0.8 or 1 it climbs on to
+  106 mm/s, as far as the scripted wave walks well.
+- **Every fault pays less** (cap 0.6, band 20; own weighed 0.8 or 4,
+  per-critic normalisation's range at a walk; the costs in full, and at
+  half as a run starts):
+
+| Behaviour | Culprits | Total minus the good walk |
+| --- | --- | ---: |
+| The good walk at 0.7 times its step rate (59 mm/s) | all | −17.5 to −21.9 |
+| At 1.4 times its step rate, above the cap (116 mm/s) | all | −1.5 to −11.3 |
+| The legs in step | all | −90 to −126 |
+| Legs in random phase | all | −169 to −639 |
+| **The wave running backward, tail to head** | all | **+9.6 to +16.5** |
+| Everyone standing | all | −56 to −70 |
+| Everyone limp | all | −92 to −247 |
+| Segment 10's left leg held up | segment 10 | −15 to −76 |
+| The tail's left leg held up | tail | −14 to −74 |
+| The head's left leg held up | head | −85 to −385 |
+| The head's legs limp, dragged | head | −242 to −1,098 |
+| The rear half braking | segments 11 to 20 | −119 to −310 |
+| The rear half limp | segments 11 to 20 | −146 to −468 |
+| Segment 10's feet skating | segment 10 | −355 to −1,900 |
+| Every other segment's feet skating | those | −359 to −1,488 |
+| All but five feet skating (run 26's limp) | all | −83 to −126 |
+| The head circling (neck bent 12°) | all | −125 to −190 |
+| Walking 20 mm beside the line | all | −53 to −54 |
+
+  The good walk earns each segment +55 mm/s from the team (+65 at the
+  ramps' start) and pays 0 to 29 of its own, the head most: line +75.8,
+  the squeeze −1.6, energy −12.1, the force share −2.3, hanging −2.5 (a
+  segment's mean).
+- **Fresh networks** (16 worlds, a 20 s episode under the training tow,
+  strayed worlds restarting): the line pays 8.5 to 9.7 mm/s in every 5 s
+  of the episode, the team channel −0.18 mm a step. The head's own
+  channel is no longer nearly empty: its mean −2.0 mm a step, its spread
+  1.6, and its rarest 1% of steps hold 18% of its variance, the least of
+  any segment (the others 24 to 76%, pain's bursts).
+- **The backward wave** (tail to head) pays +10 to +17, as it did on v4 in
+  cycle 16 (+5): on this body it walks faster (96 mm/s against 87) and
+  nearer the line (3.3 mm against 4.2). The reward does not care about the
+  wave's direction; the body does. *S. heros*' waves run head to tail
+  (Anderson et al. 1995).
+
 ### Other harms left out
 
 | Candidate | Why |
@@ -1880,6 +2004,17 @@ channel. `AveragedForces` keeps a fifth average, the force with which a
 segment's legs press on other legs (`leg_leg_force`), and with
 `pain_averaged` pain is that average squared, in newtons, times the pain
 price. Run 26 uses `pain_averaged` and leaves `energy_side_shares` off.
+
+**Cycle 18**, `task = "line"` (`CooperativeReward`, `line_task`): the line
+part is the straight line's pay of
+[Cycle 18](#cycle-18-the-straight-line-every-segment-alike-the-users-design-2026-10-18),
+from `StraightLine.update`'s steps along the line and distances from it and
+its view's angles; `goal_weights` give every segment the segments' mean;
+every segment counts as a follower, so the head pays its force share and
+the squeeze; no progress toward a target and no arrival; the first
+segment's free support is its weight beyond the others' mean, in unit
+weights, and `head_free_support` has no effect. It needs `reward_channels
+= "team_own"` and a `line_closeness_mm`.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature

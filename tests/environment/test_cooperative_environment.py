@@ -14,7 +14,7 @@ import torch
 
 from centipede.diagnostics_category import WindowSummary
 from centipede.environment.cooperative_diagnostics import CooperativeDiagnostics
-from centipede.environment.cooperative_line import HeadLine
+from centipede.environment.cooperative_line import HeadLine, StraightLine
 from centipede.environment.cooperative_observations import (
     CooperativeObservationBuilder,
 )
@@ -550,6 +550,68 @@ def test_the_head_line_is_erased_by_each_tail_and_measures_how_far_it_is_left():
     )
 
 
+def test_the_straight_line_measures_each_centre_along_it_beside_it_and_its_angle():
+    """The resting body's line runs along +x through its centres. The body
+    steps 2 mm forward: every centre goes 2 mm along it. It moves 1.5 mm to
+    the left: none goes along it, and every centre lies 1.5 mm left of it;
+    segment 2 turned 30 degrees left lies at that angle."""
+    line = StraightLine(1, SEGMENTS, "cpu")
+    state = resting_state(1)
+    line.restart(torch.tensor([True]), state)
+
+    state.body_planar_position[0, :, 0] += 0.002
+    progress, off_line = line.update(state)
+    torch.testing.assert_close(progress[0], torch.full((SEGMENTS,), 0.002))
+    torch.testing.assert_close(off_line[0], torch.zeros(SEGMENTS))
+
+    state.body_planar_position[0, :, 1] += 0.0015
+    half_turn = math.radians(30) / 2
+    state.body_quaternion[0, 2] = torch.tensor(
+        [math.cos(half_turn), 0, 0, math.sin(half_turn)]
+    )
+    progress, off_line = line.update(state)
+    torch.testing.assert_close(progress[0], torch.zeros(SEGMENTS))
+    torch.testing.assert_close(off_line[0], torch.full((SEGMENTS,), 0.0015))
+    angles = torch.zeros(SEGMENTS)
+    angles[2] = math.radians(30)
+    torch.testing.assert_close(line.view[0, :, 1], angles)
+
+
+def test_the_line_task_pays_steps_along_it_up_to_the_cap_near_it_and_facing_it():
+    """goal_step on the straight line (cycle 18), the cap 1 body length a
+    second, 1 mm a step: the centres go 2, 0.5, 0.5, -0.5 and 0.5 mm along
+    the line; segment 2 lies 2.5 mm from it (closeness 0.75 at 5 mm),
+    segment 4 faces 60 degrees away from it. Paid 1, 0.5, 0.375, -0.5 (a
+    step back in full) and 0.25: every segment, the head too, the mean
+    0.325 mm, and the squeeze; no target. The first segment weighs 2 units
+    against the others' 1.2: it hangs 0.8 for free."""
+    settings = CooperatorsSettings.from_section(
+        {
+            "task": "line",
+            "reward_channels": "team_own",
+            "line_closeness_mm": 5.0,
+            "line_speed_cap_body_lengths_per_s": 1.0,
+            "squeeze_weight": 1.0,
+        }
+    )
+    body = replace(BODY, segment_weights_n=(2e-3,) + (1.2e-3,) * (SEGMENTS - 1))
+    reward = CooperativeReward(settings, SEGMENTS, 2, body, torch.ones(SEGMENTS, 9))
+    arguments = list(goal_step()[2])
+    arguments[8] = 1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]])
+    arguments[9] = 1e-3 * torch.tensor([[0.0, 0.0, 2.5, 0.0, 0.0]])
+    angle = torch.tensor([[0.0, 0.0, 0.0, 0.0, math.radians(60)]])
+
+    _, parts, _ = reward.compute(*arguments, angle)
+
+    by_name = dict(zip(PART_NAMES, parts.reward_parts[0].unbind(dim=-1), strict=True))
+    every = torch.ones(SEGMENTS)
+    torch.testing.assert_close(by_name["line"], 0.325 * every)
+    torch.testing.assert_close(by_name["squeeze"], -0.2 * every)
+    assert not by_name["progress"].any() and not by_name["arrival"].any()
+    torch.testing.assert_close(parts.segment_progress, arguments[8])
+    assert reward.free_support.tolist() == pytest.approx([0.8, 0, 0, 0, 0])
+
+
 def test_a_block_holds_what_the_segment_senses_and_only_the_head_sees_the_target():
     builder = CooperativeObservationBuilder(
         SEGMENTS, 2, 1, LEGS, BODY.unit_weight_n, "cpu"
@@ -727,6 +789,51 @@ def test_after_an_arrival_the_body_walks_on_and_restarts_only_at_the_time_limit(
     assert truncated.all() and not terminated.any()
     assert environment.episode_steps.tolist() == [0, 0]
     assert not torch.equal(final, environment._observations())
+
+
+def test_on_the_line_v5_walks_with_no_target_and_restarts_a_strayed_world():
+    """The whole environment on v5 with the straight line: the head's
+    target values stay zero, no target is placed, every segment starts on
+    the line, and the first segment, which carries the head, may hang 0.72
+    of a unit's weight on the second for free. World 1's line moved 15 mm
+    to the side, beyond line_restart_mm, it restarts at once on a new line,
+    and world 0 at the time limit."""
+    settings = EnvironmentSettings.from_section(
+        {
+            "design": "cooperators",
+            "max_episode_steps": 3,
+            "observation_radius": 2,
+            "simulation": {
+                "model_path": str(Path("models/assembly_v5.xml").resolve()),
+                "backend": "cpu",
+                "world_count": 2,
+            },
+            "cooperators": {
+                "stagger_first_episodes": False,
+                "task": "line",
+                "reward_channels": "team_own",
+                "line_closeness_mm": 10.0,
+                "line_speed_cap_body_lengths_per_s": 1.0,
+                "line_restart_mm": 10.0,
+            },
+        }
+    )
+    environment = create_environment(settings)
+    observations = environment.reset(seed=0)
+    assert observations.shape == (2, 21, 5 * 48 + 2)
+    torch.testing.assert_close(
+        environment.line.view, torch.zeros(2, 21, 3), atol=1e-6, rtol=0
+    )
+    assert environment.reward.free_support[0] == pytest.approx(0.72, abs=0.01)
+    assert not environment.reward.free_support[1:].any()
+
+    line = environment.line
+    line.origin[1] += 0.015 * torch.stack((-line.direction[1, 1], line.direction[1, 0]))
+    for expected in ([False, True], [False, False], [True, False]):
+        observations, rewards, _, truncated, _ = environment.step(torch.zeros(2, 21, 9))
+        assert torch.isfinite(rewards).all() and not observations[..., -2:].any()
+        assert truncated.tolist() == expected
+    assert not environment.task.target_position.any()
 
 
 def test_a_tow_above_the_friction_slides_the_body_along_and_one_below_it_does_not():

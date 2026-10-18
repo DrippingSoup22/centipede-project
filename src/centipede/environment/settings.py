@@ -415,6 +415,27 @@ class CooperatorsSettings:
     press on other legs averaged over ``averaging_s``, squared, so that a
     brief brush costs little and a lasting press as before (false: the
     instant force, squared).
+
+    **The straight line** (cycle 18, docs/cooperators/task.md and
+    reward.md). ``task = "line"`` replaces the targets with a straight line
+    through each world's start pose, along the head's heading there, and
+    makes the head a segment like the others (``"targets"``: the targets
+    above). Every segment is paid, in the team channel, for how far its
+    centre goes along the line on each step, at most
+    ``line_speed_cap_body_lengths_per_s`` body lengths a second (0: no cap),
+    times its closeness to the line at ``line_closeness_mm`` and the cosine
+    of its body's angle from the line (none when it faces away), and is
+    charged in full for any step backward; the team channel adds the
+    segments' mean. The head has no target and its own force share, and
+    the first segment may take from the next, for free, only the weight it
+    carries beyond the others' mean (v5's legless head); the level stays
+    where it starts. It needs ``reward_channels = "team_own"`` and a
+    ``line_closeness_mm``; ``line_drift_leak_s``, ``head_free_support`` and
+    the targets' settings have no effect. With ``line_restart_mm`` a world
+    restarts, as at the time limit, once its segments' mean distance from
+    the line passes it, so that a body that has strayed where the line pays
+    nothing does not fill the batch with steps that pay only costs (0:
+    never).
     """
 
     start_near_distance_m: float
@@ -463,6 +484,9 @@ class CooperatorsSettings:
     ramp_team_costs: bool
     energy_side_shares: tuple[float, ...]
     pain_averaged: bool
+    task: str
+    line_speed_cap_body_lengths_per_s: float
+    line_restart_mm: float
 
     @classmethod
     def from_section(cls, values: dict) -> "CooperatorsSettings":
@@ -576,8 +600,20 @@ class CooperatorsSettings:
                 "energy_side_shares", default=(), minimum=0.0
             ),
             pain_averaged=section.boolean("pain_averaged", default=False),
+            task=section.choice("task", ("targets", "line"), default="targets"),
+            line_speed_cap_body_lengths_per_s=section.number(
+                "line_speed_cap_body_lengths_per_s", default=0.0, minimum=0.0
+            ),
+            line_restart_mm=section.number("line_restart_mm", default=0.0, minimum=0.0),
         )
         section.reject_unknown_keys()
+        if settings.task == "line" and (
+            settings.reward_channels != "team_own" or not settings.line_closeness_mm
+        ):
+            raise SettingsError(
+                '[environment.cooperators] task = "line" needs reward_channels ='
+                ' "team_own" and a line_closeness_mm'
+            )
         if sum(settings.energy_side_shares) > 0.5:
             raise SettingsError(
                 "[environment.cooperators] energy_side_shares give both sides more"

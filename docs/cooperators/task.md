@@ -3,7 +3,10 @@
 **Status (2026-10-14): agreed with the user and built
 ([As built](#as-built)). Cycle 17 (2026-10-18) keeps every target ahead
 for a first stage, the straight walk
-([Cycle 17](#cycle-17-the-straight-walk-first-the-users-decision-2026-10-18)).**
+([Cycle 17](#cycle-17-the-straight-walk-first-the-users-decision-2026-10-18)).
+Cycle 18 (2026-10-18) replaces the targets with a straight line, the head
+a segment like the others, on model v5, the body of *Scolopendra heros*
+([Cycle 18](#cycle-18-the-straight-line-the-users-design-2026-10-18)).**
 The
 task is the environment's side of the problem: the targets, the episodes,
 how the difficulty grows, and what happens after an arrival.
@@ -301,6 +304,58 @@ Narvekar et al., JMLR 2020).
   walks at 5 to 7.5 cm. The safeguard to watch is the near miss: a target
   passed just beside the head after a long walk asks for a turn back.
 
+## Cycle 18: the straight line (the user's design, 2026-10-18)
+
+**Why** (run 27). Both seeds circled one way at full speed, seed 1 to the
+right and seed 2 to the left, about 65 mm across: the head walked on one
+leg (0.2 lift-offs a second on one side, 5.3 on the other) and turned
+toward it, its heading error stayed near 75°, and the level stopped at
+0.32. Every run from scratch so far locked into one turning direction. The
+head's special role made its limp cheap: its own target, its own reward,
+and half its weight carried for free. The user: start from the most basic
+setup, a straight line and no target, with the head a segment like the
+others; once the gait is good, curve the line.
+
+**The design** (the user's):
+
+- **The stages.** 1, a straight line, until a steady wave gait forms; 2,
+  curved and random lines; 3, targets again; later, stopping and resting.
+  Each stage starts from the last one's checkpoint once its gait passes.
+- **The line.** At every restart a straight line is laid through the mean
+  of the segments' centres, along the head's heading; it stays for the
+  episode. Every segment's centre is measured against it after each step:
+  how far along it, how far to its left (signed), and its body's angle
+  from it. The pay is in [reward.md](reward.md#cycle-18-the-straight-line-every-segment-alike-the-users-design-2026-10-18).
+- **The head is a segment like the others**: no target, the same reward
+  and critics. Only its weight differs: the first unit carries the legless
+  head (0.874 g against 0.477 g for a trunk unit on v5), so it may hang the
+  weight beyond the others' mean on its neighbours for free.
+- **A speed cap from biology.** *S. heros* walked a treadmill at 0.5, 1 and
+  1.5 body lengths a second (Anderson, Shultz & Jayne 1995), *S. polymorpha*
+  at 0.64 on flat ground (Diaz et al. 2023). The line pays at most 1 body
+  length a second, the middle of the measured range: once speed earns
+  nothing more, only walking better pays.
+- **The model: v5, the body of *S. heros*** (the user's choice; main's
+  [model.md](../model.md#model-v5)): 152 mm and 11.56 g, a head without
+  legs and 21 leg-bearing units, v4's physics scaled to that size by
+  dynamic similarity. Every price in millimetres or millijoules is scaled
+  the same way ([reward.md](reward.md#cycle-18-the-straight-line-every-segment-alike-the-users-design-2026-10-18)).
+- **The episode** stays 20 s (1,000 steps), and a world restarts with a
+  new line along its new heading. No stopwatch, and the level stays where
+  it starts.
+- **A strayed world restarts** (proposed, measured): once its segments'
+  mean distance from the line passes the closeness band (20 mm), as at the
+  time limit, the agents bootstrapping from their critics' value of that
+  state. Fresh networks under the training tow curve away from their line:
+  their segments were on average 7 mm from it in an episode's first 5 s,
+  16 mm in the next, 33 and 56 mm in the last two, so after 10 s most
+  steps lay where the line pays nothing and only costs remain, which
+  would teach every agent that doing less pays (cycle 16's free-rider
+  lesson). With the restart every step lies within the band, the line pays
+  9 mm/s through the whole episode, and a fresh body restarts about every
+  10 s. It plays the part main's range circle played for the targets
+  (`analysis/line_check.py fresh` in `../Training`).
+
 ## As built
 
 - **The full circle from the model.** The near end must clear the body's
@@ -324,6 +379,16 @@ Narvekar et al., JMLR 2020).
   defaults; the episode is main's `max_episode_steps`, 1,000.
 - **Cycle 17**: `bearing_limit_deg` (180, no limit, by default) caps the
   bearing at every level (`CooperativeTask.half_bearing_rad`).
+- **Cycle 18**: `task = "line"` (`"targets"` by default) lays the straight
+  line (`environment/cooperative_line.py`, `StraightLine`), places no
+  target, leaves the head's target values zero, and never arrives, so no
+  stopwatch ends and the level does not move; it needs `reward_channels =
+  "team_own"` and a `line_closeness_mm`. `line_restart_mm` (0, never, by
+  default) restarts a world whose segments' mean distance from the line
+  passes it, by the same truncation as the time limit. The episode's diagnostics measure
+  the first segment against the line: its centre's distance from it, its
+  angle, the share of the time its centre lies within half the head's width
+  of it, and how far it went along it.
 
 ## A point to weigh (answered in the reward)
 
