@@ -248,9 +248,14 @@ actor of 2 × 64.
   millimetres, and the own channel's advantages are several times smaller
   than the team's: it would hold 2 to 16% of the variance (measured for
   cycle 16's channels). Per critic, a channel's weight is its share
-  whatever its size; the risk, a nearly empty channel's noise blown up to
-  full size (run 25's head), goes with cycle 16, which puts energy in every
-  own channel.
+  whatever its size, so an own millimetre weighs several team millimetres
+  in the update (about 2 at run 25's cycle 64, 5 to 8 at its walk,
+  `analysis/start_check.py`): any cost put in the own channel must be one
+  whose saving the team never loses by, or the segments learn to do less
+  (cycle 16's own energy, measured and left out, [reward.md](reward.md)).
+  The risk of a nearly empty channel's noise blown up to full size stays
+  with the head, whose own channel holds only its pain and hanging (run
+  25: it tilts the head's updates 20 to 40°, `analysis/head_own_check.py`).
 - **Logged**: every critic's and every baseline's explained variance after
   each update. A baseline explaining much more than its value shows the
   neighbours' actions at work.

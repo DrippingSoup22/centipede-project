@@ -40,10 +40,11 @@ After run 24, cycle 15 pays the line near it instead of charging the
 distance, draws it where the head keeps pointing, and charges every
 follower the chain's squeeze; energy and the squeeze are ramped in with
 pain ([Cycle 15](#cycle-15-the-line-where-the-head-points-and-the-squeeze-the-users-design-2026-10-17)).
-After run 25, cycle 16 moves energy into each segment's own channel,
-shared with its neighbours (40% itself, 25% each nearest, 5% each next),
-and prices pain on the legs' press averaged over 1 s
-([Cycle 16](#cycle-16-energy-shared-with-the-neighbours-pain-averaged-the-users-design-2026-10-18)).**
+After run 25, cycle 16 prices pain on the legs' press averaged over 1 s and
+hanging at twice its price, and run 26 trains on from run 25's walk; energy
+in each segment's own channel, shared with its neighbours, was built and
+measured, and left out: at a walk it pays every segment to do less
+([Cycle 16](#cycle-16-pain-averaged-hanging-dearer-energy-left-with-the-team-2026-10-18)).**
 
 Agreed with the user: the goal layers (task for the head, path for the
 followers); the costs as energy and pain; energy as a small animal's
@@ -1515,7 +1516,7 @@ braking it −26.6 and lying limp riding it −33.3; braking a tow of 0.4
 0.4 under a tow of 0.2 erase 10.2 mm/s of line a follower against 4.1 at
 spread 0.25 and 0.3 with neither ([tow.md](tow.md)).
 
-### Cycle 16: energy shared with the neighbours, pain averaged (the user's design, 2026-10-18)
+### Cycle 16: pain averaged, hanging dearer, energy left with the team (2026-10-18)
 
 **Why** (run 25). Both seeds' mean actions walked to their targets for the
 first time, 2.7 to 4.5 targets an episode at the hardest level, but limped:
@@ -1548,7 +1549,7 @@ the rear did little. Measured (the scripts in `../Training/analysis`):
   an own millimetre as 1.5 to 9 team millimetres. Not taken: with energy in
   it, no own channel is empty (the head's is 99 to 100% energy).
 
-**The design** (the user's, 2026-10-18):
+**The design first built** (the user's, 2026-10-18):
 
 - **Energy, each segment's own, shared by neighbourhood**
   (`energy_side_shares = [0.25, 0.05]`): 40% of its own, 25% of each nearest
@@ -1601,6 +1602,63 @@ own costs). Scolopendromorph centipedes walk with waves running head to
 tail, scutigeromorphs, lithobiomorphs and millipedes tail to head; why an
 animal chooses one is not well understood (Kuroda et al., 2014, as cited by
 Ambe et al., 2021).
+
+**Measured for the two ways to train** (`start_check.py`, the user's
+question: a run from scratch and a run from a learned walk need different
+things). The rollouts never depend on the reward, so each step's raw parts
+were recorded once and priced under run 25's reward, the design above and
+five other sharings of energy: the ledger above; a segment, the rear half or
+every follower with its leg commands 20% weaker, on the scripted walk and
+on run 25 seed 2's mean action at cycle 256; and the pull to explore (as in
+cycle 14: in 64 paired worlds, a probe acting with its mean for 3 s while
+the others explore, each channel's effect over its spread across the pairs,
+the team's pull plus 0.8 the own's), for fresh networks, run 25 seed 2 at
+cycle 64 (the walk emerging) and at cycle 256. Per-critic normalisation
+weighs an own millimetre as several team millimetres in the update: 0.8
+times the team's spread over the own's, about 0.4 for fresh networks, 2 at
+cycle 64 and 5 to 8 at cycle 256 (an estimate from the 3 s sums' spreads;
+at cycle 64 it gives 1.85 where `head_own_check.py`'s gradients gave 1.3 to
+1.5).
+
+- **Own energy pays doing less.** On run 25's walk a segment 20% weaker
+  saves 11 to 18 mm/s of its energy; with 40% of it its own, it gains in the
+  update while the walk it slows is shared by every follower: segment 1
+  +50 mm/s, segment 5 +39, the tail +30, the rear half +55, every follower
+  +10, as the update weighs own (segment 5 and the tail gain even at 0.8).
+  Under run 25's reward each loses (−5 to −73), but segment 5, by whose
+  weakness the whole walk gains (team +1.0). Every own sharing tried (20%
+  itself, half price, half team and half own, the body's mean in the own
+  channel) pays a weaker segment +28 to +55. The private cost and the
+  shared gain are the free-rider's dilemma; the difference reward's
+  argument for own energy holds only if the gain were credited alike.
+- **Own energy stops exploring once the legs work.** The followers' net
+  pull: run 25's reward −0.34 / +0.14 / −0.29 (fresh / cycle 64 / cycle
+  256), the design above −0.01 / −2.63 / −1.80: each exploring segment pays
+  6 to 16 mm of its own energy per 3 s, the head too.
+- **Averaged pain helps exploring**: run 25's reward with pain on the
+  averaged press, +0.52 / +0.38 / −0.02, the best of every design; the
+  brushes of random legs no longer cost.
+- **Hanging at twice its price** widens the held-up leg's margin, the
+  limp's, from −3.0 to −9.0 mm/s (−0.4 to −2.1 as the update weighs own
+  when a run starts); a held-up leg saves its own energy and lets the body
+  walk slightly faster (line +2.5), so hanging is all that charges it. The
+  pulls become +0.69 / +0.36 / −0.03; every other margin holds.
+
+**As run** (run 26, the user's decision, 2026-10-18): run 25's reward,
+energy the body's mean in the team channel, with pain on the averaged press
+and hanging at twice its price (`hanging_price = 2`), the critics' scale
+forgetting over about 10 updates; trained on from run 25 seed 2's walk at
+cycle 256, at level 1, without the tow and without ramps, the costs as that
+walk was trained. Every fault of the ledger pays less than the good walk,
+as a run starts and at full costs, and no weaker segment gains but segment
+5 on run 25's walk (+1.5, the team gaining too). The thinnest margins as
+the update weighs own: the held-up leg as a run starts (−2.1) and everyone
+standing at full costs (−5.2; run 25's reward −4.9, and run 25 walked).
+The wave is paid (legs almost in step −42 as a run starts, −66 at full
+costs; random phases −16 and −23); a wave running tail to head pays +5
+under run 25's reward as under this one, the body's preference, not this
+design's. The built environment pays exactly what `start_check.py` prices
+(within 2·10⁻⁶ mm a step).
 
 ### Other harms left out
 
@@ -1821,7 +1879,7 @@ missing side's to the other side (`side_share_weights`), in the own
 channel. `AveragedForces` keeps a fifth average, the force with which a
 segment's legs press on other legs (`leg_leg_force`), and with
 `pain_averaged` pain is that average squared, in newtons, times the pain
-price.
+price. Run 26 uses `pain_averaged` and leaves `energy_side_shares` off.
 
 **The force price, measured** (`analysis/energy_check.py` in
 `../CentipedeTraining`; on v4 as revised on 2026-10-15, with leg armature
