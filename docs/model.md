@@ -25,7 +25,7 @@ training had used it, by the user's decision
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 25 physics steps per action | `8be8e71e9b0ba9c9269be842e5d49b078c7e21fbe08e4495fdc84fc9ffbc3316` |
+| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `8212ad15e0261bcf1832abdf9a3be386500f37b066e155cc960c42be0759b2d9` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -506,8 +506,8 @@ not collide, as in v2 to v4.
 
 v4's physics, scaled to the new size by dynamic similarity, as motion under
 gravity scales (Froude): with lengths L times v4's and masses M times,
-forces scale with M, torques and stiffnesses with M L, times with √L (the
-timestep apart, below), and damping, a torque per speed, with M L √L. L is the legs' length ratio, M a
+forces scale with M, torques and stiffnesses with M L, times with √L, and
+damping, a torque per speed, with M L √L. L is the legs' length ratio, M a
 unit's mass ratio (the whole body's mass over its units).
 
 | Property | v4 | v5 | Scale |
@@ -517,9 +517,9 @@ unit's mass ratio (the whole body's mass over its units).
 | Maximum torques: sweep, lift, knee, ankle, spine yaw | 8, 18, 10, 5, 15 µN·m | 89, 201, 111, 56, 167 µN·m | M L = 11.14 |
 | Spine stiffness: yaw, pitch | 2e-5, 1e-4 N·m/rad | 2.2e-4, 1.1e-3 N·m/rad | M L |
 | Damping | | | M L √L = 14.81 |
-| Physics timestep | 0.5 ms, 40 steps per action | 0.8 ms, 25 steps per action | 1.6, beyond √L ≈ 1.33 (below) |
+| Physics timestep | 0.5 ms, 40 steps per action | 0.667 ms, 30 steps per action | √L ≈ 1.33 |
 | A leg joint's transient (inertia over damping) | 2 ms | 2.66 ms | √L |
-| Contacts' and joint limits' response | 1 ms | 1.6 ms | twice the timestep, as in v4 |
+| Contacts' and joint limits' response | 1 ms | 1.33 ms | twice the timestep, as in v4 |
 
 So the motors keep v4's strength for the body's weight, and a leg's top
 speed, torque over damping, is v4's over √L, 30 to 75 rad/s. Each leg
@@ -527,31 +527,30 @@ joint's armature makes its transient 2.66 ms, given the legs' own inertia
 at the model's pose; the spine's armature is v4's times M L². Contacts,
 friction and solver settings are v4's.
 
-**The timestep.** Scaled like the other times, it would be 0.667 ms, 30
-steps per action. The GPU's work per action grows with its physics steps
-(on v4, 40 steps took 337 ms and 25 took 228), so the timestep is longer
-still: 0.8 ms, 25 steps (the user's decision, 2026-10-18). The contacts and
-limits, at twice the timestep, are then a little softer than v4's scaled.
-Compared on the CPU (`archive/model_v5_heros/timestep_check.py` in the main
-folder; each with its contacts and limits at twice its timestep):
+**The timestep.** Scaled like the other times: 0.667 ms, 30 steps per
+action. The GPU's work per action grows with its physics steps (on v4, 40
+steps took 337 ms and 25 took 228), so longer timesteps were compared on
+the CPU (`archive/model_v5_heros/timestep_check.py` in the main folder;
+each with its contacts and limits at twice its timestep):
 
 | Steps per action | Timestep | A sine walk (3.5 Hz, wave over 9) | Deepest penetration, random commands | Joint-limit excess |
 | ---: | ---: | ---: | ---: | ---: |
-| 30 (scaled) | 0.667 ms | 85.4 mm/s, 9.4 mm high | 0.63 to 0.72 mm | 2.8° |
-| **25 (v5)** | **0.8 ms** | **77.4 mm/s, 9.5 mm high** | **0.76 to 0.91 mm** | **3.6°** |
+| **30 (v5)** | **0.667 ms** | **85.4 mm/s, 9.4 mm high** | **0.63 to 0.72 mm** | **2.8°** |
+| 25 | 0.8 ms | 77.4 mm/s, 9.5 mm high | 0.76 to 0.91 mm | 3.6° |
 | 20 | 1 ms | 71.8 mm/s, 8.5 mm high | 0.99 to 1.14 mm | 4.6° |
 
-The same walk is 9% slower at 25 steps, its feet sinking and slipping a
-little more; at 20 steps 16%, and the body walks 0.9 mm lower. On v4 the
-GPU's 32-bit arithmetic lost a world at what corresponds on v5 to
-1.33 ms; v4's 0.8 ms variant, which corresponds to 0.6 ms here, trained
-without one.
+25 steps passed every CPU check, but failed on a training GPU (an RTX 5090,
+MuJoCo Warp's Newton solver in 32-bit arithmetic): at a run's start one of
+4,352 worlds became non-finite within 3 actions, while 64-bit CPU MuJoCo
+kept 1,024 worlds from the same start finite for 12. A run takes millions
+of world-actions and stops at the first non-finite world, so v5 keeps the
+scaled timestep, as v4 kept 0.5 ms for its margin from the same failure.
 
 **The GPU's reserves.** MuJoCo Warp reserves room for each world's contacts
 and constraint rows once, and the program stops rather than drop any
 ([environment.md](environment.md)). A v5 world needs at most 103 contacts
 and 618 constraint rows, when the whole body lies on the floor (each
-contact several rows of its friction cone), 252 rows in a walk
+contact several rows of its friction cone), 183 rows in a walk
 (`archive/model_v5_heros/contact_budget.py`): more than the default 512
 rows per world, so configurations of v5 set `[environment.simulation]
 constraints_per_world` to 768.
@@ -564,12 +563,12 @@ folder's archive):
 
 | Check | Result |
 | --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.051 mm deepest penetration; no solver warning |
-| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.1 to 10.5 mm high, 0.07 to 0.13 mm deep |
-| Random full-strength motor commands, 2 s, 3 runs | 0.76 to 0.91 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 3.6° (v4: 3.2°); no solver warning |
-| Leg closest to a body under the random commands | 0.15 mm |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.038 mm deepest penetration; no solver warning |
+| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.2 to 10.6 mm high, 0.03 to 0.13 mm deep |
+| Random full-strength motor commands, 2 s, 3 runs | 0.63 to 0.72 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 2.8° (v4: 3.2°); no solver warning |
+| Leg closest to a body under the random commands | 0.13 mm |
 | Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs |
-| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.06 mm of its heights; joint-limit excess at most 3.0° |
+| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
 
 As in v1 to v4, the body cannot hold itself up with its motors off. The
 GPU backend reads v5's state as CPU MuJoCo computes it
@@ -578,8 +577,7 @@ environment runs it on both backends without change. Its speed on a
 training GPU, and the Newton solver's iterations there, are not yet
 measured. The automated tests in `tests/models/test_model_v5.py` check the
 size and mass, that every torque and damping is v4's times one scale and
-the transients its square root, the 0.8 ms timestep with contacts and
-limits at twice it, that the body sinks with its
+the timestep and transients its square root, that the body sinks with its
 motors off and stands on its lift motors, and that no leg passes through a
 body under random commands.
 
