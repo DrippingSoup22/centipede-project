@@ -67,9 +67,10 @@ class PhysicsFailure(RuntimeError):
 # factorization returns NaN for that world. The repair, applied after every
 # factorization, finds the worlds whose search direction came out non-finite
 # and factorizes them again with H's diagonal enlarged by this share, which
-# makes it positive definite again. Only that iteration's search direction
-# changes: the line search and the convergence test use the exact cost, and
-# the next iteration rebuilds H unchanged, so the solution is the same. It
+# makes it positive definite again. Only the search direction changes (with
+# elliptic cones for that iteration; pyramidal cones, which update H in place,
+# keep the larger diagonal for the rest of that solve): the line search and
+# the convergence test use the exact cost, so the solution is the same. It
 # replaces a private MuJoCo Warp function, which is why mujoco-warp is pinned.
 REPAIR_DIAGONAL_SHARE = 1e-4
 _UNREPAIRED_FACTORIZATION = mjw_solver._cholesky_factorize_solve
@@ -113,9 +114,9 @@ def _repaired_factorization(m, d, ctx, *args, **kwargs) -> None:
         inputs=[m.nv, 1.0 + REPAIR_DIAGONAL_SHARE, ctx.done, ctx.search_dot],
         outputs=[leave_alone, repaired, ctx.h],
     )
-    _UNREPAIRED_FACTORIZATION(
-        m, d, dataclasses.replace(ctx, done=leave_alone), *args, **kwargs
-    )
+    # Without the arguments that let pyramidal cones reuse a cached factor:
+    # the repaired worlds are factorized afresh.
+    _UNREPAIRED_FACTORIZATION(m, d, dataclasses.replace(ctx, done=leave_alone))
 
 
 def _register_factorization_repair(data: mjw.Data, repaired: wp.array) -> None:
