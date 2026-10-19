@@ -24,7 +24,7 @@ class BodyMeasures:
     from its front end to its rear end in the plane: the head's from its tip
     to its spine joint, the others' from joint to joint, the rear segment's
     twice the way from its joint to its centre. ``segment_weights_n`` are
-    each segment's own weight, its body and legs without the segments behind.
+    each segment's own weight, its body and legs without the other segments.
     """
 
     unit_weight_n: float
@@ -43,9 +43,14 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
 
     gravity = np.linalg.norm(model.opt.gravity)
     weight_n = model.body_mass.sum() * gravity
-    # A segment's subtree is itself, its legs and every segment behind it.
+    # A segment's subtree is itself, its legs and every segment beyond it
+    # from the tree's root (behind it from the head, ahead of it from the
+    # middle, v5's root): each subtracts the subtrees of the segments it carries.
     subtree_masses = model.body_subtreemass[mapping.body_ids]
-    own_masses = subtree_masses - np.append(subtree_masses[1:], 0.0)
+    carries = (
+        model.body_parentid[mapping.body_ids][None, :] == mapping.body_ids[:, None]
+    )
+    own_masses = subtree_masses - carries @ subtree_masses
 
     # The left sweep of the first segment stands for every leg: the model's
     # legs are copies of one another.

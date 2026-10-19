@@ -804,7 +804,7 @@ def test_on_the_line_v5_walks_with_no_target_and_restarts_a_strayed_world():
             "max_episode_steps": 3,
             "observation_radius": 2,
             "simulation": {
-                "model_path": str(Path("models/assembly_v5.xml").resolve()),
+                "model_path": str(Path("models/assembly_v5_full.xml").resolve()),
                 "backend": "cpu",
                 "world_count": 2,
             },
