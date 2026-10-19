@@ -10,7 +10,9 @@ simulation loads it (see the [architecture](architecture.md)).
 The newest model is **v5**, the body of a real species, *Scolopendra
 heros*: a head without legs and 21 leg-bearing units at the animal's
 measured length and mass, with v4's physics scaled to its size (see
-[Model v5](#model-v5)). **v4** has twelve body units, and legs of three
+[Model v5](#model-v5)). It comes in two lengths, the whole animal and its
+first ten units, a tester that screens a design quickly before the whole
+body trains it. **v4** has twelve body units, and legs of three
 links with a fourth joint, the ankle, with v3's torque motors, leg armature,
 and a 0.5 ms physics timestep (see [Model v4](#model-v4)). **v3**, which the
 example configurations use, is v2 with a longer physics timestep (see
@@ -19,9 +21,11 @@ example configurations use, is v2 with a longer physics timestep (see
 five are frozen: training work may change observations, rewards, targets,
 and learning, but never a model. A physical
 change requires a new, separately named version with its own validation. The
-one exception: v4's physics were revised in place on 2026-10-15, before any
-training had used it, by the user's decision
-([Physics of v4](#physics-of-v4)).
+two exceptions, each made before any training had used the model, by the
+user's decision: v4's physics were revised in place on 2026-10-15
+([Physics of v4](#physics-of-v4)), and v5's simulation settings on
+2026-10-19, when its file was split into the two lengths
+([Physics of v5](#physics-of-v5)).
 
 **MuJoCo version.** The program runs on MuJoCo 3.16.0 and MuJoCo Warp
 3.16.0, which v5 was validated with ([Validation of v5](#validation-of-v5)).
@@ -33,7 +37,8 @@ smaller. A model of v1 to v4 is validated again before it is trained on.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `8212ad15e0261bcf1832abdf9a3be386500f37b066e155cc960c42be0759b2d9` |
+| [`models/assembly_v5_full.xml`](../models/assembly_v5_full.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 15 physics steps per action | `8d2dd3e433feb5d710b176cd73c3b0dfc35c18bca57ca0d367de86293d280cec` |
+| [`models/assembly_v5_half.xml`](../models/assembly_v5_half.xml) | **v5's half**, its first ten units: the tester | `13773151d9468b5778ea65f0b67b472539a100bf67616b03e4cdff8ca04f55f1` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -66,9 +71,9 @@ is as described here.
 - Seven flexible connections between units, each with a yaw and a pitch hinge;
   rolling between units is locked.
 - A free root, so the whole body can move and rotate in 3D. It is the free
-  joint of the head's body, `segment_00`, which must be a child of the world:
-  turning it turns the whole centipede, which is how a reset varies the
-  starting heading.
+  joint of the head's body, `segment_00`, a child of the world (v5's is its
+  middle unit's): turning it turns the whole centipede, which is how a reset
+  varies the starting heading.
 - 69 position coordinates, 68 velocity coordinates, and 55 motors.
 - Total mass 643.4 mg.
 
@@ -462,6 +467,26 @@ three speeds. Where they measured nothing, v5 follows *S. polymorpha*, a
 close relative of the same deserts and the best-studied species. Its
 physics are v4's, scaled to the new size.
 
+### Two lengths
+
+v5 comes in two files built from the same units, density and armatures by
+one generator (`archive/model_v5_heros/make_model_v5.py` in the main
+folder), with the same simulation settings:
+
+| File | Units | Mass | Degrees of freedom | Motors | Use |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `assembly_v5_full.xml` | 21, the whole animal | 11.56 g | 214 | 188 | confirming a design, and the final training |
+| `assembly_v5_half.xml` | 10, the first ten | 5.71 g | 104 | 89 | the tester: screening a design quickly |
+
+The half is the whole body cut behind its tenth unit: every body, shape,
+joint and motor it has is the full body's, by name and value. It is half
+the length because that is about the shortest body that still holds one
+whole wave of the legs, as the scripted walks used to check v5 run (a
+wave over 9 units), and *S. heros* bends its body in waves of 5 to 11
+segments (Anderson et al. 1995). It costs a fourth of the full body's
+work on the GPU (below). What it cannot show is what only a long body
+has: 21 segments cooperating, and the whole body's wave.
+
 ### The body
 
 | Property | v4 | v5 | Source |
@@ -525,75 +550,108 @@ unit's mass ratio (the whole body's mass over its units).
 | Maximum torques: sweep, lift, knee, ankle, spine yaw | 8, 18, 10, 5, 15 µN·m | 89, 201, 111, 56, 167 µN·m | M L = 11.14 |
 | Spine stiffness: yaw, pitch | 2e-5, 1e-4 N·m/rad | 2.2e-4, 1.1e-3 N·m/rad | M L |
 | Damping | | | M L √L = 14.81 |
-| Physics timestep | 0.5 ms, 40 steps per action | 0.667 ms, 30 steps per action | √L ≈ 1.33 |
+| Physics timestep | 0.5 ms, 40 steps per action | 1.33 ms, 15 steps per action | twice √L (below) |
 | A leg joint's transient (inertia over damping) | 2 ms | 2.66 ms | √L |
-| Contacts' and joint limits' response | 1 ms | 1.33 ms | twice the timestep, as in v4 |
+| Contacts' and joint limits' response | 1 ms | 2.67 ms | twice the timestep, as in v4 |
 
 So the motors keep v4's strength for the body's weight, and a leg's top
 speed, torque over damping, is v4's over √L, 30 to 75 rad/s. Each leg
 joint's armature makes its transient 2.66 ms, given the legs' own inertia
-at the model's pose; the spine's armature is v4's times M L². Contacts,
-friction and solver settings are v4's.
+at the model's pose; the spine's armature is v4's times M L². Friction is
+v4's; the simulation settings below were revised for speed.
 
-**The timestep.** Scaled like the other times: 0.667 ms, 30 steps per
-action. The GPU's work per action grows with its physics steps (on v4, 40
-steps took 337 ms and 25 took 228), so longer timesteps were compared on
-the CPU with MuJoCo 3.12.0 (`archive/model_v5_heros/timestep_check.py` in
-the main folder; each with its contacts and limits at twice its timestep):
+**Simulation settings, revised for speed (2026-10-19).** v5 first had the
+scaled timestep (0.667 ms, 30 steps per action), v4's contacts and
+tolerance, and the head as the root of its body tree. On a training GPU
+(MuJoCo Warp's Newton solver in 32-bit arithmetic) a run of 256 update
+cycles then took about 7.5 hours on an RTX 4090, and about one world-step
+in 800 became non-finite early in training. A speed study, on Warp's CPU
+device (which runs the GPU's code) and on GPUs, found that the solver does
+84% of the work, most of it factorizing for every world a dense matrix as
+wide as the body's 214 degrees of freedom, and set four things:
 
-| Steps per action | Timestep | A sine walk (3.5 Hz, wave over 9) | Deepest penetration, random commands | Joint-limit excess |
-| ---: | ---: | ---: | ---: | ---: |
-| **30 (v5)** | **0.667 ms** | **85.4 mm/s, 9.4 mm high** | **0.63 to 0.72 mm** | **2.8°** |
-| 25 | 0.8 ms | 77.4 mm/s, 9.5 mm high | 0.76 to 0.91 mm | 3.6° |
-| 20 | 1 ms | 71.8 mm/s, 8.5 mm high | 0.99 to 1.14 mm | 4.6° |
+- **The free joint on the middle unit** (`segment_10`; the half's
+  `segment_05`). MuJoCo describes the body as a tree of joints that starts
+  at the body with the free joint. From the head, the chain of 21 units
+  made the solver's matrix so ill-conditioned when the body lay flat that
+  32-bit rounding broke its factorization: the non-finite worlds (MuJoCo
+  Warp's open issue #1415). From the middle the longest chain is half as
+  long: no failure in 128 flat landings without any repair, against 19,
+  and none on the GPU. Every hinge, axis, limit and motor is the same; on
+  the links between the middle and the head, the yaw and pitch hinges are
+  read from the other side (moved into the unit ahead, in the reverse
+  order, their axes negated so that every angle keeps its sign). In the
+  air both trees accelerate alike to 1e-11; with contacts they differ by
+  the one term MuJoCo omits for contacts, the Jacobian's rate times the
+  velocity, which depends on the root (about 0.1% of a contact force).
+- **A 1.33 ms timestep**, 15 steps per action, twice the scaled one, with
+  contacts and limits responding in twice it. The work per action falls
+  with the steps; the price is softer impacts (below).
+- **Legs touch only the legs of their own side up to three units away**,
+  through explicit contact pairs with the legs' own contact values, and
+  the floor. In a census of v5's leg contacts, 0.02% were four units
+  apart, none farther and none across the body.
+- **The solver's tolerance 1e-4** instead of 1e-6: the same walk, and
+  about 10% less work.
 
-25 steps passed every CPU check, and v5 keeps the scaled timestep, the
-more accurate. On a training GPU (RTX 5090 and 4090, MuJoCo Warp's Newton
-solver in 32-bit arithmetic), v5 becomes non-finite at either timestep,
-with MuJoCo Warp 3.14 and 3.16 alike: in a fresh run's first update cycle
-about one world-step in 800, falling to one in 14,000 by the sixth as the
-policies change (4,352 worlds, the cooperators' training). 64-bit CPU MuJoCo keeps
-1,024 worlds from the same start finite for 12 actions, and MuJoCo Warp's
-conjugate-gradient solver keeps 4,352 finite for 6 training cycles, at a
-quarter of Newton's speed. Without the floor's torsional and rolling
-friction v5 fails the same way; the cause is not known. MuJoCo Warp guards
-nothing against non-finite values, by design, so a world that turns
-non-finite stops the run ([environment.md](environment.md#when-the-physics-fails)).
+On an RTX 5090, 4,352 worlds acting like a fresh policy:
+
+| Model | Work per action | Factorizations broken by rounding |
+| --- | ---: | ---: |
+| v5 as it first was | 1,936 ms | 6,427 |
+| The full body | 619 ms | none |
+| The half | 143 ms | none |
+
+The price of the longer timestep, in CPU MuJoCo 3.16.0
+(`archive/model_v5_heros/timestep_check.py` and `validate.py`):
+
+| | v5 as it first was | The full body |
+| --- | ---: | ---: |
+| A sine walk (3.5 Hz, wave over 9) | 84.7 mm/s | 64.6 mm/s |
+| Deepest penetration, random commands | 0.68 to 0.74 mm | 1.32 to 1.56 mm |
+| Joint-limit excess, random commands | 2.7 to 3.1° | 6.5 to 7.0° |
+
+A body scaled up in proportion would not have helped: every motion slows
+by the square root of the size, so the timestep could grow exactly as much
+as each stride lengthens, and the steps per stride stay the same (dynamic
+similarity, as above).
 
 **The GPU's reserves.** MuJoCo Warp reserves room for each world's contacts
 and constraint rows once, and the program stops rather than drop any
-([environment.md](environment.md)). A v5 world needs at most 122 contacts
-and 732 constraint rows, when the whole body lies on the floor (each
-contact with the floor six rows of its friction cone), 174 rows in a walk
-(MuJoCo 3.16.0, `archive/model_v5_heros/contact_budget.py`): more than the
-default 512 rows per world, so configurations of v5 set
-`[environment.simulation] constraints_per_world` to 768.
+([environment.md](environment.md)). A full-body world needs at most 126
+contacts and 756 constraint rows, when the whole body lies on the floor
+(each contact with the floor six rows of its friction cone), 252 in a walk
+(CPU MuJoCo 3.16.0, `archive/model_v5_heros/contact_budget.py`); on the GPU
+771 rows were seen, so configurations of the full body set
+`[environment.simulation] constraints_per_world` to 1,024. The half needs
+at most 60 contacts and 360 rows (369 on the GPU), within the default 512.
 
 ### Validation of v5
 
-The checks of [Validation](#validation), on v5 (CPU MuJoCo 3.16.0, the
-model's timestep unless stated; `archive/model_v5_heros/validate.py` in the main
-folder's archive):
+The checks of [Validation](#validation), on both lengths (CPU MuJoCo
+3.16.0, the model's timestep unless stated; `archive/model_v5_heros/validate.py`
+in the main folder's archive):
 
-| Check | Result |
-| --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.037 mm deepest penetration; no solver warning |
-| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.2 to 10.6 mm high, 0.03 to 0.13 mm deep |
-| Random full-strength motor commands, 2 s, 3 runs | 0.68 to 0.74 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 3.1° (v4: 3.2°); no solver warning |
-| Leg closest to a body under the random commands | 0.14 mm |
-| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs |
-| Half timestep | Settling ends within 0.04 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
+| Check | The full body | The half |
+| --- | --- | --- |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.072 mm deepest penetration; no solver warning | The same with its 10 bodies and 20 feet: centres 3.88 mm high, 0.071 mm deep |
+| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 9.7 to 10.3 mm high, 0.10 to 0.24 mm deep | At 40% and 60% on all 20 feet, centres 9.9 to 10.0 mm high, 0.14 to 0.22 mm deep; at 20% its first unit, which carries the head on two legs, touches the floor |
+| Random full-strength motor commands, 2 s, 3 runs | 1.32 to 1.56 mm deepest penetration, in brief impacts; joint limits exceeded by at most 7.0°; no solver warning | 1.28 to 1.44 mm; at most 6.7°; no warning |
+| Leg closest to a body under the random commands | 0.09 mm | 0.06 mm |
+| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs | Nothing closer than 0.135 mm; too short to coil |
+| Half timestep | Settling ends within 0.06 mm of the model's timestep, standing within 0.07 mm of its heights; penetration 1.14 to 1.24 mm and joint-limit excess at most 5.7° under random commands | Settling within 0.07 mm; penetration 1.09 to 1.38 mm, joint-limit excess at most 5.4° |
 
 As in v1 to v4, the body cannot hold itself up with its motors off. The
 GPU backend reads v5's state as CPU MuJoCo computes it
-(`tests/environment/simulation/test_gpu_backend.py`), and the main
-environment runs it on both backends without change. Its speed on a
-training GPU, and the Newton solver's iterations there, are not yet
-measured. The automated tests in `tests/models/test_model_v5.py` check the
+(`tests/environment/simulation/test_gpu_backend.py`, on the half), and the
+main environment runs both lengths on both backends without change. The
+automated tests in `tests/models/test_model_v5.py` check the full body's
 size and mass, that every torque and damping is v4's times one scale and
-the timestep and transients its square root, that the body sinks with its
-motors off and stands on its lift motors, and that no leg passes through a
-body under random commands.
+the transients its square root, the timestep and the contacts' and
+limits' response, the root on the middle unit, the legs' contacts and the
+tolerance in both lengths, that the half's parts are the full body's, that
+the body sinks with its motors off and stands on its lift motors, and that
+no leg passes through a body under random commands.
 
 ### Sources for v5
 

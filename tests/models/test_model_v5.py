@@ -1,9 +1,10 @@
-"""Validation of model v5: the body of Scolopendra heros.
+"""Validation of model v5: the body of Scolopendra heros, in two lengths.
 
 v5 is a head without legs and 21 leg-bearing units, 152 mm and 11.56 g as
 the animals measured; its physics are v4's scaled to that size by dynamic
-similarity (docs/model.md, "Model v5"). The checks below repeat the parts
-of its validation that a change could break.
+similarity, simulated at the settings revised for speed (docs/model.md,
+"Model v5"). Its half is the same body's first ten units. The checks below
+repeat the parts of its validation that a change could break.
 """
 
 import mujoco
@@ -17,7 +18,9 @@ FLOOR, BODY, LEG, LEFT_FOOT, RIGHT_FOOT = range(5)
 LIMBS = (LEG, LEFT_FOOT, RIGHT_FOOT)
 LEG_ROLES = ("sweep", "lift", "knee", "ankle")
 UNITS = 21
-STEPS_PER_ACTION = 30
+HALF_UNITS = 10
+STEPS_PER_ACTION = 15
+LEG_REACH = 3
 
 
 @pytest.fixture(scope="module")
@@ -27,7 +30,12 @@ def v4():
 
 @pytest.fixture(scope="module")
 def v5():
-    return mujoco.MjModel.from_xml_path("models/assembly_v5.xml")
+    return mujoco.MjModel.from_xml_path("models/assembly_v5_full.xml")
+
+
+@pytest.fixture(scope="module")
+def half():
+    return mujoco.MjModel.from_xml_path("models/assembly_v5_half.xml")
 
 
 def by_role(model, names, values):
@@ -42,8 +50,8 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     """The animal's size and mass; v4's joint ranges but the knee's, which
     bends 10 degrees less; every torque one factor, M L, times v4's, and
     the leg transient and damping, over that factor, the square root of
-    the length scale L, as the timestep's 30 steps per action, with the
-    contacts and limits responding in twice it."""
+    the length scale L; 15 steps per action, with the contacts and limits
+    responding in twice the timestep."""
     data = mujoco.MjData(v5)
     mujoco.mj_forward(v5, data)
     assert v5.body_subtreemass[1] == pytest.approx(0.01156, rel=1e-3)
@@ -59,6 +67,7 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     response = (2 * v5.opt.timestep, 1.0)
     assert {tuple(row) for row in v5.geom_solref} == {response}
     assert {tuple(row) for row in v5.jnt_solref[v5.jnt_limited == 1]} == {response}
+    assert {tuple(row) for row in v5.pair_solref} == {response}
 
     def motors(model):
         names = [model.actuator(m).name.removesuffix("_motor") for m in range(model.nu)]
@@ -69,7 +78,6 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
     torque_scale = sweep5 / sweep4
     mass_scale = (v5.body_subtreemass[1] / UNITS) / (v4.body_subtreemass[1] / 12)
     time_scale = np.sqrt(torque_scale / mass_scale)
-    assert v5.opt.timestep / v4.opt.timestep == pytest.approx(time_scale, rel=0.01)
     for role, (torque,) in v4_torques.items():
         (torque5,) = v5_torques[role]
         assert torque5 == pytest.approx(torque * torque_scale, rel=1e-3)
@@ -98,6 +106,42 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
             dof = v5.jnt_dofadr[joint_id]
             transient = inertia[dof, dof] / v5.dof_damping[dof]
             assert transient == pytest.approx(0.002 * time_scale, rel=0.05)
+
+
+def test_the_full_body_and_its_half_share_their_units_and_settings(v5, half):
+    """The free joint on the middle unit; the solver's tolerance 1e-4; a leg
+    touches the floor, and the legs of its own side up to three units away
+    through contact pairs; the half is the full body's first ten units, every
+    part alike."""
+    for model, units in ((v5, UNITS), (half, HALF_UNITS)):
+        root = model.jnt_bodyid[0]
+        assert model.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE
+        assert model.body(root).name == f"segment_{units // 2:02d}"
+        assert model.body_parentid[root] == 0
+        assert model.opt.tolerance == pytest.approx(1e-4)
+        categories = model.geom_user[:, 1].astype(int)
+        assert set(model.geom_conaffinity[np.isin(categories, LIMBS)]) == {1}
+        pairs = {
+            tuple(sorted(tuple(model.geom(g).name.split("_")[1:3]) for g in pair))
+            for pair in zip(model.pair_geom1, model.pair_geom2, strict=True)
+        }
+        expected = {
+            ((f"{a:02d}", side), (f"{b:02d}", side))
+            for side in ("left", "right")
+            for a in range(units)
+            for b in range(a + 1, min(units, a + LEG_REACH + 1))
+        }
+        assert pairs == expected
+    assert half.opt.timestep == v5.opt.timestep
+    for b in range(1, half.nbody):
+        full_body = v5.body(half.body(b).name).id
+        assert half.body_mass[b] == v5.body_mass[full_body]
+    for j in range(1, half.njnt):
+        name = half.joint(j).name
+        assert np.array_equal(half.jnt_range[j], v5.jnt_range[v5.joint(name).id])
+    for a in range(half.nu):
+        name = half.actuator(a).name
+        assert half.actuator_gear[a, 0] == v5.actuator_gear[v5.actuator(name).id, 0]
 
 
 def ground_contacts(model, data):
@@ -157,7 +201,12 @@ def test_no_leg_passes_through_a_body_under_random_commands(v5):
         for limb in limbs
         for body in bodies
         if abs(owners[limb] - owners[body]) <= 2 and not parent_filtered(limb, body)
-    ] + [(int(a), int(b)) for i, a in enumerate(bodies) for b in bodies[i + 2 : i + 4]]
+    ] + [
+        (int(a), int(b))
+        for a in bodies
+        for b in bodies
+        if 2 <= owners[b] - owners[a] <= 3
+    ]
     data = mujoco.MjData(v5)
     rng = np.random.default_rng(0)
     closest = np.inf
@@ -166,7 +215,7 @@ def test_no_leg_passes_through_a_body_under_random_commands(v5):
         if step >= 10 * STEPS_PER_ACTION and step % STEPS_PER_ACTION == 0:
             data.ctrl[:] = rng.uniform(-1.0, 1.0, v5.nu)
         mujoco.mj_step(v5, data)
-        if step % 3 == 0:  # every 2 ms
+        if step % 2 == 0:  # every 2.7 ms
             for a, b in pairs:
                 distance = mujoco.mj_geomDistance(v5, data, a, b, 1e-3, None)
                 closest = min(closest, distance)
