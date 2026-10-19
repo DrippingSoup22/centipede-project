@@ -503,3 +503,31 @@ def test_invalid_physics_stops_the_run(model, mapping):
     assert trace["graph_first_bad_step"] == 0
     assert trace["step_qvel"].shape == (1, model.nv)
     assert np.isnan(trace["start_xfrc_applied"][1, 0])
+
+
+def test_allowed_non_finite_worlds_restart_from_the_actions_start(
+    model, mapping, monkeypatch
+):
+    """With one restart allowed per action, a world the physics makes
+    non-finite goes back to the action's start, flagged for the environment,
+    with finite state and effort; the other world steps on."""
+    backend = GPUBackend(model, mapping, 2, STEPS, SOLVER, 128, 512, 0.0, True, True, 1)
+    backend.reset(seed=0)
+    actions = torch.rand(2, mapping.segment_count, 6, device="cuda") * 2 - 1
+    backend.step(actions)
+    start = positions(backend).copy()
+    replay = wp.capture_launch
+
+    def replay_spoiling_world_1(graph):
+        replay(graph)
+        wp.to_torch(backend.gpu_data.qvel)[1, 10] = float("nan")
+
+    monkeypatch.setattr(wp, "capture_launch", replay_spoiling_world_1)
+    backend.step(actions)
+
+    assert backend.diagnostics.facts.restarted_worlds.tolist() == [False, True]
+    assert np.array_equal(positions(backend)[1], start[1])
+    assert not np.array_equal(positions(backend)[0], start[0])
+    for field in dataclasses.fields(backend.physical_state):
+        values = getattr(backend.physical_state, field.name)
+        assert torch.isfinite(values.float()).all(), field.name

@@ -327,6 +327,8 @@ class CooperativeEnvironment:
         truncated = self.episode_steps >= self.settings.max_episode_steps
         if self.line_restart_m:
             truncated |= off_line.mean(dim=1) > self.line_restart_m
+        # A world the physics put back to the step's start ends there.
+        truncated |= self.simulation.restarted_worlds
         self.diagnostics.record_step(
             state,
             self.previous_body_planar_position,

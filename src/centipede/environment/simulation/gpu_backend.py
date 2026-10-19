@@ -619,6 +619,7 @@ class GPUBackend:
         start_heading_range_rad: float = 0.0,
         measure_effort: bool = False,
         measure_joint_forces: bool = False,
+        max_restarted_worlds_per_action: int = 0,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -633,6 +634,9 @@ class GPUBackend:
         (``_measure_effort``), and with ``measure_joint_forces`` its joint
         forces (``_measure_joint_forces``), for which MuJoCo Warp computes the
         forces between bodies after every solve.
+        Up to ``max_restarted_worlds_per_action`` worlds made non-finite in one
+        action are put back to its start instead of stopping the run
+        (``_check_worlds``).
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
@@ -652,6 +656,7 @@ class GPUBackend:
         self.start_heading_range_rad = start_heading_range_rad
         self.measure_effort = measure_effort
         self.measure_joint_forces = measure_joint_forces
+        self.max_restarted_worlds_per_action = max_restarted_worlds_per_action
         self.timestep = float(model.opt.timestep)
         self.root_quaternion_address = mapping.root_qpos_address + 3
 
@@ -725,8 +730,12 @@ class GPUBackend:
                 contact_count=wp.to_torch(self.gpu_data.nacon),
                 constraint_rows=wp.to_torch(self.gpu_data.nefc),
                 solver_iterations=wp.to_torch(self.gpu_data.solver_niter),
+                restarted_worlds=torch.zeros(
+                    world_count, dtype=torch.bool, device=torch_device
+                ),
             )
         )
+        self._restarted_worlds = self.diagnostics.facts.restarted_worlds
 
         # The physics steps of one action, recorded as a CUDA graph by the
         # first step; see ``step``.
@@ -816,10 +825,12 @@ class GPUBackend:
             self._physics_graph = capture.graph
         else:
             wp.capture_launch(self._physics_graph)
-        self._check_worlds()
+        restarted = self._check_worlds()
         self._actions_stepped += 1
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        if restarted:
+            self._measure_start(wp.from_torch(self._restarted_worlds))
 
     def reset(
         self,
@@ -883,12 +894,16 @@ class GPUBackend:
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        self._measure_start(mask_view)
+
+    def _measure_start(self, world_mask: wp.array) -> None:
+        """The masked worlds' effort at the pose they start from, after
+        ``forward``: its forces; no motor has worked yet."""
         if self.measure_effort:
-            # The starting pose's forces; no motor has worked yet.
-            self._clear_effort(mask_view)
-            self._measure_effort(mask_view, 1.0)
+            self._clear_effort(world_mask)
+            self._measure_effort(world_mask, 1.0)
         if self.measure_joint_forces:
-            self._measure_joint_forces(mask_view, 1.0, start=True)
+            self._measure_joint_forces(world_mask, 1.0, start=True)
 
     def _run_physics_steps(self) -> None:
         """The physics steps of one action, launched from Python, each
@@ -975,24 +990,30 @@ class GPUBackend:
             device=self.device,
         )
 
-    def _check_worlds(self) -> None:
-        """Stop the run if any world's physics went wrong during the last step.
+    def _check_worlds(self) -> bool:
+        """Stop the run if any world's physics went wrong during the last step,
+        or restart the worlds made non-finite if they are few; whether it did.
 
         MuJoCo Warp records, per world, every capacity overflow since the last
         reset, but it does not detect non-finite values, so both are checked
-        here. The ``if`` is the step's only wait for the GPU; the failing world
-        is looked up only after something went wrong.
+        here. An overflow always stops the run; up to
+        ``max_restarted_worlds_per_action`` non-finite worlds go back to the
+        action's start (``_restart_worlds``), and more stop it. The ``if`` is
+        the step's only wait for the GPU; the failing world is looked up only
+        after something went wrong.
         """
+        self._restarted_worlds.zero_()
         overflow_bits = wp.to_torch(self.gpu_data.overflow)
         overflowed_worlds = (overflow_bits & CAPACITY_OVERFLOWS) != 0
         finite_qpos = torch.isfinite(wp.to_torch(self.gpu_data.qpos)).all(dim=1)
         finite_qvel = torch.isfinite(wp.to_torch(self.gpu_data.qvel)).all(dim=1)
-        broken_worlds = overflowed_worlds | ~(finite_qpos & finite_qvel)
+        non_finite_worlds = ~(finite_qpos & finite_qvel)
+        if not (overflowed_worlds | non_finite_worlds).any():
+            return False
 
-        if broken_worlds.any():
-            world_index = int(torch.nonzero(broken_worlds)[0].item())
-            world_overflows = int(overflow_bits[world_index].item())
-            if world_overflows & CONTACT_OVERFLOWS:
+        if overflowed_worlds.any():
+            world_index = int(torch.nonzero(overflowed_worlds)[0].item())
+            if int(overflow_bits[world_index].item()) & CONTACT_OVERFLOWS:
                 raise RuntimeError(
                     "Physics failed: the worlds together needed more than the "
                     f"{self.gpu_data.naconmax} contacts reserved for them, so "
@@ -1000,18 +1021,30 @@ class GPUBackend:
                     "[environment.simulation] (now "
                     f"{self.gpu_data.naconmax // self.world_count})."
                 )
-            if world_overflows & CONSTRAINT_OVERFLOWS:
-                raise RuntimeError(
-                    f"Physics failed in world {world_index}: it needed more than "
-                    f"the {self.gpu_data.njmax} constraints reserved per world, so "
-                    "some were dropped. Raise constraints_per_world in "
-                    "[environment.simulation]."
-                )
-            raise PhysicsFailure(
-                f"Physics failed in world {world_index}: MuJoCo Warp produced a "
-                "non-finite position or velocity (the simulation became unstable).",
-                self._replay_failure(world_index),
+            raise RuntimeError(
+                f"Physics failed in world {world_index}: it needed more than "
+                f"the {self.gpu_data.njmax} constraints reserved per world, so "
+                "some were dropped. Raise constraints_per_world in "
+                "[environment.simulation]."
             )
+        if int(non_finite_worlds.sum().item()) <= self.max_restarted_worlds_per_action:
+            self._restart_worlds(non_finite_worlds)
+            return True
+        world_index = int(torch.nonzero(non_finite_worlds)[0].item())
+        raise PhysicsFailure(
+            f"Physics failed in world {world_index}: MuJoCo Warp produced a "
+            "non-finite position or velocity (the simulation became unstable).",
+            self._replay_failure(world_index),
+        )
+
+    def _restart_worlds(self, world_mask: torch.Tensor) -> None:
+        """Put the masked worlds back to their state at the action's start and
+        flag them, so that the environment ends their episodes there; the
+        step's ``forward`` then gives them finite positions and forces."""
+        for name, kept in self._action_start.items():
+            values = wp.to_torch(getattr(self.gpu_data, name))
+            values[world_mask] = wp.to_torch(kept)[world_mask]
+        self._restarted_worlds.copy_(world_mask)
 
     def _replay_failure(self, world_index: int) -> dict[str, np.ndarray]:
         """The action just stepped, replayed from its start, every world back

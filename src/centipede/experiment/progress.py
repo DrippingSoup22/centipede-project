@@ -380,14 +380,17 @@ class TrainingProgress(_RedrawnLine):
         self._windows_taken += 1
         windows_left = self._total_cycles - self._cycle
         left = windows_left * self._seconds_taken / self._windows_taken
-        self._end_pass(
-            self.COLUMNS.format(
-                cycle=self._label(),
-                took=f"{took:.1f} s",
-                left=duration(left),
-                **self._results(record),
-            )
+        row = self.COLUMNS.format(
+            cycle=self._label(),
+            took=f"{took:.1f} s",
+            left=duration(left),
+            **self._results(record),
         )
+        # Worlds the GPU physics made non-finite and the run restarted.
+        restarted = record.get("physics", {}).get("restarted_worlds", 0.0)
+        if restarted:
+            row += f"  ({restarted:.4%} of world steps restarted, non-finite physics)"
+        self._end_pass(row)
         self._cycle += 1
 
     def _legend(self) -> str:

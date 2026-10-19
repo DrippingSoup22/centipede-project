@@ -94,6 +94,7 @@ class PhysicsSimulation:
                 start_heading_range_rad,
                 measure_effort,
                 measure_joint_forces,
+                settings.max_restarted_worlds_per_action,
             )
 
         self.segment_count = mapping.segment_count
@@ -105,6 +106,9 @@ class PhysicsSimulation:
         self.step_duration_s = ACTION_DURATION_S
         self.physical_state = self._backend.physical_state
         self.diagnostics = self._backend.diagnostics
+        # (W,) flags, refreshed by every step: the worlds the GPU backend put
+        # back to the step's start after MuJoCo Warp made them non-finite.
+        self.restarted_worlds = self.diagnostics.facts.restarted_worlds
 
     def reset(
         self, world_mask: torch.Tensor | None = None, seed: int | None = None

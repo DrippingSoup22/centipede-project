@@ -206,7 +206,10 @@ class Environment:
             terminated = head_distance <= self.settings.target.arrival_radius_m
         left_range = (head_distance > self.range_radius) & ~terminated
         time_is_up = self.episode_steps >= self.settings.max_episode_steps
-        truncated = (time_is_up | left_range) & ~terminated
+        # A world the physics put back to the step's start ends there too.
+        truncated = ((time_is_up | left_range) & ~terminated) | (
+            self.simulation.restarted_worlds
+        )
 
         # 4. and 5. Rewards, observations, diagnostics.
         step_rewards = self.reward_function.compute(
