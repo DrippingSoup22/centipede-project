@@ -547,12 +547,17 @@ the main folder; each with its contacts and limits at twice its timestep):
 | 25 | 0.8 ms | 77.4 mm/s, 9.5 mm high | 0.76 to 0.91 mm | 3.6° |
 | 20 | 1 ms | 71.8 mm/s, 8.5 mm high | 0.99 to 1.14 mm | 4.6° |
 
-25 steps passed every CPU check, but failed on a training GPU (an RTX 5090,
-MuJoCo Warp's Newton solver in 32-bit arithmetic): at a run's start one of
-4,352 worlds became non-finite within 3 actions, while 64-bit CPU MuJoCo
-kept 1,024 worlds from the same start finite for 12. A run takes millions
-of world-actions and stops at the first non-finite world, so v5 keeps the
-scaled timestep, as v4 kept 0.5 ms for its margin from the same failure.
+25 steps passed every CPU check, and v5 keeps the scaled timestep, the
+more accurate. On a training GPU (an RTX 5090, MuJoCo Warp's Newton solver
+in 32-bit arithmetic), v5 becomes non-finite at either timestep: at a run's
+start, about one world-action in 13,000 (one of 4,352 worlds within 3
+actions), with MuJoCo Warp 3.14 and 3.16 alike. 64-bit CPU MuJoCo keeps
+1,024 worlds from the same start finite for 12 actions, and MuJoCo Warp's
+conjugate-gradient solver keeps 4,352 finite for 6 training cycles, at a
+quarter of Newton's speed. Without the floor's torsional and rolling
+friction v5 fails the same way; the cause is not known. MuJoCo Warp guards
+nothing against non-finite values, by design, so a world that turns
+non-finite stops the run ([environment.md](environment.md#when-the-physics-fails)).
 
 **The GPU's reserves.** MuJoCo Warp reserves room for each world's contacts
 and constraint rows once, and the program stops rather than drop any
