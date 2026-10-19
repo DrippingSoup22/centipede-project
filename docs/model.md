@@ -23,6 +23,14 @@ one exception: v4's physics were revised in place on 2026-10-15, before any
 training had used it, by the user's decision
 ([Physics of v4](#physics-of-v4)).
 
+**MuJoCo version.** The program runs on MuJoCo 3.16.0 and MuJoCo Warp
+3.16.0, which v5 was validated with ([Validation of v5](#validation-of-v5)).
+v1 to v4 were validated with MuJoCo 3.12.0, and their validations have not
+been repeated under 3.16.0. Their automated tests pass under it, and it
+compiles them to the same bodies but for one part: v4's tarsus, a 0.6 mg
+link, gets another inertia, its smallest principal moment ten times
+smaller. A model of v1 to v4 is validated again before it is trained on.
+
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
 | [`models/assembly_v5.xml`](../models/assembly_v5.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 30 physics steps per action | `8212ad15e0261bcf1832abdf9a3be386500f37b066e155cc960c42be0759b2d9` |
@@ -210,7 +218,7 @@ All 16 feet stayed on the ground in both cases.
 
 | Setting | Value |
 | --- | ---: |
-| MuJoCo version | 3.12.0 |
+| MuJoCo version | 3.16.0 (v1 to v4 were validated with 3.12.0, see [Status](#status)) |
 | Integrator | `implicitfast` |
 | Physics timestep | 0.149 ms, 134 steps per 20 ms action (v1 and v2: 0.1 ms) |
 | Gravity | 9.81 m/s² |
@@ -530,8 +538,8 @@ friction and solver settings are v4's.
 **The timestep.** Scaled like the other times: 0.667 ms, 30 steps per
 action. The GPU's work per action grows with its physics steps (on v4, 40
 steps took 337 ms and 25 took 228), so longer timesteps were compared on
-the CPU (`archive/model_v5_heros/timestep_check.py` in the main folder;
-each with its contacts and limits at twice its timestep):
+the CPU with MuJoCo 3.12.0 (`archive/model_v5_heros/timestep_check.py` in
+the main folder; each with its contacts and limits at twice its timestep):
 
 | Steps per action | Timestep | A sine walk (3.5 Hz, wave over 9) | Deepest penetration, random commands | Joint-limit excess |
 | ---: | ---: | ---: | ---: | ---: |
@@ -548,27 +556,27 @@ scaled timestep, as v4 kept 0.5 ms for its margin from the same failure.
 
 **The GPU's reserves.** MuJoCo Warp reserves room for each world's contacts
 and constraint rows once, and the program stops rather than drop any
-([environment.md](environment.md)). A v5 world needs at most 103 contacts
-and 618 constraint rows, when the whole body lies on the floor (each
-contact several rows of its friction cone), 183 rows in a walk
-(`archive/model_v5_heros/contact_budget.py`): more than the default 512
-rows per world, so configurations of v5 set `[environment.simulation]
-constraints_per_world` to 768.
+([environment.md](environment.md)). A v5 world needs at most 122 contacts
+and 732 constraint rows, when the whole body lies on the floor (each
+contact with the floor six rows of its friction cone), 174 rows in a walk
+(MuJoCo 3.16.0, `archive/model_v5_heros/contact_budget.py`): more than the
+default 512 rows per world, so configurations of v5 set
+`[environment.simulation] constraints_per_world` to 768.
 
 ### Validation of v5
 
-The checks of [Validation](#validation), on v5 (CPU MuJoCo, the model's
-timestep unless stated; `archive/model_v5_heros/validate.py` in the main
+The checks of [Validation](#validation), on v5 (CPU MuJoCo 3.16.0, the
+model's timestep unless stated; `archive/model_v5_heros/validate.py` in the main
 folder's archive):
 
 | Check | Result |
 | --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.038 mm deepest penetration; no solver warning |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.037 mm deepest penetration; no solver warning |
 | Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 10.2 to 10.6 mm high, 0.03 to 0.13 mm deep |
-| Random full-strength motor commands, 2 s, 3 runs | 0.63 to 0.72 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 2.8° (v4: 3.2°); no solver warning |
-| Leg closest to a body under the random commands | 0.13 mm |
+| Random full-strength motor commands, 2 s, 3 runs | 0.68 to 0.74 mm deepest penetration, in brief impacts (v4's 0.43 to 0.52 mm, times L: 0.75 to 0.92); joint limits exceeded by at most 3.1° (v4: 3.2°); no solver warning |
+| Leg closest to a body under the random commands | 0.14 mm |
 | Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs |
-| Half timestep | Settling ends within 0.02 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
+| Half timestep | Settling ends within 0.04 mm of the full timestep, standing within 0.07 mm of its heights; joint-limit excess at most 2.4° |
 
 As in v1 to v4, the body cannot hold itself up with its motors off. The
 GPU backend reads v5's state as CPU MuJoCo computes it

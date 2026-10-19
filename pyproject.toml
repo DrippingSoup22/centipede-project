@@ -8,13 +8,14 @@ version = "0.1.0"
 description = "Independent segment agents learning to walk a simulated centipede"
 readme = "README.md"
 requires-python = ">=3.11"
-# MuJoCo is pinned to the version the frozen model was validated with.
+# MuJoCo is pinned to the version the newest model, v5, was validated with
+# (docs/model.md, Simulation settings).
 # RL_lib and MujocoReplay are also needed but not listed: they are sibling
 # projects, not published on PyPI, installed from their folders or their
 # GitHub repositories first (README, Setup). Listed by name, pip would look
 # for them on PyPI, where a package of the same name could be someone else's.
 dependencies = [
-    "mujoco==3.12.0",
+    "mujoco==3.16.0",
     "numpy>=2,<3",
     # Writes each run's complete configuration back out as TOML.
     "tomli-w",
@@ -28,7 +29,7 @@ dependencies = [
 gpu = [
     "warp-lang @ https://github.com/NVIDIA/warp/releases/download/v1.17.0/warp_lang-1.17.0%2Bcu12-py3-none-win_amd64.whl ; sys_platform == 'win32' and platform_machine == 'AMD64'",
     "warp-lang @ https://github.com/NVIDIA/warp/releases/download/v1.17.0/warp_lang-1.17.0%2Bcu12-py3-none-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "mujoco-warp==3.14.0",
+    "mujoco-warp==3.16.0",
 ]
 dev = [
     "pybind11-stubgen",

@@ -110,8 +110,8 @@ PyTorch is installed first from its CUDA 12.6 build, so that tensors can live on
 the GPU; plain `pip install torch` gives a CPU-only build on Windows. This build
 still supports older GPUs such as the MX330 (compute capability 6.1). The
 `gpu` extra adds NVIDIA Warp (its CUDA 12 build, for the same reason) and MuJoCo
-Warp. Verified with Python 3.13.15, MuJoCo 3.12.0, MuJoCo Warp
-3.14.0, Warp 1.17.0, PyTorch 2.14.1+cu126, and NumPy 2.5.3: MuJoCo Warp's GPU
+Warp. Verified with Python 3.13.15, MuJoCo 3.16.0, MuJoCo Warp
+3.16.0, Warp 1.17.0, PyTorch 2.14.1+cu126, and NumPy 2.5.3: MuJoCo Warp's GPU
 arrays become PyTorch GPU tensors without copying.
 
 Two benchmarks measure speed on a GPU:
