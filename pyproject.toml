@@ -28,7 +28,10 @@ dependencies = [
 gpu = [
     "warp-lang @ https://github.com/NVIDIA/warp/releases/download/v1.17.0/warp_lang-1.17.0%2Bcu12-py3-none-win_amd64.whl ; sys_platform == 'win32' and platform_machine == 'AMD64'",
     "warp-lang @ https://github.com/NVIDIA/warp/releases/download/v1.17.0/warp_lang-1.17.0%2Bcu12-py3-none-manylinux_2_28_x86_64.whl ; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "mujoco-warp==3.14.0",
+    # 3.14.0 and its one fix to the Newton solver's elliptic-cone Hessian,
+    # which turned indefinite for nearly still contacts and made v5
+    # non-finite (PR #1660). The release that has it, 3.15.0, needs MuJoCo 3.13.
+    "mujoco-warp @ https://github.com/google-deepmind/mujoco_warp/archive/bc8ed608f66273e9ead6a72779c13c6362b107c7.zip",
 ]
 dev = [
     "pybind11-stubgen",
