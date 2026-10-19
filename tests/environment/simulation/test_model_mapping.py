@@ -147,7 +147,7 @@ def test_v1_is_rejected_because_its_feet_share_one_category():
             "belong to no leg or spine joint: segment_03_tail_motor",
         ),
         ('name="head_tip"', 'name="head_point"', "no site named head_tip"),
-        ('<freejoint name="root" />', "", "segment_00 must be a child of the world"),
+        ('<freejoint name="root" />', "", "one segment must be a child of the world"),
         (
             'contype="2" conaffinity="1" user="3 1"',
             'contype="2" conaffinity="1" user="3 9"',

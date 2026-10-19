@@ -79,7 +79,7 @@ class ModelMapping:
         body_ids, center_site_ids, head_tip_site_id = _map_bodies_and_sites(
             model, segment_count
         )
-        root_qpos_address = _find_root_joint(model, int(body_ids[0]))
+        root_qpos_address = _find_root_joint(model, body_ids)
         geom_owner_indices, geom_categories = _read_geom_metadata(model, segment_count)
         is_head_shape = (geom_owner_indices == 0) & (geom_categories == BODY_CATEGORY)
         head_shape_id = int(np.flatnonzero(is_head_shape)[0])
@@ -271,23 +271,26 @@ def _map_bodies_and_sites(
     return body_ids, center_site_ids, head_tip_site_id
 
 
-def _find_root_joint(model: mujoco.MjModel, head_body_id: int) -> int:
+def _find_root_joint(model: mujoco.MjModel, body_ids: np.ndarray) -> int:
     """Return the position address of the free joint that carries the body.
 
-    The head's body must be the root of the body tree, with a free joint (its
-    position and orientation in the world), so that turning that joint turns
-    the whole centipede.
+    One segment's body must be the root of the body tree, a child of the world
+    with a free joint (its position and orientation in the world), so that
+    turning that joint turns the whole centipede: the head's in models v1 to
+    v4, the middle unit's in v5.
     """
-    first_joint_id = model.body_jntadr[head_body_id]
-    if (
-        model.body_parentid[head_body_id] != 0
-        or first_joint_id < 0
-        or model.jnt_type[first_joint_id] != mujoco.mjtJoint.mjJNT_FREE
-    ):
+    roots = [
+        int(body_id)
+        for body_id in body_ids
+        if model.body_parentid[body_id] == 0
+        and model.body_jntadr[body_id] >= 0
+        and model.jnt_type[model.body_jntadr[body_id]] == mujoco.mjtJoint.mjJNT_FREE
+    ]
+    if len(roots) != 1:
         raise ModelContractError(
-            "segment_00 must be a child of the world with a free joint"
+            "one segment must be a child of the world with a free joint"
         )
-    return int(model.jnt_qposadr[first_joint_id])
+    return int(model.jnt_qposadr[model.body_jntadr[roots[0]]])
 
 
 def _head_outline(

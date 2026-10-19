@@ -282,8 +282,9 @@ Normalising observations is the agents' job, not the environment's.
 the legs: each leg angle moves by a random amount between −2° and +2°, and each
 leg joint starts with a random speed (mean 0, spread 0.05 rad/s). With
 `start_heading_range_deg` above 0, the whole body is then turned about the
-vertical by a random angle within that range, by turning the free joint of the
-head's body, the root of the body tree. Each world has its own random sequence,
+vertical by a random angle within that range, by turning the free joint at the
+root of the body tree, about that body: the head's in v1 to v4, the middle
+unit's in v5. Each world has its own random sequence,
 and a fixed seed repeats it; the heading is drawn after the legs, so the legs
 start the same with or without it.
 
