@@ -495,5 +495,6 @@ def test_invalid_physics_stops_the_run(model, mapping):
         backend._check_worlds()
     trace = failure.value.trace
     assert trace["world_index"] == 1 and trace["first_bad_step"] == 0
+    assert trace["graph_first_bad_step"] == 0
     assert trace["step_qvel"].shape == (1, model.nv)
     assert np.isnan(trace["start_xfrc_applied"][1, 0])

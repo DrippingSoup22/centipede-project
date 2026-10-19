@@ -1014,27 +1014,48 @@ class GPUBackend:
             )
 
     def _replay_failure(self, world_index: int) -> dict[str, np.ndarray]:
-        """Every world back at the start of the action just stepped, then that
-        action again, one physics step at a time from Python, until world
-        ``world_index`` turns non-finite: its state at the start
-        (``start_<field>``), and after each step its positions, speeds,
-        accelerations, solver iterations, constraint rows and overflow bits
-        (``step_<field>``, one row a step) and its contacts (``contact_<field>``,
-        ``contact_step`` naming the step). ``first_bad_step`` is -1 when the
-        replay stays finite. The worlds' data is left as the replay ends."""
+        """The action just stepped, replayed from its start, every world back
+        where it began, three ways: by the recorded graph, as in training
+        (``graph_bad_worlds``: the worlds it leaves non-finite); one physics
+        step at a time from Python, recording world ``world_index`` after
+        each step: its positions, speeds, accelerations, solver iterations,
+        constraint rows and overflow bits (``step_<field>``, one row a step)
+        and its contacts (``contact_<field>``, ``contact_step`` naming the
+        step), with ``first_bad_step`` -1 when it stays finite and
+        ``graph_python_gap`` each world's largest position difference from
+        the graph's replay; and one step at a time by a freshly recorded
+        one-step graph (``graph_step_qvel``, ``graph_first_bad_step``). The
+        world's state at the start is ``start_<field>``. The worlds' data is
+        left as the last replay ends."""
 
         def of_world(array: wp.array) -> np.ndarray:
             return array.numpy()[world_index].copy()
+
+        def restart() -> None:
+            for name, kept in self._action_start.items():
+                wp.copy(getattr(self.gpu_data, name), kept)
+            self.gpu_data.overflow.zero_()
+
+        def finite(qpos: np.ndarray, qvel: np.ndarray) -> np.ndarray:
+            return np.isfinite(qpos).all(axis=-1) & np.isfinite(qvel).all(axis=-1)
 
         trace = {
             "world_index": np.array(world_index),
             "action_index": np.array(self._actions_stepped),
             "timestep": np.array(self.timestep),
         }
-        for name, kept in self._action_start.items():
-            trace[f"start_{name}"] = of_world(kept)
-            wp.copy(getattr(self.gpu_data, name), kept)
-        self.gpu_data.overflow.zero_()
+        trace |= {
+            f"start_{name}": of_world(kept) for name, kept in self._action_start.items()
+        }
+        graph_qpos = None
+        if self._physics_graph is not None:
+            restart()
+            wp.capture_launch(self._physics_graph)
+            graph_qpos = self.gpu_data.qpos.numpy().copy()
+            ok = finite(graph_qpos, self.gpu_data.qvel.numpy())
+            trace["graph_bad_worlds"] = np.flatnonzero(~ok)
+
+        restart()
         steps = {
             name: [] for name in ("qpos", "qvel", "qacc", "niter", "nefc", "overflow")
         }
@@ -1059,10 +1080,7 @@ class GPUBackend:
             contacts["dist"].append(data.contact.dist.numpy()[:count][mine])
             contacts["normal"].append(data.contact.frame.numpy()[:count][mine][:, 0])
             contacts["pos"].append(data.contact.pos.numpy()[:count][mine])
-            if not (
-                np.isfinite(steps["qpos"][-1]).all()
-                and np.isfinite(steps["qvel"][-1]).all()
-            ):
+            if not finite(steps["qpos"][-1], steps["qvel"][-1]):
                 first_bad_step = step_index
                 break
         trace["first_bad_step"] = np.array(first_bad_step)
@@ -1070,6 +1088,24 @@ class GPUBackend:
         trace |= {
             f"contact_{name}": np.concatenate(rows) for name, rows in contacts.items()
         }
+        if graph_qpos is not None and first_bad_step < 0:
+            gap = np.abs(graph_qpos - self.gpu_data.qpos.numpy())
+            trace["graph_python_gap"] = np.where(np.isfinite(gap), gap, np.inf).max(
+                axis=1
+            )
+
+        restart()
+        with wp.ScopedCapture(device=self.device) as capture:
+            mjw.step(self.gpu_model, self.gpu_data)
+        graph_speeds, graph_first_bad_step = [], -1
+        for step_index in range(self.physics_steps_per_action):
+            wp.capture_launch(capture.graph)
+            graph_speeds.append(of_world(self.gpu_data.qvel))
+            if not finite(of_world(self.gpu_data.qpos), graph_speeds[-1]):
+                graph_first_bad_step = step_index
+                break
+        trace["graph_step_qvel"] = np.stack(graph_speeds)
+        trace["graph_first_bad_step"] = np.array(graph_first_bad_step)
         return trace
 
     def _read_state(self) -> None:
