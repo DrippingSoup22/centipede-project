@@ -20,6 +20,7 @@ pytestmark = pytest.mark.physics
 
 import warp as wp  # noqa: E402
 
+from centipede.environment.simulation import gpu_backend  # noqa: E402
 from centipede.environment.simulation.constants import (  # noqa: E402
     ACTION_DURATION_S,
     LEG_ANGLE_NOISE_RAD,
@@ -531,3 +532,42 @@ def test_allowed_non_finite_worlds_restart_from_the_actions_start(
     for field in dataclasses.fields(backend.physical_state):
         values = getattr(backend.physical_state, field.name)
         assert torch.isfinite(values.float()).all(), field.name
+
+
+def test_failed_newton_factorizations_are_repaired(monkeypatch):
+    """A world whose Newton factorization comes out non-finite (MuJoCo Warp
+    issue #1415) is factorized again with a larger diagonal: its step ends
+    finite and it is flagged, the other world untouched. Without the repair
+    the same failure spoils the world. On Warp's CPU device, which compiles
+    Newton on any machine; the failure is made by spoiling world 1's first
+    factorization."""
+    unrepaired = gpu_backend._UNREPAIRED_FACTORIZATION
+
+    def failing_first(m, d, ctx, *args, **kwargs):
+        unrepaired(m, d, ctx, *args, **kwargs)
+        if not failed:
+            failed.append(True)
+            ctx.search_dot.numpy()[1] = np.nan
+            ctx.search.numpy()[1] = np.nan
+
+    monkeypatch.setattr(gpu_backend, "_UNREPAIRED_FACTORIZATION", failing_first)
+    monkeypatch.setattr(gpu_backend, "_REPAIR_ARRAYS", {})
+    monkeypatch.setattr(
+        gpu_backend.mjw_solver,
+        "_cholesky_factorize_solve",
+        gpu_backend._repaired_factorization,
+    )
+    newton = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    newton.opt.solver = SOLVERS["newton"]
+    with wp.ScopedDevice("cpu"):
+        gpu_model = mjw.put_model(newton)
+        for repair in (False, True):
+            data = mjw.make_data(newton, nworld=2, nconmax=128, njmax=512)
+            repaired = wp.zeros(2, dtype=bool)
+            if repair:
+                gpu_backend._register_factorization_repair(data, repaired)
+            failed = []
+            mjw.step(gpu_model, data)
+            finite = np.isfinite(data.qvel.numpy()).all(axis=1).tolist()
+            assert finite == ([True, True] if repair else [True, False])
+            assert repaired.numpy().tolist() == [False, repair]

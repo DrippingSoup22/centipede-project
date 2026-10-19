@@ -39,6 +39,7 @@ def test_windows_start_empty_and_time_collecting_and_learning():
         "constraint_rows",
         "solver_iterations",
         "restarted_worlds",
+        "repaired_worlds",
     ]
     assert diagnostics.episode_window.result()["episode_ended"] == 4
     timing = diagnostics.timing

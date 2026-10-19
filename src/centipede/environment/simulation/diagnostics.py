@@ -10,7 +10,8 @@ same thing. The CPU backend fills the category with ``fill_from_cpu`` at the
 end of ``step`` and ``reset``; the GPU backend builds it from views of MuJoCo
 Warp's arrays, which refresh themselves. The values are listed in
 docs/diagnostics.md. ``restarted_worlds`` flags the worlds the GPU backend
-restarted in the step; the CPU backend never restarts one.
+restarted in the step, and ``repaired_worlds`` those whose Newton
+factorization it repaired; the CPU backend does neither.
 """
 
 from dataclasses import dataclass
@@ -48,6 +49,11 @@ class SimulationFacts:
         "start and restarted (GPU, max_restarted_worlds_per_action), (W,)",
         summary="share",
     )
+    repaired_worlds: torch.Tensor = measure(
+        "Worlds in which MuJoCo Warp's Newton factorization failed in the step "
+        "and was repaired (GPU, repair_factorizations), (W,)",
+        summary="share",
+    )
 
 
 class SimulationDiagnostics:
@@ -78,6 +84,9 @@ class SimulationDiagnostics:
                     world_count, dtype=torch.int32, device=device
                 ),
                 restarted_worlds=torch.zeros(
+                    world_count, dtype=torch.bool, device=device
+                ),
+                repaired_worlds=torch.zeros(
                     world_count, dtype=torch.bool, device=device
                 ),
             )

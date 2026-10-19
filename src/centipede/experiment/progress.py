@@ -390,6 +390,10 @@ class TrainingProgress(_RedrawnLine):
         restarted = record.get("physics", {}).get("restarted_worlds", 0.0)
         if restarted:
             row += f"  ({restarted:.4%} of world steps restarted, non-finite physics)"
+        # Worlds whose Newton factorization the GPU backend repaired.
+        repaired = record.get("physics", {}).get("repaired_worlds", 0.0)
+        if repaired:
+            row += f"  ({repaired:.4%} of world steps repaired)"
         self._end_pass(row)
         self._cycle += 1
 

@@ -95,6 +95,7 @@ class PhysicsSimulation:
                 measure_effort,
                 measure_joint_forces,
                 settings.max_restarted_worlds_per_action,
+                settings.repair_factorizations,
             )
 
         self.segment_count = mapping.segment_count

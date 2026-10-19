@@ -18,6 +18,11 @@ class SimulationSettings:
     its episode ends there. MuJoCo Warp guards nothing against non-finite
     values by design, and mjlab, the framework its guide names, restarts such
     worlds the same way. With 0, the default, any such world stops the run.
+
+    ``repair_factorizations`` (2026-10-19) has the GPU backend repair the
+    Newton solver's factorizations that come out non-finite (MuJoCo Warp
+    issue #1415), as ``gpu_backend.REPAIR_DIAGONAL_SHARE`` explains. Off by
+    default.
     """
 
     model_path: Path
@@ -28,6 +33,7 @@ class SimulationSettings:
     constraints_per_world: int
     start_heading_range_deg: float
     max_restarted_worlds_per_action: int
+    repair_factorizations: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "SimulationSettings":
@@ -49,6 +55,9 @@ class SimulationSettings:
             ),
             max_restarted_worlds_per_action=section.integer(
                 "max_restarted_worlds_per_action", default=0, minimum=0
+            ),
+            repair_factorizations=section.boolean(
+                "repair_factorizations", default=False
             ),
         )
         section.reject_unknown_keys()

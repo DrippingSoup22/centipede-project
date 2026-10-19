@@ -4,11 +4,14 @@
 # pyright: reportIndexIssue=false, reportAssignmentType=false, reportGeneralTypeIssues=false
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportOperatorIssue=false
 
+import dataclasses
+
 import mujoco
 import mujoco_warp as mjw
 import numpy as np
 import torch
 import warp as wp
+from mujoco_warp._src import solver as mjw_solver
 
 from centipede.environment.simulation.constants import (
     LEG_ANGLE_NOISE_RAD,
@@ -54,6 +57,73 @@ class PhysicsFailure(RuntimeError):
     def __init__(self, message: str, trace: dict[str, np.ndarray]) -> None:
         super().__init__(message)
         self.trace = trace
+
+
+# The repair of MuJoCo Warp's Newton factorization (2026-10-19). Each Newton
+# iteration factorizes the Hessian H = M + J'DJ with a Cholesky that has no
+# guard against a pivot that is zero or negative (MuJoCo Warp issue #1415,
+# open in 3.16.0). For a long body lying on the floor, H is so poorly
+# conditioned that its 32-bit rounding can make it indefinite, and the
+# factorization returns NaN for that world. The repair, applied after every
+# factorization, finds the worlds whose search direction came out non-finite
+# and factorizes them again with H's diagonal enlarged by this share, which
+# makes it positive definite again. Only that iteration's search direction
+# changes: the line search and the convergence test use the exact cost, and
+# the next iteration rebuilds H unchanged, so the solution is the same. It
+# replaces a private MuJoCo Warp function, which is why mujoco-warp is pinned.
+REPAIR_DIAGONAL_SHARE = 1e-4
+_UNREPAIRED_FACTORIZATION = mjw_solver._cholesky_factorize_solve
+# Each GPU data's repair arrays, by the address of its qpos: the worlds to
+# leave alone on the second factorization, and those repaired in the action.
+_REPAIR_ARRAYS: dict[int, tuple[wp.array, wp.array]] = {}
+
+
+@wp.kernel
+def _flag_failed_factorizations(
+    dof_count: int,
+    diagonal_scale: float,
+    solver_done: wp.array1d[bool],
+    search_dot: wp.array1d[float],
+    # Out:
+    leave_alone: wp.array1d[bool],
+    repaired: wp.array1d[bool],
+    hessian: wp.array3d[float],
+):
+    """Flag the worlds still solving whose factorization came out non-finite,
+    and enlarge their Hessian's diagonal for the second factorization."""
+    world_index = wp.tid()
+    failed = not solver_done[world_index] and not wp.isfinite(search_dot[world_index])
+    leave_alone[world_index] = not failed
+    if failed:
+        repaired[world_index] = True
+        for dof in range(dof_count):
+            hessian[world_index, dof, dof] *= diagonal_scale
+
+
+def _repaired_factorization(m, d, ctx, *args, **kwargs) -> None:
+    """MuJoCo Warp's factorization, followed for registered data by the repair."""
+    _UNREPAIRED_FACTORIZATION(m, d, ctx, *args, **kwargs)
+    arrays = _REPAIR_ARRAYS.get(d.qpos.ptr)
+    if arrays is None:
+        return
+    leave_alone, repaired = arrays
+    wp.launch(
+        _flag_failed_factorizations,
+        dim=d.nworld,
+        inputs=[m.nv, 1.0 + REPAIR_DIAGONAL_SHARE, ctx.done, ctx.search_dot],
+        outputs=[leave_alone, repaired, ctx.h],
+    )
+    _UNREPAIRED_FACTORIZATION(
+        m, d, dataclasses.replace(ctx, done=leave_alone), *args, **kwargs
+    )
+
+
+def _register_factorization_repair(data: mjw.Data, repaired: wp.array) -> None:
+    """Repair the Newton factorizations of ``data`` from now on, flagging the
+    worlds repaired in ``repaired``, a (W,) bool array the caller clears."""
+    mjw_solver._cholesky_factorize_solve = _repaired_factorization
+    leave_alone = wp.zeros(data.nworld, dtype=bool, device=data.qpos.device)
+    _REPAIR_ARRAYS[data.qpos.ptr] = (leave_alone, repaired)
 
 
 @wp.kernel
@@ -620,6 +690,7 @@ class GPUBackend:
         measure_effort: bool = False,
         measure_joint_forces: bool = False,
         max_restarted_worlds_per_action: int = 0,
+        repair_factorizations: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -636,7 +707,9 @@ class GPUBackend:
         forces between bodies after every solve.
         Up to ``max_restarted_worlds_per_action`` worlds made non-finite in one
         action are put back to its start instead of stopping the run
-        (``_check_worlds``).
+        (``_check_worlds``). With ``repair_factorizations`` the Newton
+        solver's failed factorizations are repaired (``REPAIR_DIAGONAL_SHARE``)
+        and the worlds repaired in each action flagged.
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
@@ -733,9 +806,15 @@ class GPUBackend:
                 restarted_worlds=torch.zeros(
                     world_count, dtype=torch.bool, device=torch_device
                 ),
+                repaired_worlds=torch.zeros(
+                    world_count, dtype=torch.bool, device=torch_device
+                ),
             )
         )
         self._restarted_worlds = self.diagnostics.facts.restarted_worlds
+        self._repaired_worlds = wp.from_torch(self.diagnostics.facts.repaired_worlds)
+        if repair_factorizations:
+            _register_factorization_repair(self.gpu_data, self._repaired_worlds)
 
         # The physics steps of one action, recorded as a CUDA graph by the
         # first step; see ``step``.
@@ -817,6 +896,7 @@ class GPUBackend:
             )
         for name, kept in self._action_start.items():
             wp.copy(kept, getattr(self.gpu_data, name))
+        self._repaired_worlds.zero_()
         if self._physics_graph is None:
             self._run_physics_steps()
             # Recording only writes the launches down; nothing runs twice.
