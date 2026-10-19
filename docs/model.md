@@ -548,10 +548,11 @@ the main folder; each with its contacts and limits at twice its timestep):
 | 20 | 1 ms | 71.8 mm/s, 8.5 mm high | 0.99 to 1.14 mm | 4.6° |
 
 25 steps passed every CPU check, and v5 keeps the scaled timestep, the
-more accurate. On a training GPU (an RTX 5090, MuJoCo Warp's Newton solver
-in 32-bit arithmetic), v5 becomes non-finite at either timestep: at a run's
-start, about one world-action in 13,000 (one of 4,352 worlds within 3
-actions), with MuJoCo Warp 3.14 and 3.16 alike. 64-bit CPU MuJoCo keeps
+more accurate. On a training GPU (RTX 5090 and 4090, MuJoCo Warp's Newton
+solver in 32-bit arithmetic), v5 becomes non-finite at either timestep,
+with MuJoCo Warp 3.14 and 3.16 alike: in a fresh run's first update cycle
+about one world-step in 800, falling to one in 14,000 by the sixth as the
+policies change (4,352 worlds, the cooperators' training). 64-bit CPU MuJoCo keeps
 1,024 worlds from the same start finite for 12 actions, and MuJoCo Warp's
 conjugate-gradient solver keeps 4,352 finite for 6 training cycles, at a
 quarter of Newton's speed. Without the floor's torsional and rolling
