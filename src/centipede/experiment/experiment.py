@@ -32,13 +32,14 @@ import math
 import platform
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 
 from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBaseline
@@ -109,6 +110,22 @@ def run(configuration_path: Path) -> Path:
 
 
 # -- Training -------------------------------------------------------------------------
+
+
+def _saving_physics_failures(cycles: Iterator[int], folder: RunFolder) -> Iterator[int]:
+    """The training loop's cycles; when the physics fails with a diagnosis
+    (an error carrying the simulation's ``trace``, the failing world replayed
+    from the start of its action), the trace is saved in the run folder as
+    ``physics_failure.npz`` before the error stops the run."""
+    try:
+        yield from cycles
+    except RuntimeError as error:
+        trace = getattr(error, "trace", None)
+        if trace is not None:
+            path = folder.path / "physics_failure.npz"
+            np.savez_compressed(path, **trace)
+            print(f"The failing world's replay is saved in {path}")
+        raise
 
 
 def train(configuration: Configuration, configuration_path: Path) -> Path:
@@ -293,7 +310,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     follow_schedules(completed_cycles + 1)
     cycles_start = time.monotonic()
-    for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
+    cycles = loop.train(seed=run_settings.seed + completed_cycles)
+    for session_cycle in _saving_physics_failures(cycles, folder):
         cycle = completed_cycles + session_cycle + 1
         if levelled:
             environment.adjust_level()

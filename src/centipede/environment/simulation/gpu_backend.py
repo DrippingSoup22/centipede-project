@@ -41,6 +41,19 @@ SOLVERS = {"newton": mujoco.mjtSolver.mjSOL_NEWTON, "cg": mujoco.mjtSolver.mjSOL
 CONSTRAINT_OVERFLOWS = mjw.OverflowType.NEFC | mjw.OverflowType.NJMAX_NNZ
 CONTACT_OVERFLOWS = mjw.OverflowType.BROADPHASE | mjw.OverflowType.NARROWPHASE
 CAPACITY_OVERFLOWS = CONSTRAINT_OVERFLOWS | CONTACT_OVERFLOWS
+# What an action starts from, kept before its physics so that an action in
+# which a world fails can be replayed (``_replay_failure``).
+ACTION_START_FIELDS = ("qpos", "qvel", "qacc_warmstart", "ctrl", "xfrc_applied", "time")
+
+
+class PhysicsFailure(RuntimeError):
+    """A world's physics became non-finite. ``trace`` holds the failing
+    world's diagnosis as NumPy arrays (``GPUBackend._replay_failure``), for
+    the experiment to save."""
+
+    def __init__(self, message: str, trace: dict[str, np.ndarray]) -> None:
+        super().__init__(message)
+        self.trace = trace
 
 
 @wp.kernel
@@ -718,6 +731,12 @@ class GPUBackend:
         # The physics steps of one action, recorded as a CUDA graph by the
         # first step; see ``step``.
         self._physics_graph: wp.Graph | None = None
+        # Every world's state at the start of the current action, and the
+        # actions stepped so far, for a failure's replay.
+        self._action_start = {
+            name: wp.clone(getattr(self.gpu_data, name)) for name in ACTION_START_FIELDS
+        }
+        self._actions_stepped = 0
 
         # Each world's random sequence: the seed it was last given and how many
         # resets it has had since. Together they replace the CPU generators.
@@ -787,6 +806,8 @@ class GPUBackend:
                 outputs=[self.gpu_data.xfrc_applied],
                 device=self.device,
             )
+        for name, kept in self._action_start.items():
+            wp.copy(kept, getattr(self.gpu_data, name))
         if self._physics_graph is None:
             self._run_physics_steps()
             # Recording only writes the launches down; nothing runs twice.
@@ -796,6 +817,7 @@ class GPUBackend:
         else:
             wp.capture_launch(self._physics_graph)
         self._check_worlds()
+        self._actions_stepped += 1
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
 
@@ -985,10 +1007,70 @@ class GPUBackend:
                     "some were dropped. Raise constraints_per_world in "
                     "[environment.simulation]."
                 )
-            raise RuntimeError(
+            raise PhysicsFailure(
                 f"Physics failed in world {world_index}: MuJoCo Warp produced a "
-                "non-finite position or velocity (the simulation became unstable)."
+                "non-finite position or velocity (the simulation became unstable).",
+                self._replay_failure(world_index),
             )
+
+    def _replay_failure(self, world_index: int) -> dict[str, np.ndarray]:
+        """Every world back at the start of the action just stepped, then that
+        action again, one physics step at a time from Python, until world
+        ``world_index`` turns non-finite: its state at the start
+        (``start_<field>``), and after each step its positions, speeds,
+        accelerations, solver iterations, constraint rows and overflow bits
+        (``step_<field>``, one row a step) and its contacts (``contact_<field>``,
+        ``contact_step`` naming the step). ``first_bad_step`` is -1 when the
+        replay stays finite. The worlds' data is left as the replay ends."""
+
+        def of_world(array: wp.array) -> np.ndarray:
+            return array.numpy()[world_index].copy()
+
+        trace = {
+            "world_index": np.array(world_index),
+            "action_index": np.array(self._actions_stepped),
+            "timestep": np.array(self.timestep),
+        }
+        for name, kept in self._action_start.items():
+            trace[f"start_{name}"] = of_world(kept)
+            wp.copy(getattr(self.gpu_data, name), kept)
+        self.gpu_data.overflow.zero_()
+        steps = {
+            name: [] for name in ("qpos", "qvel", "qacc", "niter", "nefc", "overflow")
+        }
+        contacts = {name: [] for name in ("step", "geom", "dist", "normal", "pos")}
+        first_bad_step = -1
+        for step_index in range(self.physics_steps_per_action):
+            mjw.step(self.gpu_model, self.gpu_data)
+            data = self.gpu_data
+            for name, array in (
+                ("qpos", data.qpos),
+                ("qvel", data.qvel),
+                ("qacc", data.qacc),
+                ("niter", data.solver_niter),
+                ("nefc", data.nefc),
+                ("overflow", data.overflow),
+            ):
+                steps[name].append(of_world(array))
+            count = int(data.nacon.numpy()[0])
+            mine = data.contact.worldid.numpy()[:count] == world_index
+            contacts["step"].append(np.full(int(mine.sum()), step_index))
+            contacts["geom"].append(data.contact.geom.numpy()[:count][mine])
+            contacts["dist"].append(data.contact.dist.numpy()[:count][mine])
+            contacts["normal"].append(data.contact.frame.numpy()[:count][mine][:, 0])
+            contacts["pos"].append(data.contact.pos.numpy()[:count][mine])
+            if not (
+                np.isfinite(steps["qpos"][-1]).all()
+                and np.isfinite(steps["qvel"][-1]).all()
+            ):
+                first_bad_step = step_index
+                break
+        trace["first_bad_step"] = np.array(first_bad_step)
+        trace |= {f"step_{name}": np.stack(rows) for name, rows in steps.items()}
+        trace |= {
+            f"contact_{name}": np.concatenate(rows) for name, rows in contacts.items()
+        }
+        return trace
 
     def _read_state(self) -> None:
         """Refresh every world's physical state from MuJoCo Warp's data.

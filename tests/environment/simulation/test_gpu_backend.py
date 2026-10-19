@@ -28,6 +28,7 @@ from centipede.environment.simulation.cpu_backend import CPUBackend  # noqa: E40
 from centipede.environment.simulation.gpu_backend import (  # noqa: E402
     SOLVERS,
     GPUBackend,
+    PhysicsFailure,
 )
 from centipede.environment.simulation.model_mapping import ModelMapping  # noqa: E402
 from centipede.environment.simulation.physical_state import (  # noqa: E402
@@ -467,7 +468,9 @@ def test_gpu_joint_forces_match_cpu_joint_forces(model, mapping):
 
 def test_invalid_physics_stops_the_run(model, mapping):
     """Running out of reserved space, and a non-finite state, stop the run;
-    the solver's iteration-limit notice does not."""
+    the solver's iteration-limit notice does not. A non-finite world's
+    action is replayed from its start, here world 1 pushed by a NaN force:
+    the trace names the world and the physics step it turned non-finite."""
     crowded = GPUBackend(model, mapping, 2, STEPS, SOLVER, 1, 512)
     crowded.reset()
     with pytest.raises(RuntimeError, match="Raise contacts_per_world"):
@@ -483,6 +486,14 @@ def test_invalid_physics_stops_the_run(model, mapping):
         backend._check_worlds()
 
     backend.reset()
-    wp.to_torch(backend.gpu_data.qvel)[0, 10] = float("nan")
-    with pytest.raises(RuntimeError, match="world 0: .*non-finite"):
+    backend.gpu_data.overflow.zero_()
+    pushed = backend._action_start["xfrc_applied"].numpy()
+    pushed[1, 1, 0] = float("nan")
+    backend._action_start["xfrc_applied"].assign(pushed)
+    wp.to_torch(backend.gpu_data.qvel)[1, 10] = float("nan")
+    with pytest.raises(PhysicsFailure, match="world 1: .*non-finite") as failure:
         backend._check_worlds()
+    trace = failure.value.trace
+    assert trace["world_index"] == 1 and trace["first_bad_step"] == 0
+    assert trace["step_qvel"].shape == (1, model.nv)
+    assert np.isnan(trace["start_xfrc_applied"][1, 0])
