@@ -12,17 +12,23 @@ likely. What really followed holds the unit's own action, its neighbours'
 and luck; the neighbours' share is noise to the unit, which averages out
 over many samples (131,072 per agent per update) but slows learning.
 
-## Two critics per agent
+## One critic per agent
 
-| Critic | Predicts | Sees |
-| --- | --- | --- |
-| Team | The team account: the line, the squeeze, the body's energy | What its actor sees |
-| Own | The own account: its force share and hanging | What its actor sees |
+From run 05 the reward has one account, the team's: the line less the
+motion ([reward.md](reward.md)). Each agent has one critic, which predicts
+it and sees what its actor sees.
 
-- **One critic per account**, so that the clearer own signal is not drowned
-  in the team's, and each weighs what its weight says whatever its size: each
-  critic's advantages are normalised over the batch on their own, then added
-  1 : 0.8, the team first (Sheikh & Bölöni 2020; cooperators, cycle 14).
+- **One account, one critic.** RL_lib normalises each critic's advantages
+  over the batch on its own, so an account that is always 0 would give its
+  critic nothing but noise to learn, normalised up to the team's size. With
+  one account nothing of the sort exists (the user's decision, 2026-10-20).
+- **Two critics when the reward splits again.** Runs 01 to 04 had two
+  accounts, the team's (the line, the squeeze, the body's energy) and each
+  unit's own (its force share and hanging), each with its own critic, so
+  that the clearer own signal was not drowned in the team's: their
+  advantages were normalised apart, then added 1 : 0.8, the team first
+  (Sheikh & Bölöni 2020; cooperators, cycle 14). The setting
+  `own_account` brings this back when a unit's own terms return.
 - **A local critic.** It sees its actor's view and nothing else: a critic of
   the whole body would make the cooperation come from a central judge, and
   does not make the agents cooperate better (Lyu et al. 2021).
@@ -32,9 +38,6 @@ over many samples (131,072 per agent per update) but slows learning.
   0.01: the advantage looks about 19 steps ahead, and one step of the
   neighbours' actions is a sliver of their effect (as Tucker et al. 2018
   found for such baselines).
-- **The own critic is the clearer one.** A unit's own costs are caused
-  mostly by itself and its nearest neighbours, all within its view; the
-  team's are a tenth its own doing.
 
 ## Settings
 

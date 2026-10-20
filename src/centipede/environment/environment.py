@@ -84,7 +84,11 @@ class Environment:
         self.reward = RewardFunction(
             settings.reward, body, commanded_joints, self.sight_radius_m
         )
-        self.reward_channel_count = len(CHANNEL_NAMES)
+        # The accounts the agents learn from: the team's and each unit's own,
+        # or the team's alone, which then holds every part.
+        self.reward_channel_count = (
+            len(CHANNEL_NAMES) if settings.reward.own_account else 1
+        )
         self.observation_builder = ObservationBuilder(
             segment_count,
             settings.observation_radius,
@@ -92,6 +96,7 @@ class Environment:
             legs,
             body.unit_weight_n,
             self.device,
+            settings.observe_priced_forces,
         )
         self.observation_size = self.observation_builder.observation_size
         self.tow = Tow(
@@ -183,7 +188,8 @@ class Environment:
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """Apply the ``(W, N, M + 1)`` joint action for one 20 ms step.
 
-        Returns the observations, the rewards ``(W, N, 2)``, terminated
+        Returns the observations, the rewards ``(W, N, 2)`` (``(W, N)`` with
+        one account), terminated
         (never) and truncated ``(W,)``, and the final observations. A world
         whose episode was cut is already restarted: its observations start
         the new episode, and its final observations are the ones the old
@@ -251,7 +257,7 @@ class Environment:
             observations = self._observations()
         return (
             observations,
-            rewards,
+            rewards if self.reward_channel_count > 1 else rewards[..., 0],
             torch.zeros_like(truncated),
             truncated,
             final_observations,

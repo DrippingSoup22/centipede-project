@@ -7,13 +7,14 @@ from centipede.environment.line import TRAIL_VALUES
 from centipede.environment.simulation import PhysicalState
 
 
-def block_size(leg_motor_count: int) -> int:
+def block_size(leg_motor_count: int, priced_forces: bool = True) -> int:
     """Values in a unit's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
-    legs' press (1), the averaged joint forces (3), the step's joint forces
-    (2), and the last action (M + 1): 47 with ankles."""
-    return 23 + 3 * leg_motor_count
+    legs' press (1) and the averaged joint forces (3) if ``priced_forces``,
+    the step's joint forces (2), and the last action (M + 1): 47 with
+    ankles, 43 without the priced forces."""
+    return 19 + 3 * leg_motor_count + (4 if priced_forces else 0)
 
 
 def neighbour_table(
@@ -47,10 +48,11 @@ class ObservationBuilder:
     joint's force along the body (positive pulls it forward) and the
     averaged net force of its two joints along the body and up; the step's
     front joint force and net force along the body; and the action it sent
-    last (the rear's last value goes to no motor). Forces are in unit
-    weights. The blocks are laid end to end in the neighbour table's order,
-    followed by the unit's trail (``StraightLine.trail``) and its world's tow
-    level.
+    last (the rear's last value goes to no motor). Without ``priced_forces``
+    the legs' press and the averaged joint forces are left out. Forces are in
+    unit weights. The blocks are laid end to end in the neighbour table's
+    order, followed by the unit's trail (``StraightLine.trail``) and its
+    world's tow level.
     """
 
     def __init__(
@@ -61,12 +63,14 @@ class ObservationBuilder:
         leg_motor_count: int,
         unit_weight_n: float,
         device: torch.device | str,
+        priced_forces: bool = True,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
         self.segment_count = segment_count
         self.unit_weight_n = unit_weight_n
-        self.block_size = block_size(leg_motor_count)
+        self.priced_forces = priced_forces
+        self.block_size = block_size(leg_motor_count, priced_forces)
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
         )
@@ -101,15 +105,17 @@ class ObservationBuilder:
             (2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)),
             dim=-1,
         )
-        forces = torch.cat(
-            (
-                state.foot_normal_force,
-                state.foot_forward_force,
-                state.belly_normal_force[..., None],
-                state.leg_leg_force[..., None],
-                state.front_joint_force[..., None],
-                state.net_joint_force[..., :1],
-            ),
+        loads = [
+            state.foot_normal_force,
+            state.foot_forward_force,
+            state.belly_normal_force[..., None],
+        ]
+        averaged = []
+        if self.priced_forces:
+            loads.append(state.leg_leg_force[..., None])
+            averaged = [averaged_forces[..., 2:3], averaged_forces[..., :2]]
+        step_forces = torch.cat(
+            (state.front_joint_force[..., None], state.net_joint_force[..., :1]),
             dim=-1,
         )
         self.blocks[:, : self.segment_count] = torch.cat(
@@ -121,10 +127,9 @@ class ObservationBuilder:
                 state.leg_joint_velocity,
                 state.spine_yaw_position[..., None],
                 state.spine_yaw_velocity[..., None],
-                forces[..., :6] / self.unit_weight_n,
-                averaged_forces[..., 2:3],
-                averaged_forces[..., :2],
-                forces[..., 6:] / self.unit_weight_n,
+                torch.cat(loads, dim=-1) / self.unit_weight_n,
+                *averaged,
+                step_forces / self.unit_weight_n,
                 last_action,
             ),
             dim=-1,

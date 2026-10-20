@@ -24,11 +24,12 @@ class RewardSettings:
     hanging ``hanging_price`` of it for each unit weight held. A millijoule
     counts ``mm_per_mj`` millimetres (0: no millijoule part counts). The
     motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
-    joints' squared speeds, added up. Forces are averaged over
-    ``averaging_s``. Energy, the motion, the squeeze and pain are weighed from
-    ``ramp_start`` up to full over the first ``ramp_cycles`` update cycles
-    (0: full from the start); with ``ramp_after_line_share`` above 0 the
-    ramp waits at ``ramp_start`` until the untowed mean-action worlds' line
+    joints' squared speeds, added up. With ``own_account`` false every part
+    counts in one account, the team's, and each agent has one critic. Forces
+    are averaged over ``averaging_s``. Energy, the motion, the squeeze and pain
+    are weighed from ``ramp_start`` up to full over the first ``ramp_cycles``
+    update cycles (0: full from the start); with ``ramp_after_line_share``
+    above 0 the ramp waits at ``ramp_start`` until the untowed mean-action worlds' line
     reaches that share of the cap, and rises from the next cycle.
     """
 
@@ -42,6 +43,7 @@ class RewardSettings:
     pain_price: float
     hanging_price: float
     motion_price: float
+    own_account: bool
     mm_per_mj: float
     averaging_s: float
     ramp_cycles: int
@@ -68,6 +70,7 @@ class RewardSettings:
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
             hanging_price=section.number("hanging_price", default=2.0, minimum=0.0),
             motion_price=section.number("motion_price", default=0.0, minimum=0.0),
+            own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
             averaging_s=section.positive_number("averaging_s", default=1.0),
             ramp_cycles=section.integer("ramp_cycles", default=128, minimum=0),
@@ -150,7 +153,9 @@ class EnvironmentSettings:
     The line is laid at up to ``line_angle_range_deg`` either way of the
     body's heading. With ``stagger_first_episodes`` each world starts its
     first episode at a random step of it. Each spine motor receives
-    ``spine_action_scale`` times its command.
+    ``spine_action_scale`` times its command. With ``observe_priced_forces``
+    false a unit's block leaves out the forces only the old costs priced: its
+    legs' press and the joint forces averaged over a second.
     """
 
     max_episode_steps: int
@@ -158,6 +163,7 @@ class EnvironmentSettings:
     line_angle_range_deg: float
     stagger_first_episodes: bool
     spine_action_scale: float
+    observe_priced_forces: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
@@ -185,6 +191,9 @@ class EnvironmentSettings:
             ),
             spine_action_scale=section.number(
                 "spine_action_scale", default=0.35, minimum=0.0, maximum=1.0
+            ),
+            observe_priced_forces=section.boolean(
+                "observe_priced_forces", default=True
             ),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),

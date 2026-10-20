@@ -24,7 +24,7 @@ Can independent agents, each seeing only its neighbours, learn to walk
 together like a centipede? The constraints are the user's (2026-10-14,
 from the cooperators study):
 
-1. **Independent agents.** Each unit has its own actor, critics and
+1. **Independent agents.** Each unit has its own actor, critic and
    experience; nothing is shared between units.
 2. **A local view.** When it acts, a unit sees only itself and its
    neighbours within its sight ([observations.md](observations.md)).
@@ -47,17 +47,19 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
   and 24, cycle 16: a private cost set against a shared gain teaches doing
   less).
 - **A ceiling on speed.** A reward for speed without one beats every price
-  (runs 04 and 24).
+  that grows only in proportion to speed (runs 04 and 24); from run 05 the
+  ceiling is a cost that grows faster than the pay, the motion
+  ([reward.md](reward.md)).
 
 ## The parts
 
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | Run 28's, changed after runs 01 and 03: the team's line, paid against a 90 mm/s target on the speed over 1 s, squeeze and energy, ramped from a quarter to full in 160 cycles; each unit's own force share and hanging |
-| Observations | [observations.md](observations.md) | Five units' bodies (47 values each), the trail inside the unit's sight (15), the tow (1) |
+| Reward | [reward.md](reward.md) | Minimal (from run 05): the team's line, uncapped, less the motion of its joints, priced so that the net peaks at 90 mm/s and ramped from 0.05 to full in 160 cycles; nothing else |
+| Observations | [observations.md](observations.md) | Five units' bodies (43 values each from run 05), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own; gSDE; PPO's settings |
+| Critic and learning | [critic.md](critic.md) | One critic per unit from run 05 (two, team and own, before); gSDE; PPO's settings |
 
 ## The bodies
 
@@ -77,8 +79,10 @@ Not decided; each is one change for a later run.
   allows, raised by the wave's consistency (the user's idea, 2026-10-20):
   measured on the untowed noise-free worlds, so that the noise cannot fake
   it, with a fallback if no wave forms. Stage 1 has no level.
-- **Pain**, once a wave forms, as its own run.
-- **The ramp's start and length**: 0.25, 160 cycles.
-- **The slope above the target**: 1, as costly too fast as too slow.
+- **The terms left out of the minimal reward**, each brought back as its
+  own run if the test shows it is needed: the own force share or hanging
+  (a unit that stops moving pays a little in the ledger), the squeeze, pain.
+- **The motion's price and ramp**: 0.19 mm a second for each (rad/s)²,
+  from 0.05 to full in 160 cycles.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

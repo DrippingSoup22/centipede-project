@@ -1,5 +1,6 @@
 """The follow-line reward: two accounts for every unit, the team's and its
-own, each judged by its own critic (docs/follow-line/reward.md)."""
+own, each judged by its own critic, or one account, the team's, holding
+every part (docs/follow-line/reward.md)."""
 
 import torch
 
@@ -121,7 +122,8 @@ class RewardFunction:
         self.part_channels = torch.zeros(len(PART_NAMES), len(CHANNEL_NAMES))
         for index, name in enumerate(PART_NAMES):
             rate = settings.mm_per_mj if name in MILLIJOULE_PARTS else 1.0
-            self.part_channels[index, int(index >= TEAM_PART_COUNT)] = rate
+            own = index >= TEAM_PART_COUNT and settings.own_account
+            self.part_channels[index, int(own)] = rate
         self.part_channels = self.part_channels.to(device)
 
     def compute(
