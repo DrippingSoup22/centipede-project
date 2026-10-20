@@ -27,7 +27,9 @@ separately.
   units at the animal's measured size, in
   [`models/assembly_v5_full.xml`](models/assembly_v5_full.xml), and its
   first ten units, a quicker tester, in
-  [`models/assembly_v5_half.xml`](models/assembly_v5_half.xml). v4, twelve units whose
+  [`models/assembly_v5_half.xml`](models/assembly_v5_half.xml), also without
+  its head in
+  [`models/assembly_v5_headless.xml`](models/assembly_v5_headless.xml). v4, twelve units whose
   legs have an ankle, is in [`models/assembly_v4.xml`](models/assembly_v4.xml);
   the example configurations use v3, eight units with three-joint legs, in
   [`models/assembly_v3.xml`](models/assembly_v3.xml). All are described in

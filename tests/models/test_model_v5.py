@@ -1,10 +1,11 @@
-"""Validation of model v5: the body of Scolopendra heros, in two lengths.
+"""Validation of model v5: the body of Scolopendra heros, in three files.
 
 v5 is a head without legs and 21 leg-bearing units, 152 mm and 11.56 g as
 the animals measured; its physics are v4's scaled to that size by dynamic
 similarity, simulated at the settings revised for speed (docs/model.md,
-"Model v5"). Its half is the same body's first ten units. The checks below
-repeat the parts of its validation that a change could break.
+"Model v5"). Its half is the same body's first ten units, and the headless
+tester the half without its head. The checks below repeat the parts of its
+validation that a change could break.
 """
 
 import mujoco
@@ -36,6 +37,11 @@ def v5():
 @pytest.fixture(scope="module")
 def half():
     return mujoco.MjModel.from_xml_path("models/assembly_v5_half.xml")
+
+
+@pytest.fixture(scope="module")
+def headless():
+    return mujoco.MjModel.from_xml_path("models/assembly_v5_headless.xml")
 
 
 def by_role(model, names, values):
@@ -108,12 +114,15 @@ def test_v5_is_s_heros_with_v4s_physics_scaled_to_its_size(v4, v5):
             assert transient == pytest.approx(0.002 * time_scale, rel=0.05)
 
 
-def test_the_full_body_and_its_half_share_their_units_and_settings(v5, half):
+def test_the_full_body_and_its_testers_share_their_units_and_settings(
+    v5, half, headless
+):
     """The free joint on the middle unit; the solver's tolerance 1e-4; a leg
     touches the floor, and the legs of its own side up to three units away
     through contact pairs; the half is the full body's first ten units, every
-    part alike."""
-    for model, units in ((v5, UNITS), (half, HALF_UNITS)):
+    part alike, and the headless tester the same but for the first unit,
+    whose body is a trunk unit's."""
+    for model, units in ((v5, UNITS), (half, HALF_UNITS), (headless, HALF_UNITS)):
         root = model.jnt_bodyid[0]
         assert model.jnt_type[0] == mujoco.mjtJoint.mjJNT_FREE
         assert model.body(root).name == f"segment_{units // 2:02d}"
@@ -132,16 +141,25 @@ def test_the_full_body_and_its_half_share_their_units_and_settings(v5, half):
             for b in range(a + 1, min(units, a + LEG_REACH + 1))
         }
         assert pairs == expected
-    assert half.opt.timestep == v5.opt.timestep
-    for b in range(1, half.nbody):
-        full_body = v5.body(half.body(b).name).id
-        assert half.body_mass[b] == v5.body_mass[full_body]
-    for j in range(1, half.njnt):
-        name = half.joint(j).name
-        assert np.array_equal(half.jnt_range[j], v5.jnt_range[v5.joint(name).id])
-    for a in range(half.nu):
-        name = half.actuator(a).name
-        assert half.actuator_gear[a, 0] == v5.actuator_gear[v5.actuator(name).id, 0]
+    trunk_unit = v5.body_mass[v5.body("segment_01").id]
+    for tester in (half, headless):
+        assert tester.opt.timestep == v5.opt.timestep
+        for b in range(1, tester.nbody):
+            name = tester.body(b).name
+            mass = v5.body_mass[v5.body(name).id]
+            if tester is headless and name == "segment_00":
+                mass = trunk_unit
+            assert tester.body_mass[b] == pytest.approx(mass, rel=1e-9)
+        for j in range(1, tester.njnt):
+            name = tester.joint(j).name
+            assert np.array_equal(tester.jnt_range[j], v5.jnt_range[v5.joint(name).id])
+        for a in range(tester.nu):
+            name = tester.actuator(a).name
+            gear = v5.actuator_gear[v5.actuator(name).id, 0]
+            assert tester.actuator_gear[a, 0] == gear
+    assert not any(
+        headless.geom(g).name.startswith("head") for g in range(headless.ngeom)
+    )
 
 
 def ground_contacts(model, data):

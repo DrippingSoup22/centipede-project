@@ -12,7 +12,8 @@ heros*: a head without legs and 21 leg-bearing units at the animal's
 measured length and mass, with v4's physics scaled to its size (see
 [Model v5](#model-v5)). It comes in two lengths, the whole animal and its
 first ten units, a tester that screens a design quickly before the whole
-body trains it. **v4** has twelve body units, and legs of three
+body trains it; the tester also comes without its head, ten units alike,
+the simplest body to learn walking on. **v4** has twelve body units, and legs of three
 links with a fourth joint, the ankle, with v3's torque motors, leg armature,
 and a 0.5 ms physics timestep (see [Model v4](#model-v4)). **v3**, which the
 example configurations use, is v2 with a longer physics timestep (see
@@ -39,6 +40,7 @@ smaller. A model of v1 to v4 is validated again before it is trained on.
 | --- | --- | --- |
 | [`models/assembly_v5_full.xml`](../models/assembly_v5_full.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 15 physics steps per action | `8d2dd3e433feb5d710b176cd73c3b0dfc35c18bca57ca0d367de86293d280cec` |
 | [`models/assembly_v5_half.xml`](../models/assembly_v5_half.xml) | **v5's half**, its first ten units: the tester | `13773151d9468b5778ea65f0b67b472539a100bf67616b03e4cdff8ca04f55f1` |
+| [`models/assembly_v5_headless.xml`](../models/assembly_v5_headless.xml) | **v5's headless tester**, the half without its head | `5841d8f0e5c7000f1df07bacc7f4afcb107deff8ee7c58aa6cf9d956512ccba9` |
 | [`models/assembly_v4.xml`](../models/assembly_v4.xml) | **v4**, twelve units with four-joint legs, 40 physics steps per action | `ae43527f871ca116af51b4befc21f62b710c509442f0cf15c8c681243fca95e0` |
 | [`models/assembly_v3.xml`](../models/assembly_v3.xml) | **v3**, eight units with three-joint legs, used by the example configurations | `8a693cc5e15e4a468a6cafb293f67be7fab6460f7b76f0ca948546e59cb336fe` |
 | [`models/assembly_v2.xml`](../models/assembly_v2.xml) | v2, the same body with a 0.1 ms timestep | `eb3a89fcb640cdb7b75045c8848e1b9c4fde2c230d0c5a7e8115bf89f1d8a14a` |
@@ -467,9 +469,9 @@ three speeds. Where they measured nothing, v5 follows *S. polymorpha*, a
 close relative of the same deserts and the best-studied species. Its
 physics are v4's, scaled to the new size.
 
-### Two lengths
+### Two lengths, and a headless tester
 
-v5 comes in two files built from the same units, density and armatures by
+v5 comes in three files built from the same units, density and armatures by
 one generator (`archive/model_v5_heros/make_model_v5.py` in the main
 folder), with the same simulation settings:
 
@@ -477,6 +479,7 @@ folder), with the same simulation settings:
 | --- | ---: | ---: | ---: | ---: | --- |
 | `assembly_v5_full.xml` | 21, the whole animal | 11.56 g | 214 | 188 | confirming a design, and the final training |
 | `assembly_v5_half.xml` | 10, the first ten | 5.71 g | 104 | 89 | the tester: screening a design quickly |
+| `assembly_v5_headless.xml` | 10, the first ten without the head | 5.32 g | 104 | 89 | the headless tester: learning to walk without carrying the head |
 
 The half is the whole body cut behind its tenth unit: every body, shape,
 joint and motor it has is the full body's, by name and value. It is half
@@ -486,6 +489,13 @@ wave over 9 units), and *S. heros* bends its body in waves of 5 to 11
 segments (Anderson et al. 1995). It costs a fourth of the full body's
 work on the GPU (below). What it cannot show is what only a long body
 has: 21 segments cooperating, and the whole body's wave.
+
+The headless tester is the half with its head taken off (the user's
+decision, 2026-10-20): its first unit is a trunk unit like the others, so
+that all ten are alike, and only the `head_tip` site that the program needs
+marks its front end. Walking is learned on it first, without the head's
+load, which the front units must later learn to carry, perhaps with a spine
+that can lift them, a revision for later. Its other parts are the half's.
 
 ### The body
 
@@ -624,22 +634,23 @@ contacts and 756 constraint rows, when the whole body lies on the floor
 (CPU MuJoCo 3.16.0, `archive/model_v5_heros/contact_budget.py`); on the GPU
 771 rows were seen, so configurations of the full body set
 `[environment.simulation] constraints_per_world` to 1,024. The half needs
-at most 60 contacts and 360 rows (369 on the GPU), within the default 512.
+at most 60 contacts and 360 rows (369 on the GPU), within the default 512,
+and so does the headless tester.
 
 ### Validation of v5
 
-The checks of [Validation](#validation), on both lengths (CPU MuJoCo
+The checks of [Validation](#validation), on the three files (CPU MuJoCo
 3.16.0, the model's timestep unless stated; `archive/model_v5_heros/validate.py`
 in the main folder's archive):
 
-| Check | The full body | The half |
-| --- | --- | --- |
-| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.072 mm deepest penetration; no solver warning | The same with its 10 bodies and 20 feet: centres 3.88 mm high, 0.071 mm deep |
-| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 9.7 to 10.3 mm high, 0.10 to 0.24 mm deep | At 40% and 60% on all 20 feet, centres 9.9 to 10.0 mm high, 0.14 to 0.22 mm deep; at 20% its first unit, which carries the head on two legs, touches the floor |
-| Random full-strength motor commands, 2 s, 3 runs | 1.32 to 1.56 mm deepest penetration, in brief impacts; joint limits exceeded by at most 7.0°; no solver warning | 1.28 to 1.44 mm; at most 6.7°; no warning |
-| Leg closest to a body under the random commands | 0.09 mm | 0.06 mm |
-| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs | Nothing closer than 0.135 mm; too short to coil |
-| Half timestep | Settling ends within 0.06 mm of the model's timestep, standing within 0.07 mm of its heights; penetration 1.14 to 1.24 mm and joint-limit excess at most 5.7° under random commands | Settling within 0.07 mm; penetration 1.09 to 1.38 mm, joint-limit excess at most 5.4° |
+| Check | The full body | The half | The headless tester |
+| --- | --- | --- | --- |
+| Settling with every motor off, 2 s | The first body touches the floor after 52 ms; all 21 bodies and 42 feet end on the floor, centres 3.89 mm high; 0.072 mm deepest penetration; no solver warning | The same with its 10 bodies and 20 feet: centres 3.88 mm high, 0.071 mm deep | The same, the first body down after 77 ms: centres 3.89 mm high, 0.065 mm deep |
+| Every lift motor pressing down, 1 s | At 20%, 40% and 60% the body stands on all 42 feet with no body contact, centres 9.7 to 10.3 mm high, 0.10 to 0.24 mm deep | At 40% and 60% on all 20 feet, centres 9.9 to 10.0 mm high, 0.14 to 0.22 mm deep; at 20% its first unit, which carries the head on two legs, touches the floor | At 20%, 40% and 60% on all 20 feet, centres 10.2 to 10.6 mm high, 0.09 to 0.21 mm deep |
+| Random full-strength motor commands, 2 s, 3 runs | 1.32 to 1.56 mm deepest penetration, in brief impacts; joint limits exceeded by at most 7.0°; no solver warning | 1.28 to 1.44 mm; at most 6.7°; no warning | 1.38 to 1.47 mm; at most 6.3°; no warning |
+| Leg closest to a body under the random commands | 0.09 mm | 0.06 mm | 0.15 mm |
+| Legs at the corners of their ranges with the spine straight or at its hard limits, 192 poses | Nothing closer than 0.135 mm to the body of its own or any segment within two of it. Bent to every limit at once, the 21 units coil onto themselves and the tail's legs reach 2.4 mm into the head: v5 is long enough to coil, and its bodies collide neither with one another nor with other segments' legs | Nothing closer than 0.135 mm; too short to coil | As the half |
+| Half timestep | Settling ends within 0.06 mm of the model's timestep, standing within 0.07 mm of its heights; penetration 1.14 to 1.24 mm and joint-limit excess at most 5.7° under random commands | Settling within 0.07 mm; penetration 1.09 to 1.38 mm, joint-limit excess at most 5.4° | Settling within 0.064 mm; penetration 1.09 to 1.38 mm, joint-limit excess at most 5.3° |
 
 As in v1 to v4, the body cannot hold itself up with its motors off. The
 GPU backend reads v5's state as CPU MuJoCo computes it
@@ -649,7 +660,8 @@ automated tests in `tests/models/test_model_v5.py` check the full body's
 size and mass, that every torque and damping is v4's times one scale and
 the transients its square root, the timestep and the contacts' and
 limits' response, the root on the middle unit, the legs' contacts and the
-tolerance in both lengths, that the half's parts are the full body's, that
+tolerance in the three files, that the half's parts are the full body's and
+the headless tester's too but for its first unit's body, that
 the body sinks with its motors off and stands on its lift motors, and that
 no leg passes through a body under random commands.
 
