@@ -25,7 +25,7 @@ spacings, 16.5 mm on v5 (the user's definition).
 | The spine joint behind it: angle, speed | 2 | The joint it commands; zeros for the rear |
 | Foot loads: each foot pressing down, and pushing fore or aft | 4 | Load sensing, the signal biology puts at the root of the wave (Yasui et al. 2017; Dallmann et al. 2017; Owaki & Ishiguro 2017) |
 | Its belly's load | 1 | Resting or dragging, which hanging charges |
-| Its legs' press on other legs | 1 | What pain charges |
+| Its legs' press on other legs | 1 | What pain charged (removed, [reward.md](reward.md)) |
 | Joint forces, averaged over 1 s: the front joint's along the body, and its two joints' net force along and up | 3 | What the force share, the squeeze and hanging charge; across five blocks every joint around the unit |
 | The same of the step: the front joint's, and the net along | 2 | A reflex: being pulled now |
 | Its last action | 9 | What it is doing; across the blocks, what its neighbours just did |

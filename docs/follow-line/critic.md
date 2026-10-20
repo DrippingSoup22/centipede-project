@@ -17,7 +17,7 @@ over many samples (131,072 per agent per update) but slows learning.
 | Critic | Predicts | Sees |
 | --- | --- | --- |
 | Team | The team account: the line, the squeeze, the body's energy | What its actor sees |
-| Own | The own account: its force share, hanging and pain | What its actor sees |
+| Own | The own account: its force share and hanging | What its actor sees |
 
 - **One critic per account**, so that the clearer own signal is not drowned
   in the team's, and each weighs what its weight says whatever its size: each
