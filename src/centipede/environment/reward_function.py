@@ -145,7 +145,8 @@ class RewardFunction:
 
         The line: each unit's step forward, up to the cap (or, with
         ``line_cap_averaged``, scaled by the cap over its averaged speed when
-        that is above it), times its closeness, 1 - (distance / band)², and
+        that is above it, less ``line_overspeed_slope`` times the speed above
+        it), times its closeness, 1 - (distance / band)², and
         the cosine of its angle (none beyond the band or facing away), and a
         step back in full; the team is paid the units' mean. The squeeze: at
         each joint, the averaged force along the body with the tows behind it
@@ -167,7 +168,9 @@ class RewardFunction:
         facing = angle.cos().clamp(min=0.0)
         if self.settings.line_cap_averaged:
             cap = self.settings.line_speed_cap_mm_per_s * 1e-3
-            paid = step_mm.clamp(min=0.0) * cap / averaged_speed.clamp(min=cap)
+            speed = averaged_speed.clamp(min=cap)
+            target_pay = cap - self.settings.line_overspeed_slope * (speed - cap)
+            paid = step_mm.clamp(min=0.0) * target_pay / speed
         else:
             paid = step_mm.clamp(min=0.0, max=self.line_cap_mm)
         forward = paid * closeness * facing

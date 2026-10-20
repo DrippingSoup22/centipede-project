@@ -18,6 +18,11 @@ two lift together, half a turn when they alternate, a small positive lag
 when the rear foot follows the front one, as in a wave from front to rear,
 and negative when it leads. The window summary gives each lag's mean, its
 consistency over every world and lift-off, and its lock within each world.
+
+A leg's strokes are read from its lift joint instead, contacts aside, so that
+a gait too fast for a 60 ms stance still counts: a stroke ends when the
+joint, having risen 3 degrees above its average over the last second, falls
+3 degrees below it.
 """
 
 import math
@@ -42,6 +47,9 @@ LEGS = ("left", "right")
 STANCE_LOAD_SHARE = 0.1
 # A stance shorter than this (60 ms) is a bounce, not a step.
 MIN_STANCE_STEPS = 3
+# A lift joint's stroke: its swing either way of its average over a second.
+STROKE_BAND_RAD = math.radians(3.0)
+STROKE_AVERAGING_S = 1.0
 # Shares of an episode's steps, in 10% bins.
 SHARE_EDGES = tuple(round(0.1 * index, 1) for index in range(11))
 
@@ -122,6 +130,13 @@ class StepFacts:
     lift_off: torch.Tensor = measure(
         "The foot lifted off after a stance of at least 60 ms: a step began,"
         " (W, N, 2); its share over 20 ms is the foot's step tempo",
+        summary="share",
+        parts=LEGS,
+    )
+    leg_stroke: torch.Tensor = measure(
+        "The leg's lift joint ended a stroke: having risen 3 degrees above its"
+        " average over the last second, it fell 3 degrees below it, (W, N, 2);"
+        " its share over 20 ms is the leg's stroke tempo, contacts aside",
         summary="share",
         parts=LEGS,
     )
@@ -243,6 +258,36 @@ class FootCycles:
         return lift_off, phase, known
 
 
+class LegStrokes:
+    """Each leg's lift joint against its average over the last second, in
+    every world, ``(W, N, 2)``."""
+
+    def __init__(self, world_count: int, segment_count: int, device) -> None:
+        shape = (world_count, segment_count, 2)
+        self.average = torch.zeros(shape, device=device)
+        self.raised = torch.zeros(shape, dtype=torch.bool, device=device)
+        # Whether the average has started from the joint's angle yet.
+        self.started = torch.zeros(shape, dtype=torch.bool, device=device)
+
+    def restart(self, world_mask: torch.Tensor) -> None:
+        """Forget the masked worlds' strokes, as their episodes restart."""
+        for value in vars(self).values():
+            value.masked_fill_(world_mask[:, None, None], 0)
+
+    def step(self, lift_angle: torch.Tensor) -> torch.Tensor:
+        """Advance by a step with each leg's lift joint at ``lift_angle``
+        (rad); returns the legs that ended a stroke."""
+        rate = ACTION_DURATION_S / STROKE_AVERAGING_S
+        moved = self.average + rate * (lift_angle - self.average)
+        self.average.copy_(torch.where(self.started, moved, lift_angle))
+        self.started.fill_(True)
+        above = lift_angle > self.average + STROKE_BAND_RAD
+        below = lift_angle < self.average - STROKE_BAND_RAD
+        stroke = self.raised & below
+        self.raised.copy_((self.raised | above) & ~below)
+        return stroke
+
+
 class EnvironmentDiagnostics:
     """Fills the two categories and keeps per-episode totals.
 
@@ -271,6 +316,7 @@ class EnvironmentDiagnostics:
         self.unit_weight_n = unit_weight_n
         self.line_ends_m = torch.tensor([-body_length_m, body_length_m], device=device)
         self.feet = FootCycles(world_count, segment_count, device)
+        self.legs = LegStrokes(world_count, segment_count, device)
 
         def zeros(*trailing_shape: int, dtype=torch.float32) -> torch.Tensor:
             return torch.zeros(
@@ -298,6 +344,7 @@ class EnvironmentDiagnostics:
             support=flags(),
             foot_standing=flags(segment_count, 2),
             lift_off=flags(segment_count, 2),
+            leg_stroke=flags(segment_count, 2),
             neighbour_lag_measured=flags(segment_count - 1, 2),
             neighbour_lag=zeros(segment_count - 1, 2),
             left_right_lag_measured=flags(segment_count),
@@ -333,10 +380,12 @@ class EnvironmentDiagnostics:
         return self.step.reward_parts[..., PART_NAMES.index("line")].mean(dim=1)
 
     def restart(self, world_mask: torch.Tensor) -> None:
-        """Clear the masked worlds' totals and foot cycles, as they restart."""
+        """Clear the masked worlds' totals, foot cycles and leg strokes, as
+        they restart."""
         for total in (*self._totals.values(), self._steps):
             total.masked_fill_(_per_world(world_mask, total), 0)
         self.feet.restart(world_mask)
+        self.legs.restart(world_mask)
 
     def record_step(
         self,
@@ -397,6 +446,11 @@ class EnvironmentDiagnostics:
         step.foot_standing.copy_(standing)
         step.support.copy_(standing.any(dim=1).all(dim=-1))
         step.lift_off.copy_(lift_off)
+        # Each leg's joints run from the body outward, the left leg's first;
+        # the lift is a leg's second.
+        motors = state.leg_joint_position.shape[-1]
+        lift_angle = state.leg_joint_position[..., [1, motors // 2 + 1]]
+        step.leg_stroke.copy_(self.legs.step(lift_angle))
         step.neighbour_lag_measured.copy_(lift_off[:, 1:] & known[:, :-1])
         step.neighbour_lag.copy_(phase[:, :-1])
         step.left_right_lag_measured.copy_(lift_off[..., 1] & known[..., 0])

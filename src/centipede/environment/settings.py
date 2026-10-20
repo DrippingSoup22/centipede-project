@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from centipede.environment.simulation import SimulationSettings
-from centipede.settings_section import SettingsSection
+from centipede.settings_section import SettingsError, SettingsSection
 
 
 @dataclass(frozen=True)
@@ -14,7 +14,9 @@ class RewardSettings:
     over ``averaging_s`` from the cap at the episode's start, each step's
     progress scaled down by the cap over that average when it is above (a
     stride's surges and dips cancel, so walking faster than the cap gains
-    nothing).
+    nothing). With ``line_overspeed_slope`` k above 0 the cap becomes a
+    target: above it a second's pay falls by k mm/s for every mm/s too fast,
+    to none at (1 + 1/k) times the target and below none beyond.
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
     ``force_price_w``, braking work ``braking_price`` of pushing work. Pain
@@ -30,6 +32,7 @@ class RewardSettings:
 
     line_speed_cap_mm_per_s: float
     line_cap_averaged: bool
+    line_overspeed_slope: float
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
@@ -50,6 +53,9 @@ class RewardSettings:
                 "line_speed_cap_mm_per_s", default=90.0
             ),
             line_cap_averaged=section.boolean("line_cap_averaged", default=False),
+            line_overspeed_slope=section.number(
+                "line_overspeed_slope", default=0.0, minimum=0.0
+            ),
             reference_pay_mm_per_s=section.number(
                 "reference_pay_mm_per_s", default=53.0, minimum=0.0
             ),
@@ -69,6 +75,11 @@ class RewardSettings:
             ),
         )
         section.reject_unknown_keys()
+        if settings.line_overspeed_slope and not settings.line_cap_averaged:
+            raise SettingsError(
+                "[environment.reward] line_overspeed_slope works on the averaged"
+                " speed: set line_cap_averaged = true"
+            )
         return settings
 
     def ramp_weight_at(self, cycle: int, ramp_from: int | None = 1) -> float:

@@ -185,15 +185,23 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     torch.testing.assert_close(rewards[0, 0, 1], torch.tensor(-1.06 - 1.59 * 0.1328))
 
 
-def test_the_averaged_cap_pays_every_step_until_the_average_passes_the_cap():
+@pytest.mark.parametrize(
+    ("slope", "paid_above"),
+    [(0.0, (90 / 135, 90 / 200)), (1.0, (45 / 135, -20 / 200))],
+)
+def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
     """With ``line_cap_averaged``, steps of 2 mm (100 mm/s, above the 90 mm/s
-    cap) are paid in full while the unit's averaged speed is 50 or 90 mm/s,
-    and by 90/135 of it at 135 mm/s; a step back is charged in full."""
-    settings = RewardSettings.from_section({"line_cap_averaged": True})
+    cap) are paid in full while the unit's averaged speed is 50 or 90 mm/s;
+    at 135 and 200 mm/s the cap pays 90/v of them, and the target, slope 1,
+    (90 - (v - 90))/v: a third, then a charge. A step back is charged in
+    full."""
+    settings = RewardSettings.from_section(
+        {"line_cap_averaged": True, "line_overspeed_slope": slope}
+    )
     commanded = torch.ones(SEGMENTS, LEGS + 1)
     reward = RewardFunction(settings, BODY, commanded, 0.005)
-    progress = 1e-3 * torch.tensor([[2.0, 2.0, 2.0, -0.5, 0.0]])
-    averaged_speed = 1e-3 * torch.tensor([[50.0, 90.0, 135.0, 135.0, 0.0]])
+    progress = 1e-3 * torch.tensor([[2.0, 2.0, 2.0, -0.5, 2.0]])
+    averaged_speed = 1e-3 * torch.tensor([[50.0, 90.0, 135.0, 135.0, 200.0]])
     zeros = torch.zeros(1, SEGMENTS)
 
     _, parts, _ = reward.compute(
@@ -207,7 +215,8 @@ def test_the_averaged_cap_pays_every_step_until_the_average_passes_the_cap():
         zeros,
     )
 
-    paid = torch.tensor([2.0, 2.0, 2.0 * 90 / 135, -0.5, 0.0])
+    at_135, at_200 = paid_above
+    paid = torch.tensor([2.0, 2.0, 2.0 * at_135, -0.5, 2.0 * at_200])
     torch.testing.assert_close(
         parts[0, :, PART_NAMES.index("line")], paid.mean() * torch.ones(SEGMENTS)
     )
@@ -288,11 +297,13 @@ def test_the_tow_fades_while_the_untowed_mean_walks_and_draws_from_a_floor():
     assert tow.facts.push.item() == pytest.approx(levels[:6].mean().item())
 
 
-def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
+def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised():
     """Every foot stands four steps of eight, each unit's a step behind the
     one ahead and each right foot half a cycle behind its left: a wave from
-    front to rear of 45 degrees per unit, with the sides alternating. Both
-    worlds go 1 mm a step along the line; world 1 ends having lost it."""
+    front to rear of 45 degrees per unit, with the sides alternating. Each
+    left leg's lift joint swings 20 degrees either way every four steps, a
+    stroke every 80 ms, while the right legs' stay still. Both worlds go 1 mm
+    a step along the line; world 1 ends having lost it."""
     diagnostics = EnvironmentDiagnostics(2, SEGMENTS, BODY.unit_weight_n, "cpu", None)
     window = WindowSummary(diagnostics.step)
     state = resting_state(2)
@@ -302,6 +313,9 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
     for step in range(40):
         standing = (step - delay) % 8 < 4
         state.foot_normal_force.copy_(standing * BODY.unit_weight_n)
+        state.leg_joint_position[..., 1] = math.radians(20) * math.sin(
+            math.pi * step / 2
+        )
         diagnostics.record_step(
             state,
             torch.ones(2, SEGMENTS, 2),
@@ -317,6 +331,8 @@ def test_the_gait_is_read_from_the_feet_and_each_episode_is_summarised():
 
     gait = window.result()
     torch.testing.assert_close(gait["foot_standing"], torch.full((SEGMENTS, 2), 0.5))
+    strokes = torch.tensor([0.25, 0.0]).expand(SEGMENTS, 2)
+    torch.testing.assert_close(gait["leg_stroke"], strokes)
     torch.testing.assert_close(
         gait["neighbour_lag"], torch.full((SEGMENTS - 1, 2), math.pi / 4)
     )
