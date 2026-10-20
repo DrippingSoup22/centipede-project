@@ -30,6 +30,9 @@ from centipede.environment.simulation.gpu_backend import (  # noqa: E402
     GPUBackend,
 )
 from centipede.environment.simulation.model_mapping import ModelMapping  # noqa: E402
+from centipede.environment.simulation.physical_state import (  # noqa: E402
+    EFFORT_FIELDS,
+)
 from centipede.environment.simulation.simulation import (  # noqa: E402
     physics_steps_per_action,
 )
@@ -78,10 +81,12 @@ def test_construction_prepares_the_gpu_worlds(model, mapping):
     ):
         assert np.array_equal(getattr(backend, table).numpy(), getattr(mapping, table))
 
+    effort_views = dict(zip(EFFORT_FIELDS, backend._effort, strict=True))
     for field in dataclasses.fields(backend.physical_state):
         tensor = getattr(backend.physical_state, field.name)
+        view = effort_views.get(field.name) or getattr(backend, f"_{field.name}")
         assert tensor.is_cuda, field.name
-        assert getattr(backend, f"_{field.name}").ptr == tensor.data_ptr(), field.name
+        assert view.ptr == tensor.data_ptr(), field.name
 
     # The simulation's category is MuJoCo Warp's own arrays, seen as tensors.
     facts = backend.diagnostics.facts
@@ -271,6 +276,13 @@ def test_physical_state_matches_cpu_mujoco(model_path):
                 expected["spine_yaw_velocity"] = data.qvel[
                     mapping.spine_dof_addresses[segment_index]
                 ]
+            # The front end: the head's tip, then the joint with the one ahead.
+            spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
+            expected["front_end_position"] = (
+                data.site_xpos[mapping.head_tip_site_id, :2]
+                if segment_index == 0
+                else data.xanchor[spine_joint_ids[segment_index - 1], :2]
+            )
             for field, value in expected.items():
                 actual = getattr(state, field)[world_index, segment_index]
                 assert np.allclose(actual.cpu().numpy(), value, atol=1e-5), field
@@ -374,12 +386,101 @@ def test_gpu_physics_matches_cpu_physics_while_settling():
         assert torch.allclose(actual, expected, atol=tolerance), field
 
 
+def test_gpu_effort_matches_cpu_effort():
+    """From the same settled state, with two neighbours' legs swept together,
+    both backends measure the same effort: the floor's support, the legs'
+    press, the feet's forward forces, and the motors' work."""
+    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    cpu_model.opt.solver = SOLVERS[SOLVER]
+    mapping = ModelMapping.from_model(cpu_model)
+    segment_count = mapping.segment_count
+    cpu = CPUBackend(cpu_model, mapping, 1, STEPS, measure_effort=True)
+    cpu.reset(seed=0)
+    for _ in range(25):
+        cpu.step(torch.zeros(1, segment_count, 6))
+    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    gpu = GPUBackend(
+        gpu_model, mapping, 1, STEPS, SOLVER, 128, 512, measure_effort=True
+    )
+    gpu.reset(seed=0)
+    wp.to_torch(gpu.gpu_data.qpos)[0] = torch.from_numpy(cpu.world_data[0].qpos)
+    wp.to_torch(gpu.gpu_data.qvel)[0] = torch.from_numpy(cpu.world_data[0].qvel)
+    mjw.forward(gpu.gpu_model, gpu.gpu_data)
+
+    actions = torch.zeros(1, segment_count, 6)
+    actions[0, 2, 0], actions[0, 3, 0] = -1.0, 1.0
+    actions[0, 5:, 0] = actions[0, 5:, 3] = -0.8
+    for _ in range(2):
+        cpu.step(actions)
+        gpu.step(actions.cuda())
+
+    def measured(field: str) -> tuple[torch.Tensor, torch.Tensor]:
+        expected = getattr(cpu.physical_state, field)
+        assert expected.abs().max() > 0, field
+        return getattr(gpu.physical_state, field).cpu(), expected
+
+    # The legs' press and the motors' work belong to each segment exactly.
+    for field in EFFORT_FIELDS[3:]:
+        actual, expected = measured(field)
+        assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
+    # A resting body's load and friction are shared among its shapes as each
+    # solver finds (they are statically indeterminate, and the laptop's CG
+    # solver stops at its iteration limit), so only the totals compare;
+    # friction, the least converged, only roughly.
+    for field, tolerance in (
+        ("foot_normal_force", 0.03),
+        ("belly_normal_force", 0.03),
+        ("foot_forward_force", 0.5),
+    ):
+        actual, expected = measured(field)
+        assert actual.sum().item() == pytest.approx(
+            expected.sum().item(), rel=tolerance
+        )
+
+
+@pytest.mark.parametrize(
+    "model_path", ["models/assembly_v3.xml", "models/assembly_v5_half.xml"]
+)
+def test_gpu_joint_forces_match_cpu_joint_forces(model_path):
+    """With the rear segment pushed forward by three body weights, as the
+    step's body forces, both backends measure each joint's push alike,
+    whichever segment roots the body tree (v5's middle unit). Near the head
+    the push is small beside the friction, which each solver shares among
+    the feet as it finds, so the joints are compared against the largest
+    push."""
+    model = mujoco.MjModel.from_xml_path(model_path)
+    mapping = ModelMapping.from_model(model)
+    steps = physics_steps_per_action(model)
+    cpu = CPUBackend(model, mapping, 1, steps, measure_joint_forces=True)
+    cpu.reset(seed=0)
+    gpu = GPUBackend(
+        model, mapping, 1, steps, SOLVER, 128, 512, measure_joint_forces=True
+    )
+    gpu.reset(seed=0)
+    body_forces = torch.zeros(1, mapping.segment_count, 3)
+    body_forces[0, -1, 0] = (
+        3 * model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    )
+    actions = torch.zeros(1, mapping.segment_count, mapping.leg_actuator_ids.shape[1])
+
+    cpu.step(actions, body_forces=body_forces)
+    gpu.step(actions.cuda(), body_forces=body_forces.cuda())
+
+    expected = cpu.physical_state.front_joint_force[0]
+    actual = gpu.physical_state.front_joint_force[0].cpu()
+    assert actual[0] == expected[0] == 0
+    assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
+    expected = cpu.physical_state.net_joint_force[0]
+    actual = gpu.physical_state.net_joint_force[0].cpu()
+    assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
+
+
 # -- Failure -------------------------------------------------------------------
 
 
 def test_invalid_physics_stops_the_run(model, mapping):
-    """Running out of reserved space, and a non-finite state, stop the run;
-    the solver's iteration-limit notice does not."""
+    """Running out of reserved space, and a non-finite state with no restart
+    allowed, stop the run; the solver's iteration-limit notice does not."""
     crowded = GPUBackend(model, mapping, 2, STEPS, SOLVER, 1, 512)
     crowded.reset()
     with pytest.raises(RuntimeError, match="Raise contacts_per_world"):
@@ -395,6 +496,35 @@ def test_invalid_physics_stops_the_run(model, mapping):
         backend._check_worlds()
 
     backend.reset()
-    wp.to_torch(backend.gpu_data.qvel)[0, 10] = float("nan")
-    with pytest.raises(RuntimeError, match="world 0: .*non-finite"):
+    backend.gpu_data.overflow.zero_()
+    wp.to_torch(backend.gpu_data.qvel)[1, 10] = float("nan")
+    with pytest.raises(RuntimeError, match="world 1: .*non-finite"):
         backend._check_worlds()
+
+
+def test_allowed_non_finite_worlds_restart_from_the_actions_start(
+    model, mapping, monkeypatch
+):
+    """With one restart allowed per action, a world the physics makes
+    non-finite goes back to the action's start, flagged for the environment,
+    with finite state and effort; the other world steps on."""
+    backend = GPUBackend(model, mapping, 2, STEPS, SOLVER, 128, 512, 0.0, True, True, 1)
+    backend.reset(seed=0)
+    actions = torch.rand(2, mapping.segment_count, 6, device="cuda") * 2 - 1
+    backend.step(actions)
+    start = positions(backend).copy()
+    replay = wp.capture_launch
+
+    def replay_spoiling_world_1(graph):
+        replay(graph)
+        wp.to_torch(backend.gpu_data.qvel)[1, 10] = float("nan")
+
+    monkeypatch.setattr(wp, "capture_launch", replay_spoiling_world_1)
+    backend.step(actions)
+
+    assert backend.diagnostics.facts.restarted_worlds.tolist() == [False, True]
+    assert np.array_equal(positions(backend)[1], start[1])
+    assert not np.array_equal(positions(backend)[0], start[0])
+    for field in dataclasses.fields(backend.physical_state):
+        values = getattr(backend.physical_state, field.name)
+        assert torch.isfinite(values.float()).all(), field.name

@@ -11,6 +11,13 @@ class SimulationSettings:
     ``start_heading_range_deg`` turns the whole body about the vertical at every
     reset, by a random angle within plus or minus this many degrees: 0 keeps the
     model's heading, 180 allows any heading.
+
+    ``max_restarted_worlds_per_action`` (2026-10-19, the user's decision) lets
+    the GPU backend restart worlds that MuJoCo Warp made non-finite, up to this
+    many in one action: each goes back to its state at the action's start, and
+    its episode ends there. MuJoCo Warp guards nothing against non-finite
+    values by design, and mjlab, the framework its guide names, restarts such
+    worlds the same way. With 0, the default, any such world stops the run.
     """
 
     model_path: Path
@@ -20,6 +27,7 @@ class SimulationSettings:
     contacts_per_world: int
     constraints_per_world: int
     start_heading_range_deg: float
+    max_restarted_worlds_per_action: int
 
     @classmethod
     def from_section(cls, values: dict) -> "SimulationSettings":
@@ -38,6 +46,9 @@ class SimulationSettings:
             ),
             start_heading_range_deg=section.number(
                 "start_heading_range_deg", default=0.0, minimum=0, maximum=180
+            ),
+            max_restarted_worlds_per_action=section.integer(
+                "max_restarted_worlds_per_action", default=0, minimum=0
             ),
         )
         section.reject_unknown_keys()

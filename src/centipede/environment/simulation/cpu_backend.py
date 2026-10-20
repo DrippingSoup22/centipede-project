@@ -14,8 +14,12 @@ from centipede.environment.simulation.model_mapping import (
     LEFT_FOOT_CATEGORY,
     RIGHT_FOOT_CATEGORY,
     ModelMapping,
+    spine_joint_force_bodies,
 )
-from centipede.environment.simulation.physical_state import PhysicalState
+from centipede.environment.simulation.physical_state import (
+    EFFORT_FIELDS,
+    PhysicalState,
+)
 
 
 class CPUBackend:
@@ -33,12 +37,18 @@ class CPUBackend:
         world_count: int,
         physics_steps_per_action: int,
         start_heading_range_rad: float = 0.0,
+        measure_effort: bool = False,
+        measure_joint_forces: bool = False,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
-        turn the body about the vertical. The generators start from seed 0
+        turn the body about the vertical. With ``measure_effort`` the physical
+        state's effort fields are measured (``_add_effort``), and with
+        ``measure_joint_forces`` its joint forces (``_add_joint_forces``). The
+        generators
+        start from seed 0
         until ``reset`` is given a seed. Each
         physical-state tensor is also kept as a NumPy view sharing its memory,
         so writing MuJoCo values into a view fills the tensor directly.
@@ -48,6 +58,13 @@ class CPUBackend:
         self.world_count = world_count
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
+        self.measure_effort = measure_effort
+        self.measure_joint_forces = measure_joint_forces
+        # The spine's yaw joints, from the head back: the joints its motors drive.
+        self.spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
+        self._joint_force_bodies, self._joint_force_signs = spine_joint_force_bodies(
+            model, mapping.body_ids
+        )
 
         self.world_data: list[mujoco.MjData] = []
         self.reset_generators: list[Generator] = []
@@ -76,6 +93,12 @@ class CPUBackend:
         self._head_tip_position = self.physical_state.head_tip_position.numpy()
         self._spine_yaw_position = self.physical_state.spine_yaw_position.numpy()
         self._spine_yaw_velocity = self.physical_state.spine_yaw_velocity.numpy()
+        self._effort = {
+            name: getattr(self.physical_state, name).numpy() for name in EFFORT_FIELDS
+        }
+        self._front_end_position = self.physical_state.front_end_position.numpy()
+        self._front_joint_force = self.physical_state.front_joint_force.numpy()
+        self._net_joint_force = self.physical_state.net_joint_force.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
@@ -131,18 +154,30 @@ class CPUBackend:
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)
+            if self.measure_effort:
+                self._clear_effort(world_index)
+                self._add_effort(world_index, 1.0)
+            if self.measure_joint_forces:
+                self._front_joint_force[world_index] = 0.0
+                self._net_joint_force[world_index] = 0.0
+                self._add_joint_forces(world_index, 1.0)
         self.diagnostics.fill_from_cpu(self.world_data)
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        body_forces: torch.Tensor | None = None,
     ) -> None:
         """Hold each world's leg and spine actions for one 20 ms step.
 
         ``leg_actions`` has shape (W, N, M): every world's segment actions, in
         leg action order (``ModelMapping``). ``spine_actions`` has shape
         (W, N - 1), one command per spine joint from the head back; without it
-        the spine motors receive zero. Stops the run if the physics fails;
-        afterwards the physical state is refreshed.
+        the spine motors receive zero. ``body_forces``, (W, N, 3) newtons in
+        world axes, become each segment body's applied force, its torque
+        zero. Stops the run if the physics fails; afterwards the physical
+        state is refreshed.
         """
         actions = leg_actions.cpu().numpy()
         spine_commands = (
@@ -150,17 +185,142 @@ class CPUBackend:
             if spine_actions is None
             else spine_actions.cpu().numpy()
         )
+        forces = None if body_forces is None else body_forces.cpu().numpy()
 
         for world_index, data in enumerate(self.world_data):
             data.ctrl[self.mapping.leg_actuator_ids] = actions[world_index]
             data.ctrl[self.mapping.spine_actuator_ids] = spine_commands[world_index]
+            if forces is not None:
+                # MuJoCo's applied force: the force first, then the torque.
+                data.xfrc_applied[self.mapping.body_ids, :3] = forces[world_index]
+            if self.measure_effort:
+                self._clear_effort(world_index)
+            if self.measure_joint_forces:
+                self._front_joint_force[world_index] = 0.0
+                self._net_joint_force[world_index] = 0.0
             for _ in range(self.physics_steps_per_action):
                 mujoco.mj_step(self.model, data)
+                if self.measure_effort:
+                    self._add_effort(world_index, 1 / self.physics_steps_per_action)
+                if self.measure_joint_forces:
+                    self._add_joint_forces(
+                        world_index, 1 / self.physics_steps_per_action
+                    )
             self._check_world(world_index)
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)
         self.diagnostics.fill_from_cpu(self.world_data)
+
+    def _clear_effort(self, world_index: int) -> None:
+        """Zero one world's effort measures."""
+        for values in self._effort.values():
+            values[world_index] = 0.0
+
+    def _add_effort(self, world_index: int, scale: float) -> None:
+        """Add the physics step just taken to one world's effort measures.
+
+        Each motor's torque times speed times the timestep adds to its
+        segment's pushing work where positive, to its braking work where
+        negative. Each contact's force comes from its constraint rows: with
+        the elliptic cones the model must have, the first three hold its
+        normal and two tangential parts in the contact's frame, whose normal
+        points from its first shape to its second, so the force acts on the
+        second shape as it is and on the first reversed. A foot or body shape
+        on the floor adds ``scale`` times its normal force, and a foot also
+        the part along its segment's forward axis. Two legs touching press
+        both segments alike; each segment's total adds ``scale`` times itself
+        and its square.
+        """
+        data = self.world_data[world_index]
+        mapping = self.mapping
+        effort = {name: values[world_index] for name, values in self._effort.items()}
+
+        motor_work = (
+            data.actuator_force * data.actuator_velocity * self.model.opt.timestep
+        )
+        segment_work = np.zeros(
+            (mapping.segment_count, mapping.leg_actuator_ids.shape[1] + 1)
+        )
+        segment_work[:, :-1] = motor_work[mapping.leg_actuator_ids]
+        segment_work[:-1, -1] = motor_work[mapping.spine_actuator_ids]
+        effort["motor_positive_work"] += np.maximum(segment_work, 0.0).sum(axis=1)
+        effort["motor_negative_work"] += np.maximum(-segment_work, 0.0).sum(axis=1)
+
+        contact = data.contact
+        acting = contact.efc_address >= 0
+        shapes = contact.geom[acting]
+        local_force = data.efc_force[contact.efc_address[acting, None] + np.arange(3)]
+        force_on_second = np.einsum(
+            "ci,cij->cj", local_force, contact.frame[acting].reshape(-1, 3, 3)
+        )
+        normal_force = local_force[:, 0]
+        categories = mapping.geom_categories[shapes]
+        owners = mapping.geom_owner_indices[shapes]
+        floor_first = categories[:, 0] == FLOOR_CATEGORY
+        on_floor = floor_first | (categories[:, 1] == FLOOR_CATEGORY)
+
+        pressed = np.zeros(mapping.segment_count)
+        np.add.at(
+            pressed, owners[~on_floor].ravel(), np.repeat(normal_force[~on_floor], 2)
+        )
+        effort["leg_leg_force"] += scale * pressed
+        effort["leg_leg_force_squared"] += scale * pressed**2
+
+        # The shape on the floor, and the floor's force on it.
+        shape_end = floor_first[on_floor].astype(int)
+        category = categories[on_floor, shape_end]
+        owner = owners[on_floor, shape_end]
+        force = np.where(
+            floor_first[on_floor, None],
+            force_on_second[on_floor],
+            -force_on_second[on_floor],
+        )
+        floor_normal = normal_force[on_floor]
+        belly = category == BODY_CATEGORY
+        np.add.at(
+            effort["belly_normal_force"], owner[belly], scale * floor_normal[belly]
+        )
+        foot = (category == LEFT_FOOT_CATEGORY) | (category == RIGHT_FOOT_CATEGORY)
+        foot_index = (owner[foot], category[foot] - LEFT_FOOT_CATEGORY)
+        # Each body's forward axis: the first column of its rotation matrix.
+        forward_axes = data.xmat[mapping.body_ids][:, [0, 3, 6]]
+        along = (force[foot] * forward_axes[owner[foot]]).sum(axis=1)
+        np.add.at(effort["foot_normal_force"], foot_index, scale * floor_normal[foot])
+        np.add.at(effort["foot_forward_force"], foot_index, scale * along)
+
+    def _add_joint_forces(self, world_index: int, scale: float) -> None:
+        """Add ``scale`` times each segment's front joint force, along its
+        forward axis, and its net joint force, along it and up, to one world's
+        measures.
+
+        MuJoCo's ``cfrc_int`` holds, for every body, the force its parent
+        exerts on the subtree it heads, about the subtree's centre, with the
+        force in its last three values, in world axes. ``mj_rnePostConstraint``
+        fills it from the physics step just taken. Each joint's force, the
+        front side's on the rear side, is its child's ``cfrc_int`` with the
+        sign the tree's direction there gives (``spine_joint_force_bodies``).
+        The net force on a segment alone is what its front joint gives it
+        less what its rear joint passes on to the segments behind.
+        """
+        data = self.world_data[world_index]
+        mujoco.mj_rnePostConstraint(self.model, data)
+        body_ids = self.mapping.body_ids
+        front = np.zeros((len(body_ids), 3))
+        front[1:] = (
+            self._joint_force_signs[:, None]
+            * data.cfrc_int[self._joint_force_bodies, 3:]
+        )
+        net = front.copy()
+        net[:-1] -= front[1:]
+        forward_axes = data.xmat[body_ids][:, [0, 3, 6]]
+        self._front_joint_force[world_index] += scale * (front * forward_axes).sum(
+            axis=1
+        )
+        self._net_joint_force[world_index, :, 0] += scale * (net * forward_axes).sum(
+            axis=1
+        )
+        self._net_joint_force[world_index, :, 1] += scale * net[:, 2]
 
     def _check_world(self, world_index: int) -> None:
         """Stop the run if MuJoCo reported or produced an impossible state.
@@ -199,6 +359,14 @@ class CPUBackend:
         self._leg_joint_position[world_index] = data.qpos[mapping.leg_qpos_addresses]
         self._leg_joint_velocity[world_index] = data.qvel[mapping.leg_dof_addresses]
         self._head_tip_position[world_index] = data.site_xpos[mapping.head_tip_site_id]
+        # The head's tip, then the spine joints: each segment's joint with the
+        # segment ahead.
+        self._front_end_position[world_index, 0] = data.site_xpos[
+            mapping.head_tip_site_id, :2
+        ]
+        self._front_end_position[world_index, 1:] = data.xanchor[
+            self.spine_joint_ids, :2
+        ]
         # Each segment's joint behind it; the rear segment's entry stays zero.
         self._spine_yaw_position[world_index, :-1] = data.qpos[
             mapping.spine_qpos_addresses

@@ -23,6 +23,7 @@ def test_defaults_fill_everything_but_the_required_keys():
         contacts_per_world=128,
         constraints_per_world=512,
         start_heading_range_deg=0.0,
+        max_restarted_worlds_per_action=0,
     )
 
 

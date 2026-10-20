@@ -224,6 +224,12 @@ def test_physical_state_matches_mujoco(model, mapping):
                 spine = model.joint(f"segment_{segment + 1:02d}_yaw")
                 expected["spine_yaw_position"] = data.qpos[spine.qposadr[0]]
                 expected["spine_yaw_velocity"] = data.qvel[spine.dofadr[0]]
+            # The front end: the head's tip, then the joint with the one ahead.
+            expected["front_end_position"] = (
+                data.site_xpos[model.site("head_tip").id, :2]
+                if segment == 0
+                else data.xanchor[model.joint(f"segment_{segment:02d}_yaw").id, :2]
+            )
             for field, value in expected.items():
                 actual = getattr(state, field)[row].numpy()
                 assert np.allclose(actual, value, rtol=1e-6, atol=1e-7), field
@@ -280,6 +286,78 @@ def test_contact_flags_follow_the_contact_list(model, mapping):
             seen[flag] |= bool(values.any())
 
     assert all(seen.values()), seen
+
+
+def settled_backend_measuring_effort(model, mapping):
+    """One world measuring effort, settled for half a second with the motors
+    off: the body rests on the floor."""
+    backend = CPUBackend(
+        model, mapping, 1, physics_steps_per_action(model), measure_effort=True
+    )
+    backend.reset(seed=0)
+    for _ in range(25):
+        backend.step(torch.zeros(1, SEGMENT_COUNT, 6))
+    return backend
+
+
+def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
+    model, mapping
+):
+    backend = settled_backend_measuring_effort(model, mapping)
+    state = backend.physical_state
+    weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    support = state.foot_normal_force.sum() + state.belly_normal_force.sum()
+    assert support.item() == pytest.approx(weight, rel=1e-3)
+    assert state.motor_positive_work.sum() == state.motor_negative_work.sum() == 0
+
+    # Segments 2 and 3 sweep their left legs toward each other: both feel the
+    # same press, and only they; a mean of squares is at least the squared mean.
+    actions = torch.zeros(1, SEGMENT_COUNT, 6)
+    actions[0, 2, 0], actions[0, 3, 0] = -1.0, 1.0
+    for _ in range(3):
+        backend.step(actions)
+    pressed = state.leg_leg_force[0]
+    assert pressed[2] == pressed[3] > 0.1 * weight / SEGMENT_COUNT
+    assert pressed.sum() == pytest.approx(2 * pressed[2].item())
+    assert state.leg_leg_force_squared[0, 2] >= pressed[2] ** 2
+    assert (state.motor_positive_work[0, 2:4] > 0).all()
+
+    # Every sweep pushes back: the floor pushes the feet forward.
+    actions[..., 0] = actions[..., 3] = -0.8
+    backend.step(actions)
+    assert state.foot_forward_force.sum() > 0
+
+
+@pytest.mark.parametrize(
+    "model_path", ["models/assembly_v3.xml", "models/assembly_v5_half.xml"]
+)
+def test_joint_forces_carry_a_push_from_behind_up_the_body(model_path):
+    """The rear segment, pushed forward with three body weights, pushes the
+    segment ahead with most of it, and each joint further up carries less:
+    each joint moves everything ahead of it. The head has no joint ahead.
+    Net of both its joints, the rear segment is held back by most of the
+    push, and the joints' forces on the whole body cancel. So whichever
+    segment roots MuJoCo's body tree: the head in v3, the middle unit in v5."""
+    model = mujoco.MjModel.from_xml_path(model_path)
+    mapping = ModelMapping.from_model(model)
+    backend = CPUBackend(
+        model, mapping, 1, physics_steps_per_action(model), measure_joint_forces=True
+    )
+    backend.reset(seed=0)
+    push = 3 * model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    backend.world_data[0].xfrc_applied[mapping.body_ids[-1], 0] = push
+
+    backend.step(
+        torch.zeros(1, mapping.segment_count, mapping.leg_actuator_ids.shape[1])
+    )
+
+    force = backend.physical_state.front_joint_force[0]
+    assert force[0] == 0
+    assert force[-1] < -0.5 * push
+    assert (force[1:].diff() < 0).all()
+    net = backend.physical_state.net_joint_force[0]
+    assert net[-1, 0] == force[-1]
+    assert net[:, 0].sum().abs() < 0.01 * push
 
 
 # -- Failure -------------------------------------------------------------------

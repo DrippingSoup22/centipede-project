@@ -24,8 +24,12 @@ from centipede.environment.simulation.model_mapping import (
     LEFT_FOOT_CATEGORY,
     RIGHT_FOOT_CATEGORY,
     ModelMapping,
+    spine_joint_force_bodies,
 )
-from centipede.environment.simulation.physical_state import PhysicalState
+from centipede.environment.simulation.physical_state import (
+    EFFORT_FIELDS,
+    PhysicalState,
+)
 
 # Warp otherwise prints a banner when it starts and a line for every kernel it
 # loads, which bury the training's own output. The training profile measures
@@ -38,6 +42,9 @@ SOLVERS = {"newton": mujoco.mjtSolver.mjSOL_NEWTON, "cg": mujoco.mjtSolver.mjSOL
 CONSTRAINT_OVERFLOWS = mjw.OverflowType.NEFC | mjw.OverflowType.NJMAX_NNZ
 CONTACT_OVERFLOWS = mjw.OverflowType.BROADPHASE | mjw.OverflowType.NARROWPHASE
 CAPACITY_OVERFLOWS = CONSTRAINT_OVERFLOWS | CONTACT_OVERFLOWS
+# What an action starts from, kept before its physics so that a world it makes
+# non-finite can go back there (``_restart_worlds``).
+ACTION_START_FIELDS = ("qpos", "qvel", "qacc_warmstart", "ctrl", "xfrc_applied", "time")
 
 
 @wp.kernel
@@ -76,6 +83,25 @@ def _apply_spine_actions(
     world_index, joint_index = wp.tid()
     motor_id = spine_actuator_ids[joint_index]
     ctrl[world_index, motor_id] = spine_actions[world_index, joint_index]
+
+
+@wp.kernel
+def _apply_body_forces(
+    # In
+    body_ids: wp.array1d[wp.int32],
+    body_forces: wp.array2d[wp.vec3],
+    # Out
+    xfrc_applied: wp.array2d[wp.spatial_vector],
+) -> None:
+    """Make each segment's force its body's applied force, with no torque.
+
+    One thread per (world, segment). MuJoCo Warp keeps MuJoCo's order: the
+    force in the spatial vector's top, the torque in its bottom.
+    """
+    world_index, segment_index = wp.tid()
+    xfrc_applied[world_index, body_ids[segment_index]] = wp.spatial_vector(
+        body_forces[world_index, segment_index], wp.vec3(0.0)
+    )
 
 
 @wp.kernel
@@ -174,6 +200,7 @@ def _read_segment_state(
     leg_dof_addresses: wp.array2d[int],
     spine_qpos_addresses: wp.array1d[int],
     spine_dof_addresses: wp.array1d[int],
+    spine_joint_ids: wp.array1d[int],
     head_tip_site_id: int,
     # In: model
     site_bodyid: wp.array1d[int],
@@ -182,6 +209,7 @@ def _read_segment_state(
     site_xpos: wp.array2d[wp.vec3],
     site_xmat: wp.array2d[wp.mat33],
     xquat: wp.array2d[wp.quat],
+    xanchor: wp.array2d[wp.vec3],
     qpos: wp.array2d[float],
     qvel: wp.array2d[float],
     cvel: wp.array2d[wp.spatial_vector],
@@ -197,6 +225,7 @@ def _read_segment_state(
     head_tip_position: wp.array1d[wp.vec3],
     spine_yaw_position: wp.array2d[float],
     spine_yaw_velocity: wp.array2d[float],
+    front_end_position: wp.array2d[wp.vec2],
 ) -> None:
     """Copy each segment's position, orientation, joints and velocity.
 
@@ -206,7 +235,8 @@ def _read_segment_state(
     velocity at a shared reference point (the centre of mass of its whole
     tree), so it is first moved to the site, then turned into site axes.
     The spine joint read is the one behind the segment; the rear segment has
-    none, and its entries stay zero.
+    none, and its entries stay zero. The front end is the head's tip, and
+    for every other segment its spine joint with the segment ahead.
     """
     world_index, segment_index = wp.tid()
     site_id = center_site_ids[segment_index]
@@ -252,7 +282,12 @@ def _read_segment_state(
     body_linear_velocity[world_index, segment_index] = world_to_site @ linear_velocity
 
     if segment_index == 0:
-        head_tip_position[world_index] = site_xpos[world_index, head_tip_site_id]
+        tip = site_xpos[world_index, head_tip_site_id]
+        head_tip_position[world_index] = tip
+        front_end_position[world_index, 0] = wp.vec2(tip[0], tip[1])
+    else:
+        anchor = xanchor[world_index, spine_joint_ids[segment_index - 1]]
+        front_end_position[world_index, segment_index] = wp.vec2(anchor[0], anchor[1])
 
 
 @wp.kernel
@@ -309,6 +344,257 @@ def _read_contact_flags(
         right_foot_ground_contact[world_index, owner_index] = True
 
 
+@wp.kernel
+def _clear_effort(
+    # In
+    world_mask: wp.array1d[wp.bool],
+    # Out
+    foot_normal_force: wp.array3d[float],
+    foot_forward_force: wp.array3d[float],
+    belly_normal_force: wp.array2d[float],
+    leg_leg_force: wp.array2d[float],
+    leg_leg_force_squared: wp.array2d[float],
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+) -> None:
+    """Zero the masked worlds' effort measures; one thread per (world, segment)."""
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    for side in range(2):
+        foot_normal_force[world_index, segment_index, side] = 0.0
+        foot_forward_force[world_index, segment_index, side] = 0.0
+    belly_normal_force[world_index, segment_index] = 0.0
+    leg_leg_force[world_index, segment_index] = 0.0
+    leg_leg_force_squared[world_index, segment_index] = 0.0
+    motor_positive_work[world_index, segment_index] = 0.0
+    motor_negative_work[world_index, segment_index] = 0.0
+
+
+@wp.kernel
+def _add_contact_forces(
+    # In: data
+    nacon: wp.array1d[int],
+    contact_geom: wp.array1d[wp.vec2i],
+    contact_worldid: wp.array1d[int],
+    contact_frame: wp.array1d[wp.mat33],
+    contact_efc_address: wp.array2d[int],
+    efc_force: wp.array2d[float],
+    xmat: wp.array2d[wp.mat33],
+    # In: tables
+    geom_owner_indices: wp.array1d[int],
+    geom_categories: wp.array1d[int],
+    body_ids: wp.array1d[int],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    # Out
+    foot_normal_force: wp.array3d[float],
+    foot_forward_force: wp.array3d[float],
+    belly_normal_force: wp.array2d[float],
+    leg_leg_pressed: wp.array2d[float],
+) -> None:
+    """Add one physics step's contact forces of the masked worlds.
+
+    Launched with one thread per pool slot, like ``_read_contact_flags``. The
+    arithmetic of the CPU backend's ``_add_effort``: a contact's first three
+    constraint rows are its normal and two tangential forces in its frame,
+    acting on its second shape as they are and on the first reversed. A foot
+    or body shape on the floor adds ``scale`` times its normal force, and a
+    foot also the part along its segment's forward axis; two legs touching
+    add their normal force, unscaled, to both owners' ``leg_leg_pressed``,
+    which ``_add_segment_effort`` then takes in. Several contacts may touch
+    one shape, so the forces are added atomically.
+    """
+    contact_index = wp.tid()
+    if contact_index >= nacon[0]:
+        return
+    world_index = contact_worldid[contact_index]
+    if contact_efc_address[contact_index, 0] < 0 or not world_mask[world_index]:
+        return
+    local_force = wp.vec3(
+        efc_force[world_index, contact_efc_address[contact_index, 0]],
+        efc_force[world_index, contact_efc_address[contact_index, 1]],
+        efc_force[world_index, contact_efc_address[contact_index, 2]],
+    )
+    normal_force = local_force[0]
+    pair = contact_geom[contact_index]
+    first_on_floor = geom_categories[pair[0]] == FLOOR_CATEGORY
+    if not first_on_floor and geom_categories[pair[1]] != FLOOR_CATEGORY:
+        for end in range(2):
+            wp.atomic_add(
+                leg_leg_pressed,
+                world_index,
+                geom_owner_indices[pair[end]],
+                normal_force,
+            )
+        return
+
+    # The shape on the floor, and the floor's force on it.
+    force = wp.transpose(contact_frame[contact_index]) @ local_force
+    shape_id = pair[1]
+    if not first_on_floor:
+        shape_id = pair[0]
+        force = -force
+    category = geom_categories[shape_id]
+    owner_index = geom_owner_indices[shape_id]
+    if category == BODY_CATEGORY:
+        wp.atomic_add(
+            belly_normal_force, world_index, owner_index, scale * normal_force
+        )
+    elif category == LEFT_FOOT_CATEGORY or category == RIGHT_FOOT_CATEGORY:
+        side = category - LEFT_FOOT_CATEGORY
+        rotation = xmat[world_index, body_ids[owner_index]]
+        forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
+        wp.atomic_add(
+            foot_normal_force, world_index, owner_index, side, scale * normal_force
+        )
+        wp.atomic_add(
+            foot_forward_force,
+            world_index,
+            owner_index,
+            side,
+            scale * wp.dot(force, forward),
+        )
+
+
+@wp.func
+def _add_motor_work(
+    actuator_force: wp.array2d[float],
+    actuator_velocity: wp.array2d[float],
+    motor_id: wp.int32,
+    world_index: int,
+    segment_index: int,
+    timestep: float,
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+):
+    """Add one motor's work over ``timestep`` to its segment's pushing work
+    where positive, to its braking work where negative."""
+    work = (
+        timestep
+        * actuator_force[world_index, motor_id]
+        * actuator_velocity[world_index, motor_id]
+    )
+    if work > 0.0:
+        motor_positive_work[world_index, segment_index] += work
+    else:
+        motor_negative_work[world_index, segment_index] -= work
+
+
+@wp.kernel
+def _add_segment_effort(
+    # In: data
+    actuator_force: wp.array2d[float],
+    actuator_velocity: wp.array2d[float],
+    # In: tables
+    leg_actuator_ids: wp.array2d[wp.int32],
+    spine_actuator_ids: wp.array1d[wp.int32],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    timestep: float,
+    # In and out
+    leg_leg_pressed: wp.array2d[float],
+    leg_leg_force: wp.array2d[float],
+    leg_leg_force_squared: wp.array2d[float],
+    motor_positive_work: wp.array2d[float],
+    motor_negative_work: wp.array2d[float],
+) -> None:
+    """Add one physics step's legs pressed and motor work of the masked worlds.
+
+    One thread per (world, segment), after ``_add_contact_forces``: the
+    segment's pressed total adds ``scale`` times itself and its square, then
+    starts again from zero; each of its leg motors and the spine motor behind
+    it adds torque times speed times ``timestep`` to its pushing work where
+    positive, to its braking work where negative.
+    """
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    pressed = leg_leg_pressed[world_index, segment_index]
+    leg_leg_force[world_index, segment_index] += scale * pressed
+    leg_leg_force_squared[world_index, segment_index] += scale * pressed * pressed
+    leg_leg_pressed[world_index, segment_index] = 0.0
+
+    for leg_motor_index in range(leg_actuator_ids.shape[1]):
+        _add_motor_work(
+            actuator_force,
+            actuator_velocity,
+            leg_actuator_ids[segment_index, leg_motor_index],
+            world_index,
+            segment_index,
+            timestep,
+            motor_positive_work,
+            motor_negative_work,
+        )
+    if segment_index < spine_actuator_ids.shape[0]:
+        _add_motor_work(
+            actuator_force,
+            actuator_velocity,
+            spine_actuator_ids[segment_index],
+            world_index,
+            segment_index,
+            timestep,
+            motor_positive_work,
+            motor_negative_work,
+        )
+
+
+@wp.kernel
+def _add_joint_forces(
+    # In: data
+    cfrc_int: wp.array2d[wp.spatial_vector],
+    xmat: wp.array2d[wp.mat33],
+    # In: tables
+    body_ids: wp.array1d[wp.int32],
+    joint_force_bodies: wp.array1d[wp.int32],
+    joint_force_signs: wp.array1d[float],
+    world_mask: wp.array1d[wp.bool],
+    scale: float,
+    start: bool,
+    # In and out
+    front_joint_force: wp.array2d[float],
+    net_joint_force: wp.array2d[wp.vec2],
+) -> None:
+    """Add ``scale`` times each segment's front joint force of the masked
+    worlds, along its forward axis, and its net joint force, along it and up;
+    ``start`` replaces the values instead.
+
+    One thread per (world, segment). ``cfrc_int`` holds, for every body, the
+    force its parent exerts on the subtree it heads, its linear part last, in
+    world axes (MuJoCo Warp fills it after the solver with
+    ``run_rne_postconstraint``). Each joint's force, the front side's on the
+    rear side, is its child's ``cfrc_int`` with the sign the tree's
+    direction there gives (``spine_joint_force_bodies``). The head has no
+    joint ahead, and its front value stays zero. The net force on a segment
+    alone is what its front joint gives it less what its rear joint passes
+    on to the segments behind.
+    """
+    world_index, segment_index = wp.tid()
+    if not world_mask[world_index]:
+        return
+    body_id = body_ids[segment_index]
+    rotation = xmat[world_index, body_id]
+    forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
+    front = wp.vec3(0.0)
+    if segment_index > 0:
+        front = joint_force_signs[segment_index - 1] * wp.spatial_bottom(
+            cfrc_int[world_index, joint_force_bodies[segment_index - 1]]
+        )
+    net = front
+    if segment_index < body_ids.shape[0] - 1:
+        net = front - joint_force_signs[segment_index] * wp.spatial_bottom(
+            cfrc_int[world_index, joint_force_bodies[segment_index]]
+        )
+    along = scale * wp.dot(front, forward)
+    net_along_up = scale * wp.vec2(wp.dot(net, forward), net[2])
+    if start:
+        front_joint_force[world_index, segment_index] = along
+        net_joint_force[world_index, segment_index] = net_along_up
+    else:
+        front_joint_force[world_index, segment_index] += along
+        net_joint_force[world_index, segment_index] += net_along_up
+
+
 class GPUBackend:
     """Runs every world at once on the GPU with MuJoCo Warp.
 
@@ -328,6 +614,9 @@ class GPUBackend:
         contacts_per_world: int,
         constraints_per_world: int,
         start_heading_range_rad: float = 0.0,
+        measure_effort: bool = False,
+        measure_joint_forces: bool = False,
+        max_restarted_worlds_per_action: int = 0,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -337,12 +626,20 @@ class GPUBackend:
         set on the host model before the copy, because MuJoCo Warp reads it
         while building the GPU model. The contact and constraint capacities are
         reserved here once: contacts in one pool shared by all worlds,
-        constraints separately for each world.
+        constraints separately for each world. With ``measure_effort`` the
+        physical state's effort fields are measured after every physics step
+        (``_measure_effort``), and with ``measure_joint_forces`` its joint
+        forces (``_measure_joint_forces``), for which MuJoCo Warp computes the
+        forces between bodies after every solve.
+        Up to ``max_restarted_worlds_per_action`` worlds made non-finite in one
+        action are put back to its start instead of stopping the run
+        (``_check_worlds``).
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
         model.opt.solver = SOLVERS[solver]
         self.gpu_model = mjw.put_model(model)
+        self.gpu_model.opt.run_rne_postconstraint = measure_joint_forces
         self.gpu_data = mjw.make_data(
             model,
             nworld=world_count,
@@ -354,6 +651,10 @@ class GPUBackend:
         self.leg_motor_count = mapping.leg_actuator_ids.shape[1]
         self.physics_steps_per_action = physics_steps_per_action
         self.start_heading_range_rad = start_heading_range_rad
+        self.measure_effort = measure_effort
+        self.measure_joint_forces = measure_joint_forces
+        self.max_restarted_worlds_per_action = max_restarted_worlds_per_action
+        self.timestep = float(model.opt.timestep)
         self.root_quaternion_address = mapping.root_qpos_address + 3
 
         # The Warp device that holds the model and data, and its PyTorch name.
@@ -369,7 +670,18 @@ class GPUBackend:
         self.spine_actuator_ids = to_gpu(mapping.spine_actuator_ids)
         self.spine_qpos_addresses = to_gpu(mapping.spine_qpos_addresses)
         self.spine_dof_addresses = to_gpu(mapping.spine_dof_addresses)
+        # The spine's yaw joints, from the head back: the joints its motors drive.
+        self.spine_joint_ids = to_gpu(
+            model.actuator_trnid[mapping.spine_actuator_ids, 0]
+        )
         self.body_ids = to_gpu(mapping.body_ids)
+        joint_force_bodies, joint_force_signs = spine_joint_force_bodies(
+            model, mapping.body_ids
+        )
+        self.joint_force_bodies = to_gpu(joint_force_bodies)
+        self.joint_force_signs = wp.array(
+            joint_force_signs, dtype=float, device=self.device
+        )
         self.center_site_ids = to_gpu(mapping.center_site_ids)
         self.geom_owner_indices = to_gpu(mapping.geom_owner_indices)
         self.geom_categories = to_gpu(mapping.geom_categories)
@@ -400,6 +712,19 @@ class GPUBackend:
         self._right_foot_ground_contact = wp.from_torch(state.right_foot_ground_contact)
         self._body_ground_contact = wp.from_torch(state.body_ground_contact)
         self._leg_leg_contact = wp.from_torch(state.leg_leg_contact)
+        self._effort = [wp.from_torch(getattr(state, name)) for name in EFFORT_FIELDS]
+        self._front_joint_force = wp.from_torch(state.front_joint_force)
+        self._net_joint_force = wp.from_torch(state.net_joint_force, dtype=wp.vec2)
+        self._front_end_position = wp.from_torch(
+            state.front_end_position, dtype=wp.vec2
+        )
+        # Each segment's legs pressed by others during one physics step.
+        self._leg_leg_pressed = wp.zeros(
+            (world_count, self.segment_count), dtype=float, device=self.device
+        )
+        self._every_world = wp.from_torch(
+            torch.ones(world_count, dtype=torch.bool, device=torch_device)
+        )
 
         # The simulation's category, as views of MuJoCo Warp's own arrays: the
         # physics refreshes them, so nothing is copied per step.
@@ -409,12 +734,21 @@ class GPUBackend:
                 contact_count=wp.to_torch(self.gpu_data.nacon),
                 constraint_rows=wp.to_torch(self.gpu_data.nefc),
                 solver_iterations=wp.to_torch(self.gpu_data.solver_niter),
+                restarted_worlds=torch.zeros(
+                    world_count, dtype=torch.bool, device=torch_device
+                ),
             )
         )
+        self._restarted_worlds = self.diagnostics.facts.restarted_worlds
 
         # The physics steps of one action, recorded as a CUDA graph by the
         # first step; see ``step``.
         self._physics_graph: wp.Graph | None = None
+        # Every world's state at the start of the current action, for a
+        # failed world's restart.
+        self._action_start = {
+            name: wp.clone(getattr(self.gpu_data, name)) for name in ACTION_START_FIELDS
+        }
 
         # Each world's random sequence: the seed it was last given and how many
         # resets it has had since. Together they replace the CPU generators.
@@ -430,11 +764,16 @@ class GPUBackend:
         )
 
     def step(
-        self, leg_actions: torch.Tensor, spine_actions: torch.Tensor | None = None
+        self,
+        leg_actions: torch.Tensor,
+        spine_actions: torch.Tensor | None = None,
+        body_forces: torch.Tensor | None = None,
     ) -> None:
         """Hold the (W, N, M) leg and (W, N - 1) spine actions for 20 ms.
 
-        Without spine actions, the spine motors receive zero.
+        Without spine actions, the spine motors receive zero. ``body_forces``,
+        (W, N, 3) newtons in world axes, become each segment body's applied
+        force, its torque zero, before the physics runs.
 
         The actions are written into ``ctrl`` once, then the physics runs its
         steps for the action (134 for model v3). Launched from Python, each
@@ -468,6 +807,19 @@ class GPUBackend:
             outputs=[self.gpu_data.ctrl],
             device=self.device,
         )
+        if body_forces is not None:
+            wp.launch(
+                kernel=_apply_body_forces,
+                dim=(self.world_count, self.segment_count),
+                inputs=[
+                    self.body_ids,
+                    wp.from_torch(body_forces.contiguous(), dtype=wp.vec3),
+                ],
+                outputs=[self.gpu_data.xfrc_applied],
+                device=self.device,
+            )
+        for name, kept in self._action_start.items():
+            wp.copy(kept, getattr(self.gpu_data, name))
         if self._physics_graph is None:
             self._run_physics_steps()
             # Recording only writes the launches down; nothing runs twice.
@@ -476,9 +828,11 @@ class GPUBackend:
             self._physics_graph = capture.graph
         else:
             wp.capture_launch(self._physics_graph)
-        self._check_worlds()
+        restarted = self._check_worlds()
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        if restarted:
+            self._measure_start(wp.from_torch(self._restarted_worlds))
 
     def reset(
         self,
@@ -542,30 +896,128 @@ class GPUBackend:
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
+        self._measure_start(mask_view)
+
+    def _measure_start(self, world_mask: wp.array) -> None:
+        """The masked worlds' effort at the pose they start from, after
+        ``forward``: its forces; no motor has worked yet."""
+        if self.measure_effort:
+            self._clear_effort(world_mask)
+            self._measure_effort(world_mask, 1.0)
+        if self.measure_joint_forces:
+            self._measure_joint_forces(world_mask, 1.0, start=True)
 
     def _run_physics_steps(self) -> None:
-        """The physics steps of one action, launched from Python."""
-        for _ in range(self.physics_steps_per_action):
+        """The physics steps of one action, launched from Python, each
+        followed by its share of the effort when it is measured."""
+        steps = self.physics_steps_per_action
+        if self.measure_effort:
+            self._clear_effort(self._every_world)
+        for step_index in range(steps):
             mjw.step(self.gpu_model, self.gpu_data)
+            if self.measure_effort:
+                self._measure_effort(self._every_world, 1 / steps)
+            if self.measure_joint_forces:
+                self._measure_joint_forces(
+                    self._every_world, 1 / steps, start=step_index == 0
+                )
 
-    def _check_worlds(self) -> None:
-        """Stop the run if any world's physics went wrong during the last step.
+    def _clear_effort(self, world_mask: wp.array) -> None:
+        """Zero the masked worlds' effort measures."""
+        wp.launch(
+            _clear_effort,
+            dim=(self.world_count, self.segment_count),
+            inputs=[world_mask],
+            outputs=self._effort,
+            device=self.device,
+        )
+
+    def _measure_effort(self, world_mask: wp.array, scale: float) -> None:
+        """Add the masked worlds' effort of the physics state just computed:
+        ``scale`` times its forces, and its motors' work over a timestep."""
+        foot_normal, foot_forward, belly, leg_leg, leg_leg_squared, *work = self._effort
+        wp.launch(
+            _add_contact_forces,
+            dim=self.gpu_data.naconmax,
+            inputs=[
+                self.gpu_data.nacon,
+                self.gpu_data.contact.geom,
+                self.gpu_data.contact.worldid,
+                self.gpu_data.contact.frame,
+                self.gpu_data.contact.efc_address,
+                self.gpu_data.efc.force,
+                self.gpu_data.xmat,
+                self.geom_owner_indices,
+                self.geom_categories,
+                self.body_ids,
+                world_mask,
+                scale,
+            ],
+            outputs=[foot_normal, foot_forward, belly, self._leg_leg_pressed],
+            device=self.device,
+        )
+        wp.launch(
+            _add_segment_effort,
+            dim=(self.world_count, self.segment_count),
+            inputs=[
+                self.gpu_data.actuator_force,
+                self.gpu_data.actuator_velocity,
+                self.leg_actuator_ids,
+                self.spine_actuator_ids,
+                world_mask,
+                scale,
+                self.timestep,
+            ],
+            outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *work],
+            device=self.device,
+        )
+
+    def _measure_joint_forces(
+        self, world_mask: wp.array, scale: float, start: bool
+    ) -> None:
+        """Add ``scale`` times the masked worlds' front joint forces of the
+        physics state just computed, or, with ``start``, replace them."""
+        wp.launch(
+            _add_joint_forces,
+            dim=(self.world_count, self.segment_count),
+            inputs=[
+                self.gpu_data.cfrc_int,
+                self.gpu_data.xmat,
+                self.body_ids,
+                self.joint_force_bodies,
+                self.joint_force_signs,
+                world_mask,
+                scale,
+                start,
+            ],
+            outputs=[self._front_joint_force, self._net_joint_force],
+            device=self.device,
+        )
+
+    def _check_worlds(self) -> bool:
+        """Stop the run if any world's physics went wrong during the last step,
+        or restart the worlds made non-finite if they are few; whether it did.
 
         MuJoCo Warp records, per world, every capacity overflow since the last
         reset, but it does not detect non-finite values, so both are checked
-        here. The ``if`` is the step's only wait for the GPU; the failing world
-        is looked up only after something went wrong.
+        here. An overflow always stops the run; up to
+        ``max_restarted_worlds_per_action`` non-finite worlds go back to the
+        action's start (``_restart_worlds``), and more stop it. The ``if`` is
+        the step's only wait for the GPU; the failing world is looked up only
+        after something went wrong.
         """
+        self._restarted_worlds.zero_()
         overflow_bits = wp.to_torch(self.gpu_data.overflow)
         overflowed_worlds = (overflow_bits & CAPACITY_OVERFLOWS) != 0
         finite_qpos = torch.isfinite(wp.to_torch(self.gpu_data.qpos)).all(dim=1)
         finite_qvel = torch.isfinite(wp.to_torch(self.gpu_data.qvel)).all(dim=1)
-        broken_worlds = overflowed_worlds | ~(finite_qpos & finite_qvel)
+        non_finite_worlds = ~(finite_qpos & finite_qvel)
+        if not (overflowed_worlds | non_finite_worlds).any():
+            return False
 
-        if broken_worlds.any():
-            world_index = int(torch.nonzero(broken_worlds)[0].item())
-            world_overflows = int(overflow_bits[world_index].item())
-            if world_overflows & CONTACT_OVERFLOWS:
+        if overflowed_worlds.any():
+            world_index = int(torch.nonzero(overflowed_worlds)[0].item())
+            if int(overflow_bits[world_index].item()) & CONTACT_OVERFLOWS:
                 raise RuntimeError(
                     "Physics failed: the worlds together needed more than the "
                     f"{self.gpu_data.naconmax} contacts reserved for them, so "
@@ -573,17 +1025,29 @@ class GPUBackend:
                     "[environment.simulation] (now "
                     f"{self.gpu_data.naconmax // self.world_count})."
                 )
-            if world_overflows & CONSTRAINT_OVERFLOWS:
-                raise RuntimeError(
-                    f"Physics failed in world {world_index}: it needed more than "
-                    f"the {self.gpu_data.njmax} constraints reserved per world, so "
-                    "some were dropped. Raise constraints_per_world in "
-                    "[environment.simulation]."
-                )
             raise RuntimeError(
-                f"Physics failed in world {world_index}: MuJoCo Warp produced a "
-                "non-finite position or velocity (the simulation became unstable)."
+                f"Physics failed in world {world_index}: it needed more than "
+                f"the {self.gpu_data.njmax} constraints reserved per world, so "
+                "some were dropped. Raise constraints_per_world in "
+                "[environment.simulation]."
             )
+        if int(non_finite_worlds.sum().item()) <= self.max_restarted_worlds_per_action:
+            self._restart_worlds(non_finite_worlds)
+            return True
+        world_index = int(torch.nonzero(non_finite_worlds)[0].item())
+        raise RuntimeError(
+            f"Physics failed in world {world_index}: MuJoCo Warp produced a "
+            "non-finite position or velocity (the simulation became unstable)."
+        )
+
+    def _restart_worlds(self, world_mask: torch.Tensor) -> None:
+        """Put the masked worlds back to their state at the action's start and
+        flag them, so that the environment ends their episodes there; the
+        step's ``forward`` then gives them finite positions and forces."""
+        for name, kept in self._action_start.items():
+            values = wp.to_torch(getattr(self.gpu_data, name))
+            values[world_mask] = wp.to_torch(kept)[world_mask]
+        self._restarted_worlds.copy_(world_mask)
 
     def _read_state(self) -> None:
         """Refresh every world's physical state from MuJoCo Warp's data.
@@ -602,12 +1066,14 @@ class GPUBackend:
                 self.leg_dof_addresses,
                 self.spine_qpos_addresses,
                 self.spine_dof_addresses,
+                self.spine_joint_ids,
                 self.head_tip_site_id,
                 self.gpu_model.site_bodyid,
                 self.gpu_model.body_rootid,
                 self.gpu_data.site_xpos,
                 self.gpu_data.site_xmat,
                 self.gpu_data.xquat,
+                self.gpu_data.xanchor,
                 self.gpu_data.qpos,
                 self.gpu_data.qvel,
                 self.gpu_data.cvel,
@@ -624,6 +1090,7 @@ class GPUBackend:
                 self._head_tip_position,
                 self._spine_yaw_position,
                 self._spine_yaw_velocity,
+                self._front_end_position,
             ],
             device=self.device,
         )

@@ -293,6 +293,29 @@ def _find_root_joint(model: mujoco.MjModel, body_ids: np.ndarray) -> int:
     return int(model.jnt_qposadr[model.body_jntadr[roots[0]]])
 
 
+def spine_joint_force_bodies(
+    model: mujoco.MjModel, body_ids: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """For each joint between segment ``i`` and segment ``i + 1`` behind it,
+    the body whose ``cfrc_int`` carries the joint's force, and the sign that
+    turns that force into the one the front side exerts on the rear side,
+    ``(N - 1,)`` each.
+
+    MuJoCo's ``cfrc_int`` is the force a body's parent exerts on the subtree
+    the body heads. Where the tree runs from the front back (models v1 to v4,
+    and v5 behind its middle unit) the child is the rear segment, and its
+    ``cfrc_int`` is the front side's force on the rear side: sign +1. Where
+    it runs forward from a root behind (v5 ahead of its middle unit) the
+    child is the front segment, and its ``cfrc_int`` is the rear side's
+    force on the front side: sign -1, by Newton's third law.
+    """
+    front, rear = body_ids[:-1], body_ids[1:]
+    rear_is_child = model.body_parentid[rear] == front
+    children = np.where(rear_is_child, rear, front).astype(np.int32)
+    signs = np.where(rear_is_child, 1.0, -1.0).astype(np.float32)
+    return children, signs
+
+
 def _head_outline(
     model: mujoco.MjModel, shape_id: int, head_body_id: int, center_site_id: int
 ) -> HeadOutline:
