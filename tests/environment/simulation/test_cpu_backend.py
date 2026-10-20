@@ -328,6 +328,36 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     assert state.foot_forward_force.sum() > 0
 
 
+def test_the_floor_push_counts_every_shape_on_the_floor_along_it():
+    """At rest with its motors off, the tester lies on more than its feet:
+    the floor holds it up and pushes it nowhere along the floor (along the
+    units' own pitched axes, part of the support would read as a push).
+    Pushed gently forward along the floor, the body is held by the floor
+    alone: the floor's push on all its shapes cancels the push."""
+    model = mujoco.MjModel.from_xml_path("models/assembly_v5_headless.xml")
+    mapping = ModelMapping.from_model(model)
+    backend = CPUBackend(
+        model, mapping, 1, physics_steps_per_action(model), measure_effort=True
+    )
+    backend.reset(seed=0)
+    actions = torch.zeros(1, mapping.segment_count, mapping.leg_actuator_ids.shape[1])
+    for _ in range(25):
+        backend.step(actions)
+    state = backend.physical_state
+    data = backend.world_data[0]
+    weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    assert abs(state.floor_forward_force.sum().item()) < 0.002 * weight
+
+    push = 0.05 * weight / mapping.segment_count
+    flat_axes = data.xmat[mapping.body_ids][:, [0, 3, 6]] * [1.0, 1.0, 0.0]
+    flat_axes /= np.linalg.norm(flat_axes, axis=1, keepdims=True)
+    data.xfrc_applied[mapping.body_ids, :3] = push * flat_axes
+    backend.step(actions)
+
+    held = state.floor_forward_force.sum().item()
+    assert held == pytest.approx(-push * mapping.segment_count, rel=0.1)
+
+
 @pytest.mark.parametrize(
     "model_path", ["models/assembly_v3.xml", "models/assembly_v5_half.xml"]
 )

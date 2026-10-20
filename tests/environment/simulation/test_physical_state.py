@@ -28,6 +28,7 @@ EXPECTED_FIELDS = [
     ("foot_normal_force", (12, 2), torch.float32),
     ("foot_forward_force", (12, 2), torch.float32),
     ("belly_normal_force", (12,), torch.float32),
+    ("floor_forward_force", (12,), torch.float32),
     ("leg_leg_force", (12,), torch.float32),
     ("leg_leg_force_squared", (12,), torch.float32),
     ("motor_positive_work", (12,), torch.float32),

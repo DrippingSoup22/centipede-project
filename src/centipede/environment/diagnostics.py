@@ -69,8 +69,15 @@ class StepFacts:
         "The floor's push on the unit's body, in unit weights, (W, N)"
     )
     feet_push: torch.Tensor = measure(
-        "The floor's push on the unit's feet along the unit, in unit weights,"
-        " (W, N): positive drives it forward, negative brakes it"
+        "The floor's force on the unit's feet along the unit's own axis, as the"
+        " unit feels it, in unit weights, (W, N): a unit pitched nose down reads"
+        " part of its support as braking, so floor_push judges driving"
+    )
+    floor_push: torch.Tensor = measure(
+        "The floor's push on everything of the unit that touches it (its feet,"
+        " its legs' other parts, its body), along the unit laid flat on the"
+        " floor, in unit weights, (W, N): positive drives it forward, negative"
+        " brakes it"
     )
     segment_progress: torch.Tensor = measure(
         "How far the unit's centre went along the line, (W, N)", "m"
@@ -279,6 +286,7 @@ class EnvironmentDiagnostics:
             feet_carry=zeros(segment_count),
             belly_carry=zeros(segment_count),
             feet_push=zeros(segment_count),
+            floor_push=zeros(segment_count),
             segment_progress=zeros(segment_count),
             own_energy=zeros(segment_count, len(ENERGY_PARTS)),
             spine_bend=zeros(segment_count),
@@ -371,6 +379,7 @@ class EnvironmentDiagnostics:
         step.feet_carry.copy_(state.foot_normal_force.sum(dim=-1) / unit)
         step.belly_carry.copy_(state.belly_normal_force / unit)
         step.feet_push.copy_(state.foot_forward_force.sum(dim=-1) / unit)
+        step.floor_push.copy_(state.floor_forward_force / unit)
         step.segment_progress.copy_(progress)
         step.own_energy.copy_(own_energy)
         step.spine_bend.copy_(state.spine_yaw_position.abs())

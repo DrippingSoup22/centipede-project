@@ -7,6 +7,7 @@ EFFORT_FIELDS = (
     "foot_normal_force",
     "foot_forward_force",
     "belly_normal_force",
+    "floor_forward_force",
     "leg_leg_force",
     "leg_leg_force_squared",
     "motor_positive_work",
@@ -56,6 +57,10 @@ class PhysicalState:
     foot_normal_force: torch.Tensor  # (W, N, 2), left and right, from the floor
     foot_forward_force: torch.Tensor  # (W, N, 2), the same, along the segment
     belly_normal_force: torch.Tensor  # (W, N), the body shape's, from the floor
+    # (W, N), the floor's force on every shape of the segment it touches (feet,
+    # the legs' other parts, the body), along the segment's forward axis laid
+    # flat on the floor
+    floor_forward_force: torch.Tensor
     leg_leg_force: torch.Tensor  # (W, N), between the segment's and others' legs
     leg_leg_force_squared: torch.Tensor  # (W, N), its square's mean, N²
     motor_positive_work: torch.Tensor  # (W, N), leg motors and spine motor behind
@@ -103,6 +108,7 @@ class PhysicalState:
             foot_normal_force=zeros(n, 2),
             foot_forward_force=zeros(n, 2),
             belly_normal_force=zeros(n),
+            floor_forward_force=zeros(n),
             leg_leg_force=zeros(n),
             leg_leg_force_squared=zeros(n),
             motor_positive_work=zeros(n),

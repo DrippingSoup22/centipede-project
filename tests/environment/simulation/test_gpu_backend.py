@@ -420,7 +420,7 @@ def test_gpu_effort_matches_cpu_effort():
         return getattr(gpu.physical_state, field).cpu(), expected
 
     # The legs' press and the motors' work belong to each segment exactly.
-    for field in EFFORT_FIELDS[3:]:
+    for field in EFFORT_FIELDS[4:]:
         actual, expected = measured(field)
         assert torch.allclose(actual, expected, atol=0.05 * expected.abs().max())
     # A resting body's load and friction are shared among its shapes as each
@@ -431,6 +431,7 @@ def test_gpu_effort_matches_cpu_effort():
         ("foot_normal_force", 0.03),
         ("belly_normal_force", 0.03),
         ("foot_forward_force", 0.5),
+        ("floor_forward_force", 0.5),
     ):
         actual, expected = measured(field)
         assert actual.sum().item() == pytest.approx(

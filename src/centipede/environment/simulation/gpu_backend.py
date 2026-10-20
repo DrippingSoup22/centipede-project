@@ -352,6 +352,7 @@ def _clear_effort(
     foot_normal_force: wp.array3d[float],
     foot_forward_force: wp.array3d[float],
     belly_normal_force: wp.array2d[float],
+    floor_forward_force: wp.array2d[float],
     leg_leg_force: wp.array2d[float],
     leg_leg_force_squared: wp.array2d[float],
     motor_positive_work: wp.array2d[float],
@@ -365,6 +366,7 @@ def _clear_effort(
         foot_normal_force[world_index, segment_index, side] = 0.0
         foot_forward_force[world_index, segment_index, side] = 0.0
     belly_normal_force[world_index, segment_index] = 0.0
+    floor_forward_force[world_index, segment_index] = 0.0
     leg_leg_force[world_index, segment_index] = 0.0
     leg_leg_force_squared[world_index, segment_index] = 0.0
     motor_positive_work[world_index, segment_index] = 0.0
@@ -391,6 +393,7 @@ def _add_contact_forces(
     foot_normal_force: wp.array3d[float],
     foot_forward_force: wp.array3d[float],
     belly_normal_force: wp.array2d[float],
+    floor_forward_force: wp.array2d[float],
     leg_leg_pressed: wp.array2d[float],
 ) -> None:
     """Add one physics step's contact forces of the masked worlds.
@@ -398,9 +401,12 @@ def _add_contact_forces(
     Launched with one thread per pool slot, like ``_read_contact_flags``. The
     arithmetic of the CPU backend's ``_add_effort``: a contact's first three
     constraint rows are its normal and two tangential forces in its frame,
-    acting on its second shape as they are and on the first reversed. A foot
-    or body shape on the floor adds ``scale`` times its normal force, and a
-    foot also the part along its segment's forward axis; two legs touching
+    acting on its second shape as they are and on the first reversed. Every
+    shape on the floor adds ``scale`` times the force's part along its
+    segment's forward axis laid flat on the floor to ``floor_forward_force``
+    (along the tilted axis, a pitched segment would read part of its support
+    as a push); a foot or body shape also its normal force, and a foot the
+    part along the tilted axis, as the segment feels it; two legs touching
     add their normal force, unscaled, to both owners' ``leg_leg_pressed``,
     which ``_add_segment_effort`` then takes in. Several contacts may touch
     one shape, so the forces are added atomically.
@@ -437,14 +443,18 @@ def _add_contact_forces(
         force = -force
     category = geom_categories[shape_id]
     owner_index = geom_owner_indices[shape_id]
+    rotation = xmat[world_index, body_ids[owner_index]]
+    forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
+    flat = wp.normalize(wp.vec3(rotation[0, 0], rotation[1, 0], 0.0))
+    wp.atomic_add(
+        floor_forward_force, world_index, owner_index, scale * wp.dot(force, flat)
+    )
     if category == BODY_CATEGORY:
         wp.atomic_add(
             belly_normal_force, world_index, owner_index, scale * normal_force
         )
     elif category == LEFT_FOOT_CATEGORY or category == RIGHT_FOOT_CATEGORY:
         side = category - LEFT_FOOT_CATEGORY
-        rotation = xmat[world_index, body_ids[owner_index]]
-        forward = wp.vec3(rotation[0, 0], rotation[1, 0], rotation[2, 0])
         wp.atomic_add(
             foot_normal_force, world_index, owner_index, side, scale * normal_force
         )
@@ -935,7 +945,15 @@ class GPUBackend:
     def _measure_effort(self, world_mask: wp.array, scale: float) -> None:
         """Add the masked worlds' effort of the physics state just computed:
         ``scale`` times its forces, and its motors' work over a timestep."""
-        foot_normal, foot_forward, belly, leg_leg, leg_leg_squared, *work = self._effort
+        (
+            foot_normal,
+            foot_forward,
+            belly,
+            floor_forward,
+            leg_leg,
+            leg_leg_squared,
+            *work,
+        ) = self._effort
         wp.launch(
             _add_contact_forces,
             dim=self.gpu_data.naconmax,
@@ -953,7 +971,13 @@ class GPUBackend:
                 world_mask,
                 scale,
             ],
-            outputs=[foot_normal, foot_forward, belly, self._leg_leg_pressed],
+            outputs=[
+                foot_normal,
+                foot_forward,
+                belly,
+                floor_forward,
+                self._leg_leg_pressed,
+            ],
             device=self.device,
         )
         wp.launch(

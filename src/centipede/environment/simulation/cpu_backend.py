@@ -281,10 +281,17 @@ class CPUBackend:
         np.add.at(
             effort["belly_normal_force"], owner[belly], scale * floor_normal[belly]
         )
+        # Each body's forward axis: the first column of its rotation matrix. A
+        # foot's push is taken along it, as the segment feels it; the floor's
+        # push on the segment along it laid flat on the floor, or a pitched
+        # segment would read part of its support as a push.
+        forward_axes = data.xmat[mapping.body_ids][:, [0, 3, 6]]
+        flat_axes = forward_axes * [1.0, 1.0, 0.0]
+        flat_axes /= np.linalg.norm(flat_axes, axis=1, keepdims=True)
+        on_the_floor = (force * flat_axes[owner]).sum(axis=1)
+        np.add.at(effort["floor_forward_force"], owner, scale * on_the_floor)
         foot = (category == LEFT_FOOT_CATEGORY) | (category == RIGHT_FOOT_CATEGORY)
         foot_index = (owner[foot], category[foot] - LEFT_FOOT_CATEGORY)
-        # Each body's forward axis: the first column of its rotation matrix.
-        forward_axes = data.xmat[mapping.body_ids][:, [0, 3, 6]]
         along = (force[foot] * forward_axes[owner[foot]]).sum(axis=1)
         np.add.at(effort["foot_normal_force"], foot_index, scale * floor_normal[foot])
         np.add.at(effort["foot_forward_force"], foot_index, scale * along)
