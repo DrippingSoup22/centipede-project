@@ -42,7 +42,10 @@ The team receives the mean over the units.
   walked 119 mm/s. Scaled by the averaged speed, a unit earns at most the
   cap per second however its stride surges. Each episode starts the average
   at the cap: only the speed above the cap counts, so a slow start is paid
-  in full and a fast one gains nothing.
+  in full. A fast one still gains a little while its average climbs, about
+  c · 1 s · ln(v / c) per episode: at twice the cap 62 mm, 3 mm/s over a
+  20 s episode (run 03 measured it: its noise-free walks at 136 to 187 mm/s
+  were paid 92 to 95 mm/s).
 - **The band b**, the sight radius, 16.5 mm on v5: a unit is paid for the
   line only while it can see it ([observations.md](observations.md)). Run 28
   used 20 mm; within 10 mm walking faster up to the cap did not pay, the
