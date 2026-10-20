@@ -40,6 +40,9 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
   predicts; a reward and its critic are one decision.
 - **The goal first.** Moving along the line is worth more than what it
   costs, and no term is lowest for a body standing still (runs 07 to 10).
+  From run 08 a cost of how the body walks takes a share of the line's
+  pay, never more: a price subtracted from it outgrew the pay in this
+  branch's run 07, and the body stopped walking ([reward.md](reward.md)).
 - **Outcomes, never form.** A term judges what happened, never how the legs
   moved (the oscillators: every rule about how to move was gamed).
 - **Shared gains, own duties.** What the body achieves and spends is shared
@@ -47,18 +50,19 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
   and 24, cycle 16: a private cost set against a shared gain teaches doing
   less).
 - **A ceiling on speed.** A reward for speed without one beats every price
-  that grows only in proportion to speed (runs 04 and 24). From run 05 the
-  ceiling is a cost that grows faster than the pay; run 05's, the motion,
-  let a gait the agents made cheaper run past it, so from run 06 it is the
-  joints' accelerations, which grow as the speed to the fourth once the
-  stride is at its longest ([reward.md](reward.md)).
+  that grows only in proportion to speed (runs 04 and 24). Runs 05 to 07
+  set the ceiling with a cost that grows faster than the pay, but the pace
+  such a cost sets depends on how fast the jerk of the agents' gait grows
+  with speed, which no one controls. From run 08 the pace is the task's,
+  the line's cap, and the accelerations judge only how smoothly the body
+  walks ([reward.md](reward.md)).
 
 ## The parts
 
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | From run 06: the team's line, uncapped, less its joints' accelerations, which favour wide, slow strokes over short, fast ones, their weight adapting to the noise-free walk from run 07 (rising above 110 mm/s, falling below 70); each unit's own carry, the weight its feet do not carry |
+| Reward | [reward.md](reward.md) | From run 08: the team's line, capped at 100 mm/s, of which the joints' accelerations take a share, so that wide, slow strokes keep more than short, fast ones; each unit's own carry, the weight its feet do not carry |
 | Observations | [observations.md](observations.md) | Five units' bodies (44 values each from run 06), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
 | Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own (one in run 05); gSDE; PPO's settings |
@@ -84,11 +88,11 @@ Not decided; each is one change for a later run.
 - **The terms left out**, each brought back as its own run if a test shows
   it is needed: the force share (a unit carried along on skidding feet),
   the squeeze, pain (legs crossed over their neighbours').
-- **The accelerations' price and its adaptive weight**: 0.001 mm a second
-  for each (rad/s²)², the weight from 0.002 within the band of 70 to 110
-  mm/s, 1.1 times a window; the carry's price.
-- **The wave as a guard on the price**: the price could rise only while
-  the noise-free wave holds (the user's idea, 2026-10-20); left out of run
-  07 while the wave measure over 128 worlds sits near its chance level.
+- **The accelerations' halving and the cap**: 3.8·10⁶ (rad/s²)² and 100
+  mm/s; the carry's price.
+- **The exploring noise's share.** The noise's jerk still lowers the pay,
+  so the agents gain by narrowing it; if the team critic loses sight
+  again, the smoothness could be asked of the policy's mean action in its
+  loss instead of the reward (Mysore et al. 2021).
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

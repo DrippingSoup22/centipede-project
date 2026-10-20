@@ -16,7 +16,7 @@ over many samples (131,072 per agent per update) but slows learning.
 
 | Critic | Predicts | Sees |
 | --- | --- | --- |
-| Team | The team account: the line, less the joints' accelerations (from run 06) | What its actor sees |
+| Team | The team account: the line, of which the joints' accelerations take a share (from run 08; subtracted in runs 06 and 07) | What its actor sees |
 | Own | The own account: its carry (from run 06) | What its actor sees, its feet's averaged load included |
 
 - **One critic per account**, so that the clearer own signal is not drowned
