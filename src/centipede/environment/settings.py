@@ -36,7 +36,9 @@ class RewardSettings:
     ``ramp_shape`` "exponential", by the same factor each cycle; with
     ``ramp_after_line_share`` above 0 the ramp waits at ``ramp_start`` until
     the untowed mean-action worlds' line reaches that share of the cap, and
-    rises from the next cycle.
+    rises from the next cycle. With ``ramp_shape`` "adaptive" the weight
+    follows the untowed mean-action worlds instead, from ``ramp_start``,
+    after each of the tow's windows (``adapted_ramp_weight``).
     """
 
     line_speed_cap_mm_per_s: float
@@ -57,6 +59,8 @@ class RewardSettings:
     ramp_cycles: int
     ramp_start: float
     ramp_shape: str
+    ramp_band_mm_per_s: tuple[float, float]
+    ramp_factor: float
     ramp_after_line_share: float
 
     @classmethod
@@ -91,8 +95,12 @@ class RewardSettings:
                 "ramp_start", default=0.5, minimum=0.0, maximum=1.0
             ),
             ramp_shape=section.choice(
-                "ramp_shape", ("linear", "exponential"), default="linear"
+                "ramp_shape", ("linear", "exponential", "adaptive"), default="linear"
             ),
+            ramp_band_mm_per_s=section.number_range(
+                "ramp_band_mm_per_s", default=(70.0, 110.0), minimum=0.0
+            ),
+            ramp_factor=section.number("ramp_factor", default=1.1, minimum=1.0),
             ramp_after_line_share=section.number(
                 "ramp_after_line_share", default=0.0, minimum=0.0, maximum=1.0
             ),
@@ -103,10 +111,10 @@ class RewardSettings:
                 "[environment.reward] line_overspeed_slope works on the averaged"
                 " speed: set line_cap_averaged = true"
             )
-        if settings.ramp_shape == "exponential" and not settings.ramp_start:
+        if settings.ramp_shape != "linear" and not settings.ramp_start:
             raise SettingsError(
-                "[environment.reward] an exponential ramp grows from ramp_start:"
-                " set it above 0"
+                f"[environment.reward] an {settings.ramp_shape} ramp grows from"
+                " ramp_start: set it above 0"
             )
         return settings
 
@@ -123,6 +131,24 @@ class RewardSettings:
         if self.ramp_shape == "exponential":
             return start ** (1 - risen)
         return start + (1 - start) * risen
+
+    def adapted_ramp_weight(
+        self, weight: float, speed_mm_per_s: float, stepping: bool
+    ) -> float:
+        """The adaptive ramp's weight after a window in which the untowed
+        mean-action worlds went ``speed_mm_per_s`` along the line, their feet
+        ``stepping`` or not: raised while they walk faster than the band,
+        lowered while slower, held within it. Each step is ``ramp_factor``
+        times, raised to one more power for each band width beyond the edge
+        (at most four): a proportional term (Stooke et al. 2020). The weight
+        stays within ``ramp_start`` and 1."""
+        low, high = self.ramp_band_mm_per_s
+        width = max(high - low, 1.0)
+        if speed_mm_per_s > high and stepping:
+            weight *= self.ramp_factor ** min(4.0, 1 + (speed_mm_per_s - high) / width)
+        elif speed_mm_per_s < low:
+            weight /= self.ramp_factor ** min(4.0, 1 + (low - speed_mm_per_s) / width)
+        return min(1.0, max(self.ramp_start, weight))
 
 
 @dataclass(frozen=True)

@@ -171,16 +171,16 @@ class Tow:
         self._push_sum += self._training_share @ self.pushes.sum(dim=1)
         self._steps += 1
 
-    def adjust(self) -> None:
+    def adjust(self) -> bool:
         """After an update cycle: once ``window_steps`` steps have passed since
         the top last moved, lower it by ``step`` if the untowed measuring
         worlds walked, their line and their feet's lift-offs above the
         settings' bars, else raise it, within 0 and ``start``; then start a
-        new window. The measures become ``facts``. This waits for the GPU
-        once a window."""
+        new window. The measures become ``facts``. Returns whether a window
+        closed. This waits for the GPU once a window."""
         settings = self.settings
         if not self.worlds_per_group or self._steps < settings.window_steps:
-            return
+            return False
         per_second = self._sums / (
             self.worlds_per_group * self._steps * ACTION_DURATION_S
         )
@@ -201,3 +201,4 @@ class Tow:
         self._sums.zero_()
         self._push_sum.zero_()
         self._steps = 0
+        return True

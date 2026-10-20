@@ -74,6 +74,25 @@ def test_the_settings_default_to_the_agreed_design_and_ramp_the_costs():
     )
     weights = [exponential.ramp_weight_at(cycle) for cycle in (1, 51, 101)]
     assert weights == pytest.approx([0.01, 0.1, 1.0])
+    # An adaptive ramp, the band 70 to 110 mm/s: raised 1.1 times just above
+    # it, 1.1 squared a band width beyond, held within it or when the feet do
+    # not step, lowered below it; within its start and 1.
+    adaptive = RewardSettings.from_section(
+        {"ramp_shape": "adaptive", "ramp_start": 0.01}
+    )
+    weights = [
+        adaptive.adapted_ramp_weight(0.1, speed, stepping)
+        for speed, stepping in (
+            (110.1, True),
+            (150, True),
+            (150, False),
+            (90, True),
+            (69.9, True),
+        )
+    ]
+    assert weights == pytest.approx([0.11, 0.121, 0.1, 0.1, 0.1 / 1.1], rel=1e-3)
+    assert adaptive.adapted_ramp_weight(0.0105, 30, True) == 0.01
+    assert adaptive.adapted_ramp_weight(0.95, 300, True) == 1.0
 
 
 def test_the_line_is_laid_at_its_turn_and_measures_each_centre_on_it():

@@ -8,8 +8,8 @@ the experiment reads ``segment_count``, ``observation_size``, the action
 sizes and ``leg_motor_count`` to create the agents, sets the ramp's weight
 before each update cycle of training with ``set_ramp_weight``, and in
 training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
-first, ``adjust_tow`` after each update cycle, and reads ``tow.facts`` and
-``untowed_line``.
+first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``,
+``untowed_line`` and ``untowed_walk``.
 """
 
 import math
@@ -160,15 +160,25 @@ class Environment:
         action, half of them at the tow's top and half without tow."""
         self.tow.reserve(worlds_per_group)
 
-    def adjust_tow(self) -> None:
+    def adjust_tow(self) -> bool:
         """After an update cycle: move the tow's top by what the untowed
-        measuring worlds did, and refresh ``tow.facts``."""
-        self.tow.adjust()
+        measuring worlds did, and refresh ``tow.facts``, once a window;
+        returns whether a window closed."""
+        return self.tow.adjust()
 
     def untowed_line(self) -> float:
         """The line paid to the untowed measuring worlds over the tow's last
         window, mm/s, the units' mean; NaN before the first."""
         return self.tow.facts.line[GROUPS.index("without tow")].item()
+
+    def untowed_walk(self) -> tuple[float, bool]:
+        """How fast the untowed measuring worlds went along the line over the
+        tow's last window, mm/s, the units' mean, and whether their feet
+        stepped, lifting off above the tow's bar."""
+        untowed = GROUPS.index("without tow")
+        facts = self.tow.facts
+        stepping = facts.lift_offs[untowed].item() > self.settings.tow.lift_off_hz
+        return facts.speed[untowed].item(), stepping
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.

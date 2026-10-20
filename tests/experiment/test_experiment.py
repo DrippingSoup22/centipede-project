@@ -73,6 +73,32 @@ def saved_update_count(checkpoint_path):
     return checkpoint["agents"]["segment_agents"][0]["update_count"]
 
 
+def test_an_adaptive_ramp_follows_the_untowed_walk_and_is_saved(tmp_path):
+    """An untrained body walks slower than a band of 1000 to 2000 mm/s: the
+    weight stays at its start; a continued run takes up a saved weight and
+    lowers it after each window (one a cycle here), 1.1 squared, a band width
+    below the band."""
+    adaptive = TRAINING_FILE.replace(
+        "max_episode_steps = 3\n",
+        'max_episode_steps = 3\n[environment.reward]\nramp_shape = "adaptive"\n'
+        "ramp_start = 0.01\nramp_band_mm_per_s = [1000, 2000]\n",
+    ).replace("update_cycles = 3", "update_cycles = 2")
+    folder = run_file(tmp_path, adaptive, NAME="adaptive")
+    assert [record["ramp_weight"] for record in training_log(folder)] == [0.01] * 2
+    checkpoint_path = folder / "checkpoints" / "cycle_0002.pt"
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
+    assert checkpoint["ramp_weight"] == 0.01
+    checkpoint["ramp_weight"] = 0.5
+    torch.save(checkpoint, checkpoint_path)
+    continuing = (
+        f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
+        "[interaction_loop]\nupdate_cycles = 4\n"
+    )
+    run_file(tmp_path, continuing)
+    weights = [record["ramp_weight"] for record in training_log(folder)[2:]]
+    assert weights == pytest.approx([0.5, 0.5 / 1.1**2], rel=0.01)
+
+
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     # The ramp waits for a line no untrained body walks.
     recorded = TRAINING_FILE.replace(

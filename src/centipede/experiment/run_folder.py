@@ -114,16 +114,19 @@ class RunFolder:
         agents_state: dict,
         tow_top: float | None = None,
         ramp_from: int | None = 1,
+        ramp_weight: float | None = None,
     ) -> Path:
         """Save the agents after ``completed_cycles`` cycles, the tow's top
-        when there is one, and the cycle the ramp rose from (None: not yet);
-        returns the file."""
+        when there is one, the cycle the ramp rose from (None: not yet), and
+        an adaptive ramp's weight when there is one; returns the file."""
         self.checkpoints.mkdir(exist_ok=True)
         path = self.checkpoints / f"cycle_{completed_cycles:04d}.pt"
         checkpoint = {"completed_cycles": completed_cycles, "agents": agents_state}
         if tow_top is not None:
             checkpoint["tow_top"] = tow_top
         checkpoint["ramp_from"] = ramp_from
+        if ramp_weight is not None:
+            checkpoint["ramp_weight"] = ramp_weight
         torch.save(checkpoint, path)
         return path
 
@@ -152,7 +155,7 @@ class RunFolder:
         if not isinstance(checkpoint, dict) or not (
             {"completed_cycles", "agents"}
             <= set(checkpoint)
-            <= {"completed_cycles", "agents", "tow_top", "ramp_from"}
+            <= {"completed_cycles", "agents", "tow_top", "ramp_from", "ramp_weight"}
         ):
             raise SettingsError(f"{path} is not a checkpoint of this project")
         return checkpoint

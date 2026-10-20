@@ -132,6 +132,10 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         reward_settings.ramp_after_line_share * reward_settings.line_speed_cap_mm_per_s
     )
     ramp_from = None if ramp_line_mm_per_s else 1
+    # An adaptive ramp's weight starts at ramp_start and moves after each of
+    # the tow's windows by what the untowed mean-action worlds did.
+    adaptive_ramp = reward_settings.ramp_shape == "adaptive"
+    ramp_weight = reward_settings.ramp_start
     completed_cycles = 0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
@@ -141,6 +145,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             completed_cycles = checkpoint["completed_cycles"]
             saved_tow_top = checkpoint.get("tow_top")
             ramp_from = checkpoint.get("ramp_from", ramp_from)
+            ramp_weight = checkpoint.get("ramp_weight", ramp_weight)
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -252,7 +257,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     progress.header()
     # The learning rate of each update follows the schedule over the run's
     # cycles (an adaptive one is each agent's own), and so do scheduled action
-    # spreads and the ramp of energy, the squeeze and pain; the loop pauses
+    # spreads and the ramped costs' weight, unless it adapts; the loop pauses
     # after every cycle, before the next window.
     agent_settings = configuration.agents
 
@@ -263,7 +268,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)
-        environment.set_ramp_weight(reward_settings.ramp_weight_at(cycle, ramp_from))
+        environment.set_ramp_weight(
+            ramp_weight
+            if adaptive_ramp
+            else reward_settings.ramp_weight_at(cycle, ramp_from)
+        )
 
     follow_schedules(completed_cycles + 1)
     cycles_start = time.monotonic()
@@ -271,9 +280,13 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     for session_cycle in cycles:
         cycle = completed_cycles + session_cycle + 1
         if worlds_per_group:
-            environment.adjust_tow()
+            window_closed = environment.adjust_tow()
             if ramp_from is None and environment.untowed_line() >= ramp_line_mm_per_s:
                 ramp_from = cycle + 1
+            if adaptive_ramp and window_closed:
+                ramp_weight = reward_settings.adapted_ramp_weight(
+                    ramp_weight, *environment.untowed_walk()
+                )
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         record["ramp_weight"] = environment.reward.ramp_weight
@@ -313,6 +326,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 agents.state_dict(),
                 tow_top=environment.tow.top if towed else None,
                 ramp_from=ramp_from,
+                ramp_weight=ramp_weight if adaptive_ramp else None,
             )
         if out_of_time:
             print(

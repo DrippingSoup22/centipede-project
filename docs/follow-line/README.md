@@ -58,7 +58,7 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | From run 06: the team's line, uncapped, less its joints' accelerations, which favour wide, slow strokes over short, fast ones, ramped exponentially from 0.002 to full in 224 cycles; each unit's own carry, the weight its feet do not carry |
+| Reward | [reward.md](reward.md) | From run 06: the team's line, uncapped, less its joints' accelerations, which favour wide, slow strokes over short, fast ones, their weight adapting to the noise-free walk from run 07 (rising above 110 mm/s, falling below 70); each unit's own carry, the weight its feet do not carry |
 | Observations | [observations.md](observations.md) | Five units' bodies (44 values each from run 06), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
 | Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own (one in run 05); gSDE; PPO's settings |
@@ -84,7 +84,11 @@ Not decided; each is one change for a later run.
 - **The terms left out**, each brought back as its own run if a test shows
   it is needed: the force share (a unit carried along on skidding feet),
   the squeeze, pain (legs crossed over their neighbours').
-- **The accelerations' price and ramp**: 0.001 mm a second for each
-  (rad/s²)², from 0.002 to full in 224 cycles; the carry's price.
+- **The accelerations' price and its adaptive weight**: 0.001 mm a second
+  for each (rad/s²)², the weight from 0.002 within the band of 70 to 110
+  mm/s, 1.1 times a window; the carry's price.
+- **The wave as a guard on the price**: the price could rise only while
+  the noise-free wave holds (the user's idea, 2026-10-20); left out of run
+  07 while the wave measure over 128 worlds sits near its chance level.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

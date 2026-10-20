@@ -2,7 +2,8 @@
 
 From run 06 (the user's design, 2026-10-20, after run 05): the team is paid
 the line it walks, less what its joints' accelerations cost; each unit's
-own account is charged the weight its feet do not carry. Run 05 charged the
+own account is charged the weight its feet do not carry. From run 07 the
+accelerations' weight adapts to the walk. Run 05 charged the
 joints' speeds instead and had no own account; runs 01 to 04 used the
 cooperators' run 28 reward (`docs/cooperators/reward.md` on that branch).
 Every run's lessons are in the study's `Training/results/follow-line/README.md`.
@@ -68,18 +69,40 @@ for each (rad/s²)²; the team is charged the units' mean.
   (`Training/analysis/gait_costs.py`, measured on the noise-free policies
   of runs 01 to 05). There the walk nets about +73 mm/s a unit. The jerkier
   gaits of runs 01 to 04 would peak at 18 to 51 mm/s: under this price
-  smooth strokes pay.
+  smooth strokes pay. This full price is the ceiling; how much of it
+  applies is the adaptive weight's choice (below).
 
-## The ramp
+## The price adapts to the walk
 
-The accelerations are weighed 0.002 of their price at the first update
-cycle, rising by the same factor each cycle, about doubling every 25, to
-full at cycle 225 (the exponential form of Hwangbo et al. 2019's
-curriculum on the costs of moving). Untrained agents' exploring is jerky:
-it costs more than run 05's gait at 354 mm/s, and at full price 400 times
-what it earns; at 0.002 the two about balance. While the weight is below
-about 0.08 (the first 60% of the ramp), any walk as jerky as the scripted
-one still pays; after that only smooth walking does.
+From run 07 the accelerations' weight follows what the agents' walk does,
+not the clock (the user's decision, 2026-10-20). After each of the tow's
+windows ([task.md](task.md#the-tow)) it reads the worlds that act with the
+agents' mean action and are never towed, the walk the policy really learned:
+
+- it rises 1.1 times while they walk faster than 110 mm/s with their feet
+  stepping, the price being then needed;
+- it falls 1.1 times while they walk slower than 70 mm/s, so that the cost
+  can never squeeze the body into a creep;
+- it holds in between, and the agents refine their gait at a steady price.
+
+Each step goes to one more power of 1.1 for each 40 mm/s beyond the band,
+at most four (1.46 times): a proportional term, so that the price catches
+up with a walk far outside the band without overshooting near it (Stooke
+et al. 2020's PID Lagrangian; the price works as a Lagrange multiplier on
+the speed). It starts at 0.002, where untrained agents' exploring breaks
+even: their jerky movements cost 400 times what they earn at full price.
+It stays within 0.002 and 1. The band is the pace a real centipede walks
+at; the agents choose how they make it, and wide, smooth strokes are what
+keep the price low. A price that only rises when the walk is good enough
+and falls when it breaks is the common answer of locomotion work to costs
+that stifle exploring: legged_gym widens its tasks only once tracking
+passes 80% (Rudin et al. 2021), and Kim et al. (2024) tighten each
+constraint from the policy's current level.
+
+Run 06 raised the weight on a clock, exponentially from 0.002 to full at
+cycle 225: the body walked best near 0.06 (96 mm/s, a wave of 0.27), then
+crept as the weight rose past it, its jerky gait and its exploring noise
+both charged far more than the line paid.
 
 ## The carry
 
