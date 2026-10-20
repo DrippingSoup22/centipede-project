@@ -143,6 +143,11 @@ class Environment:
         self.joint_velocity = torch.zeros(
             (world_count, segment_count, legs + 1), device=self.device
         )
+        # Each unit's squared accelerations, averaged as the forces are, from
+        # 0 at an episode's start (the body at rest).
+        self.averaged_accelerations = torch.zeros(
+            (world_count, segment_count), device=self.device
+        )
 
     def set_ramp_weight(self, weight: float) -> None:
         """Weigh the ramped costs (energy, the squeeze, pain, the motion and
@@ -239,6 +244,10 @@ class Environment:
         self.averaged_line_speed += self.forces.averaging_rate * (
             progress / ACTION_DURATION_S - self.averaged_line_speed
         )
+        self.averaged_accelerations += self.forces.averaging_rate * (
+            self.reward.squared_accelerations(joint_acceleration)
+            - self.averaged_accelerations
+        )
         rewards, reward_parts, own_energy = self.reward.compute(
             state,
             motor_command,
@@ -249,6 +258,7 @@ class Environment:
             averaged_forces,
             self.tow.pushes,
             joint_acceleration,
+            self.averaged_accelerations,
         )
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
         truncated = (
@@ -301,6 +311,7 @@ class Environment:
             world_mask[:, None], self.line_cap_m_per_s
         )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
+        self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.joint_velocity.copy_(
             torch.where(
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity

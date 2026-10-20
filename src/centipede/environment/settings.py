@@ -26,7 +26,12 @@ class RewardSettings:
     motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
     joints' squared speeds, added up, and the accelerations
     ``acceleration_price`` for each (rad/s²)² of their squared changes of
-    speed. Each unit's feet not carrying its weight, beyond its free support,
+    speed. With ``acceleration_halving`` above 0 the accelerations take a
+    share of the line's forward pay instead of a price: each step's forward
+    pay is multiplied by 1 / (1 + J / ``acceleration_halving``), J the units'
+    mean of the same squared changes, each averaged over ``averaging_s``, so
+    the pay halves at J = ``acceleration_halving`` (rad/s²)²; a step back is
+    still charged in full. Each unit's feet not carrying its weight, beyond its free support,
     cost it ``carry_price`` mm a second for each unit weight on average. With
     ``own_account`` false every part counts in one account, the team's, and
     each agent has one critic. Forces are averaged over ``averaging_s``.
@@ -52,6 +57,7 @@ class RewardSettings:
     hanging_price: float
     motion_price: float
     acceleration_price: float
+    acceleration_halving: float
     carry_price: float
     own_account: bool
     mm_per_mj: float
@@ -86,6 +92,9 @@ class RewardSettings:
             acceleration_price=section.number(
                 "acceleration_price", default=0.0, minimum=0.0
             ),
+            acceleration_halving=section.number(
+                "acceleration_halving", default=0.0, minimum=0.0
+            ),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
@@ -110,6 +119,12 @@ class RewardSettings:
             raise SettingsError(
                 "[environment.reward] line_overspeed_slope works on the averaged"
                 " speed: set line_cap_averaged = true"
+            )
+        if settings.acceleration_price and settings.acceleration_halving:
+            raise SettingsError(
+                "[environment.reward] the accelerations take either a price or a"
+                " share of the line: set acceleration_price or"
+                " acceleration_halving, not both"
             )
         if settings.ramp_shape != "linear" and not settings.ramp_start:
             raise SettingsError(

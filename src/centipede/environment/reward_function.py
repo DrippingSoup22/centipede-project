@@ -137,6 +137,11 @@ class RewardFunction:
             self.part_channels[index, int(own)] = rate
         self.part_channels = self.part_channels.to(device)
 
+    def squared_accelerations(self, joint_acceleration: torch.Tensor) -> torch.Tensor:
+        """Each unit's joints' changes of speed ``(W, N, M + 1)`` rad/s²,
+        squared and added up over the joints it commands, ``(W, N)``."""
+        return (joint_acceleration.square() * self.commanded_joints).sum(dim=-1)
+
     def compute(
         self,
         physical_state: PhysicalState,
@@ -148,6 +153,7 @@ class RewardFunction:
         averaged_forces: torch.Tensor,
         tow_pushes: torch.Tensor,
         joint_acceleration: torch.Tensor,
+        averaged_accelerations: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 11)``
         in PART_NAMES' order, and each unit's own energy ``(W, N, 3)`` mJ.
@@ -160,10 +166,16 @@ class RewardFunction:
         ``AveragedForces.values``; ``tow_pushes`` ``(W, N)`` each unit's tow
         on the step, in unit weights; ``joint_acceleration`` ``(W, N, M + 1)``
         how fast each unit's joints (its legs' and the spine joint behind it)
-        changed their speed over the step, rad/s². The motion: each unit's
-        joints turning, their speeds squared and added up; the accelerations,
-        the same of their changes of speed; the team is charged the units'
-        mean of each.
+        changed their speed over the step, rad/s², and
+        ``averaged_accelerations`` ``(W, N)`` their ``squared_accelerations``
+        averaged as the forces are. The motion: each unit's joints turning,
+        their speeds squared and added up; the accelerations, the same of
+        their changes of speed; the team is charged the units' mean of each.
+        With ``acceleration_halving`` the accelerations' part is instead the
+        share of the team's forward line pay they take, from the units' mean
+        of the averaged accelerations: the forward pay times J / (halving +
+        J), so that the team keeps the forward pay times halving / (halving
+        + J), and a step back in full.
 
         The line: each unit's step forward, up to the cap (or, with
         ``line_cap_averaged``, scaled by the cap over its averaged speed when
@@ -221,10 +233,19 @@ class RewardFunction:
             state.spine_yaw_velocity.square() * self.commanded_joints[:, -1]
         )
         motion = self.motion_price_mm * ramp * squared_speeds.mean(dim=1, keepdim=True)
-        accelerations = (joint_acceleration.square() * self.commanded_joints).sum(-1)
-        acceleration = (
-            self.acceleration_price_mm * ramp * accelerations.mean(dim=1, keepdim=True)
-        )
+        halving = self.settings.acceleration_halving
+        if halving:
+            # The share of the forward pay the accelerations take: 1 - the
+            # factor 1 / (1 + J / halving).
+            jerk = ramp * averaged_accelerations.mean(dim=1, keepdim=True) / halving
+            acceleration = forward.mean(dim=1, keepdim=True) * jerk / (1 + jerk)
+        else:
+            accelerations = self.squared_accelerations(joint_acceleration)
+            acceleration = (
+                self.acceleration_price_mm
+                * ramp
+                * accelerations.mean(dim=1, keepdim=True)
+            )
 
         force_share = self.reference_mm * ((along + tow_pushes) / scale) ** 2
         pain = (pressed * self.unit_weight_n) ** 2 * self.pain_price_mj * ramp
