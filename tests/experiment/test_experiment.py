@@ -2,7 +2,8 @@
 
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
-files, the tow and the mean-action worlds, continuing a run, starting from
+files, the tow and the mean-action worlds, the ramp that waits for them,
+continuing a run, starting from
 another run's agents with its own learning rate and wider layers, and
 evaluating without changing anything.
 """
@@ -73,8 +74,13 @@ def saved_update_count(checkpoint_path):
 
 
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
+    # The ramp waits for a line no untrained body walks.
     recorded = TRAINING_FILE.replace(
         'runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1'
+    ).replace(
+        "max_episode_steps = 3\n",
+        "max_episode_steps = 3\n[environment.reward]\nramp_start = 0.3\n"
+        "ramp_cycles = 2\nramp_after_line_share = 1.0\n",
     )
     folder = run_file(tmp_path, recorded, NAME="probe")
 
@@ -89,6 +95,8 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert len(log[-1]["learning"]["critic_explained_variances"][0]) == 2
     checkpoint = torch.load(checkpoints / "cycle_0003.pt", weights_only=True)
     assert checkpoint["tow_top"] == pytest.approx(log[-1]["tow"]["tow"])
+    assert [record["ramp_weight"] for record in log] == [0.3] * 3
+    assert checkpoint["ramp_from"] is None
 
     # In so short a run every recording would start at the first cycle: the
     # last, at 100%, records the first world's next episode, from its start,
@@ -103,15 +111,19 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert recording.path_points.shape == (3, 1, 1, 2, 3)
     assert "<include" not in recording.model_xml
 
-    # The continued run tows from the saved top, moved by a window a cycle.
+    # The continued run tows from the saved top, moved by a window a cycle,
+    # and ramps from the saved cycle.
     checkpoint["tow_top"] = 0.1
+    checkpoint["ramp_from"] = 4
     torch.save(checkpoint, checkpoints / "cycle_0003.pt")
     continuing = (
         f'[run]\nmode = "train"\ncontinue_from = "{folder.as_posix()}"\n'
         "[interaction_loop]\nupdate_cycles = 5\n"
     )
     assert run_file(tmp_path, continuing) == folder
-    assert [record["cycle"] for record in training_log(folder)] == [1, 2, 3, 4, 5]
+    log = training_log(folder)
+    assert [record["cycle"] for record in log] == [1, 2, 3, 4, 5]
+    assert [record["ramp_weight"] for record in log[3:]] == pytest.approx([0.3, 0.65])
     assert saved_update_count(checkpoints / "cycle_0005.pt") == 5
     checkpoint = torch.load(checkpoints / "cycle_0005.pt", weights_only=True)
     assert checkpoint["tow_top"] == pytest.approx(0.1, abs=0.041)

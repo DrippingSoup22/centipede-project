@@ -126,6 +126,7 @@ class RewardFunction:
         physical_state: PhysicalState,
         motor_command: torch.Tensor,
         progress: torch.Tensor,
+        averaged_speed: torch.Tensor,
         distance: torch.Tensor,
         angle: torch.Tensor,
         averaged_forces: torch.Tensor,
@@ -137,18 +138,21 @@ class RewardFunction:
         ``motor_command`` ``(W, N, M + 1)`` is what each motor received;
         ``progress``, ``distance`` and ``angle`` ``(W, N)`` are each unit's
         step along the line (m), distance from it (m) and angle from its
-        direction (``StraightLine``); ``averaged_forces`` is
+        direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
+        along the line averaged as the forces are (m/s); ``averaged_forces`` is
         ``AveragedForces.values``; ``tow_pushes`` ``(W, N)`` each unit's tow
         on the step, in unit weights.
 
-        The line: each unit's step forward, up to the cap, times its
-        closeness, 1 - (distance / band)², and the cosine of its angle (none
-        beyond the band or facing away), and a step back in full; the team
-        is paid the units' mean. The squeeze: at each joint, the averaged
-        force along the body with the tows behind it taken out, a pull free,
-        squared against the force scale and averaged over the joints. Energy:
-        each unit's pushing work, braking work and squared commands, the
-        team charged the units' mean. Each unit's own: its force share, the
+        The line: each unit's step forward, up to the cap (or, with
+        ``line_cap_averaged``, scaled by the cap over its averaged speed when
+        that is above it), times its closeness, 1 - (distance / band)², and
+        the cosine of its angle (none beyond the band or facing away), and a
+        step back in full; the team is paid the units' mean. The squeeze: at
+        each joint, the averaged force along the body with the tows behind it
+        taken out, a pull free, squared against the force scale and averaged
+        over the joints. Energy: each unit's pushing work, braking work and
+        squared commands, the team charged the units' mean. Each unit's own:
+        its force share, the
         averaged net force of its joints along the body plus its tow,
         squared against the force scale; its hanging, the weight its
         neighbours hold up for it beyond its free support and its belly's
@@ -161,7 +165,12 @@ class RewardFunction:
         step_mm = progress * 1e3
         closeness = (1 - (distance * 1e3 / self.band_mm) ** 2).clamp(min=0.0)
         facing = angle.cos().clamp(min=0.0)
-        forward = step_mm.clamp(min=0.0, max=self.line_cap_mm) * closeness * facing
+        if self.settings.line_cap_averaged:
+            cap = self.settings.line_speed_cap_mm_per_s * 1e-3
+            paid = step_mm.clamp(min=0.0) * cap / averaged_speed.clamp(min=cap)
+        else:
+            paid = step_mm.clamp(min=0.0, max=self.line_cap_mm)
+        forward = paid * closeness * facing
         line = forward + step_mm.clamp(max=0.0)
 
         along, up, front, belly, pressed = averaged_forces.unbind(dim=-1)

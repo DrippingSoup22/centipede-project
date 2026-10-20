@@ -308,9 +308,9 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
 
 
 def _check_mean_action_worlds(configuration: Configuration) -> None:
-    """Fail clearly where the mean-action worlds or the tow cannot work: the
-    worlds need some worlds left to learn from, and the tow fades only by
-    what the untowed ones measure."""
+    """Fail clearly where the mean-action worlds, the tow or the waiting ramp
+    cannot work: the worlds need some worlds left to learn from, and the tow
+    fades and the ramp waits only by what the untowed ones measure."""
     worlds_per_group = configuration.run.mean_action_worlds_per_group
     environment = configuration.environment
     world_count = environment.simulation.world_count
@@ -323,6 +323,11 @@ def _check_mean_action_worlds(configuration: Configuration) -> None:
         raise SettingsError(
             "[environment.tow] start fades by what the untowed mean-action"
             " worlds do: set [run] mean_action_worlds_per_group"
+        )
+    if environment.reward.ramp_after_line_share > 0 and not worlds_per_group:
+        raise SettingsError(
+            "[environment.reward] ramp_after_line_share waits for what the"
+            " untowed mean-action worlds do: set [run] mean_action_worlds_per_group"
         )
 
 

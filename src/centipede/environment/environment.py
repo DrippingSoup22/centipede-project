@@ -8,7 +8,8 @@ the experiment reads ``segment_count``, ``observation_size``, the action
 sizes and ``leg_motor_count`` to create the agents, sets the ramp's weight
 before each update cycle of training with ``set_ramp_weight``, and in
 training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
-first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``.
+first, ``adjust_tow`` after each update cycle, and reads ``tow.facts`` and
+``untowed_line``.
 """
 
 import math
@@ -26,7 +27,7 @@ from centipede.environment.reward_function import (
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.environment.simulation.constants import ACTION_DURATION_S
-from centipede.environment.tow import Tow
+from centipede.environment.tow import GROUPS, Tow
 
 
 class Environment:
@@ -123,6 +124,14 @@ class Environment:
         self.forward_speed = torch.zeros(
             (world_count, segment_count), device=self.device
         )
+        # Each unit's speed along the line, m/s, averaged as the forces are,
+        # whose cap the line pays with ``line_cap_averaged``. An episode
+        # starts it at the cap: the pay reads only how far above the cap it
+        # is, so a slow start is paid as from 0, and a fast one gains nothing.
+        self.line_cap_m_per_s = settings.reward.line_speed_cap_mm_per_s * 1e-3
+        self.averaged_line_speed = torch.zeros(
+            (world_count, segment_count), device=self.device
+        )
 
     def set_ramp_weight(self, weight: float) -> None:
         """Weigh energy, the squeeze and pain by ``weight`` from the next step
@@ -143,6 +152,11 @@ class Environment:
         """After an update cycle: move the tow's top by what the untowed
         measuring worlds did, and refresh ``tow.facts``."""
         self.tow.adjust()
+
+    def untowed_line(self) -> float:
+        """The line paid to the untowed measuring worlds over the tow's last
+        window, mm/s, the units' mean; NaN before the first."""
+        return self.tow.facts.line[GROUPS.index("without tow")].item()
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
@@ -196,10 +210,14 @@ class Environment:
 
         progress = self.line.update(state)
         averaged_forces = self.forces.update(state)
+        self.averaged_line_speed += self.forces.averaging_rate * (
+            progress / ACTION_DURATION_S - self.averaged_line_speed
+        )
         rewards, reward_parts, own_energy = self.reward.compute(
             state,
             motor_command,
             progress,
+            self.averaged_line_speed,
             self.line.distance,
             self.line.angle,
             averaged_forces,
@@ -252,6 +270,9 @@ class Environment:
         self.tow.restart(world_mask)
         self.diagnostics.restart(world_mask)
         self.forward_speed.masked_fill_(world_mask[:, None], 0.0)
+        self.averaged_line_speed.masked_fill_(
+            world_mask[:, None], self.line_cap_m_per_s
+        )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
 
     def _observations(self) -> torch.Tensor:

@@ -124,6 +124,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # The tow, if any, fades by what the mean-action worlds do.
     towed = configuration.environment.tow.start > 0
     saved_tow_top = None
+    # The ramped costs rise from cycle 1, or, with ramp_after_line_share, from
+    # the cycle after the untowed mean-action worlds' line reaches that share
+    # of the cap (None until then); a continued run keeps the cycle it found.
+    reward_settings = configuration.environment.reward
+    ramp_line_mm_per_s = (
+        reward_settings.ramp_after_line_share * reward_settings.line_speed_cap_mm_per_s
+    )
+    ramp_from = None if ramp_line_mm_per_s else 1
     completed_cycles = 0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
@@ -132,6 +140,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
             saved_tow_top = checkpoint.get("tow_top")
+            ramp_from = checkpoint.get("ramp_from", ramp_from)
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -254,9 +263,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)
-        environment.set_ramp_weight(
-            configuration.environment.reward.ramp_weight_at(cycle)
-        )
+        environment.set_ramp_weight(reward_settings.ramp_weight_at(cycle, ramp_from))
 
     follow_schedules(completed_cycles + 1)
     cycles_start = time.monotonic()
@@ -265,8 +272,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         cycle = completed_cycles + session_cycle + 1
         if worlds_per_group:
             environment.adjust_tow()
+            if ramp_from is None and environment.untowed_line() >= ramp_line_mm_per_s:
+                ramp_from = cycle + 1
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
+        record["ramp_weight"] = environment.reward.ramp_weight
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
@@ -302,6 +312,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 cycle,
                 agents.state_dict(),
                 tow_top=environment.tow.top if towed else None,
+                ramp_from=ramp_from,
             )
         if out_of_time:
             print(

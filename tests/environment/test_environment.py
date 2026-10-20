@@ -64,6 +64,10 @@ def test_the_settings_default_to_the_agreed_design_and_ramp_the_costs():
     assert settings.tow.start == 0.0  # no tow unless asked
     weights = [settings.reward.ramp_weight_at(cycle) for cycle in (1, 65, 129, 300)]
     assert weights == [0.5, 0.75, 1.0, 1.0]
+    # A ramp that waits (ramp_after_line_share) holds its start, then rises
+    # from the cycle it is given.
+    assert settings.reward.ramp_weight_at(300, None) == 0.5
+    assert settings.reward.ramp_weight_at(300, 236) == 0.75
 
 
 def test_the_line_is_laid_at_its_turn_and_measures_each_centre_on_it():
@@ -149,7 +153,14 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     tow = torch.tensor([[0.0, 0.0, 0.0, 0.1, 0.1]])
 
     rewards, parts, own_energy = reward.compute(
-        state, command, progress, distance, angle, averaged, tow
+        state,
+        command,
+        progress,
+        torch.zeros(1, SEGMENTS),
+        distance,
+        angle,
+        averaged,
+        tow,
     )
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
@@ -172,6 +183,34 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     team = 0.485 - 0.1325 - 1.59 * (0.2 + 0.1 + 0.0332)
     torch.testing.assert_close(rewards[0, :, 0], team * every)
     torch.testing.assert_close(rewards[0, 0, 1], torch.tensor(-1.06 - 1.59 * 0.1328))
+
+
+def test_the_averaged_cap_pays_every_step_until_the_average_passes_the_cap():
+    """With ``line_cap_averaged``, steps of 2 mm (100 mm/s, above the 90 mm/s
+    cap) are paid in full while the unit's averaged speed is 50 or 90 mm/s,
+    and by 90/135 of it at 135 mm/s; a step back is charged in full."""
+    settings = RewardSettings.from_section({"line_cap_averaged": True})
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    reward = RewardFunction(settings, BODY, commanded, 0.005)
+    progress = 1e-3 * torch.tensor([[2.0, 2.0, 2.0, -0.5, 0.0]])
+    averaged_speed = 1e-3 * torch.tensor([[50.0, 90.0, 135.0, 135.0, 0.0]])
+    zeros = torch.zeros(1, SEGMENTS)
+
+    _, parts, _ = reward.compute(
+        resting_state(1),
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        progress,
+        averaged_speed,
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, 5),
+        zeros,
+    )
+
+    paid = torch.tensor([2.0, 2.0, 2.0 * 90 / 135, -0.5, 0.0])
+    torch.testing.assert_close(
+        parts[0, :, PART_NAMES.index("line")], paid.mean() * torch.ones(SEGMENTS)
+    )
 
 
 def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():

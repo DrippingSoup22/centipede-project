@@ -9,7 +9,12 @@ class RewardSettings:
     """The [environment.reward] section (docs/follow-line/reward.md); the
     defaults are the agreed values.
 
-    The line pays each unit's step along it up to ``line_speed_cap_mm_per_s``.
+    The line pays each unit's step along it up to ``line_speed_cap_mm_per_s``:
+    on each step, or with ``line_cap_averaged`` on the unit's speed averaged
+    over ``averaging_s`` from the cap at the episode's start, each step's
+    progress scaled down by the cap over that average when it is above (a
+    stride's surges and dips cancel, so walking faster than the cap gains
+    nothing).
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
     ``force_price_w``, braking work ``braking_price`` of pushing work. Pain
@@ -18,10 +23,13 @@ class RewardSettings:
     counts ``mm_per_mj`` millimetres. Forces are averaged over
     ``averaging_s``. Energy, the squeeze and pain are weighed from
     ``ramp_start`` up to full over the first ``ramp_cycles`` update cycles
-    (0: full from the start).
+    (0: full from the start); with ``ramp_after_line_share`` above 0 the
+    ramp waits at ``ramp_start`` until the untowed mean-action worlds' line
+    reaches that share of the cap, and rises from the next cycle.
     """
 
     line_speed_cap_mm_per_s: float
+    line_cap_averaged: bool
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
@@ -32,6 +40,7 @@ class RewardSettings:
     averaging_s: float
     ramp_cycles: int
     ramp_start: float
+    ramp_after_line_share: float
 
     @classmethod
     def from_section(cls, values: dict) -> "RewardSettings":
@@ -40,6 +49,7 @@ class RewardSettings:
             line_speed_cap_mm_per_s=section.positive_number(
                 "line_speed_cap_mm_per_s", default=90.0
             ),
+            line_cap_averaged=section.boolean("line_cap_averaged", default=False),
             reference_pay_mm_per_s=section.number(
                 "reference_pay_mm_per_s", default=53.0, minimum=0.0
             ),
@@ -54,16 +64,23 @@ class RewardSettings:
             ramp_start=section.number(
                 "ramp_start", default=0.5, minimum=0.0, maximum=1.0
             ),
+            ramp_after_line_share=section.number(
+                "ramp_after_line_share", default=0.0, minimum=0.0, maximum=1.0
+            ),
         )
         section.reject_unknown_keys()
         return settings
 
-    def ramp_weight_at(self, cycle: int) -> float:
-        """The ramped costs' weight in update cycle ``cycle``, counted from 1."""
+    def ramp_weight_at(self, cycle: int, ramp_from: int | None = 1) -> float:
+        """The ramped costs' weight in update cycle ``cycle``, counted from 1,
+        for a ramp that starts rising at cycle ``ramp_from``; ``None``: it
+        has not started (``ramp_after_line_share``)."""
+        if ramp_from is None:
+            return self.ramp_start
         if not self.ramp_cycles:
             return 1.0
         start = self.ramp_start
-        return start + (1 - start) * min(1.0, (cycle - 1) / self.ramp_cycles)
+        return start + (1 - start) * min(1.0, (cycle - ramp_from) / self.ramp_cycles)
 
 
 @dataclass(frozen=True)
