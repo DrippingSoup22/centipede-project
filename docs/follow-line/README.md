@@ -54,7 +54,7 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | Run 28's, changed after run 01: the team's line, capped on the speed over 1 s, squeeze and energy, which wait until the body walks the line; each unit's own force share and hanging |
+| Reward | [reward.md](reward.md) | Run 28's, changed after runs 01 and 03: the team's line, paid against a 90 mm/s target on the speed over 1 s, squeeze and energy, ramped from a quarter to full in 160 cycles; each unit's own force share and hanging |
 | Observations | [observations.md](observations.md) | Five units' bodies (47 values each), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
 | Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own; gSDE; PPO's settings |
@@ -78,6 +78,7 @@ Not decided; each is one change for a later run.
   measured on the untowed noise-free worlds, so that the noise cannot fake
   it, with a fallback if no wave forms. Stage 1 has no level.
 - **Pain**, once a wave forms, as its own run.
-- **The ramp's gate and length**: 0.9 of the cap, 64 cycles.
+- **The ramp's start and length**: 0.25, 160 cycles.
+- **The slope above the target**: 1, as costly too fast as too slow.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

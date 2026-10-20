@@ -3,9 +3,10 @@
 Agreed with the user on 2026-10-20: the cooperators' run 28 reward
 (`docs/cooperators/reward.md` on that branch, cycles 14 to 18, where every
 term's history and measurements are), with nothing left of the head's
-special role. Changed after run 01 (the user's decisions, 2026-10-20): the
-cap holds on each unit's speed averaged over 1 s, pain is removed, and
-energy and the squeeze wait until the body walks the line.
+special role. Changed after run 01 and run 03 (the user's decisions,
+2026-10-20): the line is paid against a target speed on each unit's speed
+averaged over 1 s, pain is removed, and energy and the squeeze start at a
+quarter of their weight and reach it in 160 cycles.
 
 ## Two accounts
 
@@ -26,26 +27,32 @@ on the step (mm), v̄ its speed along the line averaged over 1 s as the forces
 are (mm/s), d its centre's distance from the line (mm) and θ its body's
 angle from the line's direction:
 
-> line = Δs · min(1, c / v̄) · max(0, 1 − (d / b)²) · max(0, cos θ) for
-> Δs ≥ 0, and Δs for a step back
+> line = Δs · s(v̄) · max(0, 1 − (d / b)²) · max(0, cos θ) for Δs ≥ 0, and
+> Δs for a step back
 
-The team receives the mean over the units.
+where the speed factor s is 1 up to the target speed v\*, and
+(v\* − k (v̄ − v\*)) / v̄ above it. A second's pay is therefore the speed up
+to the target, then falls by k mm/s for every mm/s too fast: with k = 1,
+none at twice the target and a charge beyond. The team receives the mean
+over the units.
 
-- **The cap c**, 90 mm/s, 0.6 of the full body's length a second. *S.
+- **The target v\***, 90 mm/s, 0.6 of the full body's length a second. *S.
   heros* walked a treadmill at 0.5 to 1.5 body lengths a second (Anderson
-  et al. 1995); a scripted wave on v5 reaches 0.6 at 3.5 steps a second.
-  Above the cap speed earns nothing, so only walking better pays. It is set
-  in millimetres, so it asks every leg the same on every body.
+  et al. 1995); a scripted wave on v5 reaches 90 mm/s at 3 steps a second.
+  It is set in millimetres, so it asks every leg the same on every body.
+- **A target, not a cap.** Run 03 paid at most the cap (s = v\* / v̄): above
+  it speed earned nothing but cost nothing either while energy was free, and
+  the body learned a run at 10 Hz and 230 to 260 mm/s, which energy added
+  later did not undo. Paid less above the target, a unit gains by slowing
+  down, and since k = 1 makes being too fast cost as much as being too slow,
+  the noise centres the walk on the target. Hwangbo et al. (2019) likewise
+  charge the error from a commanded velocity either way.
 - **On the averaged speed**, like every force the reward weighs. Run 01
   capped each step at 1.8 mm: a stride's surges were cut, its dips paid in
   full, so a faster stride, with higher dips, still earned more, and seed 2
-  walked 119 mm/s. Scaled by the averaged speed, a unit earns at most the
-  cap per second however its stride surges. Each episode starts the average
-  at the cap: only the speed above the cap counts, so a slow start is paid
-  in full. A fast one still gains a little while its average climbs, about
-  c · 1 s · ln(v / c) per episode: at twice the cap 62 mm, 3 mm/s over a
-  20 s episode (run 03 measured it: its noise-free walks at 136 to 187 mm/s
-  were paid 92 to 95 mm/s).
+  walked 119 mm/s. On the averaged speed a stride's surges and dips cancel.
+  Each episode starts the average at the target, so a slow start is paid in
+  full; a fast start is charged a little late while its average climbs.
 - **The band b**, the sight radius, 16.5 mm on v5: a unit is paid for the
   line only while it can see it ([observations.md](observations.md)). Run 28
   used 20 mm; within 10 mm walking faster up to the cap did not pay, the
@@ -91,32 +98,37 @@ their legs raked back, never reaching forward of neutral: pain taught them
 to keep apart rather than to step in turn, and to find a wave they must be
 free to fail. It may return as its own run once a wave forms.
 
-## The ramp: the walk first, then its cost
+## The ramp
 
-Energy and the squeeze weigh nothing until the untowed noise-free worlds
-earn 0.9 of the cap from the line (81 mm/s); from the next update cycle
-their weight rises to full over 64 cycles. The body first learns to follow
-the line however it can, a messy walk included, and energy then refines
-the walk toward the cheapest one, the wave (the user's idea). In run 01
-both started at half their weight, and for untrained agents they cost more
-than the line paid (the fresh check), which teaches doing less (Hwangbo et
-al. 2019's curriculum factor; cooperators, cycle 15). In run 01 the line
-reached 84 mm/s by cycle 96 and held 84 to 89 after it, so the gate opens
-once the walk reaches the cap. A continued run keeps the cycle its ramp
-rose from.
+Energy and the squeeze weigh 0.25 at the first update cycle and rise in a
+straight line to their full weight at cycle 161. This is Hwangbo et al.
+(2019)'s curriculum: every cost but the objective is multiplied by a factor
+that starts at 0.3, chosen "to prevent the initial tendency to stand still",
+and rises with the iterations toward 1; they note that low penalties on
+effort give unnatural motion and high ones a standing body. Both happened
+here. Run 01 started at half (with pain), and for untrained agents the costs
+outweighed the line (the fresh check: −9.7 mm/s a unit), which taught timid
+legs. Run 03 started at 0 until the walk reached the cap, and the walk became
+a run that the full costs did not undo. On this body an untrained unit's
+team account breaks even at 0.25 (−0.6 mm/s). The ramp follows time rather
+than the walk's progress: it is predictable, the seeds stay comparable, and
+no loop forms between the cost and the walk it waits for; holding the speed
+is the target's job. In runs 01 and 03 the walk formed between cycles 74
+and 100, when this ramp weighs 0.6 to 0.7.
 
 ## The ledger
 
 Before a run, scripted walks on the built code check that the good wave walk
 pays more than every fault we know (the study's `Training/analysis/ledger.py`).
-On this branch's code (2026-10-20, the design above, pain at 0) the good
-wave walk, 103 mm/s, earns the line's cap, +90 mm/s a unit, and the team
-+71 with the ramped costs in full. Every fault pays less, own weighed 0.8
-or 4 and the ramped costs at 0 or in full, by 3 to 1,500 mm/s; walking
-faster than the cap loses even with the costs at 0 (−2.6 mm/s). The one
-exception is the wave running backward, tail to head (+1.0 mm/s at 0.8 in
-full, −0.7 at 0), a near tie: the reward does not care about the wave's
-direction. On the half body, whose first unit
-carries the head, the same walk squeezes the chain (−22 mm/s a unit): the
-others push the heavy front unit along, one more reason to train headless
-first.
+On this branch's code (2026-10-20, the design above) the good wave walk at
+the target, 3 steps a second and 90 mm/s, earns +84 mm/s a unit from the
+line, and the team +65 with the ramped costs in full (+80 at 0.25). Every
+fault pays less, own weighed 0.8 or 4 and the ramped costs at 0.25 or in
+full, by 15 mm/s and more for walking faster (1.4 times the step rate,
+111 mm/s) and 37 to 51 for a run at twice it. The one exception is the wave
+running backward, tail to head, a near tie: it loses at own weight 0.8
+(−2.6 mm/s in full, −6.0 at 0.25) and ties only in the stress test at 4
+(+2.6 in full): the reward does not care about the wave's direction. On the
+half body, whose first unit carries the head, the same walk squeezes the
+chain (−22 mm/s a unit): the others push the heavy front unit along, one
+more reason to train headless first.
