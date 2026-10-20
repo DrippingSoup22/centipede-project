@@ -46,4 +46,4 @@ over many samples (131,072 per agent per update) but slows learning.
 | Worlds × steps | 4,096 × 32 per update | legged_gym's batch (Rudin et al. 2021) |
 | Minibatches, passes | 4 of 32,768, 5 passes | 20 Adam steps an update, as theirs |
 | Learning rate | Each actor's adapted after every update toward a KL of 0.01 (×1.5 or ÷1.5, between 1e-5 and 1e-2), from 3e-4; the critics 3e-4 | Rudin et al.'s rule: steady steps as the spread narrows |
-| Discount, GAE λ | 0.998, 0.95 | Run 28's; 0.99 is a later one-change test |
+| Discount, GAE λ | 0.998, 0.95 | Run 28's |

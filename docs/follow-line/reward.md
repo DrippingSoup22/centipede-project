@@ -81,18 +81,16 @@ the rear one sweeps into the front one.
 
 Energy, the squeeze and pain start at half their weight and reach it fully
 at update cycle 129, so that exploring stays worth it while the body learns
-(Hwangbo et al. 2019's curriculum factor; cooperators, cycle 15). A run
-without them is an early one-change test.
+(Hwangbo et al. 2019's curriculum factor; cooperators, cycle 15).
 
 ## The ledger
 
 Before a run, scripted walks on the built code check that the good wave walk
-pays more than every fault we know (`../Training/analysis/`). Run 28's
-reward on the headless tester (the cooperators' code, 2026-10-20, with the
-16.5 mm band, the 90 mm/s cap and the joint forces read correctly under the
-middle root): the good wave walk, 103 mm/s, earns the team +69 mm/s a unit;
-every fault pays less at the trained weights, by 10 to 400 mm/s, but the
-wave running backward, tail to head (+1.9 mm/s), a near tie: the reward
+pays more than every fault we know (the study's `Training/analysis/ledger.py`).
+On this branch's code (2026-10-20) the good wave walk, 103 mm/s, earns the
+team +69 mm/s a unit; every fault pays less, own weighed 0.8 or 4 and the
+ramped costs at half or in full, by 6 to 1,900 mm/s, but the wave running
+backward, tail to head (+1.2 to +2.1 mm/s at 0.8), a near tie: the reward
 does not care about the wave's direction. On the half body, whose first unit
 carries the head, the same walk squeezes the chain (−22 mm/s a unit): the
 others push the heavy front unit along, one more reason to train headless

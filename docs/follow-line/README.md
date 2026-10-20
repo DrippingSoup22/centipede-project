@@ -68,3 +68,15 @@ ten units alike, so that walking is learned before the front units must
 carry a head. The head comes later, as its own segment, with a spine that
 can lift the front (the user, 2026-10-20: a separate discussion of the
 model).
+
+## Open questions
+
+Not decided; each is one change for a later run.
+
+- **Stage 2's curves.** A level that makes the line bend more as the walk
+  allows, raised by the wave's consistency (the user's idea, 2026-10-20):
+  measured on the untowed noise-free worlds, so that the noise cannot fake
+  it, with a fallback if no wave forms. Stage 1 has no level.
+- **The ramps.** A run without them tells whether they are needed.
+- **The discount.** 0.99 against 0.998.
+- **The head**, as its own segment, on the model's later version.
