@@ -5,18 +5,22 @@
 - **train** creates a new run folder, or reopens one with ``continue_from``;
   builds the environment, the agents, and the interaction loop; and after each
   cycle writes one line to the training log. Every ``checkpoint_every_cycles``
-  cycles, and after the last, it saves a checkpoint and refreshes the report;
-  every ``record_every_episodes`` episode lengths it writes one episode length
-  of windows as a replay recording.
+  cycles, and after the last, it saves a checkpoint and refreshes the report.
+  With ``record_worlds`` it records that many worlds, one episode each, for
+  replay, ending by 25, 50, 75 and 100% of the update cycles.
   With ``time_limit_hours`` it stops cleanly, after a checkpoint, before a
   cycle that would end after the limit, so that a run on a machine with a
   session limit never ends in the middle of one; the run is then continued in
-  a new session. With
+  a new session. A run may keep worlds that act with the mean action, and
+  tow its body; the tow's top moves after each cycle and is saved with the
+  checkpoints. With
   ``start_from`` the new run's agents begin from another run's
   checkpoint, for example to continue learning on a harder task.
 - **evaluate** loads a checkpoint, runs every seed with the agents and each
-  listed baseline, and writes the results, their report, and the recordings
-  into the run.
+  listed baseline, and writes the results and the recordings into the run.
+
+A run writes no HTML report: the training project's monitor shows its log
+while it trains, and its review tools read the evaluations' results.
 
 This is the only component that deals with files. See docs/architecture.md and
 docs/configuration.md.
@@ -50,7 +54,6 @@ from centipede.experiment.progress import (
     TrainingProgress,
     duration,
     recording_sizes,
-    reward_weights,
     training_settings,
 )
 from centipede.experiment.recordings import (
@@ -58,11 +61,7 @@ from centipede.experiment.recordings import (
     evaluation_recording,
     training_recording,
 )
-from centipede.experiment.report import (
-    LoggedCategory,
-    write_evaluation_report,
-    write_training_report,
-)
+from centipede.experiment.report import LoggedCategory
 from centipede.experiment.run_folder import RunFolder
 from centipede.interaction_loop.interaction_loop import InteractionLoop
 from centipede.settings_section import SettingsError
@@ -71,8 +70,10 @@ from centipede.settings_section import SettingsError
 Actor = Agents | ZeroActionBaseline | RandomActionBaseline
 
 # The most device memory a training recording may hold while it runs: the
-# poses of every world for one episode length.
+# poses of the recorded worlds for one episode.
 RECORDING_MEMORY_LIMIT_BYTES = 1 << 30
+# When training recordings end, in percent of the update cycles.
+RECORDING_PERCENTS = (25, 50, 75, 100)
 
 # Recorded with every training session, so a result can be traced to its tools.
 RECORDED_PACKAGES = (
@@ -113,16 +114,16 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # Everything that can fail comes before the run folder is written, so a
     # rejected run leaves nothing behind.
     environment = Environment(configuration.environment)
-    agents = Agents(
-        environment.segment_count,
-        environment.observation_size,
-        environment.world_count,
+    worlds_per_group = run_settings.mean_action_worlds_per_group
+    agents = _agents_for(
+        environment,
+        configuration,
         loop_settings.rollout_window_steps,
-        configuration.agents,
-        run_settings.seed,
-        environment.segment_action_sizes,
-        environment.leg_motor_count,
+        mean_action_world_count=2 * worlds_per_group,
     )
+    # The tow, if any, fades by what the mean-action worlds do.
+    towed = configuration.environment.tow.start > 0
+    saved_tow_top = None
     completed_cycles = 0
     if checkpoint_path is not None:
         checkpoint = RunFolder.load_checkpoint(
@@ -130,6 +131,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         )
         if continue_from is not None:
             completed_cycles = checkpoint["completed_cycles"]
+            saved_tow_top = checkpoint.get("tow_top")
         else:
             _check_agents_can_start_from(
                 checkpoint, configuration.agents, checkpoint_path
@@ -138,13 +140,14 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         # it starts from, such as the spine, or wider layers: its agents are
         # then widened.
         agents.load_state_dict(checkpoint["agents"], widen=continue_from is None)
-    # A recording covers whole windows: the episode length, rounded up.
-    recording_windows = math.ceil(
-        configuration.environment.max_episode_steps / loop_settings.rollout_window_steps
-    )
-    recording_frames = recording_windows * loop_settings.rollout_window_steps
-    if run_settings.record_every_episodes:
-        _check_recording_fits(environment, recording_frames)
+    if towed:
+        environment.start_tow(saved_tow_top)
+    if worlds_per_group:
+        environment.reserve_measuring_worlds(worlds_per_group)
+    episode_steps = configuration.environment.max_episode_steps
+    record_worlds = min(run_settings.record_worlds, environment.world_count)
+    if record_worlds:
+        _check_recording_fits(environment, episode_steps, record_worlds)
 
     if continue_from is not None:
         folder = RunFolder.open(continue_from)
@@ -178,28 +181,18 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         ),
         end="\n\n",
     )
-    weights = configuration.environment.rewards.weights(
-        configuration.environment.max_episode_steps
-    )
-    print(
-        reward_weights(
-            weights.per_step,
-            weights.episode_shares,
-            configuration.agents.ppo.discount,
-        ),
-        end="\n\n",
-    )
-    if run_settings.record_every_episodes:
-        blocks = recording_windows * run_settings.record_every_episodes
-        file_count = sum(
-            (cycle - 1) % blocks == 0
-            for cycle in range(completed_cycles + 1, total_cycles + 1)
+    recording_starts = (
+        _recording_starts(
+            total_cycles, episode_steps, loop_settings.rollout_window_steps
         )
-        world_count, position_count = environment.diagnostics.simulation.qpos.shape
-        kept = run_settings.record_worlds
-        kept = world_count if kept == "all" else min(kept, world_count)
+        if record_worlds
+        else {}
+    )
+    if record_worlds:
+        file_count = sum(start > completed_cycles for start in recording_starts)
+        position_count = environment.diagnostics.simulation.qpos.shape[1]
         print(
-            recording_sizes(file_count, kept, recording_frames, position_count),
+            recording_sizes(file_count, record_worlds, episode_steps, position_count),
             end="\n\n",
         )
     if completed_cycles >= total_cycles:
@@ -208,34 +201,33 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
 
     # The loop counts the cycles of this session only; the log and checkpoints
     # count from the start of the run. A resumed session draws new episodes.
+    learning_worlds = (
+        torch.arange(environment.world_count, device=environment.device)
+        < agents.learning_world_count
+        if worlds_per_group
+        else None
+    )
     loop = InteractionLoop(
         environment,
         agents,
         replace(loop_settings, update_cycles=total_cycles - completed_cycles),
+        counted_worlds=learning_worlds,
     )
-    categories = _training_categories(loop, agents, environment)
+    categories = _training_categories(
+        loop, agents, environment, measuring=bool(worlds_per_group)
+    )
     transitions_per_cycle = environment.world_count * loop_settings.rollout_window_steps
 
-    # Recording: one episode length of windows per file. All worlds start
-    # together, so a recording that starts at a multiple of the episode length
-    # holds every world's whole episode, from its first step to its last,
-    # unless the world arrived earlier and restarted. The recorder is armed
-    # before the recording's first window and taken once it is complete, or
-    # when the session ends; both happen between cycles.
+    # Recording: the recorder is armed before a recording's first cycle and
+    # taken once complete, both between cycles. One that a session's end
+    # leaves incomplete is not written.
     recorder = loop.diagnostics.recorder
-    record_every = run_settings.record_every_episodes
-    recording_first_cycle = 0
-
-    def recording_starts(cycle: int) -> bool:
-        blocks = recording_windows * record_every
-        return record_every > 0 and (cycle - 1) % blocks == 0
-
     scene = (
-        RecordingScene.from_run(configuration, environment) if record_every else None
+        RecordingScene.from_run(configuration, environment) if record_worlds else None
     )
-    if recording_starts(completed_cycles + 1):
-        recorder.arm(recording_frames)
-        recording_first_cycle = completed_cycles + 1
+    recording_first_cycle = completed_cycles + 1
+    if recording_first_cycle in recording_starts:
+        recorder.arm(episode_steps, record_worlds)
 
     # Wall-clock time per cycle in this session, everything included, for the
     # time limit.
@@ -245,28 +237,34 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         else run_settings.time_limit_hours * 3600
     )
     progress = TrainingProgress(
-        completed_cycles + 1,
-        total_cycles,
-        loop_settings.rollout_window_steps,
-        configuration.environment.max_episode_steps,
+        completed_cycles + 1, total_cycles, loop_settings.rollout_window_steps
     )
     loop.diagnostics.progress = progress
     progress.header()
     # The learning rate of each update follows the schedule over the run's
-    # cycles, and so do scheduled action spreads; the loop pauses after every
-    # cycle, before the next window.
+    # cycles (an adaptive one is each agent's own), and so do scheduled action
+    # spreads and the ramp of energy, the squeeze and pain; the loop pauses
+    # after every cycle, before the next window.
     agent_settings = configuration.agents
 
     def follow_schedules(cycle: int) -> None:
-        agents.set_learning_rate(agent_settings.learning_rate_at(cycle, total_cycles))
+        learning_rate = agent_settings.learning_rate_at(cycle, total_cycles)
+        if learning_rate is not None:
+            agents.set_learning_rate(learning_rate)
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)
+        environment.set_ramp_weight(
+            configuration.environment.reward.ramp_weight_at(cycle)
+        )
 
     follow_schedules(completed_cycles + 1)
     cycles_start = time.monotonic()
-    for session_cycle in loop.train(seed=run_settings.seed + completed_cycles):
+    cycles = loop.train(seed=run_settings.seed + completed_cycles)
+    for session_cycle in cycles:
         cycle = completed_cycles + session_cycle + 1
+        if worlds_per_group:
+            environment.adjust_tow()
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         folder.append_log(record)
@@ -279,36 +277,32 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             and cycle < total_cycles
             and time.monotonic() - session_start + seconds_per_cycle > time_limit_s
         )
-        if recorder.recording and (
-            recorder.complete or cycle == total_cycles or out_of_time
-        ):
-            window = recorder.take(
-                run_settings.record_levels,
-                run_settings.record_worlds,
-                run_settings.record_selection,
-            )
+        if recorder.complete():
+            percent = recording_starts[recording_first_cycle]
             folder.write_recording(
-                f"cycles_{recording_first_cycle:04d}-{cycle:04d}",
+                f"{percent:03d}pct_cycles_{recording_first_cycle:04d}-{cycle:04d}",
                 training_recording(
                     scene,
-                    window,
-                    recording_first_cycle,
-                    total_cycles,
+                    recorder.take(),
+                    percent,
+                    (recording_first_cycle, cycle),
                     configuration,
                     folder,
                 ),
             )
-        if cycle < total_cycles and recording_starts(cycle + 1):
-            recorder.arm(recording_frames)
+        if (cycle + 1) in recording_starts and not recorder.recording:
+            recorder.arm(episode_steps, record_worlds)
             recording_first_cycle = cycle + 1
         if (
             cycle % run_settings.checkpoint_every_cycles == 0
             or cycle == total_cycles
             or out_of_time
         ):
-            folder.save_checkpoint(cycle, agents.state_dict())
-            if run_settings.report:
-                _write_training_report(folder, configuration, categories)
+            folder.save_checkpoint(
+                cycle,
+                agents.state_dict(),
+                tow_top=environment.tow.top if towed else None,
+            )
         if out_of_time:
             print(
                 f"Stopped after cycle {cycle} of {total_cycles}: another cycle"
@@ -327,17 +321,57 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     return folder.path
 
 
-def _check_recording_fits(environment: Environment, frames: int) -> None:
-    """Fail clearly where recording one episode length would take too much
-    device memory: the poses, targets, and episode starts of every world."""
-    world_count, position_count = environment.diagnostics.simulation.qpos.shape
-    needed = frames * world_count * (4 * (position_count + 2) + 1)
+def _agents_for(
+    environment: Environment,
+    configuration: Configuration,
+    rollout_window_steps: int,
+    mean_action_world_count: int = 0,
+) -> Agents:
+    """Agents that fit the environment: its body and its reward channels; in
+    training, the last ``mean_action_world_count`` worlds act with the mean
+    action and are not learned from."""
+    return Agents(
+        environment.segment_count,
+        environment.observation_size,
+        environment.world_count,
+        rollout_window_steps,
+        configuration.agents,
+        configuration.run.seed,
+        environment.segment_action_sizes,
+        environment.leg_motor_count,
+        environment.reward_channel_count,
+        mean_action_world_count,
+    )
+
+
+def _recording_starts(
+    total_cycles: int, episode_steps: int, window_steps: int
+) -> dict[int, int]:
+    """The cycle each training recording starts at, with its percent.
+
+    A recorded world waits up to an episode for its next start and then
+    records one, so a recording spans up to two episodes of windows; each
+    starts that early, or at the first cycle, to end by its share of the
+    update cycles.
+    """
+    span = math.ceil(2 * episode_steps / window_steps)
+    return {
+        max(1, round(percent / 100 * total_cycles) - span + 1): percent
+        for percent in RECORDING_PERCENTS
+    }
+
+
+def _check_recording_fits(environment: Environment, frames: int, worlds: int) -> None:
+    """Fail clearly where recording one episode would take too much device
+    memory: the poses and episode starts of the recorded worlds."""
+    position_count = environment.diagnostics.simulation.qpos.shape[1]
+    needed = frames * worlds * (4 * position_count + 1)
     if needed > RECORDING_MEMORY_LIMIT_BYTES:
         raise SettingsError(
-            f"Recording one episode length ({frames:,} steps of {world_count:,}"
-            f" worlds) needs {needed / 2**30:.1f} GiB of device memory, more than"
-            f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: shorten the episodes,"
-            " use fewer worlds, or set [run] record_every_episodes = 0"
+            f"Recording one episode ({frames:,} steps of {worlds:,} worlds) needs"
+            f" {needed / 2**30:.1f} GiB of device memory, more than"
+            f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: record fewer worlds"
+            " with [run] record_worlds"
         )
 
 
@@ -371,9 +405,13 @@ def _check_agents_can_start_from(
 
 
 def _training_categories(
-    loop: InteractionLoop, agents: Agents, environment: Environment
+    loop: InteractionLoop,
+    agents: Agents,
+    environment: Environment,
+    measuring: bool = False,
 ) -> list[LoggedCategory]:
-    """Every diagnostics category logged once per window, in report order."""
+    """Every diagnostics category logged once per window, in report order;
+    ``measuring`` adds the tow and what the mean-action worlds measured."""
     loop_diagnostics = loop.diagnostics
     return [
         LoggedCategory(
@@ -381,7 +419,7 @@ def _training_categories(
             "Episodes",
             "Means over the episodes that ended in each window; 'episode ended' "
             "counts them. Windows in which no episode ended have no values.",
-            loop_diagnostics.episode_window.descriptions,
+            loop.diagnostics.episode_window.descriptions,
             loop_diagnostics.episode_window.result,
         ),
         _distribution_category(
@@ -403,6 +441,23 @@ def _training_categories(
         ),
         _timing_category(loop),
         _physics_category(loop),
+        *(_tow_category(environment) if measuring else []),
+    ]
+
+
+def _tow_category(environment: Environment) -> list[LoggedCategory]:
+    """The tow's top after each cycle and the mean-action worlds' last window."""
+    facts = environment.tow.facts
+    return [
+        LoggedCategory(
+            "tow",
+            "Tow",
+            "After each update cycle. The mean-action worlds act with the agents'"
+            " mean action, half at the tow's top, half without tow; their values"
+            " are over the window that last moved the top, NaN before one.",
+            descriptions(facts),
+            lambda: values(facts),
+        )
     ]
 
 
@@ -462,31 +517,6 @@ def _physics_category(loop: InteractionLoop) -> LoggedCategory:
         "number of worlds contacts and constraints_per_world rows per world.",
         simulation_window.descriptions,
         simulation_window.result,
-    )
-
-
-def _write_training_report(
-    folder: RunFolder, configuration: Configuration, categories: list[LoggedCategory]
-) -> None:
-    """Refresh the run's report from its whole log."""
-    sessions = folder.read_run_info()["sessions"]
-    run_facts = {
-        "run_folder": str(folder.path),
-        "started": sessions[0]["started"],
-        "training_sessions": len(sessions),
-        "code_version": sessions[-1]["git_commit"] or "unknown",
-        "device": sessions[-1]["device"],
-    }
-    if configuration.run.start_from is not None:
-        run_facts["agents_started_from"] = sessions[0]["checkpoint"]
-    write_training_report(
-        folder.report_path,
-        folder.path.name,
-        run_facts,
-        categories,
-        folder.read_log(),
-        configuration.training_values(),
-        sessions,
     )
 
 
@@ -558,18 +588,12 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     folder = RunFolder.open(evaluation.source)
     checkpoint_path = folder.checkpoint_named_by(evaluation.source)
 
-    environment = Environment(configuration.environment)
-    # Evaluation never stores or learns, so the agents' storage is one step.
-    agents = Agents(
-        environment.segment_count,
-        environment.observation_size,
-        environment.world_count,
-        1,
-        configuration.agents,
-        configuration.run.seed,
-        environment.segment_action_sizes,
-        environment.leg_motor_count,
+    # Each world's first episode is judged, so every one starts at the start.
+    environment = Environment(
+        replace(configuration.environment, stagger_first_episodes=False)
     )
+    # Evaluation never stores or learns, so the agents' storage is one step.
+    agents = _agents_for(environment, configuration, 1)
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])
     loop = InteractionLoop(environment, agents, configuration.interaction_loop)
@@ -606,7 +630,11 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     for actor_name, make_actor in actors.items():
         for seed in evaluation.seeds:
             if evaluation.record:
-                recorder.arm(configuration.environment.max_episode_steps)
+                recorder.arm(
+                    configuration.environment.max_episode_steps,
+                    environment.world_count,
+                    at_next_episode=False,
+                )
             progress.start(actor_name, seed)
             loop.evaluate(make_actor(seed), seed)
             record = {"seed": seed}
@@ -616,12 +644,11 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
             results[actor_name].append(record)
             progress.finish(record)
             if evaluation.record:
-                window = recorder.take(1, "all", "ranked")
                 folder.write_evaluation_recording(
                     f"{stem}_{actor_name.replace(' ', '_')}_seed{seed}",
                     evaluation_recording(
                         scene,
-                        window,
+                        recorder.take(),
                         actor_name,
                         seed,
                         checkpoint_path,
@@ -642,11 +669,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     folder.write_evaluation(
         stem, {"run_facts": run_facts, "settings": settings, "results": results}
     )
-    report_path = folder.evaluations / f"{stem}.html"
-    write_evaluation_report(
-        report_path, folder.path.name, run_facts, categories, results, settings
-    )
-    print(f"\nResults: {report_path}")
+    print(f"\nResults: {folder.evaluations / stem}.json")
     return folder.path
 
 

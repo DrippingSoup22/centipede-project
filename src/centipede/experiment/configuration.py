@@ -9,7 +9,7 @@ There are three kinds of file, told apart by their ``[run]`` section:
   ``update_cycles``, and the session's ``time_limit_hours``;
 - an **evaluation file** (``mode = "evaluate"``) names a run or one of its
   checkpoints, holds ``[evaluation]``, and may change ``[environment]``
-  settings, such as farther targets or the CPU backend.
+  settings, such as the line's angle or the CPU backend.
 
 Continuing and evaluation files start from the named run's saved
 configuration, and their own sections replace the matching values. Every
@@ -46,37 +46,37 @@ class RunSettings:
     """The [run] section of a training run.
 
     ``start_from`` is a run folder (its latest checkpoint) or a checkpoint
-    file whose agents the new run begins with. The ``record_*`` settings say
-    which episode lengths are recorded for replay, each as one file, how many
-    worlds each keeps (``record_worlds``: a number, or ``"all"``), which ones
-    when not all, and how many levels their ranks are sorted into.
+    file whose agents the new run begins with. ``record_worlds`` is how many
+    worlds, the first ones, are recorded for replay at 25, 50, 75 and 100% of
+    the update cycles, one episode each; 0 records nothing.
     ``time_limit_hours`` bounds one training session: the run stops cleanly,
-    with a checkpoint, before a cycle that would end after it. See
+    with a checkpoint, before a cycle that would end after it. With
+    ``mean_action_worlds_per_group`` the last worlds act with the agents'
+    mean action and are not learned from: that many at the tow's top, as many
+    without tow (docs/follow-line/task.md). See
     docs/configuration.md.
     """
 
     name: str
     seed: int
     checkpoint_every_cycles: int
-    report: bool
     runs_folder: Path
     start_from: Path | None
-    record_every_episodes: int
-    record_levels: int
-    record_worlds: int | str
-    record_selection: str
+    record_worlds: int
     time_limit_hours: float | None
+    mean_action_worlds_per_group: int
 
     @classmethod
     def from_section(cls, values: dict) -> "RunSettings":
         """Check the section's values and fill in the defaults."""
         section = SettingsSection(values, "run")
         section.choice("mode", ("train",))
-        if "record_per_level" in values:
+        retired = sorted(set(values) & set(RETIRED_SETTINGS["run"]))
+        if retired:
             raise SettingsError(
-                "[run] record_per_level was replaced on 2026-10-08 by record_worlds,"
-                ' how many worlds a recording keeps in all, or "all" (the default);'
-                " record_levels x record_per_level gives the number it kept"
+                f"[run] {', '.join(retired)} retired on 2026-10-14: record_worlds"
+                " (0 by default) records that many worlds, one episode each, at"
+                " 25, 50, 75 and 100% of the update cycles"
             )
         checkpoint_every_cycles = section.positive_integer(
             "checkpoint_every_cycles", default=16
@@ -85,18 +85,13 @@ class RunSettings:
             name=section.text("name"),
             seed=section.integer("seed", default=0, minimum=0),
             checkpoint_every_cycles=checkpoint_every_cycles,
-            report=section.boolean("report", default=True),
             runs_folder=section.path("runs_folder", default=Path("runs")),
             start_from=section.path("start_from", default=None),
-            record_every_episodes=section.integer(
-                "record_every_episodes", default=1, minimum=0
-            ),
-            record_levels=section.positive_integer("record_levels", default=4),
-            record_worlds=section.count_or_all("record_worlds", default="all"),
-            record_selection=section.choice(
-                "record_selection", ("ranked", "first"), default="ranked"
-            ),
+            record_worlds=section.integer("record_worlds", default=0, minimum=0),
             time_limit_hours=section.positive_number("time_limit_hours", default=None),
+            mean_action_worlds_per_group=section.integer(
+                "mean_action_worlds_per_group", default=0, minimum=0
+            ),
         )
         section.reject_unknown_keys()
         # The name becomes part of a folder name.
@@ -206,7 +201,7 @@ def read_toml(path: Path) -> dict[str, Any]:
 
 
 def dotted_keys(path: Path) -> list[str]:
-    """The settings a file sets itself, as ``"environment.target.arrival_radius_m"``."""
+    """The settings a file sets itself, as ``"environment.tow.start"``."""
     return sorted(_dotted(read_toml(path)))
 
 
@@ -307,7 +302,28 @@ def _checked_configuration(values: dict, mode: str, **extra: Any) -> Configurati
             f"[environment.simulation] backend is {backend!r}, got "
             f"{configuration.agents.device!r}"
         )
+    if mode == "train":
+        _check_mean_action_worlds(configuration)
     return configuration
+
+
+def _check_mean_action_worlds(configuration: Configuration) -> None:
+    """Fail clearly where the mean-action worlds or the tow cannot work: the
+    worlds need some worlds left to learn from, and the tow fades only by
+    what the untowed ones measure."""
+    worlds_per_group = configuration.run.mean_action_worlds_per_group
+    environment = configuration.environment
+    world_count = environment.simulation.world_count
+    if 2 * worlds_per_group >= world_count:
+        raise SettingsError(
+            f"[run] mean_action_worlds_per_group leaves no world to learn from:"
+            f" 2 x {worlds_per_group} of {world_count} worlds"
+        )
+    if environment.tow.start > 0 and not worlds_per_group:
+        raise SettingsError(
+            "[environment.tow] start fades by what the untowed mean-action"
+            " worlds do: set [run] mean_action_worlds_per_group"
+        )
 
 
 # -- Helpers --------------------------------------------------------------------
@@ -327,10 +343,19 @@ def _with_episode_discount(agents_values: dict, max_episode_steps: int) -> dict:
 
 
 # Settings that older runs saved and the current code no longer has, by
-# section. record_every_cycles recorded single windows; record_every_episodes
-# replaced it, with its own default. record_per_level kept that many worlds of
-# each level; record_worlds replaced it, keeping every world by default.
-RETIRED_SETTINGS = {"run": ("record_every_cycles", "record_per_level")}
+# section. Recordings once covered single windows (record_every_cycles), then
+# every few episode lengths of ranked worlds (record_every_episodes,
+# record_levels, record_per_level, record_selection); since 2026-10-14 they
+# are one episode of the first record_worlds worlds at fixed points.
+RETIRED_SETTINGS = {
+    "run": (
+        "record_every_cycles",
+        "record_every_episodes",
+        "record_levels",
+        "record_per_level",
+        "record_selection",
+    )
+}
 
 
 def _saved_configuration(source: Path) -> dict:
@@ -363,7 +388,7 @@ def _merged(base: dict, changes: dict) -> dict:
 
 
 def _dotted(values: dict, prefix: str = "") -> dict[str, Any]:
-    """Nested tables flattened to ``{"target.distance_range_m": value}``."""
+    """Nested tables flattened to ``{"tow.start": value}``."""
     flat = {}
     for key, value in values.items():
         if isinstance(value, dict):

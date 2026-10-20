@@ -1,41 +1,46 @@
-"""Tests for the terminal's view of a training run: one line per window."""
+"""Tests for the terminal's view of a run: one line per window or pass."""
+
+import math
 
 from centipede.experiment.progress import (
     EvaluationProgress,
     TrainingProgress,
-    reward_weights,
     training_settings,
 )
 
-# Step facts of two segments, as the log holds them: the head moves 0.4 mm per
-# 20 ms step, 0.3 mm of it toward its target.
+# Step facts of two units, as the log holds them: the line pays 0.4 and 0.2 mm
+# a 20 ms step, they go 0.4 and 0.2 mm along it, 1 and 3 mm from it; one foot
+# in ten lifts off each step; the feet lag those ahead by 0.5 rad, and the
+# two sides alternate.
 STEP_FACTS = {
-    "reward_parts": [[0.0, -0.003, -0.001, 0.0], [0.0, -0.002, 0.0, 0.0]],
+    "reward_parts": [[0.4, -0.1], [0.2, -0.1]],
+    "segment_progress": [0.0004, 0.0002],
+    "off_line": [0.001, 0.003],
+    "lift_off": [[0.1, 0.0], [0.0, 0.1]],
     "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
-    "segment_moved": [0.0004, 0.0002],
-    "segment_progress": [0.0003, 0.0001],
+    "neighbour_lag": [[0.5, 0.5]],
+    "neighbour_lag_consistency": [[1.0, 1.0]],
+    "left_right_lag": [math.pi, math.pi],
+    "left_right_lag_consistency": [0.5, 0.5],
 }
-
-
-def window(endings):
-    return {
-        "timing": {"collecting_seconds": 20.5, "learning_seconds": 2.6},
-        "step_facts": STEP_FACTS,
-        "episode_distributions": {"ending": endings},
-    }
+RESULTS = [
+    *("15.0", "mm/s", "15.0", "mm/s", "2.0", "25%"),
+    *("+29", "1.00", "+180", "0.50", "2.5", "25%"),
+]
 
 
 def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys):
-    # Episodes of two windows: the endings count the last two windows.
-    progress = TrainingProgress(
-        first_cycle=3, total_cycles=12, window_steps=4, episode_steps=8
-    )
+    progress = TrainingProgress(first_cycle=3, total_cycles=12, window_steps=4)
     for steps_taken in range(1, 5):
         progress.step(steps_taken)
     progress.learning()
-    progress.finish(window([1, 0, 0, 1, 2, 0]))
-    progress.finish(window([0, 0, 0, 0, 0, 0]))
-    progress.finish(window([0, 1, 0, 0, 0, 1]))
+    progress.finish(
+        {
+            "timing": {"collecting_seconds": 20.5, "learning_seconds": 2.6},
+            "step_facts": STEP_FACTS,
+            "episodes": {"strayed": 0.25},
+        }
+    )
 
     output = capsys.readouterr().out
     drawings = output.split("\r")[1:]
@@ -44,14 +49,7 @@ def test_a_window_redraws_its_line_as_it_fills_then_ends_with_its_results(capsys
     assert drawings[5].endswith("\n")  # the results end the window's line
     assert "\n" not in "".join(drawings[:5])  # until then it is redrawn in place
     # The time left: the 9 windows after window 3 at 23.1 s each.
-    assert drawings[5].split() == [
-        *("3/12", "23.1", "s", "|", "-0.00300", "20.0", "mm/s", "15.0", "mm/s"),
-        *("25%", "|", "4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m28s"),
-    ]
-    assert drawings[6].split()[-9:] == [
-        *("4", "25%", "0%", "0%", "25%", "50%", "0%", "|", "3m05s")
-    ]
-    assert drawings[7].split()[-9:-2] == ["2", "0%", "50%", "0%", "0%", "0%", "50%"]
+    assert drawings[5].split() == ["3/12", "23.1", "s", "|", *RESULTS, "|", "3m28s"]
 
 
 def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
@@ -59,25 +57,16 @@ def test_an_evaluation_pass_fills_toward_the_time_limit_then_shows_its_episodes(
 ):
     progress = EvaluationProgress(total_passes=2, max_episode_steps=10)
     progress.start("agents", seed=7)
-    for steps_taken in range(1, 6):  # every world arrived after 5 steps
+    for steps_taken in range(1, 6):
         progress.step(steps_taken)
-    progress.finish(
-        {
-            "step_facts": STEP_FACTS,
-            "episode_distributions": {"ending": [1, 1, 0, 0, 0, 0]},
-        }
-    )
+    progress.finish({"step_facts": STEP_FACTS, "episodes": {"strayed": 0.25}})
 
     drawings = capsys.readouterr().out.split("\r")[1:]
     assert drawings[0].startswith(" 1/2  agents, seed 7  ")
     assert "[##..................]  1/10 steps" in drawings[0]
-    # Finished early, and the row holds the first episodes.
     row = drawings[-1].split()
     assert row[:4] == ["1/2", "agents,", "seed", "7"]
-    assert row[-13:] == [
-        *("|", "20.0", "mm/s", "15.0", "mm/s", "25%", "|"),
-        *("50%", "50%", "0%", "0%", "0%", "0%"),
-    ]
+    assert row[5:] == ["|", *RESULTS]
 
 
 def test_the_settings_header_names_the_six_training_settings_and_what_they_make():
@@ -98,19 +87,3 @@ def test_the_settings_header_names_the_six_training_settings_and_what_they_make(
     assert "131,072 samples" in lines[11]
     assert "  [run]  seed* = 1" in lines
     assert "  [environment]  max_episode_steps = 1024" in lines
-
-
-def test_the_reward_weights_follow_the_settings_header():
-    text = reward_weights(
-        {"arrival": 1.0, "progress": 0.2314, "step_cost": 0.000904},
-        {"step_cost": 0.2314, "body_contact": 0.3471},
-        discount=0.99729,
-    )
-
-    lines = text.splitlines()
-    assert lines[1].split() == [
-        *("per", "step:", "arrival", "1", "progress", "0.231"),
-        *("step_cost", "0.000904"),
-    ]
-    assert lines[4].endswith("step_cost 0.231  body_contact 0.347  (budget 0.579)")
-    assert lines[5] == "  discount 0.99729"

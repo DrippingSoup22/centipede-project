@@ -6,7 +6,7 @@ worlds as the first dimension. See docs/agents.md.
 """
 
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import torch
@@ -16,6 +16,10 @@ from rl_lib.normalization import ObservationNormalizer
 
 from centipede.agents.rollout_storage import RolloutStorage
 from centipede.agents.settings import AgentSettings
+
+# The adaptive learning rate's step and limits (Rudin et al., CoRL 2021).
+ADAPTIVE_STEP = 1.5
+ADAPTIVE_LIMITS = (1e-5, 1e-2)
 
 
 class SegmentAgent:
@@ -30,13 +34,17 @@ class SegmentAgent:
         settings: AgentSettings,
         seed: int,
         action_size: int,
+        reward_channel_count: int = 1,
+        advantage_weights: tuple[float, ...] = (),
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
         The seed sets the networks' starting weights and starts the PPO's own
         generator, which draws its actions and orders its minibatches.
         ``action_size`` is how many motors the segment commands: its leg
-        motors, and with spine control the spine joint behind it.
+        motors, and with spine control the spine joint behind it. The agent
+        has a critic for each of the ``reward_channel_count`` reward channels,
+        weighed by ``advantage_weights`` (empty: 1 each).
         """
         self.segment_index = segment_index
         self.settings = settings
@@ -52,22 +60,32 @@ class SegmentAgent:
                 action_size=action_size,
                 hidden_sizes=settings.hidden_layers,
                 initial_std=settings.initial_action_std,
-                std_mode="global",
+                std_mode="gsde" if settings.state_dependent_noise_steps else "global",
+                activation=settings.actor_activation,
             )
-            critic_network = StateValueNetwork(
-                observation_size=observation_size,
-                hidden_sizes=settings.hidden_layers,
-            )
+            critic_networks = [
+                StateValueNetwork(observation_size, settings.hidden_layers)
+                for _ in range(reward_channel_count)
+            ]
         # Optimizers keep references to the parameters, so they are created
         # after the networks have moved to the device.
         actor_network.to(device)
-        critic_network.to(device)
+        for network in critic_networks:
+            network.to(device)
+        several_critics = reward_channel_count > 1
 
         self.ppo = PPO(
             actor_network,
-            _optimizer(actor_network, settings),
-            critic_network,
-            _optimizer(critic_network, settings),
+            _optimizer(actor_network.parameters(), settings),
+            critic_networks if several_critics else critic_networks[0],
+            _optimizer(
+                [
+                    parameter
+                    for network in critic_networks
+                    for parameter in network.parameters()
+                ],
+                settings,
+            ),
             clip_ratio=settings.ppo.clip_ratio,
             entropy_coefficient=settings.ppo.entropy_coefficient,
             seed=seed,
@@ -75,7 +93,11 @@ class SegmentAgent:
             action_low=[-1.0] * action_size,
             action_high=[1.0] * action_size,
             noise_beta=settings.exploration_noise_beta,
+            exploration_matrix_steps=max(settings.state_dependent_noise_steps, 1),
             temporal_smoothness_coefficient=settings.ppo.temporal_smoothness_coefficient,
+            advantage_weights=(advantage_weights or None) if several_critics else None,
+            value_normalization=settings.value_normalization,
+            value_normalization_horizon=settings.value_normalization_horizon,
         )
         # Scheduled spreads are set by the experiment, never learned.
         if settings.action_std_schedule != "learned":
@@ -93,6 +115,7 @@ class SegmentAgent:
             observation_size,
             device=device,
             action_size=action_size,
+            reward_channel_count=reward_channel_count,
         )
         # Completed updates, saved with the agent's state.
         self.update_count = 0
@@ -138,6 +161,21 @@ class SegmentAgent:
         for optimizer in self._optimizers():
             for group in optimizer.param_groups:
                 group["lr"] = learning_rate
+
+    def adapt_learning_rate(self, approximate_kl: float) -> None:
+        """Rudin et al.'s rule (CoRL 2021, algorithm 1), once per update: the
+        actor's learning rate falls by ADAPTIVE_STEP after an update whose KL
+        was above twice ``desired_kl`` and rises by it after one below half,
+        within ADAPTIVE_LIMITS. The critics keep theirs: the KL measures only
+        how far the policy moved. Their rule acts after every minibatch; once
+        per update, the GPU never waits in the middle of one."""
+        desired_kl = self.settings.desired_kl
+        low, high = ADAPTIVE_LIMITS
+        for group in self.ppo.actor_optimizer.param_groups:
+            if approximate_kl > 2 * desired_kl:
+                group["lr"] = max(low, group["lr"] / ADAPTIVE_STEP)
+            elif 0 < approximate_kl < desired_kl / 2:
+                group["lr"] = min(high, group["lr"] * ADAPTIVE_STEP)
 
     def set_action_std(self, action_std: float) -> None:
         """Give every action the spread ``action_std`` from the next step on."""
@@ -185,23 +223,30 @@ class SegmentAgent:
         its new motors; each new action's spread starts at
         ``initial_action_std``. The saved optimizers and random generator no
         longer fit, so the agent keeps its fresh ones, and its normaliser gives
-        each new input a mean of 0 and a spread of 1.
+        each new input a mean of 0 and a spread of 1. Every critic is widened,
+        and the critics' value normaliser restored as saved.
         """
         ppo_state = state["ppo"]
         normaliser_state = state["observation_normaliser"]
-        fresh_state = self.ppo.state_dict()
+        saved_critics = ppo_state["critic_network"]
+        if not self.ppo.several_critics:
+            saved_critics = [saved_critics]
+        # Each network's saved state, fresh state, and the network.
+        networks = [
+            (ppo_state["actor_network"], self.ppo.actor_network),
+            *zip(saved_critics, self.ppo.critic_networks, strict=True),
+        ]
         if widen and any(
             saved.shape != fresh.shape
-            for part in ("actor_network", "critic_network")
+            for saved_state, network in networks
             for saved, fresh in zip(
-                ppo_state[part].values(), fresh_state[part].values(), strict=True
+                saved_state.values(), network.state_dict().values(), strict=True
             )
         ):
-            for part, network in (
-                ("actor_network", self.ppo.actor_network),
-                ("critic_network", self.ppo.critic_network),
-            ):
-                network.load_state_dict(_widened(ppo_state[part], fresh_state[part]))
+            for saved_state, network in networks:
+                network.load_state_dict(_widened(saved_state, network.state_dict()))
+            if "value_normalizer" in ppo_state:
+                self.ppo.value_normalizer.load_state_dict(ppo_state["value_normalizer"])
             normaliser_state = _widened_normaliser(
                 normaliser_state, self.observation_normaliser.observation_size
             )
@@ -283,10 +328,9 @@ def _widened_normaliser(
 
 
 def _optimizer(
-    network: torch.nn.Module, settings: AgentSettings
+    parameters: Iterable[torch.nn.Parameter], settings: AgentSettings
 ) -> torch.optim.Optimizer:
-    """The optimizer the settings name, for one network's parameters."""
-    parameters = network.parameters()
+    """The optimizer the settings name, for the given networks' parameters."""
     if settings.optimizer == "sgd":
         return torch.optim.SGD(
             parameters,

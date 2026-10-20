@@ -1,6 +1,9 @@
 # Smoke test: checks that training runs from start to finish, in seconds, on
-# the CPU. It writes a run folder with its configuration, log, checkpoints, and
-# a replay recording of every window, but no report; its results mean nothing.
+# the CPU, with every part of the follow-line design: the headless tester, two
+# critics per agent, gSDE, value normalisation, the adaptive learning rate,
+# the tow and its mean-action worlds. It writes a run folder with its
+# configuration, log, checkpoints and a replay recording; its results mean
+# nothing.
 #
 #   python -m centipede configs/smoke.toml
 
@@ -9,23 +12,32 @@ mode = "train"
 name = "smoke"
 seed = 1
 checkpoint_every_cycles = 1
-report = false
-record_every_episodes = 1
+record_worlds = 2
+mean_action_worlds_per_group = 1
 
 [environment]
 max_episode_steps = 8
 
+[environment.tow]
+start = 0.2
+
 [environment.simulation]
-model_path = "models/assembly_v3.xml"
+model_path = "models/assembly_v5_headless.xml"
 backend = "cpu"
-world_count = 2
+world_count = 6
 
 [agents]
 device = "cpu"
 hidden_layers = [16, 16]
+actor_activation = "tanh"
+state_dependent_noise_steps = 4
+advantage_weights = [1.0, 0.8]
+value_normalization = true
+value_normalization_horizon = 10
+learning_rate_schedule = "adaptive"
 
 [agents.ppo]
-minibatch_size = 16
+minibatch_size = 32
 
 [interaction_loop]
 rollout_window_steps = 16

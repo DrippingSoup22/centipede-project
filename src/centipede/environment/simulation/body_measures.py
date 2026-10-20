@@ -25,6 +25,8 @@ class BodyMeasures:
     to its spine joint, the others' from joint to joint, the rear segment's
     twice the way from its joint to its centre. ``segment_weights_n`` are
     each segment's own weight, its body and legs without the other segments.
+    ``unit_spacing_m`` is the mean distance between neighbouring segments'
+    centres.
     """
 
     unit_weight_n: float
@@ -33,6 +35,7 @@ class BodyMeasures:
     turning_circle_m: float
     segment_lengths_m: tuple[float, ...]
     segment_weights_n: tuple[float, ...] = ()
+    unit_spacing_m: float = 0.0
 
 
 def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
@@ -96,6 +99,7 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
         turning_circle_m=float(turning_circle),
         segment_lengths_m=tuple(float(length) for length in segment_lengths),
         segment_weights_n=tuple(float(mass * gravity) for mass in own_masses),
+        unit_spacing_m=float(unit_spacing),
     )
 
 

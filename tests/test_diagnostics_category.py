@@ -1,5 +1,6 @@
 """Tests for describing the values of a diagnostics category."""
 
+import math
 from dataclasses import dataclass
 
 import pytest
@@ -127,3 +128,26 @@ def test_a_window_summary_counts_the_masked_rows_in_each_bin():
 
     window.clear()
     assert window.histograms()["length"].tolist() == [0.0, 0.0]
+
+
+@dataclass(frozen=True)
+class ExampleLags:
+    known: torch.Tensor = measure("Both phases known", summary="share")
+    lag: torch.Tensor = measure("A lag", "rad", summary="angle", counted_where="known")
+
+
+def test_an_angle_gives_its_mean_consistency_and_lock_where_counted():
+    lags = ExampleLags(known=torch.zeros(2, dtype=torch.bool), lag=torch.zeros(2))
+    window = WindowSummary(lags)
+
+    # World 0 keeps a lag of 0; world 1 shows pi once, then nothing counted.
+    for known, lag in (([True, True], [0.0, math.pi]), ([True, False], [0.0, 0.0])):
+        lags.known.copy_(torch.tensor(known))
+        lags.lag.copy_(torch.tensor(lag))
+        window.add()
+
+    summary = window.result()
+    assert list(summary) == ["known", "lag", "lag_consistency", "lag_lock"]
+    assert summary["lag"].abs() < 1e-6
+    torch.testing.assert_close(summary["lag_consistency"], torch.tensor(1 / 3))
+    torch.testing.assert_close(summary["lag_lock"], torch.tensor(1.0))

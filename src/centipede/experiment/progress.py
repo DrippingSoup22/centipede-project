@@ -14,45 +14,53 @@ results. Lines are redrawn in place with a carriage return, only when the bar
 grows, so a terminal, or a log that captures the output, shows one line per
 pass.
 
-In training a pass is one window. Its results are the time it took, values of
-every step of every world, which do not depend on where each world is in its
-episode and so move smoothly from window to window (the reward per step, the
-head's speed along the ground and toward its target, and the share of steps
-with a body on the ground), and how episodes ended. All worlds start
-together, so their episodes end in waves; the endings are therefore shares of
-the episodes that ended over the last episode length of windows, in which
-every world ends at least one.
-
-In evaluation a pass is one actor and seed: every world runs its first
-episode, which ends at the target, out of the range circle, or at the time
-limit, so the bar fills toward the time limit and jumps to full when every
-world has finished sooner. Its results are the same values over the steps of
-those first episodes, and how they ended.
+In training a pass is one window; in evaluation, one actor and seed, every
+world running its first episode, so the bar fills toward the time limit and
+jumps to full when every world has finished sooner. Their results are the
+time they took and values of every step of every world: the line paid, how
+fast the units went along the line and how far from it they were, the gait's
+step rate and two lags, and the share of steps with a body down; and the
+share of the episodes that ended because the body lost the line.
 """
 
 import math
 import time
-from collections import deque
 from typing import Any
 
 from centipede.experiment.report import STEP_SECONDS
 
 BAR_WIDTH = 20
 SETTINGS_LINE_WIDTH = 100
-# How episodes end, in the order of the environment's ending histogram: at the
-# target; out of time with less than a quarter of the start distance left,
-# less than half, less than all of it, or no closer; out of the range circle.
-ENDINGS = ("arrived", "<1/4", "<1/2", "closer", "not closer", "left circle")
 TRAINING_COLUMNS = (
-    "{cycle}  {took:>6}  |  {reward:>11}  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {episodes:>8}  {endings}  |  {left:>6}"
+    "{cycle}  {took:>6}  |  {line:>9}  {speed:>9}  {off:>6}  {strayed:>7}"
+    "  {wave:>9}  {left_right:>10}  {steps:>6}  {body_down:>9}  |  {left:>6}"
 )
 EVALUATION_COLUMNS = (
-    "{number}  {actor:<26}  {took:>6}  |  {speed:>9}  {toward:>9}  {body_down:>9}"
-    "  |  {endings}"
+    "{number}  {actor:<26}  {took:>6}  |  {line:>9}  {speed:>9}  {off:>6}"
+    "  {strayed:>7}  {wave:>9}  {left_right:>10}  {steps:>6}  {body_down:>9}"
 )
-# Where the body-on-ground flag sits among a segment's contact flags.
+COLUMN_NAMES = {
+    "line": "line",
+    "speed": "speed",
+    "off": "off",
+    "strayed": "strayed",
+    "wave": "wave",
+    "left_right": "left-right",
+    "steps": "steps",
+    "body_down": "body down",
+}
+LEGEND = (
+    "line: the line paid, the units' mean; speed: how fast they went along it;"
+    " off: their\ndistance from it, in mm; strayed: share of the episodes that"
+    " ended because the body\nlost the line. wave: each foot's lag behind the"
+    " same-side foot ahead, in degrees,\nthen its consistency from 0 (none) to 1;"
+    " left-right: the same between a unit's two\nfeet, 180 when they alternate."
+    " steps: each foot's lift-offs a second. body down:\nshare of steps with a"
+    " body on the ground."
+)
+# Where the body-on-ground flag sits among a unit's contact flags.
 BODY_ON_GROUND = 2
+LINE_PART = 0
 
 
 def duration(seconds: float) -> str:
@@ -122,49 +130,16 @@ def training_settings(values: dict[str, Any], written_keys: set[str]) -> str:
     return "\n".join(lines)
 
 
-def reward_weights(
-    per_step: dict[str, float], episode_shares: dict[str, float], discount: float
-) -> str:
-    """The weights the reward's rules give each term, printed under the settings.
-
-    ``per_step`` and ``episode_shares`` are those of ``RewardWeights``; the
-    agents' ``discount`` is shown with them, since the rules rely on it.
-    """
-    lines = [
-        "Reward weights (from [environment.rewards]; rules in docs/environment.md)",
-        "  per step:  "
-        + "  ".join(f"{name} {weight:.3g}" for name, weight in per_step.items()),
-    ]
-    if "progress" in per_step:
-        lines += [
-            "    progress is per halving of the head's distance to its target,",
-            "    received by every follower too, at follower_progress_share",
-        ]
-    if "movement" in per_step:
-        lines.append(
-            "    movement is per step of moving the joints as much as random"
-            " commands do; calm movements pay a small fraction of it"
-        )
-    if episode_shares:
-        lines.append(
-            "  a whole episode of each cost, in arrival rewards:  "
-            + "  ".join(f"{name} {share:.3g}" for name, share in episode_shares.items())
-            + f"  (budget {sum(episode_shares.values()):.3g})"
-        )
-    lines.append(f"  discount {discount:.6g}")
-    return "\n".join(lines)
-
-
 def recording_sizes(
     file_count: int, world_count: int, frames: int, position_count: int
 ) -> str:
     """The recordings a training run will write, with their expected sizes.
 
     A world's frame holds its ``position_count`` positions as 32-bit numbers,
-    the target's position, and whether an episode started there; the rest of
-    a file is small.
+    the line's two ends, and whether an episode started there; the rest of a
+    file is small.
     """
-    file_bytes = frames * world_count * (4 * position_count + 13)
+    file_bytes = frames * world_count * (4 * position_count + 25)
     files = f"{file_count:,} file{'' if file_count == 1 else 's'}"
     return (
         f"Recordings: {files} of {world_count:,} worlds x {frames:,} steps,"
@@ -197,38 +172,50 @@ def _bar(filled: int) -> str:
     return "[" + "#" * filled + "." * (BAR_WIDTH - filled) + "]"
 
 
-def _legend(counted_episodes: str) -> str:
-    """What the speeds and the endings mean, printed above the column names."""
-    return (
-        "speed: the head's, along the ground; toward: how fast it closes on its"
-        f" target.\nEndings: shares of {counted_episodes}. Those out of time are"
-        " split by how much of\nthe start distance was left: <1/4, <1/2, closer"
-        " (less than all of it), or not closer."
-    )
-
-
-def _speed(metres_per_step: float) -> str:
-    return f"{metres_per_step * 1000 / STEP_SECONDS:.1f} mm/s"
-
-
-def _behaviour(step: dict[str, Any]) -> dict[str, str]:
-    """The head's speeds and the share of steps with a body down, from step facts."""
+def _behaviour(step: dict[str, Any], episodes: dict[str, Any]) -> dict[str, str]:
+    """The values of a line, from the step facts and the episodes."""
+    units = len(step["segment_progress"])
+    line = sum(parts[LINE_PART] for parts in step["reward_parts"]) / units
+    speed = sum(step["segment_progress"]) / units
+    off = sum(step["off_line"]) / units
+    steps = sum(sum(feet) for feet in step["lift_off"]) / (2 * units)
     flags = step["contact_flags"]
-    body_down = sum(segment[BODY_ON_GROUND] for segment in flags) / len(flags)
+    body_down = sum(unit[BODY_ON_GROUND] for unit in flags) / units
+    strayed = episodes["strayed"]
     return {
-        "speed": _speed(step["segment_moved"][0]),
-        "toward": _speed(step["segment_progress"][0]),
+        "line": f"{line / STEP_SECONDS:.1f} mm/s",
+        "speed": f"{speed * 1000 / STEP_SECONDS:.1f} mm/s",
+        "off": f"{off * 1000:.1f}",
+        "strayed": "-" if strayed is None else f"{strayed:.0%}",
+        "wave": _lag(step["neighbour_lag"], step["neighbour_lag_consistency"]),
+        "left_right": _lag(step["left_right_lag"], step["left_right_lag_consistency"]),
+        "steps": f"{steps / STEP_SECONDS:.1f}",
         "body_down": f"{body_down:.0%}",
     }
 
 
-def _endings(counts: list[float]) -> str:
-    """Each ending's share of the counted episodes, under its column name."""
-    total = sum(counts)
-    shares = [f"{count / total:.0%}" if total else "-" for count in counts]
-    return "  ".join(
-        share.rjust(len(name)) for share, name in zip(shares, ENDINGS, strict=True)
-    )
+def _lag(means: Any, consistencies: Any) -> str:
+    """A lag over all the feet it was measured at: the direction of the mean of
+    their mean unit vectors, in degrees, and its length."""
+    pairs = [
+        (mean, consistency)
+        for mean, consistency in zip(_flat(means), _flat(consistencies), strict=True)
+        if mean is not None and consistency is not None
+    ]
+    if not pairs:
+        return "-"
+    x = sum(length * math.cos(angle) for angle, length in pairs) / len(pairs)
+    y = sum(length * math.sin(angle) for angle, length in pairs) / len(pairs)
+    return f"{math.degrees(math.atan2(y, x)):+.0f} {math.hypot(x, y):.2f}"
+
+
+def _flat(values: Any):
+    """The numbers of nested lists, in order."""
+    if isinstance(values, list):
+        for value in values:
+            yield from _flat(value)
+    else:
+        yield values
 
 
 class _RedrawnLine:
@@ -271,9 +258,7 @@ class _RedrawnLine:
 class TrainingProgress(_RedrawnLine):
     """One line per window: a filling bar while it runs, then its results."""
 
-    def __init__(
-        self, first_cycle: int, total_cycles: int, window_steps: int, episode_steps: int
-    ) -> None:
+    def __init__(self, first_cycle: int, total_cycles: int, window_steps: int) -> None:
         super().__init__(window_steps)
         self._cycle = first_cycle
         self._total_cycles = total_cycles
@@ -281,60 +266,40 @@ class TrainingProgress(_RedrawnLine):
         # The time the windows so far took, for the training time left.
         self._seconds_taken = 0.0
         self._windows_taken = 0
-        # The ending counts of the windows that make the last episode length.
-        self._recent_endings: deque[list[float]] = deque(
-            maxlen=math.ceil(episode_steps / window_steps)
-        )
 
     def header(self) -> None:
         """The legend and the column names, once before the first window."""
-        span = self._recent_endings.maxlen
-        print(
-            _legend(
-                f"the episodes that ended in the last {span} windows, one episode"
-                " length,\nin which every world ends at least one"
-            ),
-            flush=True,
-        )
+        print(LEGEND, flush=True)
         print(
             TRAINING_COLUMNS.format(
                 cycle="cycle".rjust(self._cycle_width),
                 took="took",
-                reward="reward/step",
-                speed="speed",
-                toward="toward",
-                body_down="body down",
-                episodes="episodes",
-                endings="  ".join(ENDINGS),
                 left="left",
+                **COLUMN_NAMES,
             ),
             flush=True,
         )
 
     def finish(self, record: dict[str, Any]) -> None:
         """Replace the line with the window's results."""
-        timing, step = record["timing"], record["step_facts"]
-        segments = step["reward_parts"]
-        reward_per_step = sum(sum(parts) for parts in segments) / len(segments)
-        self._recent_endings.append(record["episode_distributions"]["ending"])
-        counts = [sum(column) for column in zip(*self._recent_endings, strict=True)]
+        timing = record["timing"]
         took = timing["collecting_seconds"] + timing["learning_seconds"]
         # The training time left, at the mean time of the windows so far.
         self._seconds_taken += took
         self._windows_taken += 1
         windows_left = self._total_cycles - self._cycle
         left = windows_left * self._seconds_taken / self._windows_taken
-        self._end_pass(
-            TRAINING_COLUMNS.format(
-                cycle=self._label(),
-                took=f"{took:.1f} s",
-                reward=f"{reward_per_step:+.5f}",
-                **_behaviour(step),
-                episodes=f"{round(sum(counts))}",
-                endings=_endings(counts),
-                left=duration(left),
-            )
+        row = TRAINING_COLUMNS.format(
+            cycle=self._label(),
+            took=f"{took:.1f} s",
+            left=duration(left),
+            **_behaviour(record["step_facts"], record["episodes"]),
         )
+        # Worlds the GPU physics made non-finite and the run restarted.
+        restarted = record.get("physics", {}).get("restarted_worlds", 0.0)
+        if restarted:
+            row += f"  ({restarted:.4%} of world steps restarted, non-finite physics)"
+        self._end_pass(row)
         self._cycle += 1
 
     def _label(self) -> str:
@@ -354,16 +319,13 @@ class EvaluationProgress(_RedrawnLine):
 
     def header(self) -> None:
         """The legend and the column names, once before the first pass."""
-        print(_legend("every world's first episode"), flush=True)
+        print(LEGEND, flush=True)
         print(
             EVALUATION_COLUMNS.format(
                 number="pass".rjust(self._number_width),
                 actor="actor and seed",
                 took="took",
-                speed="speed",
-                toward="toward",
-                body_down="body down",
-                endings="  ".join(ENDINGS),
+                **COLUMN_NAMES,
             ),
             flush=True,
         )
@@ -382,8 +344,7 @@ class EvaluationProgress(_RedrawnLine):
                 number=number,
                 actor=self._actor,
                 took=duration(took),
-                **_behaviour(record["step_facts"]),
-                endings=_endings(record["episode_distributions"]["ending"]),
+                **_behaviour(record["step_facts"], record["episodes"]),
             )
         )
 

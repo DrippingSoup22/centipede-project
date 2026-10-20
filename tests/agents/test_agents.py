@@ -102,6 +102,43 @@ def test_each_agent_acts_and_learns_from_its_own_segment_only():
     assert agents.diagnostics.learning.actor_loss.ne(0).all()
 
 
+def test_an_adaptive_schedule_lets_each_actor_steer_its_rate_by_its_own_kl():
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "learning_rate_schedule": "adaptive",
+            "desired_kl": 1.0,
+            "ppo": {"minibatch_size": 4},
+        }
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+    )
+    assert settings.learning_rate_at(1, 10) is None  # left to the agents
+    collect_window(agents)
+    agents.update()
+
+    # Each update moved its policy far less than half the desired KL: the
+    # diagnostics hold the rate it used, and each actor's rose by 1.5 for the
+    # next update, while the critics kept theirs.
+    learning_rates = agents.diagnostics.learning.learning_rate.tolist()
+    assert learning_rates == pytest.approx([3e-4] * SEGMENTS)
+    for agent in agents.segment_agents:
+        assert agent.ppo.actor_optimizer.param_groups[0]["lr"] == pytest.approx(4.5e-4)
+        assert agent.ppo.critic_optimizer.param_groups[0]["lr"] == 3e-4
+    # Above twice the desired KL, it falls by 1.5.
+    first = agents.segment_agents[0]
+    first.adapt_learning_rate(2.5)
+    assert first.ppo.actor_optimizer.param_groups[0]["lr"] == pytest.approx(3e-4)
+
+
 def test_a_saved_file_restores_every_agent_and_rejects_another_body():
     original = make_agents()
     collect_window(original)
@@ -157,6 +194,89 @@ def test_segments_may_command_more_motors_and_a_new_run_widens_saved_agents():
         wider.load_state_dict(saved)  # continuing or evaluating needs a match
     wider.load_state_dict(saved, widen=True)
     assert [agent.action_size for agent in wider.segment_agents] == [7, 7, 6]
+
+
+def test_two_reward_channels_are_weighed_and_both_teach():
+    """Each agent has a critic per channel, weighed as the settings say, and
+    learns from both, with value normalisation."""
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "advantage_weights": [1.0, 0.8],
+            "value_normalization": True,
+            "value_normalization_horizon": 10,
+            "ppo": {"minibatch_size": 4},
+        }
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        reward_channel_count=2,
+    )
+    weights = [agent.ppo.advantage_weights.tolist() for agent in agents.segment_agents]
+    assert weights == [[1.0, pytest.approx(0.8)]] * SEGMENTS
+    for step in range(WINDOW_STEPS):
+        agents.act(body_tensor(step, OBSERVATION_SIZE), training=True)
+        agents.record(
+            body_tensor(100 + step, 2),
+            torch.zeros(WORLDS, dtype=torch.bool),
+            torch.zeros(WORLDS, dtype=torch.bool),
+            body_tensor(step + 1, OBSERVATION_SIZE),
+        )
+    agents.update()
+
+    learning = agents.diagnostics.learning
+    assert learning.critic_explained_variances.shape == (SEGMENTS, 2)
+    assert torch.isfinite(learning.critic_explained_variances).all()
+
+
+def test_the_last_worlds_may_act_with_the_mean_action_and_are_never_learned_from():
+    """Of four worlds, the last two measure the policies: they get the mean
+    action, and only the first two are stored."""
+    settings = AgentSettings.from_section(
+        {"hidden_layers": [8], "ppo": {"minibatch_size": 4}}
+    )
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+        mean_action_world_count=2,
+    )
+    observations = body_tensor(0, OBSERVATION_SIZE)
+
+    actions = agents.act(observations, training=True)
+
+    mean_actions = agents.act(observations, training=False)
+    assert torch.equal(actions[2:], mean_actions[2:])
+    assert not torch.equal(actions[:2], mean_actions[:2])
+    storage = agents.segment_agents[1].rollout_storage
+    assert storage.observations.shape[1] == 2
+    agents.record(
+        body_tensor(100),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(1, OBSERVATION_SIZE),
+    )
+    agents.act(body_tensor(1, OBSERVATION_SIZE), training=True)
+    agents.record(
+        body_tensor(101),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        torch.zeros(WORLDS, dtype=torch.bool),
+        body_tensor(2, OBSERVATION_SIZE),
+    )
+    agents.update()
+    assert torch.isfinite(agents.diagnostics.learning.approximate_kl).all()
 
 
 @pytest.mark.parametrize("device", DEVICES)

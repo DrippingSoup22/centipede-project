@@ -36,10 +36,14 @@ class LearningSummary:
     )
     explained_variance: torch.Tensor = measure(
         "How much of the returns' variation the critic predicted before the "
-        "update: 1 exactly, 0 nothing, (N,)"
+        "update: 1 exactly, 0 nothing, (N,); with several critics, the first's"
+    )
+    critic_explained_variances: torch.Tensor = measure(
+        "The same for each critic, one per reward channel, (N, K)"
     )
     learning_rate: torch.Tensor = measure(
-        "The optimizers' learning rate in the update, the same for every agent"
+        "The actor's learning rate in the update; the critics' is the same"
+        " unless the schedule is adaptive, (N,)"
     )
     action_std: torch.Tensor = measure(
         "Each leg action's learned spread, before squashing, in leg action"
@@ -52,25 +56,37 @@ class LearningSummary:
     )
 
 
-# The values copied straight from RL_lib's update summary, in its order.
-SUMMARY_NAMES = tuple(item.name for item in fields(PPOUpdateSummary))
+# The single values copied straight from RL_lib's update summary, in its
+# order; the explained variances, one per critic, are copied apart.
+SUMMARY_NAMES = tuple(
+    item.name for item in fields(PPOUpdateSummary) if item.type is float
+)
 
 
 class AgentDiagnostics:
     """Fills the agents' learning category, ``learning``, which the experiment reads."""
 
     def __init__(
-        self, segment_count: int, leg_motor_count: int, device: torch.device | str
+        self,
+        segment_count: int,
+        leg_motor_count: int,
+        device: torch.device | str,
+        reward_channel_count: int = 1,
     ) -> None:
         """Allocate the category, all zero, for agents whose first
-        ``leg_motor_count`` actions drive their legs."""
+        ``leg_motor_count`` actions drive their legs and that have a critic for
+        each of ``reward_channel_count`` reward channels."""
         self.leg_motor_count = leg_motor_count
         self.learning = LearningSummary(
             **{
                 name: torch.zeros(segment_count, device=device)
                 for name in SUMMARY_NAMES
             },
-            learning_rate=torch.zeros((), device=device),
+            explained_variance=torch.zeros(segment_count, device=device),
+            critic_explained_variances=torch.zeros(
+                (segment_count, reward_channel_count), device=device
+            ),
+            learning_rate=torch.zeros(segment_count, device=device),
             action_std=torch.zeros((segment_count, leg_motor_count), device=device),
             spine_action_std=torch.zeros(segment_count, device=device),
         )
@@ -80,7 +96,8 @@ class AgentDiagnostics:
         summaries: Sequence[PPOUpdateSummary],
         segment_agents: Sequence[SegmentAgent],
     ) -> None:
-        """Copy every agent's update summary and current action spreads.
+        """Copy every agent's update summary, learning rate and current action
+        spreads.
 
         ``summaries`` and ``segment_agents`` are both in segment order.
         """
@@ -92,10 +109,27 @@ class AgentDiagnostics:
         )
         for column, name in enumerate(SUMMARY_NAMES):
             getattr(self.learning, name).copy_(summary_rows[:, column])
+        critics = torch.tensor(
+            [
+                [summary.explained_variance]
+                if isinstance(summary.explained_variance, float)
+                else list(summary.explained_variance)
+                for summary in summaries
+            ]
+        )
+        self.learning.critic_explained_variances.copy_(critics)
+        self.learning.explained_variance.copy_(critics[:, 0])
         with torch.no_grad():
             for segment_index, agent in enumerate(segment_agents):
+                self.learning.learning_rate[segment_index] = (
+                    agent.ppo.actor_optimizer.param_groups[0]["lr"]
+                )
                 # The policy clamps the log spread to [-20, 2] before using it.
+                # gSDE's has one per feature and action: an action's spread
+                # when its features weigh equally is their root mean square.
                 spread = agent.ppo.actor_network.log_std.clamp(-20.0, 2.0).exp()
+                if spread.dim() == 2:
+                    spread = spread.square().mean(dim=0).sqrt()
                 legs = self.leg_motor_count
                 self.learning.action_std[segment_index].copy_(spread[:legs])
                 if agent.action_size > legs:

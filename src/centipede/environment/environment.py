@@ -1,291 +1,264 @@
-"""The environment's front file: the learning task built on the physics simulation.
+"""The environment's front file: the follow-line task built on the physics
+simulation (docs/follow-line/).
 
-It keeps each world's episode state (target, step count, previous positions)
-and coordinates the observation builder, the reward function, the diagnostics,
-and the physics simulation. The interaction loop uses only ``reset`` and
-``step``; the experiment reads ``segment_count``, ``observation_size``, the
-action sizes and ``leg_motor_count`` to create the agents. See
-docs/environment.md.
+It keeps each world's episode state and coordinates the line, the averaged
+forces, the reward, the observations, the tow, the diagnostics and the
+physics simulation. The interaction loop uses only ``reset`` and ``step``;
+the experiment reads ``segment_count``, ``observation_size``, the action
+sizes and ``leg_motor_count`` to create the agents, sets the ramp's weight
+before each update cycle of training with ``set_ramp_weight``, and in
+training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
+first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``.
 """
+
+import math
 
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
-from centipede.environment.observation_builder import (
-    ObservationBuilder,
-    head_forward_direction,
+from centipede.environment.line import StraightLine, forward_axis
+from centipede.environment.observation_builder import ObservationBuilder
+from centipede.environment.reward_function import (
+    CHANNEL_NAMES,
+    AveragedForces,
+    RewardFunction,
 )
-from centipede.environment.reward_function import RewardFunction, joint_angles
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
-from centipede.settings_section import SettingsError
+from centipede.environment.simulation.constants import ACTION_DURATION_S
+from centipede.environment.tow import Tow
 
 
 class Environment:
-    """Batches of centipede worlds, each with a target for the head.
+    """Batches of centipede worlds, each following its straight line.
 
-    Every tensor passed in or out has the worlds as its first dimension. When an
-    episode ends in a world, ``step`` resets that world by itself.
-
-    ``segment_action_sizes`` lists how many actions each segment takes: one
-    per leg motor, ``leg_motor_count`` (six for legs of three joints, eight
-    with ankles), and with spine control one more, the spine joint behind it,
-    for every segment but the rear. ``action_size`` is the width of the joint
-    action, the largest of them; the rear's last column is padding.
+    Every tensor passed in or out has the worlds as its first dimension.
+    Every unit commands its leg motors and, but the rear, the spine joint
+    behind it: ``segment_action_sizes`` lists each unit's actions and
+    ``action_size`` is the width of the joint action, the rear's last column
+    going to no motor. Each spine motor receives ``spine_action_scale`` times
+    its command. Rewards have two accounts, team and own, ``(W, N, 2)``. An
+    episode never terminates: it is cut, and the agents value what would have
+    followed, at the time limit, when the units' mean distance from the line
+    passes their sight radius, or when the physics restarted the world; the
+    world then restarts on a new line.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
-        """Create the simulation and the parts, and allocate the episode state."""
+        """Create the simulation, measuring effort and the joint forces, and
+        the task's parts."""
         self.settings = settings
-        self.simulation = PhysicsSimulation(settings.simulation)
-        self.world_count = self.simulation.world_count
-        self.segment_count = self.simulation.segment_count
+        self.simulation = PhysicsSimulation(
+            settings.simulation, measure_effort=True, measure_joint_forces=True
+        )
+        self.world_count = world_count = self.simulation.world_count
+        self.segment_count = segment_count = self.simulation.segment_count
+        self.leg_motor_count = legs = self.simulation.leg_motor_count
         self.device = self.simulation.physical_state.body_height.device
+        self.body = body = self.simulation.body_measures
+        self.sight_radius_m = settings.sight_radius_spacings * body.unit_spacing_m
 
-        # The radius comes from the configuration and the segment count from
-        # the model, so they can only be checked together, here.
-        if settings.observation_radius >= self.segment_count:
-            raise SettingsError(
-                f"[environment] observation_radius must be less than the model's "
-                f"{self.segment_count} segments, got {settings.observation_radius}"
-            )
+        self.segment_action_sizes = [legs + 1] * (segment_count - 1) + [legs]
+        self.action_size = legs + 1
+        commanded_joints = torch.ones((segment_count, legs + 1), device=self.device)
+        commanded_joints[-1, -1] = 0.0
+        # What each motor receives for a command of 1: the spine's scaled.
+        self.motor_scale = torch.ones(legs + 1, device=self.device)
+        self.motor_scale[-1] = settings.spine_action_scale
 
-        leg_motor_count = self.simulation.leg_motor_count
-        self.leg_motor_count = leg_motor_count
-        self.observation_builder = ObservationBuilder(
-            self.segment_count,
-            settings.observation_radius,
-            self.world_count,
+        self.line = StraightLine(
+            world_count,
+            segment_count,
+            body.unit_spacing_m,
+            self.sight_radius_m,
             self.device,
-            leg_motor_count,
-            spine_observed=settings.spine_control,
+        )
+        self.forces = AveragedForces(
+            world_count,
+            segment_count,
+            body.unit_weight_n,
+            min(1.0, ACTION_DURATION_S / settings.reward.averaging_s),
+            self.device,
+        )
+        self.reward = RewardFunction(
+            settings.reward, body, commanded_joints, self.sight_radius_m
+        )
+        self.reward_channel_count = len(CHANNEL_NAMES)
+        self.observation_builder = ObservationBuilder(
+            segment_count,
+            settings.observation_radius,
+            world_count,
+            legs,
+            body.unit_weight_n,
+            self.device,
         )
         self.observation_size = self.observation_builder.observation_size
-        spine_count = self.segment_count - 1
-        if settings.spine_control:
-            self.segment_action_sizes = [leg_motor_count + 1] * spine_count + [
-                leg_motor_count
-            ]
-        else:
-            self.segment_action_sizes = [leg_motor_count] * self.segment_count
-        self.action_size = max(self.segment_action_sizes)
-        # The joints each segment commands, among its leg joints and the spine
-        # joint behind it, last.
-        commanded_joints = torch.ones(
-            (self.segment_count, leg_motor_count + 1),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        commanded_joints[:, -1] = 0.0
-        if settings.spine_control:
-            commanded_joints[:spine_count, -1] = 1.0
-        # Arrival under the head counts progress no closer than half the head's
-        # width: within the head's reach, nothing pays more.
-        self.head_outline = self.simulation.head_outline
-        target = settings.target
-        self.reward_function = RewardFunction(
-            settings.rewards,
-            settings.max_episode_steps,
-            self.head_outline.half_width_m
-            if target.arrival == "head"
-            else target.arrival_radius_m,
-            commanded_joints,
+        self.tow = Tow(
+            settings.tow,
+            world_count,
+            body.segment_weights_n,
+            body.unit_weight_n,
+            self.device,
         )
         self.diagnostics = EnvironmentDiagnostics(
-            self.world_count,
-            self.segment_count,
-            self.reward_function.term_names,
+            world_count,
+            segment_count,
+            body.unit_weight_n,
             self.device,
             self.simulation.diagnostics.facts,
+            body.body_length_m,
         )
 
-        # Episode state, overwritten in place.
-        self.target_position = torch.zeros(
-            (self.world_count, 2), dtype=torch.float32, device=self.device
-        )
+        # Episode state, overwritten in place. The lines' angles and the first
+        # episodes' staggering have their own random sequence.
+        self.generator = torch.Generator(device=self.device)
         self.episode_steps = torch.zeros(
-            self.world_count, dtype=torch.int32, device=self.device
+            world_count, dtype=torch.int32, device=self.device
         )
-        self.previous_body_planar_position = torch.zeros(
-            (self.world_count, self.segment_count, 2),
-            dtype=torch.float32,
-            device=self.device,
+        self.last_action = torch.zeros(
+            (world_count, segment_count, legs + 1), device=self.device
         )
-        self.previous_head_tip_position = torch.zeros(
-            (self.world_count, 2), dtype=torch.float32, device=self.device
-        )
-        self.previous_joint_position = torch.zeros(
-            (self.world_count, self.segment_count, leg_motor_count + 1),
-            dtype=torch.float32,
-            device=self.device,
-        )
-        # The radius of each world's range circle, around its target; infinite
-        # when there is no circle.
-        self.range_radius = torch.full(
-            (self.world_count,), torch.inf, dtype=torch.float32, device=self.device
+        # Each unit's speed along its forward axis over the last step, m/s,
+        # which the tow reads.
+        self.forward_speed = torch.zeros(
+            (world_count, segment_count), device=self.device
         )
 
-        # Targets have their own random sequence, separate from the starting
-        # poses, so changing how targets are drawn never changes the poses.
-        self.target_generator = torch.Generator(device=self.device)
+    def set_ramp_weight(self, weight: float) -> None:
+        """Weigh energy, the squeeze and pain by ``weight`` from the next step
+        on, as the ramp of the coming update cycle says."""
+        self.reward.ramp_weight = weight
+
+    def start_tow(self, top: float | None = None) -> None:
+        """Tow every unit from the next step on, under the settings' start or
+        a saved ``top``; only training does."""
+        self.tow.start(self.settings.tow.start if top is None else top)
+
+    def reserve_measuring_worlds(self, worlds_per_group: int) -> None:
+        """The last ``2 x worlds_per_group`` worlds measure the agents' mean
+        action, half of them at the tow's top and half without tow."""
+        self.tow.reserve(worlds_per_group)
+
+    def adjust_tow(self) -> None:
+        """After an update cycle: move the tow's top by what the untowed
+        measuring worlds did, and refresh ``tow.facts``."""
+        self.tow.adjust()
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
 
-        A ``seed`` restarts both the starting poses' and the targets' random
-        sequences, so the same seed repeats the same episodes' starts.
+        A ``seed`` restarts the starting poses', the lines' and the tow's
+        random sequences. With ``stagger_first_episodes`` every world starts
+        its episode at a random step of it.
         """
         self.simulation.reset(seed=seed)
         if seed is not None:
-            self.target_generator.manual_seed(seed)
-
+            self.generator.manual_seed(seed)
+            self.tow.generator.manual_seed(seed)
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
-        self._place_targets(every_world)
         self.episode_steps.zero_()
-        state = self.simulation.physical_state
-        self.diagnostics.start_episodes(
-            every_world, state, self.target_position, self.range_radius
-        )
-        return self.observation_builder.build(state, self.target_position)
+        if self.settings.stagger_first_episodes:
+            self.episode_steps.random_(
+                0, self.settings.max_episode_steps, generator=self.generator
+            )
+        self._restart(every_world)
+        return self._observations()
 
     def step(
         self, joint_action: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Apply the ``(W, N, action_size)`` joint action for one 20 ms step.
+        """Apply the ``(W, N, M + 1)`` joint action for one 20 ms step.
 
-        Returns the observations, the rewards ``(W, N)``, terminated and
-        truncated ``(W,)``, and the final observations. Worlds whose episode
-        ended are already reset: their observations start the new episode, and
-        their final observations are the ones the old episode ended with.
+        Returns the observations, the rewards ``(W, N, 2)``, terminated
+        (never) and truncated ``(W,)``, and the final observations. A world
+        whose episode was cut is already restarted: its observations start
+        the new episode, and its final observations are the ones the old
+        episode ended with.
         """
         state = self.simulation.physical_state
-
-        # 1. Copy the positions before the step: the physical state is
-        # overwritten in place by the step.
-        self.previous_body_planar_position.copy_(state.body_planar_position)
-        self.previous_head_tip_position.copy_(state.head_tip_position[:, :2])
-        self.previous_joint_position.copy_(joint_angles(state))
-
-        # 2. Move the body. With spine control, the column after the leg motors
-        # holds each segment's command for the spine joint behind it; without,
-        # the spine is passive.
+        before = state.body_planar_position.clone()
         legs = self.leg_motor_count
-        if self.settings.spine_control:
-            self.simulation.step(joint_action[..., :legs], joint_action[:, :-1, legs])
-        else:
-            self.simulation.step(joint_action)
+        motor_command = joint_action * self.motor_scale
+        body_forces = (
+            self.tow.forces(state.body_quaternion, self.forward_speed)
+            if self.tow.started
+            else None
+        )
+        self.simulation.step(
+            motor_command[..., :legs], motor_command[:, :-1, legs], body_forces
+        )
+        if self.tow.started:
+            moved = state.body_planar_position - before
+            self.forward_speed.copy_(
+                (moved * forward_axis(state)).sum(dim=-1) / ACTION_DURATION_S
+            )
         self.episode_steps += 1
 
-        # 3. Arrival, or a cut: the time limit or leaving the range circle,
-        # which end the episode alike. Arrival wins when both happen.
-        head_distance = (self.target_position - state.head_tip_position[:, :2]).norm(
-            dim=-1
-        )
-        if self.settings.target.arrival == "head":
-            terminated = self._target_under_head()
-        else:
-            terminated = head_distance <= self.settings.target.arrival_radius_m
-        left_range = (head_distance > self.range_radius) & ~terminated
-        time_is_up = self.episode_steps >= self.settings.max_episode_steps
-        truncated = (time_is_up | left_range) & ~terminated
-
-        # 4. and 5. Rewards, observations, diagnostics.
-        step_rewards = self.reward_function.compute(
+        progress = self.line.update(state)
+        averaged_forces = self.forces.update(state)
+        rewards, reward_parts, own_energy = self.reward.compute(
             state,
-            self.previous_body_planar_position,
-            self.previous_head_tip_position,
-            self.target_position,
-            terminated,
-            self.previous_joint_position,
-            joint_action,
+            motor_command,
+            progress,
+            self.line.distance,
+            self.line.angle,
+            averaged_forces,
+            self.tow.pushes,
         )
-        observations = self.observation_builder.build(state, self.target_position)
+        strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
+        truncated = (
+            (self.episode_steps >= self.settings.max_episode_steps)
+            | strayed
+            | self.simulation.restarted_worlds
+        )
         self.diagnostics.record_step(
             state,
-            self.previous_body_planar_position,
-            self.previous_head_tip_position,
-            self.target_position,
-            step_rewards,
-            terminated,
+            rewards,
+            reward_parts,
+            own_energy,
+            progress,
+            self.line,
+            averaged_forces,
+            strayed,
             truncated,
-            left_range,
         )
+        self.tow.record(self.diagnostics.step)
 
-        # 6. Reset the worlds whose episode ended. ``build`` returns a new
-        # tensor, so the final observations keep the values from before.
-        ended = terminated | truncated
-        final_observations = observations
-        if ended.any():
-            self.simulation.reset(ended)
-            self._place_targets(ended)
-            self.episode_steps.masked_fill_(ended, 0)
-            self.diagnostics.start_episodes(
-                ended, state, self.target_position, self.range_radius
-            )
-            observations = self.observation_builder.build(state, self.target_position)
-
+        self.last_action.copy_(joint_action)
+        final_observations = observations = self._observations()
+        if truncated.any():
+            self.simulation.reset(truncated)
+            self.episode_steps.masked_fill_(truncated, 0)
+            self._restart(truncated)
+            observations = self._observations()
         return (
             observations,
-            step_rewards.rewards,
-            terminated,
+            rewards,
+            torch.zeros_like(truncated),
             truncated,
             final_observations,
         )
 
-    def _place_targets(self, world_mask: torch.Tensor) -> None:
-        """Give the masked worlds a new target in front of the head's tip.
-
-        Distance and bearing are drawn uniformly from ``[environment.target]``;
-        a positive bearing is to the head's left. Values are drawn for every
-        world and kept only where the mask is set, which avoids asking the GPU
-        how many worlds are masked.
-        """
+    def _restart(self, world_mask: torch.Tensor) -> None:
+        """Start the masked worlds' episodes afresh, as they stand after the
+        simulation's reset: a new line, averages, tow level and gait."""
         state = self.simulation.physical_state
-        target_settings = self.settings.target
-        head_tip = state.head_tip_position[:, :2]
-        forward = head_forward_direction(state.body_quaternion[:, 0])
-        left = torch.stack((-forward[:, 1], forward[:, 0]), dim=-1)
-
-        def uniform(low: float, high: float) -> torch.Tensor:
-            """One value per world, uniform between ``low`` and ``high``."""
-            draw = torch.rand(
-                self.world_count, generator=self.target_generator, device=self.device
-            )
-            return low + (high - low) * draw
-
-        distance = uniform(*target_settings.distance_range_m)
-        bearing = torch.deg2rad(uniform(*target_settings.bearing_range_deg))
-        direction = (
-            torch.cos(bearing)[:, None] * forward + torch.sin(bearing)[:, None] * left
+        draw = torch.rand(
+            self.world_count, generator=self.generator, device=self.device
         )
-        new_target = head_tip + distance[:, None] * direction
-        self.target_position.copy_(
-            torch.where(world_mask[:, None], new_target, self.target_position)
-        )
-        if target_settings.range_circle_ratio:
-            self.range_radius.copy_(
-                torch.where(
-                    world_mask,
-                    target_settings.range_circle_ratio * distance,
-                    self.range_radius,
-                )
-            )
+        turn = (2 * draw - 1) * math.radians(self.settings.line_angle_range_deg)
+        self.line.restart(world_mask, state, turn)
+        self.forces.restart(world_mask, state)
+        self.tow.restart(world_mask)
+        self.diagnostics.restart(world_mask)
+        self.forward_speed.masked_fill_(world_mask[:, None], 0.0)
+        self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
 
-    def _target_under_head(self) -> torch.Tensor:
-        """Worlds whose target lies under the head's outline, seen from above.
-
-        The target is measured from the head's centre along the head's forward
-        direction and to its side, and compared with the rectangle that encloses
-        the head's body shape.
-        """
-        state = self.simulation.physical_state
-        outline = self.head_outline
-        offset = self.target_position - state.body_planar_position[:, 0]
-        forward = head_forward_direction(state.body_quaternion[:, 0])
-        along = (offset * forward).sum(dim=-1)
-        across = forward[:, 0] * offset[:, 1] - forward[:, 1] * offset[:, 0]
-        return (
-            (along >= outline.rear_m)
-            & (along <= outline.front_m)
-            & (across.abs() <= outline.half_width_m)
+    def _observations(self) -> torch.Tensor:
+        return self.observation_builder.build(
+            self.simulation.physical_state,
+            self.last_action,
+            self.forces.values,
+            self.line.trail,
+            self.tow.levels(),
         )

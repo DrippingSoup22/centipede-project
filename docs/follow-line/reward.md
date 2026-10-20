@@ -88,7 +88,12 @@ without them is an early one-change test.
 
 Before a run, scripted walks on the built code check that the good wave walk
 pays more than every fault we know (`../Training/analysis/`). Run 28's
-reward on the half body, 2026-10-20: every fault paid less at the trained
-weights but the wave running backward, tail to head (+4 mm/s), which this
-body walks a little faster; the reward does not care about the wave's
-direction.
+reward on the headless tester (the cooperators' code, 2026-10-20, with the
+16.5 mm band, the 90 mm/s cap and the joint forces read correctly under the
+middle root): the good wave walk, 103 mm/s, earns the team +69 mm/s a unit;
+every fault pays less at the trained weights, by 10 to 400 mm/s, but the
+wave running backward, tail to head (+1.9 mm/s), a near tie: the reward
+does not care about the wave's direction. On the half body, whose first unit
+carries the head, the same walk squeezes the chain (−22 mm/s a unit): the
+others push the heavy front unit along, one more reason to train headless
+first.

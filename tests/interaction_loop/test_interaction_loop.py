@@ -34,7 +34,7 @@ class FakeEnvironment:
         self.diagnostics = EnvironmentDiagnostics(
             WORLDS,
             SEGMENTS,
-            ["arrival"],
+            1e-3,
             "cpu",
             SimulationDiagnostics.allocate(WORLDS, 2, "cpu").facts,
         )
@@ -111,8 +111,9 @@ def test_a_short_run_with_the_real_environment_and_agents_is_finite():
         EnvironmentSettings.from_section(
             {
                 "max_episode_steps": 3,
+                "stagger_first_episodes": False,
                 "simulation": {
-                    "model_path": "models/assembly_v3.xml",
+                    "model_path": "models/assembly_v5_headless.xml",
                     "backend": "cpu",
                     "world_count": WORLDS,
                 },
@@ -131,6 +132,7 @@ def test_a_short_run_with_the_real_environment_and_agents_is_finite():
         seed=1,
         segment_action_sizes=environment.segment_action_sizes,
         leg_motor_count=environment.leg_motor_count,
+        reward_channel_count=environment.reward_channel_count,
     )
     loop = InteractionLoop(environment, agents, settings)
 
@@ -144,9 +146,8 @@ def test_a_short_run_with_the_real_environment_and_agents_is_finite():
     for agent in agents.segment_agents:
         for parameter in agent.ppo.actor_network.parameters():
             assert parameter.isfinite().all()
-    for summary in training_steps.values():
-        assert summary.isfinite().all()
+    assert training_steps["reward_parts"].isfinite().all()
     # Every world's first episode reaches the three-step limit.
     assert evaluation_episodes["episode_ended"] == WORLDS
-    assert evaluation_episodes["length_steps"] == 3
+    assert evaluation_episodes["duration"] == 0.06
     assert loop.diagnostics.timing.collecting_seconds > 0

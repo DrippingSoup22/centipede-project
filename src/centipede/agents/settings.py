@@ -1,11 +1,12 @@
 import math
 from dataclasses import dataclass
 
-from centipede.settings_section import SettingsSection
+from centipede.settings_section import SettingsError, SettingsSection
 
 OPTIMIZERS = ("adam", "adamw", "sgd")
-LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine")
+LEARNING_RATE_SCHEDULES = ("constant", "linear", "cosine", "adaptive")
 ACTION_STD_SCHEDULES = ("learned", "log_linear")
+ACTIVATIONS = ("relu", "tanh")
 
 
 @dataclass(frozen=True)
@@ -68,35 +69,69 @@ class AgentSettings:
     al., 2017). ``exploration_noise_beta`` colors the exploration noise over
     time: 0 is white noise, fresh at every step; 0.5 is the PPO default of
     Hollenstein et al. (AAAI 2024) and 1 pink noise (RL_lib's
-    ``SquashedGaussianPolicy``).
+    ``SquashedGaussianPolicy``). With ``state_dependent_noise_steps`` above 0
+    the agents explore instead with generalized state-dependent exploration
+    (gSDE; Raffin, Kober and Stulp, CoRL 2021): the noise is the actor's
+    features times an exploration matrix each world keeps for that many
+    steps, so that the same state gets the same noise and exploration tries
+    behaviours the actor can learn, rather than a drift through time it
+    cannot copy; the noise is then not colored. Its spreads, one per feature
+    and action, start at ``initial_action_std``, which an action's spread is
+    while they are equal (RL_lib's ``GaussianPolicyNetwork``).
+    ``actor_activation`` is the actor's hidden activation, ReLU or tanh. gSDE
+    wants tanh, as Raffin et al. and Stable-Baselines3's PPO use: the noise is
+    made from the last hidden layer, and ReLU's features, never negative,
+    hardly change direction from one state to the next, so a held matrix adds
+    mostly a constant push (83% of the noise over 32 steps with run 13's
+    actors, 52% with fresh tanh ones; Training's
+    ``analysis/gsde_feature_check.py``).
     Normalised observations are clipped to plus or minus ``observation_clip``.
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
     ``learning_rate_schedule`` over the run's update cycles
-    (``learning_rate_at``).
+    (``learning_rate_at``). With "adaptive", each agent's actor steers its
+    own learning rate from ``learning_rate`` by how far each update moved
+    its policy, toward ``desired_kl`` (``SegmentAgent.adapt_learning_rate``),
+    and the critics keep ``learning_rate``.
+
+    With an environment that pays several reward channels, each agent has a
+    critic per channel, and ``advantage_weights`` weighs their normalised
+    advantages, one per channel (empty: 1 each). With ``value_normalization``
+    the critics learn standardised return targets, standardised by every
+    target since the start or, with ``value_normalization_horizon``, by about
+    that many latest updates' (docs/follow-line/critic.md).
     """
 
     device: str
     hidden_layers: tuple[int, ...]
+    actor_activation: str
     initial_action_std: float
     action_std_schedule: str
     final_action_std: float
     exploration_noise_beta: float
+    state_dependent_noise_steps: int
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
     final_learning_rate: float
+    desired_kl: float
     weight_decay: float
     momentum: float
     normaliser_epsilon: float
     observation_clip: float
+    advantage_weights: tuple[float, ...]
+    value_normalization: bool
+    value_normalization_horizon: int
     ppo: PPOSettings
 
-    def learning_rate_at(self, cycle: int, total_cycles: int) -> float:
+    def learning_rate_at(self, cycle: int, total_cycles: int) -> float | None:
         """The learning rate of the update in ``cycle``, counted from 1 to
         ``total_cycles``: ``learning_rate`` in the first, moving to
         ``final_learning_rate`` in the last, in a straight line or along half
-        a cosine, or ``learning_rate`` throughout when constant."""
+        a cosine, or ``learning_rate`` throughout when constant; None when
+        each agent adapts its own."""
+        if self.learning_rate_schedule == "adaptive":
+            return None
         if self.learning_rate_schedule == "constant" or total_cycles == 1:
             return self.learning_rate
         progress = (cycle - 1) / (total_cycles - 1)
@@ -133,6 +168,9 @@ class AgentSettings:
             hidden_layers=section.integer_list(
                 "hidden_layers", default=(64, 64), minimum=1
             ),
+            actor_activation=section.choice(
+                "actor_activation", ACTIVATIONS, default="relu"
+            ),
             initial_action_std=initial_action_std,
             action_std_schedule=section.choice(
                 "action_std_schedule", ACTION_STD_SCHEDULES, default="learned"
@@ -143,6 +181,9 @@ class AgentSettings:
             exploration_noise_beta=section.number(
                 "exploration_noise_beta", default=0.0, minimum=0.0, maximum=2.0
             ),
+            state_dependent_noise_steps=section.integer(
+                "state_dependent_noise_steps", default=0, minimum=0
+            ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,
             learning_rate_schedule=section.choice(
@@ -151,13 +192,26 @@ class AgentSettings:
             final_learning_rate=section.positive_number(
                 "final_learning_rate", default=learning_rate / 10
             ),
+            desired_kl=section.positive_number("desired_kl", default=0.01),
             weight_decay=section.number("weight_decay", default=0.0, minimum=0.0),
             momentum=section.number("momentum", default=0.9, minimum=0.0, maximum=1.0),
             normaliser_epsilon=section.positive_number(
                 "normaliser_epsilon", default=1e-8
             ),
             observation_clip=section.positive_number("observation_clip", default=10.0),
+            advantage_weights=section.number_list(
+                "advantage_weights", default=(), minimum=0.0
+            ),
+            value_normalization=section.boolean("value_normalization", default=False),
+            value_normalization_horizon=section.integer(
+                "value_normalization_horizon", default=0, minimum=0
+            ),
             ppo=PPOSettings.from_section(section.table("ppo")),
         )
         section.reject_unknown_keys()
+        if settings.state_dependent_noise_steps and settings.exploration_noise_beta:
+            raise SettingsError(
+                "[agents] state_dependent_noise_steps and exploration_noise_beta"
+                " are two kinds of noise: set only one"
+            )
         return settings

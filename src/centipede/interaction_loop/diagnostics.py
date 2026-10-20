@@ -21,7 +21,7 @@ from typing import Protocol
 import torch
 
 from centipede.diagnostics_category import WindowSummary, measure
-from centipede.interaction_loop.recording import WindowRecorder
+from centipede.interaction_loop.recording import EpisodeRecorder
 
 
 @dataclass(frozen=True)
@@ -54,7 +54,7 @@ class LoopDiagnostics:
     are what the experiment reads; each window summary offers its category's
     ``descriptions`` and its ``result()``. Episode summaries count only the
     worlds whose episode ended; the simulation's maxima always count every
-    world. ``recorder`` records the poses of the windows the experiment arms.
+    world. ``recorder`` records the episodes the experiment arms it for.
     """
 
     def __init__(self, environment) -> None:
@@ -64,7 +64,7 @@ class LoopDiagnostics:
             environment.diagnostics.episode, mask_field="episode_ended"
         )
         self.simulation_window = WindowSummary(environment.diagnostics.simulation)
-        self.recorder = WindowRecorder(environment.diagnostics, environment.world_count)
+        self.recorder = EpisodeRecorder(environment.diagnostics)
         self.timing = Timing(
             collecting_seconds=torch.zeros(()),
             learning_seconds=torch.zeros(()),
@@ -80,7 +80,6 @@ class LoopDiagnostics:
         self.step_window.clear()
         self.episode_window.clear()
         self.simulation_window.clear()
-        self.recorder.start_window()
         self._window_steps = 0
         self.timing.learning_seconds.zero_()
         start = _synchronised_clock()

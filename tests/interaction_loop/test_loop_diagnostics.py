@@ -17,7 +17,7 @@ from centipede.interaction_loop.diagnostics import LoopDiagnostics
 def test_windows_start_empty_and_time_collecting_and_learning():
     simulation = SimulationDiagnostics.allocate(2, 3, "cpu")
     environment_diagnostics = EnvironmentDiagnostics(
-        2, 3, ["arrival"], "cpu", simulation.facts
+        2, 3, 1e-3, "cpu", simulation.facts
     )
     environment = SimpleNamespace(diagnostics=environment_diagnostics, world_count=2)
     diagnostics = LoopDiagnostics(environment)

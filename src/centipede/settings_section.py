@@ -161,6 +161,17 @@ class SettingsSection:
             raise self._error(key, "must be a non-empty list of whole numbers", value)
         return tuple(self._check_integer(key, item, minimum, None) for item in value)
 
+    def number_list(
+        self, key: str, default: Any = REQUIRED, minimum: float | None = None
+    ) -> tuple[float, ...]:
+        """A list of real numbers, such as weights; may be empty."""
+        if self._missing(key, default):
+            return default
+        value = self.values[key]
+        if not isinstance(value, list):
+            raise self._error(key, "must be a list of numbers", value)
+        return tuple(self._check_number(key, item, minimum, None) for item in value)
+
     def choice_list(
         self, key: str, options: Sequence[str], default: Any = REQUIRED
     ) -> tuple[str, ...]:
@@ -181,7 +192,7 @@ class SettingsSection:
     # -- Nested tables --------------------------------------------------------
 
     def table(self, key: str) -> dict[str, Any]:
-        """A nested table, such as ``target`` inside ``[environment]``.
+        """A nested table, such as ``tow`` inside ``[environment]``.
 
         Returns the table's raw values for its own settings class to read; a
         missing table is empty, so all of its defaults apply.
