@@ -8,20 +8,21 @@ from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 
-# The reward's parts, signed, each in its own unit: the line, the squeeze and
-# the force share in millimetres, the rest in millijoules. The team account
-# adds the first TEAM_PART_COUNT, each unit's own account the rest.
+# The reward's parts, signed, each in its own unit: the line, the squeeze, the
+# motion and the force share in millimetres, the rest in millijoules. The team
+# account adds the first TEAM_PART_COUNT, each unit's own account the rest.
 PART_NAMES = (
     "line",
     "squeeze",
     "pushing",
     "braking",
     "force",
+    "motion",
     "force_share",
     "pain",
     "hanging",
 )
-TEAM_PART_COUNT = 5
+TEAM_PART_COUNT = 6
 MILLIJOULE_PARTS = ("pushing", "braking", "force", "pain", "hanging")
 CHANNEL_NAMES = ("team", "own")
 # Energy's parts, each unit's own before the team account takes their mean.
@@ -105,6 +106,8 @@ class RewardFunction:
         )
         # Millijoules for a unit weight hanging through a step.
         self.hanging_price_mj = self.force_price_mj * settings.hanging_price
+        # Millimetres for a step of joints turning at 1 rad/s squared.
+        self.motion_price_mm = settings.motion_price * ACTION_DURATION_S
         self.unit_weight_n = body.unit_weight_n
         # Each unit may take from its neighbours, for free, the weight it
         # carries beyond the others' mean, such as a head; none on the
@@ -132,7 +135,7 @@ class RewardFunction:
         averaged_forces: torch.Tensor,
         tow_pushes: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 8)``
+        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 9)``
         in PART_NAMES' order, and each unit's own energy ``(W, N, 3)`` mJ.
 
         ``motor_command`` ``(W, N, M + 1)`` is what each motor received;
@@ -141,7 +144,9 @@ class RewardFunction:
         direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
         along the line averaged as the forces are (m/s); ``averaged_forces`` is
         ``AveragedForces.values``; ``tow_pushes`` ``(W, N)`` each unit's tow
-        on the step, in unit weights.
+        on the step, in unit weights. The motion: each unit's joints (its legs'
+        and the spine joint behind it) turning, their speeds squared and added
+        up, the team charged the units' mean.
 
         The line: each unit's step forward, up to the cap (or, with
         ``line_cap_averaged``, scaled by the cap over its averaged speed when
@@ -191,6 +196,13 @@ class RewardFunction:
             dim=-1,
         )
 
+        # The rear unit has no spine joint behind it.
+        squared_speeds = state.leg_joint_velocity.square().sum(dim=-1)
+        squared_speeds += (
+            state.spine_yaw_velocity.square() * self.commanded_joints[:, -1]
+        )
+        motion = self.motion_price_mm * ramp * squared_speeds.mean(dim=1, keepdim=True)
+
         force_share = self.reference_mm * ((along + tow_pushes) / scale) ** 2
         pain = (pressed * self.unit_weight_n) ** 2 * self.pain_price_mj * ramp
         hanging = (up - self.free_support).clamp(min=0.0) + belly
@@ -200,6 +212,7 @@ class RewardFunction:
                 line.mean(dim=1, keepdim=True)[..., None],
                 -squeeze[..., None],
                 -ramp * own_energy.mean(dim=1, keepdim=True),
+                -motion[..., None],
             ),
             dim=-1,
         )

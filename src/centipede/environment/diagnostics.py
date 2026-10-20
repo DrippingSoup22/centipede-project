@@ -59,8 +59,8 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 8), in the order of reward_part_names: the line,"
-        " squeeze and force share in mm, the rest in mJ",
+        "Each reward part, (W, N, 9), in the order of reward_part_names: the line,"
+        " squeeze, motion and force share in mm, the rest in mJ",
         parts=PART_NAMES,
     )
     contact_flags: torch.Tensor = measure(

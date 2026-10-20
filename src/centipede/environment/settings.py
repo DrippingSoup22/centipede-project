@@ -22,8 +22,10 @@ class RewardSettings:
     ``force_price_w``, braking work ``braking_price`` of pushing work. Pain
     costs ``pain_price`` of a fully commanded motor at a leg's strongest push,
     hanging ``hanging_price`` of it for each unit weight held. A millijoule
-    counts ``mm_per_mj`` millimetres. Forces are averaged over
-    ``averaging_s``. Energy, the squeeze and pain are weighed from
+    counts ``mm_per_mj`` millimetres (0: no millijoule part counts). The
+    motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
+    joints' squared speeds, added up. Forces are averaged over
+    ``averaging_s``. Energy, the motion, the squeeze and pain are weighed from
     ``ramp_start`` up to full over the first ``ramp_cycles`` update cycles
     (0: full from the start); with ``ramp_after_line_share`` above 0 the
     ramp waits at ``ramp_start`` until the untowed mean-action worlds' line
@@ -39,6 +41,7 @@ class RewardSettings:
     braking_price: float
     pain_price: float
     hanging_price: float
+    motion_price: float
     mm_per_mj: float
     averaging_s: float
     ramp_cycles: int
@@ -64,7 +67,8 @@ class RewardSettings:
             braking_price=section.number("braking_price", default=0.25, minimum=0.0),
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
             hanging_price=section.number("hanging_price", default=2.0, minimum=0.0),
-            mm_per_mj=section.positive_number("mm_per_mj", default=1.59),
+            motion_price=section.number("motion_price", default=0.0, minimum=0.0),
+            mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
             averaging_s=section.positive_number("averaging_s", default=1.0),
             ramp_cycles=section.integer("ramp_cycles", default=128, minimum=0),
             ramp_start=section.number(

@@ -130,13 +130,20 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     by the tows: the squeeze, 1.06 mm at full weight, over four joints, at
     the ramp's 0.5. Unit 0 is dragged by 0.3, unit 1 pushes with 0.1, units
     3 and 4 brake their own tows of 0.1: force shares of 1.06, 0.118, 0, 0.
-    Unit 0 weighs 0.8 units more than the others and hangs that for free."""
+    Unit 0 weighs 0.8 units more than the others and hangs that for free.
+    Unit 1's leg joint turns at 10 rad/s, unit 0's spine joint at 3 and the
+    rear's at 5, which is not its own: the motion, at 0.1 mm a second for
+    each (rad/s)², is 0.018 and 0.2 mm, 0.0218 for the team at the ramp's 0.5."""
     body = replace(BODY, segment_weights_n=(1.8e-3,) + (1e-3,) * (SEGMENTS - 1))
     commanded = torch.ones(SEGMENTS, LEGS + 1)
     commanded[-1, -1] = 0.0
-    reward = RewardFunction(RewardSettings.from_section({}), body, commanded, 0.005)
+    settings = RewardSettings.from_section({"motion_price": 0.1})
+    reward = RewardFunction(settings, body, commanded, 0.005)
     reward.ramp_weight = 0.5
     state = resting_state(1)
+    state.leg_joint_velocity[0, 1, 0] = 10.0
+    state.spine_yaw_velocity[0, 0] = 3.0
+    state.spine_yaw_velocity[0, -1] = 5.0
     state.motor_positive_work[0, 0] = 2e-3
     state.motor_negative_work[0, 1] = 4e-3
     command = torch.zeros(1, SEGMENTS, LEGS + 1)
@@ -172,6 +179,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     torch.testing.assert_close(by_name["pushing"], -0.2 * every)
     torch.testing.assert_close(by_name["braking"], -0.1 * every)
     torch.testing.assert_close(by_name["force"], -0.0332 * every)
+    torch.testing.assert_close(by_name["motion"], -0.0218 * every)
     torch.testing.assert_close(
         by_name["force_share"], -torch.tensor([1.06, 1.06 / 9, 0.0, 0.0, 0.0])
     )
@@ -180,7 +188,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
         by_name["hanging"], -0.664 * torch.tensor([0.2, 0.1, 0.2, 0.0, 0.0])
     )
     torch.testing.assert_close(by_name["pain"], -0.166 * torch.eye(SEGMENTS)[4])
-    team = 0.485 - 0.1325 - 1.59 * (0.2 + 0.1 + 0.0332)
+    team = 0.485 - 0.1325 - 1.59 * (0.2 + 0.1 + 0.0332) - 0.0218
     torch.testing.assert_close(rewards[0, :, 0], team * every)
     torch.testing.assert_close(rewards[0, 0, 1], torch.tensor(-1.06 - 1.59 * 0.1328))
 
