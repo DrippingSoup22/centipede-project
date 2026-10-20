@@ -24,13 +24,19 @@ class RewardSettings:
     hanging ``hanging_price`` of it for each unit weight held. A millijoule
     counts ``mm_per_mj`` millimetres (0: no millijoule part counts). The
     motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
-    joints' squared speeds, added up. With ``own_account`` false every part
-    counts in one account, the team's, and each agent has one critic. Forces
-    are averaged over ``averaging_s``. Energy, the motion, the squeeze and pain
-    are weighed from ``ramp_start`` up to full over the first ``ramp_cycles``
-    update cycles (0: full from the start); with ``ramp_after_line_share``
-    above 0 the ramp waits at ``ramp_start`` until the untowed mean-action worlds' line
-    reaches that share of the cap, and rises from the next cycle.
+    joints' squared speeds, added up, and the accelerations
+    ``acceleration_price`` for each (rad/s²)² of their squared changes of
+    speed. Each unit's feet not carrying its weight, beyond its free support,
+    cost it ``carry_price`` mm a second for each unit weight on average. With
+    ``own_account`` false every part counts in one account, the team's, and
+    each agent has one critic. Forces are averaged over ``averaging_s``.
+    Energy, the motion, the accelerations, the squeeze and pain are weighed
+    from ``ramp_start`` up to full over the first ``ramp_cycles`` update
+    cycles (0: full from the start), in a straight line or, with
+    ``ramp_shape`` "exponential", by the same factor each cycle; with
+    ``ramp_after_line_share`` above 0 the ramp waits at ``ramp_start`` until
+    the untowed mean-action worlds' line reaches that share of the cap, and
+    rises from the next cycle.
     """
 
     line_speed_cap_mm_per_s: float
@@ -43,11 +49,14 @@ class RewardSettings:
     pain_price: float
     hanging_price: float
     motion_price: float
+    acceleration_price: float
+    carry_price: float
     own_account: bool
     mm_per_mj: float
     averaging_s: float
     ramp_cycles: int
     ramp_start: float
+    ramp_shape: str
     ramp_after_line_share: float
 
     @classmethod
@@ -70,12 +79,19 @@ class RewardSettings:
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
             hanging_price=section.number("hanging_price", default=2.0, minimum=0.0),
             motion_price=section.number("motion_price", default=0.0, minimum=0.0),
+            acceleration_price=section.number(
+                "acceleration_price", default=0.0, minimum=0.0
+            ),
+            carry_price=section.number("carry_price", default=0.0, minimum=0.0),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
             averaging_s=section.positive_number("averaging_s", default=1.0),
             ramp_cycles=section.integer("ramp_cycles", default=128, minimum=0),
             ramp_start=section.number(
                 "ramp_start", default=0.5, minimum=0.0, maximum=1.0
+            ),
+            ramp_shape=section.choice(
+                "ramp_shape", ("linear", "exponential"), default="linear"
             ),
             ramp_after_line_share=section.number(
                 "ramp_after_line_share", default=0.0, minimum=0.0, maximum=1.0
@@ -86,6 +102,11 @@ class RewardSettings:
             raise SettingsError(
                 "[environment.reward] line_overspeed_slope works on the averaged"
                 " speed: set line_cap_averaged = true"
+            )
+        if settings.ramp_shape == "exponential" and not settings.ramp_start:
+            raise SettingsError(
+                "[environment.reward] an exponential ramp grows from ramp_start:"
+                " set it above 0"
             )
         return settings
 
@@ -98,7 +119,10 @@ class RewardSettings:
         if not self.ramp_cycles:
             return 1.0
         start = self.ramp_start
-        return start + (1 - start) * min(1.0, (cycle - ramp_from) / self.ramp_cycles)
+        risen = min(1.0, (cycle - ramp_from) / self.ramp_cycles)
+        if self.ramp_shape == "exponential":
+            return start ** (1 - risen)
+        return start + (1 - start) * risen
 
 
 @dataclass(frozen=True)
@@ -155,7 +179,8 @@ class EnvironmentSettings:
     first episode at a random step of it. Each spine motor receives
     ``spine_action_scale`` times its command. With ``observe_priced_forces``
     false a unit's block leaves out the forces only the old costs priced: its
-    legs' press and the joint forces averaged over a second.
+    legs' press and the joint forces averaged over a second. With
+    ``observe_carry`` it holds its feet's load averaged as the carry is.
     """
 
     max_episode_steps: int
@@ -164,6 +189,7 @@ class EnvironmentSettings:
     stagger_first_episodes: bool
     spine_action_scale: float
     observe_priced_forces: bool
+    observe_carry: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
@@ -195,6 +221,7 @@ class EnvironmentSettings:
             observe_priced_forces=section.boolean(
                 "observe_priced_forces", default=True
             ),
+            observe_carry=section.boolean("observe_carry", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),
             tow=TowSettings.from_section(section.table("tow")),

@@ -1,23 +1,23 @@
 # Reward
 
-The minimal reward (the user's design, 2026-10-20, after runs 01 to 04): the
-team is paid the line it walks, less what moving its joints costs. Nothing
-else is priced. Runs 01 to 04 used the cooperators' run 28 reward
-(`docs/cooperators/reward.md` on that branch), with a squeeze, energy in
-millijoules, and each unit's own force share, hanging and pain; their lessons
-are in the study's `Training/results/follow-line/README.md`.
+From run 06 (the user's design, 2026-10-20, after run 05): the team is paid
+the line it walks, less what its joints' accelerations cost; each unit's
+own account is charged the weight its feet do not carry. Run 05 charged the
+joints' speeds instead and had no own account; runs 01 to 04 used the
+cooperators' run 28 reward (`docs/cooperators/reward.md` on that branch).
+Every run's lessons are in the study's `Training/results/follow-line/README.md`.
 
-## One account
+## Two accounts
 
 Each 20 ms step every agent receives:
 
 ```text
-team = line − motion        (the same for all ten)
+team = line − accelerations        (the same for all ten)
+own  = − carry                     (each unit's own)
 ```
 
-Every part counts in this one account, so each agent has one critic
-([critic.md](critic.md)); runs 01 to 04 also had each unit's own account.
-Everything is counted in millimetres of line.
+Each account has its own critic ([critic.md](critic.md)). Everything is
+counted in millimetres of line.
 
 ## The line
 
@@ -29,7 +29,7 @@ the line's direction:
 > a step back
 
 The team receives the mean over the units. There is no cap: walking always
-pays, and the motion cost is what makes walking faster stop paying.
+pays, and the accelerations are what make walking faster stop paying.
 
 - **The band b**, the sight radius, 16.5 mm on v5: a unit is paid for the
   line only while it can see it ([observations.md](observations.md)).
@@ -38,52 +38,75 @@ pays, and the motion cost is what makes walking faster stop paying.
 - **The mean**, because the chain moves together: sharing the gain is what
   first moved the walk into the policy (cooperators, run 23).
 
-## The motion
+## The accelerations
 
-Each unit's joints, its legs' and the spine joint behind it, turning: their
-squared speeds added up, at 0.19 mm a second for each (rad/s)²; the team is
-charged the units' mean.
+Each unit's joints, its legs' and the spine joint behind it: how much each
+changed its speed over the step, squared and added up, at 0.001 mm a second
+for each (rad/s²)²; the team is charged the units' mean.
 
-- **Zero at rest, steep with speed.** A joint's squared speed is in
-  proportion to its kinetic energy, so the cost grows with how fast and how
-  wide the legs stroke. Walking faster earns the line in proportion but costs
-  more than in proportion, so there is a speed beyond which faster pays less.
-- **Priced so that the net peaks at a real centipede's pace.** On the
-  scripted walk (`Training/analysis/energy_speed.py`), one more mm/s of speed
-  costs one more mm/s of motion at 90 mm/s, 0.6 of the full body's length a
-  second (*S. heros*: 0.5 to 1.5 body lengths a second, Anderson et al.
-  1995). There the net is +14 mm/s a unit: line 85, motion 71; at 41, 68,
-  103, 111 and 148 mm/s it is +2, +11, +12, −6 and −54.
-- **Why not energy in millijoules.** Runs 01 to 04 priced the motors'
-  pushing and braking work and each command squared for as long as it was
-  held. Measured on the scripted walk, that energy grows with speed but far
-  too slowly: near 90 mm/s one more mm/s cost 0.1 to 0.2 mm/s, so the
-  fastest walk always paid most, and runs 03 and 04 learned a run at 7 to
-  11 strokes a second. Raising its price does not help: most of it is a
-  fixed part, the force of holding commands, so walks at every speed would
-  cost more than they earn and standing would win (run 01's timid legs).
+- **Wide, slow strokes cost less than short, fast ones.** The body's speed
+  is about a stroke's width times its frequency. A joint's speed grows the
+  same way, so a cost on the joints' speeds (run 05's motion) cannot tell
+  the two apart: it costs the speed squared whichever way it is made. A
+  joint's acceleration grows with the width but with the frequency squared,
+  so for the same speed a stroke twice as wide and half as fast costs a
+  quarter. On the scripted walk at 90 mm/s, an 80° sweep at 3 Hz costs the
+  sweep joint 8 times less than a 63° sweep at 7 Hz
+  (`Training/analysis/sweep_rate.py`). Jerky, erratic movements cost the
+  most. The metabolic cost of swinging a leg rises about as its
+  frequency's fourth power (Doke, Donelan & Kuo 2005), and legged_gym
+  charges joint accelerations for smooth gaits (Rudin et al. 2021).
+- **Faster costs more and more.** Once the stroke is as wide as the leg
+  allows, only a higher frequency makes the body faster, and the cost grows
+  as the speed to the fourth: each millimetre costs more the faster the
+  body goes. A gait the agents make smoother goes only a cube root faster
+  (twice as smooth, 1.26 times), and a longer stride goes faster, which is
+  the way to speed the reward wants.
+- **Priced on the best gait we know.** Run 05's agents found strokes far
+  smoother for their speed than the scripted walk's; the price is set so
+  that run 05's gait, every leg working, would peak near 100 mm/s
+  (`Training/analysis/gait_costs.py`, measured on the noise-free policies
+  of runs 01 to 05). There the walk nets about +73 mm/s a unit. The jerkier
+  gaits of runs 01 to 04 would peak at 18 to 51 mm/s: under this price
+  smooth strokes pay.
 
 ## The ramp
 
-The motion is weighed 0.05 of its price at the first update cycle, rising
-in a straight line to full at cycle 161 (Hwangbo et al. 2019's curriculum on
-the costs of moving, which "results in a standing behavior" when high from
-the start). Untrained agents' exploring noise moves the joints more than the
-scripted walk does, so at full price exploring costs 17 times what it earns
-(the fresh check: motion −147 mm/s a unit, line +8.5 under the tow); at
-0.05 the two about balance (+1.2). Lowering the noise instead does not: at
-a spread of 0.1 exploring still loses (−16 mm/s) and earns little.
+The accelerations are weighed 0.002 of their price at the first update
+cycle, rising by the same factor each cycle, about doubling every 25, to
+full at cycle 225 (the exponential form of Hwangbo et al. 2019's
+curriculum on the costs of moving). Untrained agents' exploring is jerky:
+it costs more than run 05's gait at 354 mm/s, and at full price 400 times
+what it earns; at 0.002 the two about balance. While the weight is below
+about 0.08 (the first 60% of the ramp), any walk as jerky as the scripted
+one still pays; after that only smooth walking does.
+
+## The carry
+
+Each unit's own account is charged, at 50 mm a second for each unit weight,
+what its two feet, on average over 1 s, do not carry of its weight beyond
+its free support (on the headless tester, all of its weight). Run 05's
+agents walked on a few units' legs: the others held theirs crossed over
+their neighbours' and lifted, and saved their share of the cost while
+others carried them. A unit must carry itself on its own feet whatever
+else holds it up: its neighbours through the joints, its belly, or a leg
+resting on another. It is its own duty, in its own account ("shared gains,
+own duties", [README.md](README.md)): the charge falls on the unit that
+leans on the others, not on the team. Feet that carry while skidding along pass:
+a unit carried along on skidding feet is a known gap, left open until a
+run shows it.
 
 ## The ledger
 
 Before a run, scripted walks on the built code check that the good wave walk
 pays more than every fault we know (the study's `Training/analysis/ledger.py`).
-With the motion in full (2026-10-20), the good walk at the target pace, 3
-steps a second and 90 mm/s, earns the team +14 mm/s a unit, standing 0.
-Faster walks lose (1.4 times the step rate by 17.6, twice it by 50.6), and
-so do slower ones (0.7 times by 4.5), the backward wave (5.9) and every
-fault of the body as a whole. Two faults of one unit pay a little more than
-the good walk: unit 0 dragged with its legs limp (+2.4) and unit 5 holding a
-leg up (+2.8). A unit that stops moving saves its share of the motion while
-the others still carry it; the own terms that closed this gap (force share,
-hanging) are left out of this test on purpose.
+The scripted walk is about ten times jerkier for its speed than run 05's
+learned gait (its lift snaps at every step), so at the full price it costs
+far more than it earns and cannot judge that price; the price rests on the
+learned gaits instead. The ledger checks the reward's structure with the
+accelerations priced at the scripted walk's level (2026-10-20): the good
+walk earns +37 mm/s a unit, and every fault loses, among them a walk at
+twice the step rate (by 6.8), six units each holding a leg up (by 70, by 96
+at twice the rate) and skating feet (by 19 to 63). At the ramp's start,
+when the accelerations are nearly free, faster walks still pay more, until
+the weight reaches about 0.05.

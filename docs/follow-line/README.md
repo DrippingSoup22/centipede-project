@@ -47,19 +47,21 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
   and 24, cycle 16: a private cost set against a shared gain teaches doing
   less).
 - **A ceiling on speed.** A reward for speed without one beats every price
-  that grows only in proportion to speed (runs 04 and 24); from run 05 the
-  ceiling is a cost that grows faster than the pay, the motion
-  ([reward.md](reward.md)).
+  that grows only in proportion to speed (runs 04 and 24). From run 05 the
+  ceiling is a cost that grows faster than the pay; run 05's, the motion,
+  let a gait the agents made cheaper run past it, so from run 06 it is the
+  joints' accelerations, which grow as the speed to the fourth once the
+  stride is at its longest ([reward.md](reward.md)).
 
 ## The parts
 
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | Minimal (from run 05): the team's line, uncapped, less the motion of its joints, priced so that the net peaks at 90 mm/s and ramped from 0.05 to full in 160 cycles; nothing else |
-| Observations | [observations.md](observations.md) | Five units' bodies (43 values each from run 05), the trail inside the unit's sight (15), the tow (1) |
+| Reward | [reward.md](reward.md) | From run 06: the team's line, uncapped, less its joints' accelerations, which favour wide, slow strokes over short, fast ones, ramped exponentially from 0.002 to full in 224 cycles; each unit's own carry, the weight its feet do not carry |
+| Observations | [observations.md](observations.md) | Five units' bodies (44 values each from run 06), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
-| Critic and learning | [critic.md](critic.md) | One critic per unit from run 05 (two, team and own, before); gSDE; PPO's settings |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own (one in run 05); gSDE; PPO's settings |
 
 ## The bodies
 
@@ -79,10 +81,10 @@ Not decided; each is one change for a later run.
   allows, raised by the wave's consistency (the user's idea, 2026-10-20):
   measured on the untowed noise-free worlds, so that the noise cannot fake
   it, with a fallback if no wave forms. Stage 1 has no level.
-- **The terms left out of the minimal reward**, each brought back as its
-  own run if the test shows it is needed: the own force share or hanging
-  (a unit that stops moving pays a little in the ledger), the squeeze, pain.
-- **The motion's price and ramp**: 0.19 mm a second for each (rad/s)²,
-  from 0.05 to full in 160 cycles.
+- **The terms left out**, each brought back as its own run if a test shows
+  it is needed: the force share (a unit carried along on skidding feet),
+  the squeeze, pain (legs crossed over their neighbours').
+- **The accelerations' price and ramp**: 0.001 mm a second for each
+  (rad/s²)², from 0.002 to full in 224 cycles; the carry's price.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

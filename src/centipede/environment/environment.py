@@ -97,6 +97,7 @@ class Environment:
             body.unit_weight_n,
             self.device,
             settings.observe_priced_forces,
+            settings.observe_carry,
         )
         self.observation_size = self.observation_builder.observation_size
         self.tow = Tow(
@@ -137,10 +138,16 @@ class Environment:
         self.averaged_line_speed = torch.zeros(
             (world_count, segment_count), device=self.device
         )
+        # Each unit's joints' speeds at the end of the last step, rad/s: its
+        # legs' and the spine joint's behind it, for the accelerations.
+        self.joint_velocity = torch.zeros(
+            (world_count, segment_count, legs + 1), device=self.device
+        )
 
     def set_ramp_weight(self, weight: float) -> None:
-        """Weigh energy, the squeeze and pain by ``weight`` from the next step
-        on, as the ramp of the coming update cycle says."""
+        """Weigh the ramped costs (energy, the squeeze, pain, the motion and
+        the accelerations) by ``weight`` from the next step on, as the ramp of
+        the coming update cycle says."""
         self.reward.ramp_weight = weight
 
     def start_tow(self, top: float | None = None) -> None:
@@ -216,6 +223,9 @@ class Environment:
 
         progress = self.line.update(state)
         averaged_forces = self.forces.update(state)
+        velocity = self._joint_velocity()
+        joint_acceleration = (velocity - self.joint_velocity) / ACTION_DURATION_S
+        self.joint_velocity.copy_(velocity)
         self.averaged_line_speed += self.forces.averaging_rate * (
             progress / ACTION_DURATION_S - self.averaged_line_speed
         )
@@ -228,6 +238,7 @@ class Environment:
             self.line.angle,
             averaged_forces,
             self.tow.pushes,
+            joint_acceleration,
         )
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
         truncated = (
@@ -280,6 +291,19 @@ class Environment:
             world_mask[:, None], self.line_cap_m_per_s
         )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
+        self.joint_velocity.copy_(
+            torch.where(
+                world_mask[:, None, None], self._joint_velocity(), self.joint_velocity
+            )
+        )
+
+    def _joint_velocity(self) -> torch.Tensor:
+        """Each unit's leg joints' speeds and the spine joint's behind it,
+        ``(W, N, M + 1)`` rad/s."""
+        state = self.simulation.physical_state
+        return torch.cat(
+            (state.leg_joint_velocity, state.spine_yaw_velocity[..., None]), dim=-1
+        )
 
     def _observations(self) -> torch.Tensor:
         return self.observation_builder.build(

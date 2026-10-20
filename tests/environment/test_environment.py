@@ -68,6 +68,12 @@ def test_the_settings_default_to_the_agreed_design_and_ramp_the_costs():
     # from the cycle it is given.
     assert settings.reward.ramp_weight_at(300, None) == 0.5
     assert settings.reward.ramp_weight_at(300, 236) == 0.75
+    # An exponential ramp multiplies by the same factor each cycle.
+    exponential = RewardSettings.from_section(
+        {"ramp_shape": "exponential", "ramp_start": 0.01, "ramp_cycles": 100}
+    )
+    weights = [exponential.ramp_weight_at(cycle) for cycle in (1, 51, 101)]
+    assert weights == pytest.approx([0.01, 0.1, 1.0])
 
 
 def test_the_line_is_laid_at_its_turn_and_measures_each_centre_on_it():
@@ -134,11 +140,18 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     Unit 1's leg joint turns at 10 rad/s, unit 0's spine joint at 3 and the
     rear's at 5, which is not its own: the motion, at 0.1 mm a second for
     each (rad/s)², is 0.018 and 0.2 mm, 0.0218 for the team at the ramp's 0.5.
-    With one account the team's holds every part, and the own account none."""
+    Unit 1's leg joint speeds up by 100 rad/s², the rear's spine joint by 50:
+    the accelerations, at 0.001 mm a second for each (rad/s²)², 0.02 mm for
+    the team. Unit 1's feet carry half its weight on average: the carry, at
+    10 mm a second for each unit weight, 0.1 mm; unit 0's carry its own,
+    beyond its free support, and more. With one account the team's holds
+    every part, and the own account none."""
     body = replace(BODY, segment_weights_n=(1.8e-3,) + (1e-3,) * (SEGMENTS - 1))
     commanded = torch.ones(SEGMENTS, LEGS + 1)
     commanded[-1, -1] = 0.0
-    settings = RewardSettings.from_section({"motion_price": 0.1})
+    settings = RewardSettings.from_section(
+        {"motion_price": 0.1, "acceleration_price": 1e-3, "carry_price": 10.0}
+    )
     reward = RewardFunction(settings, body, commanded, 0.005)
     reward.ramp_weight = 0.5
     state = resting_state(1)
@@ -152,16 +165,20 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     progress = 1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]])
     distance = 1e-3 * torch.tensor([[0.0, 0.0, 2.5, 0.0, 0.0]])
     angle = torch.tensor([[0.0, 0.0, 0.0, 0.0, math.radians(60)]])
-    averaged = torch.zeros(1, SEGMENTS, 5)
+    averaged = torch.zeros(1, SEGMENTS, 6)
     averaged[0, :, 0] = torch.tensor([0.3, -0.1, 0.0, -0.1, -0.1])  # along
     averaged[0, :, 1] = torch.tensor([1.0, 0.1, 0.0, 0.0, 0.0])  # up
     averaged[0, :, 2] = torch.tensor([0.0, -0.5, 0.2, -0.2, 0.0])  # front joint
     averaged[0, 2, 3] = 0.2  # belly
     averaged[0, 4, 4] = 2.0  # legs pressed
+    averaged[0, :, 5] = torch.tensor([1.2, 0.5, 1.0, 1.0, 1.0])  # feet
     tow = torch.tensor([[0.0, 0.0, 0.0, 0.1, 0.1]])
+    acceleration = torch.zeros(1, SEGMENTS, LEGS + 1)
+    acceleration[0, 1, 0] = 100.0
+    acceleration[0, -1, -1] = 50.0
 
     step = (state, command, progress, torch.zeros(1, SEGMENTS), distance, angle)
-    rewards, parts, own_energy = reward.compute(*step, averaged, tow)
+    rewards, parts, own_energy = reward.compute(*step, averaged, tow, acceleration)
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
     every = torch.ones(SEGMENTS)
@@ -173,6 +190,8 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     torch.testing.assert_close(by_name["braking"], -0.1 * every)
     torch.testing.assert_close(by_name["force"], -0.0332 * every)
     torch.testing.assert_close(by_name["motion"], -0.0218 * every)
+    torch.testing.assert_close(by_name["acceleration"], -0.02 * every)
+    torch.testing.assert_close(by_name["carry"], -0.1 * torch.eye(SEGMENTS)[1])
     torch.testing.assert_close(
         by_name["force_share"], -torch.tensor([1.06, 1.06 / 9, 0.0, 0.0, 0.0])
     )
@@ -181,12 +200,12 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
         by_name["hanging"], -0.664 * torch.tensor([0.2, 0.1, 0.2, 0.0, 0.0])
     )
     torch.testing.assert_close(by_name["pain"], -0.166 * torch.eye(SEGMENTS)[4])
-    team = 0.485 - 0.1325 - 1.59 * (0.2 + 0.1 + 0.0332) - 0.0218
+    team = 0.485 - 0.1325 - 1.59 * (0.2 + 0.1 + 0.0332) - 0.0218 - 0.02
     torch.testing.assert_close(rewards[0, :, 0], team * every)
     torch.testing.assert_close(rewards[0, 0, 1], torch.tensor(-1.06 - 1.59 * 0.1328))
     one = RewardFunction(replace(settings, own_account=False), body, commanded, 0.005)
     one.ramp_weight = 0.5
-    one_account, _, _ = one.compute(*step, averaged, tow)
+    one_account, _, _ = one.compute(*step, averaged, tow, acceleration)
     torch.testing.assert_close(one_account[..., 0], rewards.sum(dim=-1))
     assert not one_account[..., 1].any()
 
@@ -217,8 +236,9 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         averaged_speed,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 5),
+        torch.zeros(1, SEGMENTS, 6),
         zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
     )
 
     at_135, at_200 = paid_above
@@ -239,8 +259,9 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     last_action = torch.rand(2, SEGMENTS, LEGS + 1)
     # Averaged: along, up, front joint; unit 1 pushes unit 0 with 0.5, and
     # unit 2 is pulled by unit 1 with 2.
-    averaged = torch.zeros(2, SEGMENTS, 5)
+    averaged = torch.zeros(2, SEGMENTS, 6)
     averaged[0, 1, :3] = torch.tensor([0.3, 1.0, -0.5])
+    averaged[0, 1, 5] = 0.7  # the feet's load
     averaged[0, 2, 2] = 2.0
     trail = torch.rand(2, SEGMENTS, 15)
 
@@ -270,6 +291,17 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     assert lean.block_size == 43
     torch.testing.assert_close(
         lean_observations[0, 1, :43], torch.cat((own[:32], own[36:]))
+    )
+    # With the carry: the feet's averaged load before the step's joint forces.
+    carry = ObservationBuilder(
+        SEGMENTS, 2, 2, LEGS, BODY.unit_weight_n, "cpu", False, True
+    )
+    carry_observations = carry.build(
+        state, last_action, averaged, trail, torch.tensor([0.0, 0.25])
+    )
+    torch.testing.assert_close(
+        carry_observations[0, 1, :44],
+        torch.cat((own[:32], torch.tensor([0.7]), own[36:])),
     )
 
 
@@ -365,24 +397,26 @@ def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised(
 
 
 def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts():
-    """The whole environment on the headless tester, as run 05 sets it: 231
-    values for each of ten agents (no priced forces), every unit starting
-    within its sight of the line, the spine motors receiving 0.35 of their
-    command, one account. World 1's line
-    moved 20 mm to the side, beyond the sight radius, it restarts at once on
-    a new line; world 0 at the time limit."""
+    """The whole environment on the headless tester, as run 06 sets it: 236
+    values for each of ten agents (no priced forces, the feet's averaged
+    load), every unit starting within its sight of the line, the spine
+    motors receiving 0.35 of their command, two accounts, the accelerations
+    and the carry priced. World 1's line moved 20 mm to the side, beyond the
+    sight radius, it restarts at once on a new line, its joints' last speeds
+    taken afresh; world 0 at the time limit."""
     settings = EnvironmentSettings.from_section(
         {
             "max_episode_steps": 3,
             "stagger_first_episodes": False,
             "observe_priced_forces": False,
+            "observe_carry": True,
             "simulation": HEADLESS,
-            "reward": {"own_account": False},
+            "reward": {"acceleration_price": 1e-3, "carry_price": 50.0},
         }
     )
     environment = Environment(settings)
     observations = environment.reset(seed=0)
-    assert observations.shape == (2, 10, 231)
+    assert observations.shape == (2, 10, 236)
     assert environment.sight_radius_m == pytest.approx(0.0165, abs=1e-4)
     # Units up to 30 mm from the body's middle, the line turned up to 10 deg.
     assert (environment.line.distance < 0.0055).all()
@@ -400,9 +434,12 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
     action[..., -1] = 1.0
     for expected in ([False, True], [False, False], [True, False]):
         observations, rewards, terminated, truncated, _ = environment.step(action)
-        assert rewards.shape == (2, 10) and torch.isfinite(rewards).all()
+        assert rewards.shape == (2, 10, 2) and torch.isfinite(rewards).all()
         assert truncated.tolist() == expected and not terminated.any()
         if expected[1]:
             assert environment.diagnostics.episode.strayed.tolist() == [False, True]
+            torch.testing.assert_close(
+                environment.joint_velocity[1], environment._joint_velocity()[1]
+            )
     torch.testing.assert_close(spine_commands[0], torch.full((2, 9), 0.35))
     assert (environment.line.distance[1] < 0.0055).all()
