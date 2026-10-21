@@ -156,7 +156,7 @@ speed; local sensing coordinates it.
 | --- | --- |
 | Quick tapping, 8 to 16 steps a second, in every run, whatever the reward or the motor | The known default of locomotion learning without gait structure (Fu; Escontrela; CAPS) |
 | Runs paid for distance, uncapped from run 09; flat ground throughout | The structures that give natural gaits include a commanded speed and varied terrain (Fu) |
-| The best waves (0.35 to 0.37, runs 07 and 08) came with a capped line and a price on jerky motion | A commanded speed and smoothness, as in the standard recipe |
+| The best waves (0.35 to 0.37, runs 07 and 08) came with jerky motion priced, run 08's also with a capped line | Smoothness, and a commanded speed, as in the standard recipe |
 | No wave in runs 09 and 11; each leg paddles on its own | Relative overgeneralisation |
 | Idle legs | Lazy agents |
 | Targets across the whole range tapped faster than torques (run 11) | The studies using targets act through small offsets around a standing pose, with smoothness or energy terms |
