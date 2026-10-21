@@ -4,7 +4,7 @@ Agreed with the user on 2026-10-20.
 
 ## The body
 
-Model v5's headless tester: ten units alike, ten agents, no head
+A headless tester, v5 or v6: ten units alike, ten agents
 ([README.md](README.md#the-bodies)).
 
 ## A world's episode
@@ -29,21 +29,15 @@ restart: the model's pose, a new straight line at a small random angle
 **Every ending is a truncation.** At the time limit, when it loses the
 line, and when MuJoCo Warp makes it non-finite (rare, and counted), a world
 restarts and the agents value what would have followed with their critics,
-as if the walk went on (Pardo et al. 2018). Ending the
-episode instead would value it at zero, and at the start of training every
-step is worth less than zero: fresh networks on the half body, with the
-tow, earned −0.16 mm a step in the team channel, and the own channel holds
-only costs. Ending would then pay for leaving the line. legged_gym clips
-negative rewards to zero for the same reason. Drifting is still
-discouraged: the line pays less the farther a unit is from it.
+as if the walk went on (Pardo et al. 2018). Valuing an ending at zero would
+pay an untrained body, whose steps are worth less than zero, for leaving
+the line.
 
 ## The tow
 
-Training wheels that fade (cooperators, cycles 10, 12 and 15;
-`docs/cooperators/tow.md` on that branch). Without them a unit's own step
-moves nothing while its neighbours stand, so exploring finds nothing to
-learn from: fresh networks on the half body earned −0.1 to −1.7 mm/s of line
-untowed, and +9.4 with the tow (2026-10-20).
+Training wheels that fade (`docs/cooperators/tow.md` on that branch).
+Without them a unit's own step moves nothing while its neighbours stand, so
+exploring finds nothing to learn from.
 
 - **The push.** Each unit is pushed forward along its heading by its world's
   tow level times its weight, less as it speeds up: max(0, 1 − v / 33 mm/s)
