@@ -145,20 +145,18 @@ class RewardFunction:
         return (joint_acceleration.square() * self.commanded_joints).sum(dim=-1)
 
     def energy(
-        self,
-        physical_state: PhysicalState,
-        motor_command: torch.Tensor,
-        command_change: torch.Tensor,
+        self, physical_state: PhysicalState, force_change: torch.Tensor
     ) -> torch.Tensor:
         """Each unit's energy over the step just taken, ``(W, N, 4)`` mJ in
         ENERGY_PARTS' order, priced: its motors' pushing work, their braking
-        work at ``braking_price``, their commands ``motor_command`` ``(W, N, M
-        + 1)`` held, |u| to ``force_exponent`` at ``force_price_w``, and
-        switched, each command's ``command_change`` over the step, as a rate,
-        squared, at ``switching_price``."""
+        work at ``braking_price``, their force u (``motor_force``, a share of
+        each one's strength) held, |u| to ``force_exponent`` at
+        ``force_price_w``, and switched, each force's ``force_change`` ``(W,
+        N, M + 1)`` since the step before, as a rate, squared, at
+        ``switching_price``."""
         settings = self.settings
-        held = motor_command.abs().pow(settings.force_exponent)
-        rate = command_change / ACTION_DURATION_S
+        held = physical_state.motor_force.abs().pow(settings.force_exponent)
+        rate = force_change / ACTION_DURATION_S
         switched = rate.square() * ACTION_DURATION_S * settings.switching_price
         return torch.stack(
             (
@@ -173,7 +171,6 @@ class RewardFunction:
     def compute(
         self,
         physical_state: PhysicalState,
-        motor_command: torch.Tensor,
         progress: torch.Tensor,
         averaged_speed: torch.Tensor,
         distance: torch.Tensor,
@@ -183,13 +180,13 @@ class RewardFunction:
         joint_acceleration: torch.Tensor,
         averaged_accelerations: torch.Tensor,
         averaged_energy: torch.Tensor,
-        command_change: torch.Tensor,
+        force_change: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 13)``
         in PART_NAMES' order, and each unit's own ``energy`` ``(W, N, 4)`` mJ.
 
-        ``motor_command`` ``(W, N, M + 1)`` is what each motor received, and
-        ``command_change`` how much that changed since the step before;
+        ``force_change`` ``(W, N, M + 1)`` is how much each motor's force
+        changed since the step before;
         ``progress``, ``distance`` and ``angle`` ``(W, N)`` are each unit's
         step along the line (m), distance from it (m) and angle from its
         direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
@@ -251,7 +248,7 @@ class RewardFunction:
         pushed = (legs_push[:, 1:].clamp(max=0.0) / scale) ** 2
         squeeze = self.reference_mm * ramp * pushed.mean(dim=-1, keepdim=True)
 
-        own_energy = self.energy(state, motor_command, command_change)
+        own_energy = self.energy(state, force_change)
 
         # The rear unit has no spine joint behind it.
         squared_speeds = state.leg_joint_velocity.square().sum(dim=-1)

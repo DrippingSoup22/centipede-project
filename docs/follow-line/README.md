@@ -65,7 +65,7 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
 | Reward | [reward.md](reward.md) | From run 10: the team's line, of which the body's energy, as a muscle pays it (work, holding, switching), takes the share h / (h + E), h the task's priority, so the body walks at its cheapest pace; each unit's own carry |
 | Observations | [observations.md](observations.md) | Five units' bodies (45 values each from run 10), the trail inside the unit's sight (15), the tow (1) |
-| Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
+| Actions | [actions.md](actions.md) | From run 11: eight leg targets and the spine joint's behind, each a target angle its motor pulls toward as a spring and a damper (torques in runs 01 to 10), every 20 ms |
 | Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own (one in runs 05 and 09); how they see; gSDE; PPO's settings |
 
 ## The bodies
@@ -74,7 +74,9 @@ Every design is screened on a tester before the full body (the procedure in
 `../Training/results/follow-line/procedure.md`). The first tester is model
 v5's headless half (`models/assembly_v5_headless.xml`, [model.md](../model.md)):
 ten units alike, so that walking is learned before the front units must
-carry a head. The head comes later, as its own segment, with a spine that
+carry a head. From run 11 it is model v6 headless, the same body whose
+motors pull toward targets ([actions.md](actions.md)); a full v6 body
+follows if targets walk better. The head comes later, as its own segment, with a spine that
 can lift the front (the user, 2026-10-20: a separate discussion of the
 model).
 
@@ -98,5 +100,7 @@ Not decided; each is one change for a later run.
 - **The tow's walking test** counts feet lifting off after stances of 60
   ms: it misses gaits above about 8 strokes a second, and brought run 09's
   tow back once its legs buzzed.
+- **The motors' stiffness.** Full strength a quarter of each joint's range
+  away from its target, critically damped.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

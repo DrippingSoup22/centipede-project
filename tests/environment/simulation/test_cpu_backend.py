@@ -321,6 +321,8 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     assert pressed.sum() == pytest.approx(2 * pressed[2].item())
     assert state.leg_leg_force_squared[0, 2] >= pressed[2] ** 2
     assert (state.motor_positive_work[0, 2:4] > 0).all()
+    # A torque motor's force is its command, as a share of its strength.
+    assert torch.allclose(state.motor_force[0, :, :-1], actions[0])
 
     # Every sweep pushes back: the floor pushes the feet forward.
     actions[..., 0] = actions[..., 3] = -0.8

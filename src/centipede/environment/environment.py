@@ -154,9 +154,9 @@ class Environment:
         self.averaged_energy = torch.zeros(
             (world_count, segment_count), device=self.device
         )
-        # What each motor received on the last step, from 0 at an episode's
-        # start (the motors off), for the cost of switching force.
-        self.last_motor_command = torch.zeros(
+        # Each motor's force on the last step, from 0 at an episode's start
+        # (no force measured yet), for the cost of switching force.
+        self.last_motor_force = torch.zeros(
             (world_count, segment_count, legs + 1), device=self.device
         )
 
@@ -259,16 +259,15 @@ class Environment:
             self.reward.squared_accelerations(joint_acceleration)
             - self.averaged_accelerations
         )
-        command_change = motor_command - self.last_motor_command
-        self.last_motor_command.copy_(motor_command)
+        force_change = state.motor_force - self.last_motor_force
+        self.last_motor_force.copy_(state.motor_force)
         self.averaged_energy += self.forces.averaging_rate * (
-            self.reward.energy(state, motor_command, command_change).sum(dim=-1)
+            self.reward.energy(state, force_change).sum(dim=-1)
             / ACTION_DURATION_S
             - self.averaged_energy
         )
         rewards, reward_parts, own_energy = self.reward.compute(
             state,
-            motor_command,
             progress,
             self.averaged_line_speed,
             self.line.distance,
@@ -278,7 +277,7 @@ class Environment:
             joint_acceleration,
             self.averaged_accelerations,
             self.averaged_energy,
-            command_change,
+            force_change,
         )
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
         truncated = (
@@ -333,7 +332,7 @@ class Environment:
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
         self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_energy.masked_fill_(world_mask[:, None], 0.0)
-        self.last_motor_command.masked_fill_(world_mask[:, None, None], 0.0)
+        self.last_motor_force.masked_fill_(world_mask[:, None, None], 0.0)
         self.joint_velocity.copy_(
             torch.where(
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity

@@ -183,8 +183,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     state.spine_yaw_velocity[0, -1] = 5.0
     state.motor_positive_work[0, 0] = 2e-3
     state.motor_negative_work[0, 1] = 4e-3
-    command = torch.zeros(1, SEGMENTS, LEGS + 1)
-    command[0, 0, 0] = 1.0
+    state.motor_force[0, 0, 0] = 1.0
     progress = 1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]])
     distance = 1e-3 * torch.tensor([[0.0, 0.0, 2.5, 0.0, 0.0]])
     angle = torch.tensor([[0.0, 0.0, 0.0, 0.0, math.radians(60)]])
@@ -200,7 +199,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     acceleration[0, 1, 0] = 100.0
     acceleration[0, -1, -1] = 50.0
 
-    step = (state, command, progress, torch.zeros(1, SEGMENTS), distance, angle)
+    step = (state, progress, torch.zeros(1, SEGMENTS), distance, angle)
     rest = (
         averaged,
         tow,
@@ -262,7 +261,6 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
 
     _, parts, _ = reward.compute(
         resting_state(1),
-        torch.zeros(1, SEGMENTS, LEGS + 1),
         progress,
         averaged_speed,
         zeros,
@@ -303,7 +301,6 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
 
     rewards, parts, _ = reward.compute(
         resting_state(1),
-        torch.zeros(1, SEGMENTS, LEGS + 1),
         1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]]),
         zeros,
         zeros,
@@ -323,9 +320,9 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
 
 
 def test_energy_holds_force_to_its_exponent_and_charges_switching_by_its_rate():
-    """A motor of unit 0 commanded 0.5, held at 1 mW for a motor fully on to
-    the power 1: 0.5 mW, 0.01 mJ over a 20 ms step. Its command changed by
-    0.2 over the step, 10 a second: switching at 2 mW for a rate of 1 a
+    """A motor of unit 0 at half its strength, held at 1 mW for a motor fully
+    on to the power 1: 0.5 mW, 0.01 mJ over a 20 ms step. Its force changed
+    by 0.2 over the step, 10 a second: switching at 2 mW for a rate of 1 a
     second, squared, 0.2 W, 0.004 mJ. The rear's spine joint, which it does
     not command, costs nothing."""
     commanded = torch.ones(SEGMENTS, LEGS + 1)
@@ -334,13 +331,13 @@ def test_energy_holds_force_to_its_exponent_and_charges_switching_by_its_rate():
         {"force_price_w": 1e-3, "force_exponent": 1.0, "switching_price": 2e-3}
     )
     reward = RewardFunction(settings, BODY, commanded, 0.005)
-    command = torch.zeros(1, SEGMENTS, LEGS + 1)
-    command[0, 0, 0] = 0.5
+    state = resting_state(1)
+    state.motor_force[0, 0, 0] = 0.5
     change = torch.zeros(1, SEGMENTS, LEGS + 1)
     change[0, 0, 0] = 0.2
     change[0, -1, -1] = 1.0
 
-    energy = reward.energy(resting_state(1), command, change)
+    energy = reward.energy(state, change)
 
     expected = torch.zeros(SEGMENTS, 4)
     expected[0, 2:] = torch.tensor([0.01, 0.004])

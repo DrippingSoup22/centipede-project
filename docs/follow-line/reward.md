@@ -1,6 +1,7 @@
 # Reward
 
-From run 10 (the user's decision, 2026-10-21, after run 09): the team is
+From run 10 (the user's decision, 2026-10-21, after run 09; run 11 the
+same on target motors, [actions.md](actions.md)): the team is
 paid the line it walks, of which the body's energy, as a muscle pays it,
 takes a share that the task's priority sets; each unit's own account is
 charged the weight its feet do not carry. Run 09 had the same share with
@@ -44,9 +45,10 @@ The team receives the mean over the units.
 
 ## The energy E
 
-Each joint's motor stands for the muscles across that joint: the agent
-commands its force, u, a share of its strongest torque, and the angle
-follows from the physics. A muscle contracting over and over pays three
+Each joint's motor stands for the muscles across that joint. Its force,
+f, is a share of its strongest torque: on torque motors (runs 01 to 10) the
+command itself, on target motors (from run 11) what the spring and damper
+pull with, averaged over the step. A muscle contracting over and over pays three
 costs (van der Zee & Kuo 2021, who measured them in cyclic contractions):
 
 | Cost | What it pays for | As the strokes quicken, at the same force | Its share in their measurement |
@@ -63,9 +65,9 @@ E being the units' mean (one body, one store):
 - **Work**: its motors' positive work, torque times joint speed, which the
   simulation adds up over its substeps; their negative work at a fifth of
   its size (muscle efficiencies about 25% and −120%, Margaria 1968).
-- **Switching**: each motor's command's rate of change, squared, at 0.00352
-  mJ/s for a rate of 1 a second (a full stroke of the command in a second).
-- **Holding**: each motor's command, |u|, at 0.418 mJ/s for a motor fully
+- **Switching**: each motor's force's rate of change, squared, at 0.00352
+  mJ/s for a rate of 1 a second (a full stroke of the force in a second).
+- **Holding**: each motor's force, |f|, at 0.418 mJ/s for a motor fully
   on.
 
 The two prices split the scripted walk's cost, at *S. heros*' fastest
@@ -171,3 +173,14 @@ networks under the tow spend 15 mJ/s a unit, 11.7 of it switching, the
 exploring noise's: the share leaves 6% of their forward line, less than
 their steps back take, so the team gets −0.4 mm/s (run 09: +0.4), and
 their carry costs 12.9.
+
+On run 11's target motors (2026-10-21) the scripted walk aims its joints
+(the lift at 0° in stance, the best of the aims from its low stop to its
+middle): 104 mm/s for 2.63 mJ/s a unit (work 0.75, switching 1.31,
+holding 0.58), the cheapest walk yet, keeping 30 of its 103 mm/s of line.
+Every fault loses at own weight 0.8: 1.4 and 2 times its step rate by 4.2
+and 8.7 (129 and 163 mm/s), the backward wave by 6.3, a leg held up by 11
+to 21, wooden legs by 44, the belly dragged by 64. 0.7 times its step rate
+ties, −0.2 (+1.8 at own weight 4): the pace pays best from about 2.5 to
+3.5 strokes a second, within *S. heros*' 1.9 to 3.45. Fresh networks spend 14 mJ/s
+a unit switching, their team gets −0.7 mm/s and their carry costs 12.3.

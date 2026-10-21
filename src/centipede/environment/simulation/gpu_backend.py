@@ -357,6 +357,7 @@ def _clear_effort(
     leg_leg_force_squared: wp.array2d[float],
     motor_positive_work: wp.array2d[float],
     motor_negative_work: wp.array2d[float],
+    motor_force: wp.array3d[float],
 ) -> None:
     """Zero the masked worlds' effort measures; one thread per (world, segment)."""
     world_index, segment_index = wp.tid()
@@ -365,6 +366,8 @@ def _clear_effort(
     for side in range(2):
         foot_normal_force[world_index, segment_index, side] = 0.0
         foot_forward_force[world_index, segment_index, side] = 0.0
+    for motor_index in range(motor_force.shape[2]):
+        motor_force[world_index, segment_index, motor_index] = 0.0
     belly_normal_force[world_index, segment_index] = 0.0
     floor_forward_force[world_index, segment_index] = 0.0
     leg_leg_force[world_index, segment_index] = 0.0
@@ -508,6 +511,7 @@ def _add_segment_effort(
     leg_leg_force_squared: wp.array2d[float],
     motor_positive_work: wp.array2d[float],
     motor_negative_work: wp.array2d[float],
+    motor_force: wp.array3d[float],
 ) -> None:
     """Add one physics step's legs pressed and motor work of the masked worlds.
 
@@ -515,7 +519,8 @@ def _add_segment_effort(
     segment's pressed total adds ``scale`` times itself and its square, then
     starts again from zero; each of its leg motors and the spine motor behind
     it adds torque times speed times ``timestep`` to its pushing work where
-    positive, to its braking work where negative.
+    positive, to its braking work where negative, and ``scale`` times its
+    force to its force.
     """
     world_index, segment_index = wp.tid()
     if not world_mask[world_index]:
@@ -526,6 +531,12 @@ def _add_segment_effort(
     leg_leg_pressed[world_index, segment_index] = 0.0
 
     for leg_motor_index in range(leg_actuator_ids.shape[1]):
+        motor_force[world_index, segment_index, leg_motor_index] += (
+            scale
+            * actuator_force[
+                world_index, leg_actuator_ids[segment_index, leg_motor_index]
+            ]
+        )
         _add_motor_work(
             actuator_force,
             actuator_velocity,
@@ -537,6 +548,9 @@ def _add_segment_effort(
             motor_negative_work,
         )
     if segment_index < spine_actuator_ids.shape[0]:
+        motor_force[world_index, segment_index, leg_actuator_ids.shape[1]] += (
+            scale * actuator_force[world_index, spine_actuator_ids[segment_index]]
+        )
         _add_motor_work(
             actuator_force,
             actuator_velocity,
@@ -944,7 +958,8 @@ class GPUBackend:
 
     def _measure_effort(self, world_mask: wp.array, scale: float) -> None:
         """Add the masked worlds' effort of the physics state just computed:
-        ``scale`` times its forces, and its motors' work over a timestep."""
+        ``scale`` times its forces, its motors' included, and its motors' work
+        over a timestep."""
         (
             foot_normal,
             foot_forward,
@@ -952,7 +967,7 @@ class GPUBackend:
             floor_forward,
             leg_leg,
             leg_leg_squared,
-            *work,
+            *motors,
         ) = self._effort
         wp.launch(
             _add_contact_forces,
@@ -992,7 +1007,7 @@ class GPUBackend:
                 scale,
                 self.timestep,
             ],
-            outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *work],
+            outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *motors],
             device=self.device,
         )
 

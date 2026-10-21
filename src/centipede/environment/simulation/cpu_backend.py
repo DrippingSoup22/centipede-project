@@ -222,8 +222,9 @@ class CPUBackend:
 
         Each motor's torque times speed times the timestep adds to its
         segment's pushing work where positive, to its braking work where
-        negative. Each contact's force comes from its constraint rows: with
-        the elliptic cones the model must have, the first three hold its
+        negative, and ``scale`` times its force to its force. Each contact's
+        force comes from its constraint rows: with the elliptic cones the
+        model must have, the first three hold its
         normal and two tangential parts in the contact's frame, whose normal
         points from its first shape to its second, so the force acts on the
         second shape as it is and on the first reversed. A foot or body shape
@@ -246,6 +247,12 @@ class CPUBackend:
         segment_work[:-1, -1] = motor_work[mapping.spine_actuator_ids]
         effort["motor_positive_work"] += np.maximum(segment_work, 0.0).sum(axis=1)
         effort["motor_negative_work"] += np.maximum(-segment_work, 0.0).sum(axis=1)
+        effort["motor_force"][:, :-1] += (
+            scale * data.actuator_force[mapping.leg_actuator_ids]
+        )
+        effort["motor_force"][:-1, -1] += (
+            scale * data.actuator_force[mapping.spine_actuator_ids]
+        )
 
         contact = data.contact
         acting = contact.efc_address >= 0
