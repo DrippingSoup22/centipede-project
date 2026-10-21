@@ -27,15 +27,17 @@ toward a target, and the body follows it.
 
 ## The parts
 
-The design as runs 10 and 11 used it.
+The design of run 12, agreed with the user on 2026-10-21. Training goes in
+stages: stage 1 from scratch at a moderate energy price, stage 2 from its
+checkpoint at a larger one ([reward.md](reward.md)).
 
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; a fading tow at the start |
-| Reward | [reward.md](reward.md) | The team is paid its line, of which the body's energy takes the share h / (h + E); each unit's own account is charged the weight its feet do not carry |
-| Observations | [observations.md](observations.md) | Five units' bodies (45 values each), the line inside the unit's sight (15), the tow (1) |
+| Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged the weight its feet do not carry |
+| Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, each seeing what its actor sees; gSDE; PPO |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing what its actor sees; gSDE from 0.3; PPO, discount 0.99 |
 
 ## The bodies
 

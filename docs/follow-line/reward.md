@@ -21,13 +21,18 @@ team_i = v* − |v̄ − v*|  −  c · Ē_i
 own_i  = − carry_i
 ```
 
-| Symbol | What it is |
-| --- | --- |
-| v̄ | The body's speed along the line: the units' mean forward line, each averaged over 1 s |
-| v* | The commanded speed |
-| Ē_i | The mean energy of the units within unit i's radius, itself and up to two each side, each averaged over 1 s, mJ/s |
-| c | The energy's price, in mm/s per mJ/s |
-| carry_i | The weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each |
+| Symbol | What it is | Setting |
+| --- | --- | --- |
+| v̄ | The body's speed along the line: the units' mean forward line, each averaged over 1 s | |
+| v* | The commanded speed, 67 mm/s | `commanded_speed_mm_per_s` |
+| Ē_i | The mean energy spent on the step by the units within unit i's radius, itself and up to two each side (those present), mJ/s | `neighbourhood_energy` |
+| c | The energy's price, in mm/s per mJ/s: 0.4 in stage 1 | `mm_per_mj` |
+| carry_i | The weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each | `carry_price` |
+
+The speed is averaged before it is compared with v*, because |v̄ − v*| is
+not linear: a stride's surges and dips must cancel first. The energy is
+charged as it is spent: its cost is linear, so averaging it would only
+delay it, and over a walk the total is the same.
 
 Below the target the team is paid its speed, v̄, exactly as the line paid
 before; above it each extra mm/s costs one. Every ending is a truncation
@@ -68,8 +73,7 @@ The task sets how fast to go, and the body finds how to walk that fast.
 
 Each motor stands for the muscles across its joint. A muscle contracting
 over and over pays three costs (van der Zee & Kuo 2021): work, switching its
-force on and off, and holding it. For each unit, in mJ a second, averaged
-over the last second:
+force on and off, and holding it. For each unit, in mJ a second:
 
 | Cost | Charged | Price |
 | --- | --- | --- |
@@ -94,11 +98,13 @@ would accept to save 1 mJ/s. A small c lets clumsy beginners, whose
 exploring alone switches 14 to 22 mJ/s a unit, still gain by trying to walk;
 a large c separates the gaits more strongly. Training goes in stages:
 
-- **Stage 1**, from scratch: c at the middle of the range in which the
-  scripted wave beats every fault and exploring beats standing still
-  (measured below).
-- **Stage 2**, from stage 1's checkpoint: a larger c, once the agents walk.
-  Whether it jumps or rises gradually is decided then.
+- **Stage 1**, from scratch: **c = 0.4**, the middle of the range in which
+  exploring still beats standing still under the tow (measured below). A
+  gait holding the speed while spending 30 mJ/s instead of the wave's 2
+  already loses 11 mm/s.
+- **Stage 2**, from stage 1's checkpoint: **c of at least 0.55**, once the
+  agents walk, so that such waste costs as much as a leg held up (15 to
+  25 mm/s). Whether it jumps or rises gradually is decided then.
 
 An energy cost is needed from the start: run 03 learned its walk with none,
 and adding it at full price later changed nothing.
@@ -161,7 +167,7 @@ and 11, fresh networks; 4 worlds, 6 s each, on v5 and v6):
 | v* | The scripted wave spends nearly the same for each millimetre at every speed on v6 (0.028 mJ/mm from 48 to 111 mm/s), so no cheapest pace sets it | **67 mm/s**, 1 body length a second, the middle of *S. heros*' 0.5 to 1.5 |
 | Ē at the ends | The mean of the units present and their sum over five differ by under 1 mm/s in every comparison | **The mean of the units present** |
 | The carry | Without it a leg held up or a unit dragged pays as much as the wave on both bodies (−0.4 to +4.5 mm/s): the neighbourhood's energy alone does not stop it. With it they lose by 15 to 35 | **Kept** |
-| c, stage 1 | The faults barely depend on c: the scripted gaits spend 1.5 to 2.8 mJ/s, close to the wave's 1.9 (v6) and 2.5 (v5). What bounds it is the start: fresh networks' exploring spends about 15 mJ/s, mostly switching, and must still beat a body standing under the tow, which holds only for c up to about 0.07 on v6 and 0.2 on v5 with the carry counted | **Set with the exploration** ([critic.md](critic.md)): a smaller noise spends less and widens the range |
+| c, stage 1 | The faults barely depend on c: the scripted gaits spend 1.5 to 2.8 mJ/s, close to the wave's 1.9 (v6) and 2.5 (v5). What bounds it is the start: fresh networks' exploring, at the starting noise 0.3 on v6, spends 11.9 mJ/s, 85% of it switching, and its team account beats a body standing under the tow by 8.5 mm/s at c = 0, 5.6 at 0.25, 2.7 at 0.5 and −3.1 at 1. With the carry added, standing wins at the start at every c, as it did in runs 06 to 11, whose walks formed anyway under the tow | **0.4**, with the noise 0.3 ([critic.md](critic.md)) |
 
 With v* = 67 mm/s and the carry, every fault loses on v5 at every c from
 0 to 4: legs in step by 55, in random phase by 46, the rear half limp by
@@ -176,6 +182,13 @@ uncoordinated legs, quick tapping that cannot hold the speed, legs that do
 no work, and running past the target. The energy's price matters most
 against a gait that holds the speed while wasting energy, as the learned
 gaits did (27 to 35 mJ/s): stage 2's larger c.
+
+On the built code (the study's `archive/ledger/ledger_12.txt`, run 12's
+configuration, c = 0.4, own weight 1), a wave over 5 units at 69 mm/s
+keeps the team 65 mm/s, and every fault loses: off the speed by 19 to 58,
+a leg held up by 20 to 23, the narrowest the lifts pressing half as hard
+(1.1) and one unit's feet skating (4.4). The wave running backward, a wave
+too, loses by 2.0.
 
 ## Open
 

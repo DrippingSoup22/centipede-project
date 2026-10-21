@@ -16,14 +16,17 @@ over many samples (131,072 per agent per update) but slows learning.
 
 | Critic | Predicts | Sees |
 | --- | --- | --- |
-| Team | The team account ([reward.md](reward.md)) | What its actor sees, its own energy averaged over 1 s included |
+| Team | The team account ([reward.md](reward.md)) | What its actor sees, the forward lines and energies averaged over 1 s included |
 | Own | The own account, its carry | What its actor sees, its feet's averaged load included |
 
 - **One critic per account**, so that the clearer own signal is not drowned
   in the team's: RL_lib normalises each critic's advantages over the batch
-  on their own, then adds them 1 : 0.8, the team first (Sheikh & Bölöni
-  2020). With no own term, a run has one critic (`own_account` false): an
-  account always 0 would give its critic only noise.
+  on their own, then adds them **1 : 1** (Sheikh & Bölöni 2020). Once
+  normalised, the weight is the only thing that sets how much each account
+  counts, and nothing measured favours either (runs 06 to 11 used 1 : 0.8,
+  a choice never tested). With no own term, a run has one critic
+  (`own_account` false): an account always 0 would give its critic only
+  noise.
 - **Local**: it sees its actor's view and nothing else
   ([constraints.md](constraints.md)). After convergence central and local
   critics give the same expected gradient (Lyu et al. 2021).
@@ -47,8 +50,10 @@ the body, whose units see three), and regains it as that settles (0.90 to
 | --- | --- | --- |
 | Networks | Actor and each critic 2 × 64 | A local view of five units (the hexapod's leg networks, Schilling et al. 2020) |
 | Value normalisation | Each critic learns its returns standardised by a mean and spread over about the last 10 updates | Returns grow as the walk improves; a scale over the whole run lagged them |
-| Exploration | gSDE: the noise is the actor's last hidden layer, at unit length, times a matrix each world draws and keeps for 4 decisions; spreads learned from 0.4; a tanh actor | With noise drawn through time, the gait was the noise and the noise-free policy stood (cooperators, runs 13 to 18) (Raffin et al. 2021) |
+| Exploration | gSDE: the noise is the actor's last hidden layer, at unit length, times a matrix each world draws and keeps for 4 decisions; spreads learned from 0.3; a tanh actor | With noise drawn through time, the gait was the noise and the noise-free policy stood (cooperators, runs 13 to 18) (Raffin et al. 2021) |
+| The noise's start, 0.3 | Fresh networks under the tow: 8.9 mm/s at 11.9 mJ/s a unit, against 9.5 at 15.8 for 0.4 and 7.3 at 7.7 for 0.2 | Almost as much exploring as 0.4 for a quarter less energy; at 0.2 the body moves noticeably less ([reward.md](reward.md), c) |
+| The matrix's hold, 4 | Holds of 1 to 32 decisions: the commands change at 12 to 6 Hz, the feet step 2.3 to 2.8 times a second, the start's margin over standing is the same from 1 to 16 and smaller at 32 | The noise follows the unit's quick senses whatever the hold, so a longer one gains nothing here; in Raffin et al.'s PPO test (Walker2D, 60 decisions a second) 4 was best and long holds explored worse. The study's archive, `checks/reward_12/hold_v6.txt` |
 | Worlds × steps | 4,096 × 32 per update | legged_gym's batch (Rudin et al. 2021) |
 | Minibatches, passes | 4 of 32,768, 5 passes | 20 Adam steps an update, as theirs |
 | Learning rate | Each actor's adapted after every update toward a KL of 0.01 (×1.5 or ÷1.5, between 1e-5 and 1e-2), from 3e-4; the critics 3e-4 | Rudin et al.'s rule |
-| Discount, GAE λ | 0.998, 0.95 | The cooperators' run 28 |
+| Discount, GAE λ | 0.99, 0.95 | A horizon of about 2 s, as legged_gym's at the same 50 decisions a second (Rudin et al. 2021): what a step changes, the 1-s averages included, is paid within a stride or two and that second. 0.998, about 10 s, came from the cooperators' target several seconds away; here it would add mostly the other units' changing behaviour, noise to a unit's critic |

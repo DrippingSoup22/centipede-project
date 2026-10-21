@@ -87,9 +87,10 @@ class RewardFunction:
 
     ``commanded_joints`` ``(N, M + 1)`` is 1.0 for the motors each unit
     commands: its leg motors and the spine motor behind it. The line is paid
-    within ``band_m`` of it. ``ramp_weight`` weighs energy, the squeeze,
-    pain, the motion and the accelerations; the experiment sets it before
-    each update cycle.
+    within ``band_m`` of it. A unit sees ``observation_radius`` neighbours on
+    each side, whose energy ``neighbourhood_energy`` charges it.
+    ``ramp_weight`` weighs energy, the squeeze, pain, the motion and the
+    accelerations; the experiment sets it before each update cycle.
     """
 
     def __init__(
@@ -98,6 +99,7 @@ class RewardFunction:
         body: BodyMeasures,
         commanded_joints: torch.Tensor,
         band_m: float,
+        observation_radius: int,
     ) -> None:
         """Fix the prices once."""
         self.settings = settings
@@ -138,6 +140,31 @@ class RewardFunction:
             own = index >= TEAM_PART_COUNT and settings.own_account
             self.part_channels[index, int(own)] = rate
         self.part_channels = self.part_channels.to(device)
+        # With neighbourhood_energy, the mean over the units each unit sees:
+        # row i weighs the units present within observation_radius of i.
+        self.neighbourhoods = None
+        if settings.neighbourhood_energy:
+            units = torch.arange(len(commanded_joints), device=device)
+            apart = (units[:, None] - units[None, :]).abs()
+            seen = (apart <= observation_radius).float()
+            self.neighbourhoods = seen / seen.sum(dim=1, keepdim=True)
+
+    def _seen(self, distance: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
+        """Each unit's closeness to the line, 1 - (distance / band)², times the
+        cosine of its angle from it, ``(W, N)``: none beyond the band or facing
+        away."""
+        closeness = (1 - (distance * 1e3 / self.band_mm) ** 2).clamp(min=0.0)
+        return closeness * angle.cos().clamp(min=0.0)
+
+    def forward_line(
+        self, progress: torch.Tensor, distance: torch.Tensor, angle: torch.Tensor
+    ) -> torch.Tensor:
+        """Each unit's forward line over the step, ``(W, N)`` mm: its step
+        along the line times ``_seen``, uncapped, or a step back in full,
+        which the commanded speed averages."""
+        step_mm = progress * 1e3
+        forward = step_mm.clamp(min=0.0) * self._seen(distance, angle)
+        return forward + step_mm.clamp(max=0.0)
 
     def squared_accelerations(self, joint_acceleration: torch.Tensor) -> torch.Tensor:
         """Each unit's joints' changes of speed ``(W, N, M + 1)`` rad/s²,
@@ -173,6 +200,7 @@ class RewardFunction:
         physical_state: PhysicalState,
         progress: torch.Tensor,
         averaged_speed: torch.Tensor,
+        averaged_forward_line: torch.Tensor,
         distance: torch.Tensor,
         angle: torch.Tensor,
         averaged_forces: torch.Tensor,
@@ -190,7 +218,9 @@ class RewardFunction:
         ``progress``, ``distance`` and ``angle`` ``(W, N)`` are each unit's
         step along the line (m), distance from it (m) and angle from its
         direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
-        along the line averaged as the forces are (m/s); ``averaged_forces`` is
+        along the line averaged as the forces are (m/s), and
+        ``averaged_forward_line`` its ``forward_line`` as a speed, averaged
+        the same way (mm/s); ``averaged_forces`` is
         ``AveragedForces.values``; ``tow_pushes`` ``(W, N)`` each unit's tow
         on the step, in unit weights; ``joint_acceleration`` ``(W, N, M + 1)``
         how fast each unit's joints (its legs' and the spine joint behind it)
@@ -211,19 +241,20 @@ class RewardFunction:
         The line: each unit's step forward, up to the cap (or, with
         ``line_cap_averaged``, scaled by the cap over its averaged speed when
         that is above it, less ``line_overspeed_slope`` times the speed above
-        it), times its closeness, 1 - (distance / band)², and
-        the cosine of its angle (none beyond the band or facing away), and a
-        step back in full; the team is paid the units' mean. The squeeze: at
-        each joint, the averaged force along the body with the tows behind it
-        taken out, a pull free, squared against the force scale and averaged
-        over the joints. Energy: each unit's ``energy``, the team charged the
-        units' mean. Each unit's own:
-        its force share, the
-        averaged net force of its joints along the body plus its tow,
-        squared against the force scale; its hanging, the weight its
-        neighbours hold up for it beyond its free support and its belly's
-        load; its pain, its legs' averaged press on other legs, squared; and
-        its carry, the weight beyond its free support that its feet, on
+        it), times its closeness, 1 - (distance / band)², and the cosine of its
+        angle (none beyond the band or facing away), and a step back in full;
+        the team is paid the units' mean. With ``commanded_speed_mm_per_s`` v*
+        the team is paid v* - |v - v*| a second instead, v the units' mean
+        ``averaged_forward_line``. The squeeze: at each joint, the averaged
+        force along the body with the tows behind it taken out, a pull free,
+        squared against the force scale and averaged over the joints. Energy:
+        each unit's ``energy``, the team charged the units' mean, or with
+        ``neighbourhood_energy`` each unit the mean of the units it sees. Each
+        unit's own: its force share, the averaged net force of its joints along
+        the body plus its tow, squared against the force scale; its hanging, the
+        weight its neighbours hold up for it beyond its free support and its
+        belly's load; its pain, its legs' averaged press on other legs, squared;
+        and its carry, the weight beyond its free support that its feet, on
         average, do not carry.
         """
         state = physical_state
@@ -231,8 +262,6 @@ class RewardFunction:
         scale = self.settings.joint_force_scale
 
         step_mm = progress * 1e3
-        closeness = (1 - (distance * 1e3 / self.band_mm) ** 2).clamp(min=0.0)
-        facing = angle.cos().clamp(min=0.0)
         if self.settings.line_cap_averaged:
             cap = self.settings.line_speed_cap_mm_per_s * 1e-3
             speed = averaged_speed.clamp(min=cap)
@@ -240,8 +269,14 @@ class RewardFunction:
             paid = step_mm.clamp(min=0.0) * target_pay / speed
         else:
             paid = step_mm.clamp(min=0.0, max=self.line_cap_mm)
-        forward = paid * closeness * facing
+        forward = paid * self._seen(distance, angle)
         line = forward + step_mm.clamp(max=0.0)
+        target = self.settings.commanded_speed_mm_per_s
+        if target:
+            body_speed = averaged_forward_line.mean(dim=1, keepdim=True)
+            team_line = (target - (body_speed - target).abs()) * ACTION_DURATION_S
+        else:
+            team_line = line.mean(dim=1, keepdim=True)
 
         along, up, front, belly, pressed, feet = averaged_forces.unbind(dim=-1)
         legs_push = front + tow_pushes.flip(-1).cumsum(dim=-1).flip(-1)
@@ -249,6 +284,10 @@ class RewardFunction:
         squeeze = self.reference_mm * ramp * pushed.mean(dim=-1, keepdim=True)
 
         own_energy = self.energy(state, force_change)
+        if self.neighbourhoods is None:
+            team_energy = own_energy.mean(dim=1, keepdim=True)
+        else:
+            team_energy = self.neighbourhoods @ own_energy
 
         # The rear unit has no spine joint behind it.
         squared_speeds = state.leg_joint_velocity.square().sum(dim=-1)
@@ -285,19 +324,23 @@ class RewardFunction:
         hanging = (up - self.free_support).clamp(min=0.0) + belly
         carry = self.carry_price_mm * (self.own_carry - feet).clamp(min=0.0)
 
+        units = line.shape[1]
         team = torch.cat(
-            (
-                line.mean(dim=1, keepdim=True)[..., None],
-                -squeeze[..., None],
-                -ramp * own_energy.mean(dim=1, keepdim=True),
-                -motion[..., None],
-                -acceleration[..., None],
-                -energy_share[..., None],
-            ),
+            [
+                part.expand(-1, units, -1)
+                for part in (
+                    team_line[..., None],
+                    -squeeze[..., None],
+                    -ramp * team_energy,
+                    -motion[..., None],
+                    -acceleration[..., None],
+                    -energy_share[..., None],
+                )
+            ],
             dim=-1,
         )
         own = torch.stack(
             (-force_share, -pain, -self.hanging_price_mj * hanging, -carry), dim=-1
         )
-        parts = torch.cat((team.expand(-1, line.shape[1], -1), own), dim=-1)
+        parts = torch.cat((team, own), dim=-1)
         return parts @ self.part_channels, parts, own_energy

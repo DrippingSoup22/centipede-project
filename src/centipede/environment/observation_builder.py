@@ -12,20 +12,23 @@ def block_size(
     priced_forces: bool = True,
     carry: bool = False,
     energy: bool = False,
+    line_speed: bool = False,
 ) -> int:
     """Values in a unit's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
     legs' press (1) and the averaged joint forces (3) if ``priced_forces``,
     the feet's averaged load (1) if ``carry``, the averaged energy (1) if
-    ``energy``, the step's joint forces (2), and the last action (M + 1): 47
-    with ankles, 43 without the priced forces, 44 with the carry instead."""
+    ``energy``, the averaged forward line (1) if ``line_speed``, the step's
+    joint forces (2), and the last action (M + 1): 47 with ankles, 43 without
+    the priced forces, 44 with the carry instead."""
     return (
         19
         + 3 * leg_motor_count
         + (4 if priced_forces else 0)
         + int(carry)
         + int(energy)
+        + int(line_speed)
     )
 
 
@@ -63,7 +66,8 @@ class ObservationBuilder:
     last (the rear's last value goes to no motor). Without ``priced_forces``
     the legs' press and the averaged joint forces are left out; with
     ``carry`` the feet's averaged load follows the averaged joint forces,
-    and with ``energy`` the unit's averaged energy in mJ/s follows them.
+    with ``energy`` the unit's averaged energy in mJ/s follows them, and
+    with ``line_speed`` its averaged forward line in mm/s.
     Forces are in unit weights. The blocks are laid end to end in the
     neighbour table's order, followed by the unit's trail
     (``StraightLine.trail``) and its world's tow level.
@@ -80,6 +84,7 @@ class ObservationBuilder:
         priced_forces: bool = True,
         carry: bool = False,
         energy: bool = False,
+        line_speed: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -88,7 +93,10 @@ class ObservationBuilder:
         self.priced_forces = priced_forces
         self.carry = carry
         self.energy = energy
-        self.block_size = block_size(leg_motor_count, priced_forces, carry, energy)
+        self.line_speed = line_speed
+        self.block_size = block_size(
+            leg_motor_count, priced_forces, carry, energy, line_speed
+        )
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
         )
@@ -107,6 +115,7 @@ class ObservationBuilder:
         trail: torch.Tensor,
         tow_levels: torch.Tensor,
         averaged_energy: torch.Tensor | None = None,
+        averaged_forward_line: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every unit's observation, ``(W, N, observation_size)``.
 
@@ -114,7 +123,9 @@ class ObservationBuilder:
         1)``; ``averaged_forces`` ``AveragedForces.values``; ``trail``
         ``StraightLine.trail``; ``tow_levels`` each world's tow level,
         ``(W,)``; ``averaged_energy`` each unit's averaged energy, ``(W, N)``
-        mJ/s, read with ``energy``. The gather creates a new tensor, so a
+        mJ/s, read with ``energy``; ``averaged_forward_line`` each unit's
+        averaged forward line, ``(W, N)`` mm/s, read with ``line_speed``. The
+        gather creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
         """
         state = physical_state
@@ -138,6 +149,8 @@ class ObservationBuilder:
             averaged.append(averaged_forces[..., 5:6])
         if self.energy:
             averaged.append(averaged_energy[..., None])
+        if self.line_speed:
+            averaged.append(averaged_forward_line[..., None])
         step_forces = torch.cat(
             (state.front_joint_force[..., None], state.net_joint_force[..., :1]),
             dim=-1,

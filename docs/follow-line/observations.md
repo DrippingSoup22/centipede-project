@@ -1,6 +1,7 @@
 # Observations
 
-Agreed with the user on 2026-10-20.
+Agreed with the user on 2026-10-20; the forward line added for run 12
+(2026-10-21).
 
 ## What a unit sees
 
@@ -14,7 +15,7 @@ spacings, 16.5 mm on v5 (the user's definition).
 - **The environment** is seen as it is: only what lies inside the sphere at
   that moment, the line for now.
 
-## A unit's block: its body, 45 values
+## A unit's block: its body, 46 values
 
 | Part | Values | Why |
 | --- | ---: | --- |
@@ -26,7 +27,8 @@ spacings, 16.5 mm on v5 (the user's definition).
 | Foot loads: each foot pressing down, and pushing fore or aft | 4 | Load sensing, the signal biology puts at the root of the wave (Yasui et al. 2017; Dallmann et al. 2017; Owaki & Ishiguro 2017) |
 | Its belly's load | 1 | Resting or dragging |
 | Its feet's load, averaged over 1 s | 1 | What its carry is charged on (the pairing rule) |
-| Its energy, averaged over 1 s, mJ/s | 1 | What the team's share is drawn from (the pairing rule); with its neighbours', the team's |
+| Its energy, averaged over 1 s, mJ/s | 1 | What its team account is charged, with its neighbours' (the pairing rule) |
+| Its forward line, averaged over 1 s, mm/s | 1 | What the commanded speed compares (the pairing rule): with its neighbours', most of the body's speed. Its own velocity swings within every stride and cannot tell it |
 | Joint forces of the step: the front joint's along the body, and its two joints' net force along | 2 | A reflex: being pulled now |
 | Its last action | 9 | What it is doing; across the blocks, what its neighbours just did |
 
@@ -36,7 +38,8 @@ behind.
 
 Settings leave out what a run's reward does not use: the forces only
 earlier costs priced (`observe_priced_forces`), the averaged load
-(`observe_carry`) and the averaged energy (`observe_energy`).
+(`observe_carry`), the averaged energy (`observe_energy`) and the averaged
+forward line (`observe_line_speed`).
 
 ## The trail it sees: 15 values
 
@@ -56,5 +59,10 @@ evaluation ([task.md](task.md#the-tow)).
 
 ## In all
 
-5 × 45 + 15 + 1 = **241 values** for each of the ten agents. Each agent
+5 × 46 + 15 + 1 = **246 values** for each of the ten agents. Each agent
 normalises its own inputs with running statistics.
+
+## Left out
+
+- **A learned memory** (a recurrent actor), which could carry a step's
+  phase: the next step if no wave forms (the user's decision, 2026-10-21).

@@ -16,7 +16,12 @@ class RewardSettings:
     stride's surges and dips cancel, so walking faster than the cap gains
     nothing). With ``line_overspeed_slope`` k above 0 the cap becomes a
     target: above it a second's pay falls by k mm/s for every mm/s too fast,
-    to none at (1 + 1/k) times the target and below none beyond.
+    to none at (1 + 1/k) times the target and below none beyond. With
+    ``commanded_speed_mm_per_s`` v* above 0 the team is paid v* - |v - v*|
+    mm a second instead, v the units' mean of their forward line (the line's
+    pay for each step, uncapped) averaged over ``averaging_s`` from 0 at the
+    episode's start: below v* its speed, above it 1 mm/s less for each mm/s
+    too fast.
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
     ``force_price_w``, and a motor commanded u, as a share of its strongest,
@@ -42,7 +47,10 @@ class RewardSettings:
     h / (h + E), E the units' mean of their energy, priced as above, in mJ
     a second averaged over ``averaging_s``; h is the value of a second of
     the walk's time (the task's priority), so the team keeps most for the
-    walk that spends least for its distance and time. Each unit's feet not
+    walk that spends least for its distance and time. With
+    ``neighbourhood_energy`` the team account charges each unit the mean
+    energy of the units it sees, itself and its neighbours (the units
+    present), instead of the units' mean. Each unit's feet not
     carrying its weight, beyond its free support, cost it ``carry_price`` mm
     a second for each unit weight on average. With
     ``own_account`` false every part counts in one account, the team's, and
@@ -61,6 +69,7 @@ class RewardSettings:
     line_speed_cap_mm_per_s: float
     line_cap_averaged: bool
     line_overspeed_slope: float
+    commanded_speed_mm_per_s: float
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
@@ -73,6 +82,7 @@ class RewardSettings:
     acceleration_price: float
     acceleration_halving: float
     time_value_mj_per_s: float
+    neighbourhood_energy: bool
     carry_price: float
     own_account: bool
     mm_per_mj: float
@@ -95,6 +105,9 @@ class RewardSettings:
             line_overspeed_slope=section.number(
                 "line_overspeed_slope", default=0.0, minimum=0.0
             ),
+            commanded_speed_mm_per_s=section.number(
+                "commanded_speed_mm_per_s", default=0.0, minimum=0.0
+            ),
             reference_pay_mm_per_s=section.number(
                 "reference_pay_mm_per_s", default=53.0, minimum=0.0
             ),
@@ -115,6 +128,7 @@ class RewardSettings:
             time_value_mj_per_s=section.number(
                 "time_value_mj_per_s", default=0.0, minimum=0.0
             ),
+            neighbourhood_energy=section.boolean("neighbourhood_energy", default=False),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
@@ -139,6 +153,16 @@ class RewardSettings:
             raise SettingsError(
                 "[environment.reward] line_overspeed_slope works on the averaged"
                 " speed: set line_cap_averaged = true"
+            )
+        if settings.commanded_speed_mm_per_s and (
+            settings.line_cap_averaged
+            or settings.acceleration_halving
+            or settings.time_value_mj_per_s
+        ):
+            raise SettingsError(
+                "[environment.reward] a commanded speed replaces the line's cap"
+                " and its shares: leave line_cap_averaged, acceleration_halving"
+                " and time_value_mj_per_s unset"
             )
         if settings.acceleration_price and settings.acceleration_halving:
             raise SettingsError(
@@ -248,7 +272,8 @@ class EnvironmentSettings:
     legs' press and the joint forces averaged over a second. With
     ``observe_carry`` it holds its feet's load averaged as the carry is,
     and with ``observe_energy`` its energy in mJ/s averaged as the energy's
-    share is.
+    share is, and with ``observe_line_speed`` its forward line in mm/s
+    averaged as the commanded speed averages it.
     """
 
     max_episode_steps: int
@@ -259,6 +284,7 @@ class EnvironmentSettings:
     observe_priced_forces: bool
     observe_carry: bool
     observe_energy: bool
+    observe_line_speed: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
@@ -292,6 +318,7 @@ class EnvironmentSettings:
             ),
             observe_carry=section.boolean("observe_carry", default=False),
             observe_energy=section.boolean("observe_energy", default=False),
+            observe_line_speed=section.boolean("observe_line_speed", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),
             tow=TowSettings.from_section(section.table("tow")),

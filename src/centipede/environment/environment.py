@@ -82,7 +82,11 @@ class Environment:
             self.device,
         )
         self.reward = RewardFunction(
-            settings.reward, body, commanded_joints, self.sight_radius_m
+            settings.reward,
+            body,
+            commanded_joints,
+            self.sight_radius_m,
+            settings.observation_radius,
         )
         # The accounts the agents learn from: the team's and each unit's own,
         # or the team's alone, which then holds every part.
@@ -99,6 +103,7 @@ class Environment:
             settings.observe_priced_forces,
             settings.observe_carry,
             settings.observe_energy,
+            settings.observe_line_speed,
         )
         self.observation_size = self.observation_builder.observation_size
         self.tow = Tow(
@@ -137,6 +142,12 @@ class Environment:
         # is, so a slow start is paid as from 0, and a fast one gains nothing.
         self.line_cap_m_per_s = settings.reward.line_speed_cap_mm_per_s * 1e-3
         self.averaged_line_speed = torch.zeros(
+            (world_count, segment_count), device=self.device
+        )
+        # Each unit's forward line as a speed, mm/s, averaged as the forces
+        # are, from 0 at an episode's start (the body at rest), which the
+        # commanded speed reads.
+        self.averaged_forward_line = torch.zeros(
             (world_count, segment_count), device=self.device
         )
         # Each unit's joints' speeds at the end of the last step, rad/s: its
@@ -255,6 +266,12 @@ class Environment:
         self.averaged_line_speed += self.forces.averaging_rate * (
             progress / ACTION_DURATION_S - self.averaged_line_speed
         )
+        forward_line = self.reward.forward_line(
+            progress, self.line.distance, self.line.angle
+        )
+        self.averaged_forward_line += self.forces.averaging_rate * (
+            forward_line / ACTION_DURATION_S - self.averaged_forward_line
+        )
         self.averaged_accelerations += self.forces.averaging_rate * (
             self.reward.squared_accelerations(joint_acceleration)
             - self.averaged_accelerations
@@ -262,14 +279,14 @@ class Environment:
         force_change = state.motor_force - self.last_motor_force
         self.last_motor_force.copy_(state.motor_force)
         self.averaged_energy += self.forces.averaging_rate * (
-            self.reward.energy(state, force_change).sum(dim=-1)
-            / ACTION_DURATION_S
+            self.reward.energy(state, force_change).sum(dim=-1) / ACTION_DURATION_S
             - self.averaged_energy
         )
         rewards, reward_parts, own_energy = self.reward.compute(
             state,
             progress,
             self.averaged_line_speed,
+            self.averaged_forward_line,
             self.line.distance,
             self.line.angle,
             averaged_forces,
@@ -330,6 +347,7 @@ class Environment:
             world_mask[:, None], self.line_cap_m_per_s
         )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
+        self.averaged_forward_line.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_energy.masked_fill_(world_mask[:, None], 0.0)
         self.last_motor_force.masked_fill_(world_mask[:, None, None], 0.0)
@@ -355,4 +373,5 @@ class Environment:
             self.line.trail,
             self.tow.levels(),
             self.averaged_energy,
+            self.averaged_forward_line,
         )

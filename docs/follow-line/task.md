@@ -11,7 +11,7 @@ A headless tester, v5 or v6: ten units alike, ten agents
 
 ```text
 restart: the model's pose, a new straight line at a small random angle
-   │  every 20 ms each unit acts; the line pays each step forward near it
+   │  every 20 ms each unit acts; the team is paid near a commanded speed
    ├─ the units lose the line (their mean distance beyond the sight radius) ─┐
    └─ 20 s pass ─────────────────────────────────────────────────────────────┴─ restart
 ```
@@ -47,9 +47,9 @@ exploring finds nothing to learn from.
 - **The top fades.** It starts at 0.2 (`[environment.tow] start`, off by
   default; run 01 sets it). After every update cycle, once 128
   steps have passed since it last moved, it falls by 0.02 if the untowed
-  noise-free worlds walked (their line at least 2.7 mm/s a unit and their
-  feet lifting off at least once a second), and rises by 0.02 otherwise, up
-  to its start.
+  noise-free worlds walked (their line paid at least 2.7 mm/s a unit, their
+  speed below the commanded one, and their feet lifting off at least once a
+  second), and rises by 0.02 otherwise, up to its start.
 - **Noise-free worlds.** Besides the 4,096 that learn, 2 × 128 worlds act
   with the agents' mean actions and are never learned from: one group at the
   tow's top, one never towed, the honest measure of the walk. Evaluations
