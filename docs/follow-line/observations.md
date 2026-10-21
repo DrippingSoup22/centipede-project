@@ -14,7 +14,7 @@ spacings, 16.5 mm on v5 (the user's definition).
 - **The environment** is seen as it is: only what lies inside the sphere at
   that moment, the line for now.
 
-## A unit's block: its body, 43 values
+## A unit's block: its body, 45 values
 
 | Part | Values | Why |
 | --- | ---: | --- |
@@ -25,6 +25,8 @@ spacings, 16.5 mm on v5 (the user's definition).
 | The spine joint behind it: angle, speed | 2 | The joint it commands; zeros for the rear |
 | Foot loads: each foot pressing down, and pushing fore or aft | 4 | Load sensing, the signal biology puts at the root of the wave (Yasui et al. 2017; Dallmann et al. 2017; Owaki & Ishiguro 2017) |
 | Its belly's load | 1 | Resting or dragging |
+| Its feet's load, averaged over 1 s | 1 | What its carry is charged on (the pairing rule) |
+| Its energy, averaged over 1 s, mJ/s | 1 | What the team's share is drawn from, from run 10 (the pairing rule); with its neighbours', the team's |
 | Joint forces of the step: the front joint's along the body, and its two joints' net force along | 2 | A reflex: being pulled now |
 | Its last action | 9 | What it is doing; across the blocks, what its neighbours just did |
 
@@ -37,9 +39,9 @@ Runs 01 to 04 also saw two things only their costs priced, 4 values more
 joint forces averaged over 1 s (the front joint's along the body, the net
 along and up), which the force share, the squeeze and hanging charged. The
 minimal reward prices none of them, so from run 05 they are left out
-(`observe_priced_forces`). Runs 06 to 08 also saw its feet's load averaged
-over 1 s, 44 values, which the carry charged (`observe_carry`, the pairing
-rule); run 09 has no carry, and leaves it out.
+(`observe_priced_forces`). Runs 05 and 09 had no carry and left its feet's
+averaged load out (`observe_carry`); runs 06 to 09 did not see the energy
+(`observe_energy`).
 
 ## The trail it sees: 15 values
 
@@ -59,6 +61,6 @@ evaluation ([task.md](task.md#the-tow)).
 
 ## In all
 
-5 × 43 + 15 + 1 = **231 values** for each of the ten agents (251 in runs
-01 to 04, 236 in runs 06 to 08). Each agent normalises its own inputs with running
+5 × 45 + 15 + 1 = **241 values** for each of the ten agents (251 in runs
+01 to 04, 231 in runs 05 and 09, 236 in runs 06 to 08). Each agent normalises its own inputs with running
 statistics.

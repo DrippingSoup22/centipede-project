@@ -49,10 +49,11 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
   by all; what a unit does to its neighbours and suffers is its own (runs 23
   and 24, cycle 16: a private cost set against a shared gain teaches doing
   less).
-- **Biology's costs.** From run 09 the cost is the body's energy as physics
-  measures it: its motors' work and the force they hold (the user, 2026-10-21:
-  "the biology has all the answers"). The pace comes from the balance of
-  that energy and the task's priority, the value of its time, as an
+- **Biology's costs.** From run 09 the cost is the body's energy (the
+  user, 2026-10-21: "the biology has all the answers"), from run 10 as a
+  muscle pays it: its work, holding its force, and switching its force on
+  and off, which makes quick strokes dear. The pace comes from the balance
+  of that energy and the task's priority, the value of its time, as an
   animal's does. Runs 05 to 08 charged the joints' speeds or jerk instead,
   measures that grow with speed by the gait's whim (run 05 sped up to 353
   mm/s, run 06 crept), and run 08 had to cap the line ([reward.md](reward.md)).
@@ -62,10 +63,10 @@ Each is a lesson of the cooperators study (runs 01 to 28, in its branch's
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The headless tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; the tow at the start |
-| Reward | [reward.md](reward.md) | From run 09: the team's line, of which the body's energy (its motors' work and holding) takes the share h / (h + E), h the task's priority, so the body walks at its cheapest pace; nothing else |
-| Observations | [observations.md](observations.md) | Five units' bodies (43 values each), the trail inside the unit's sight (15), the tow (1) |
+| Reward | [reward.md](reward.md) | From run 10: the team's line, of which the body's energy, as a muscle pays it (work, holding, switching), takes the share h / (h + E), h the task's priority, so the body walks at its cheapest pace; each unit's own carry |
+| Observations | [observations.md](observations.md) | Five units' bodies (45 values each from run 10), the trail inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg torques and the spine joint behind, every 20 ms |
-| Critic and learning | [critic.md](critic.md) | One critic per unit (two, team and own, in runs 01 to 04 and 06 to 08); gSDE; PPO's settings |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own (one in runs 05 and 09); how they see; gSDE; PPO's settings |
 
 ## The bodies
 
@@ -86,12 +87,16 @@ Not decided; each is one change for a later run.
   measured on the untowed noise-free worlds, so that the noise cannot fake
   it, with a fallback if no wave forms. Stage 1 has no level.
 - **The terms left out**, each brought back as its own run if a test shows
-  it is needed: the carry (lazy legs, if holding does not stop them), the
-  force share (a unit carried along on skidding feet), the squeeze, pain
-  (legs crossed over their neighbours').
-- **The priority and holding's weight**: 1 mJ/s and 2.7 mJ/s for a motor
-  fully on.
-- **The exploring noise's share.** The noise's energy lowers the pay, so
-  the agents gain by narrowing it.
+  it is needed: the force share (a unit carried along on skidding feet),
+  the squeeze, pain (legs crossed over their neighbours').
+- **The energy's weights**: the priority, 1 mJ/s, and the switching and
+  holding prices, set on the scripted walk by one measurement of human
+  muscle.
+- **The exploring noise's share.** The noise switches the commands too,
+  about 12 mJ/s a unit: it lowers the pay, so the agents gain by narrowing
+  it, and acts as a larger priority until they do.
+- **The tow's walking test** counts feet lifting off after stances of 60
+  ms: it misses gaits above about 8 strokes a second, and brought run 09's
+  tow back once its legs buzzed.
 - **The discount.** 0.99 against 0.998.
 - **The head**, as its own segment, on the model's later version.

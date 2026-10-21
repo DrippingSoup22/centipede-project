@@ -98,6 +98,7 @@ class Environment:
             self.device,
             settings.observe_priced_forces,
             settings.observe_carry,
+            settings.observe_energy,
         )
         self.observation_size = self.observation_builder.observation_size
         self.tow = Tow(
@@ -152,6 +153,11 @@ class Environment:
         # 0 at an episode's start.
         self.averaged_energy = torch.zeros(
             (world_count, segment_count), device=self.device
+        )
+        # What each motor received on the last step, from 0 at an episode's
+        # start (the motors off), for the cost of switching force.
+        self.last_motor_command = torch.zeros(
+            (world_count, segment_count, legs + 1), device=self.device
         )
 
     def set_ramp_weight(self, weight: float) -> None:
@@ -253,8 +259,11 @@ class Environment:
             self.reward.squared_accelerations(joint_acceleration)
             - self.averaged_accelerations
         )
+        command_change = motor_command - self.last_motor_command
+        self.last_motor_command.copy_(motor_command)
         self.averaged_energy += self.forces.averaging_rate * (
-            self.reward.energy(state, motor_command).sum(dim=-1) / ACTION_DURATION_S
+            self.reward.energy(state, motor_command, command_change).sum(dim=-1)
+            / ACTION_DURATION_S
             - self.averaged_energy
         )
         rewards, reward_parts, own_energy = self.reward.compute(
@@ -269,6 +278,7 @@ class Environment:
             joint_acceleration,
             self.averaged_accelerations,
             self.averaged_energy,
+            command_change,
         )
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
         truncated = (
@@ -323,6 +333,7 @@ class Environment:
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
         self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_energy.masked_fill_(world_mask[:, None], 0.0)
+        self.last_motor_command.masked_fill_(world_mask[:, None, None], 0.0)
         self.joint_velocity.copy_(
             torch.where(
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity
@@ -344,4 +355,5 @@ class Environment:
             self.forces.values,
             self.line.trail,
             self.tow.levels(),
+            self.averaged_energy,
         )

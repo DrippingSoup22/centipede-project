@@ -8,16 +8,25 @@ from centipede.environment.simulation import PhysicalState
 
 
 def block_size(
-    leg_motor_count: int, priced_forces: bool = True, carry: bool = False
+    leg_motor_count: int,
+    priced_forces: bool = True,
+    carry: bool = False,
+    energy: bool = False,
 ) -> int:
     """Values in a unit's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
     legs' press (1) and the averaged joint forces (3) if ``priced_forces``,
-    the feet's averaged load (1) if ``carry``, the step's joint forces (2),
-    and the last action (M + 1): 47 with ankles, 43 without the priced
-    forces, 44 with the carry instead."""
-    return 19 + 3 * leg_motor_count + (4 if priced_forces else 0) + int(carry)
+    the feet's averaged load (1) if ``carry``, the averaged energy (1) if
+    ``energy``, the step's joint forces (2), and the last action (M + 1): 47
+    with ankles, 43 without the priced forces, 44 with the carry instead."""
+    return (
+        19
+        + 3 * leg_motor_count
+        + (4 if priced_forces else 0)
+        + int(carry)
+        + int(energy)
+    )
 
 
 def neighbour_table(
@@ -53,7 +62,8 @@ class ObservationBuilder:
     front joint force and net force along the body; and the action it sent
     last (the rear's last value goes to no motor). Without ``priced_forces``
     the legs' press and the averaged joint forces are left out; with
-    ``carry`` the feet's averaged load follows the averaged joint forces.
+    ``carry`` the feet's averaged load follows the averaged joint forces,
+    and with ``energy`` the unit's averaged energy in mJ/s follows them.
     Forces are in unit weights. The blocks are laid end to end in the
     neighbour table's order, followed by the unit's trail
     (``StraightLine.trail``) and its world's tow level.
@@ -69,6 +79,7 @@ class ObservationBuilder:
         device: torch.device | str,
         priced_forces: bool = True,
         carry: bool = False,
+        energy: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -76,7 +87,8 @@ class ObservationBuilder:
         self.unit_weight_n = unit_weight_n
         self.priced_forces = priced_forces
         self.carry = carry
-        self.block_size = block_size(leg_motor_count, priced_forces, carry)
+        self.energy = energy
+        self.block_size = block_size(leg_motor_count, priced_forces, carry, energy)
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
         )
@@ -94,14 +106,16 @@ class ObservationBuilder:
         averaged_forces: torch.Tensor,
         trail: torch.Tensor,
         tow_levels: torch.Tensor,
+        averaged_energy: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every unit's observation, ``(W, N, observation_size)``.
 
         ``last_action`` is the joint action of the step before, ``(W, N, M +
         1)``; ``averaged_forces`` ``AveragedForces.values``; ``trail``
         ``StraightLine.trail``; ``tow_levels`` each world's tow level,
-        ``(W,)``. The gather creates a new tensor, so a returned observation
-        never changes when ``build`` runs again.
+        ``(W,)``; ``averaged_energy`` each unit's averaged energy, ``(W, N)``
+        mJ/s, read with ``energy``. The gather creates a new tensor, so a
+        returned observation never changes when ``build`` runs again.
         """
         state = physical_state
         # Gravity, straight down, in the unit's frame: minus the third row of
@@ -122,6 +136,8 @@ class ObservationBuilder:
             averaged = [averaged_forces[..., 2:3], averaged_forces[..., :2]]
         if self.carry:
             averaged.append(averaged_forces[..., 5:6])
+        if self.energy:
+            averaged.append(averaged_energy[..., None])
         step_forces = torch.cat(
             (state.front_joint_force[..., None], state.net_joint_force[..., :1]),
             dim=-1,

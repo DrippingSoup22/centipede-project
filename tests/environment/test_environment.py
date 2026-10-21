@@ -17,7 +17,11 @@ from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
 from centipede.environment.line import StraightLine
 from centipede.environment.observation_builder import ObservationBuilder
-from centipede.environment.reward_function import PART_NAMES, RewardFunction
+from centipede.environment.reward_function import (
+    ENERGY_PARTS,
+    PART_NAMES,
+    RewardFunction,
+)
 from centipede.environment.settings import (
     EnvironmentSettings,
     RewardSettings,
@@ -203,6 +207,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
         acceleration,
         torch.zeros(1, SEGMENTS),
         torch.zeros(1, SEGMENTS),
+        torch.zeros(1, SEGMENTS, LEGS + 1),
     )
     rewards, parts, own_energy = reward.compute(*step, *rest)
 
@@ -211,7 +216,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     torch.testing.assert_close(by_name["line"], 0.485 * every)
     torch.testing.assert_close(by_name["squeeze"], -0.1325 * every)
     # Energy, mJ: the units' mean at the ramp's 0.5; a motor fully on 0.332.
-    torch.testing.assert_close(own_energy[0, 0], torch.tensor([2.0, 0.0, 0.332]))
+    torch.testing.assert_close(own_energy[0, 0], torch.tensor([2.0, 0.0, 0.332, 0.0]))
     torch.testing.assert_close(by_name["pushing"], -0.2 * every)
     torch.testing.assert_close(by_name["braking"], -0.1 * every)
     torch.testing.assert_close(by_name["force"], -0.0332 * every)
@@ -267,6 +272,7 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
         zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
     )
 
     at_135, at_200 = paid_above
@@ -307,12 +313,38 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
         torch.zeros(1, SEGMENTS, LEGS + 1),
         accelerations,
         energy,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
     )
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
     torch.testing.assert_close(by_name["line"], 0.56 * torch.ones(SEGMENTS))
     torch.testing.assert_close(by_name[part], -0.33 * torch.ones(SEGMENTS))
     torch.testing.assert_close(rewards[0, :, 0], 0.23 * torch.ones(SEGMENTS))
+
+
+def test_energy_holds_force_to_its_exponent_and_charges_switching_by_its_rate():
+    """A motor of unit 0 commanded 0.5, held at 1 mW for a motor fully on to
+    the power 1: 0.5 mW, 0.01 mJ over a 20 ms step. Its command changed by
+    0.2 over the step, 10 a second: switching at 2 mW for a rate of 1 a
+    second, squared, 0.2 W, 0.004 mJ. The rear's spine joint, which it does
+    not command, costs nothing."""
+    commanded = torch.ones(SEGMENTS, LEGS + 1)
+    commanded[-1, -1] = 0.0
+    settings = RewardSettings.from_section(
+        {"force_price_w": 1e-3, "force_exponent": 1.0, "switching_price": 2e-3}
+    )
+    reward = RewardFunction(settings, BODY, commanded, 0.005)
+    command = torch.zeros(1, SEGMENTS, LEGS + 1)
+    command[0, 0, 0] = 0.5
+    change = torch.zeros(1, SEGMENTS, LEGS + 1)
+    change[0, 0, 0] = 0.2
+    change[0, -1, -1] = 1.0
+
+    energy = reward.energy(resting_state(1), command, change)
+
+    expected = torch.zeros(SEGMENTS, 4)
+    expected[0, 2:] = torch.tensor([0.01, 0.004])
+    torch.testing.assert_close(energy[0], expected)
 
 
 def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
@@ -369,6 +401,19 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     torch.testing.assert_close(
         carry_observations[0, 1, :44],
         torch.cat((own[:32], torch.tensor([0.7]), own[36:])),
+    )
+    # With the energy: the unit's averaged energy after the carry.
+    energy = ObservationBuilder(
+        SEGMENTS, 2, 2, LEGS, BODY.unit_weight_n, "cpu", False, True, True
+    )
+    averaged_energy = torch.zeros(2, SEGMENTS)
+    averaged_energy[0, 1] = 3.5
+    energy_observations = energy.build(
+        state, last_action, averaged, trail, torch.tensor([0.0, 0.25]), averaged_energy
+    )
+    torch.testing.assert_close(
+        energy_observations[0, 1, :45],
+        torch.cat((own[:32], torch.tensor([0.7, 3.5]), own[36:])),
     )
 
 
@@ -434,7 +479,7 @@ def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised(
             state,
             torch.ones(2, SEGMENTS, 2),
             torch.zeros(2, SEGMENTS, len(PART_NAMES)),
-            torch.zeros(2, SEGMENTS, 3),
+            torch.zeros(2, SEGMENTS, len(ENERGY_PARTS)),
             torch.full((2, SEGMENTS), 1e-3),
             line,
             torch.zeros(2, SEGMENTS, 5),

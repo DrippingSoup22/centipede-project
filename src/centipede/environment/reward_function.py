@@ -19,6 +19,7 @@ PART_NAMES = (
     "pushing",
     "braking",
     "force",
+    "switching",
     "motion",
     "acceleration",
     "energy_share",
@@ -27,11 +28,11 @@ PART_NAMES = (
     "hanging",
     "carry",
 )
-TEAM_PART_COUNT = 8
-MILLIJOULE_PARTS = ("pushing", "braking", "force", "pain", "hanging")
+TEAM_PART_COUNT = 9
+MILLIJOULE_PARTS = ("pushing", "braking", "force", "switching", "pain", "hanging")
 CHANNEL_NAMES = ("team", "own")
 # Energy's parts, each unit's own before the team account takes their mean.
-ENERGY_PARTS = ("pushing", "braking", "force")
+ENERGY_PARTS = ("pushing", "braking", "force", "switching")
 
 
 class AveragedForces:
@@ -144,18 +145,27 @@ class RewardFunction:
         return (joint_acceleration.square() * self.commanded_joints).sum(dim=-1)
 
     def energy(
-        self, physical_state: PhysicalState, motor_command: torch.Tensor
+        self,
+        physical_state: PhysicalState,
+        motor_command: torch.Tensor,
+        command_change: torch.Tensor,
     ) -> torch.Tensor:
-        """Each unit's energy over the step just taken, ``(W, N, 3)`` mJ in
+        """Each unit's energy over the step just taken, ``(W, N, 4)`` mJ in
         ENERGY_PARTS' order, priced: its motors' pushing work, their braking
-        work at ``braking_price`` and their squared commands at
-        ``force_price_w``, from ``motor_command`` ``(W, N, M + 1)``."""
-        squared_commands = (motor_command.square() * self.commanded_joints).sum(dim=-1)
+        work at ``braking_price``, their commands ``motor_command`` ``(W, N, M
+        + 1)`` held, |u| to ``force_exponent`` at ``force_price_w``, and
+        switched, each command's ``command_change`` over the step, as a rate,
+        squared, at ``switching_price``."""
+        settings = self.settings
+        held = motor_command.abs().pow(settings.force_exponent)
+        rate = command_change / ACTION_DURATION_S
+        switched = rate.square() * ACTION_DURATION_S * settings.switching_price
         return torch.stack(
             (
                 physical_state.motor_positive_work * 1e3,
-                physical_state.motor_negative_work * 1e3 * self.settings.braking_price,
-                squared_commands * self.force_price_mj,
+                physical_state.motor_negative_work * 1e3 * settings.braking_price,
+                (held * self.commanded_joints).sum(dim=-1) * self.force_price_mj,
+                (switched * self.commanded_joints).sum(dim=-1),
             ),
             dim=-1,
         )
@@ -173,11 +183,13 @@ class RewardFunction:
         joint_acceleration: torch.Tensor,
         averaged_accelerations: torch.Tensor,
         averaged_energy: torch.Tensor,
+        command_change: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 12)``
-        in PART_NAMES' order, and each unit's own energy ``(W, N, 3)`` mJ.
+        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 13)``
+        in PART_NAMES' order, and each unit's own ``energy`` ``(W, N, 4)`` mJ.
 
-        ``motor_command`` ``(W, N, M + 1)`` is what each motor received;
+        ``motor_command`` ``(W, N, M + 1)`` is what each motor received, and
+        ``command_change`` how much that changed since the step before;
         ``progress``, ``distance`` and ``angle`` ``(W, N)`` are each unit's
         step along the line (m), distance from it (m) and angle from its
         direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
@@ -207,8 +219,8 @@ class RewardFunction:
         step back in full; the team is paid the units' mean. The squeeze: at
         each joint, the averaged force along the body with the tows behind it
         taken out, a pull free, squared against the force scale and averaged
-        over the joints. Energy: each unit's pushing work, braking work and
-        squared commands, the team charged the units' mean. Each unit's own:
+        over the joints. Energy: each unit's ``energy``, the team charged the
+        units' mean. Each unit's own:
         its force share, the
         averaged net force of its joints along the body plus its tow,
         squared against the force scale; its hanging, the weight its
@@ -239,7 +251,7 @@ class RewardFunction:
         pushed = (legs_push[:, 1:].clamp(max=0.0) / scale) ** 2
         squeeze = self.reference_mm * ramp * pushed.mean(dim=-1, keepdim=True)
 
-        own_energy = self.energy(state, motor_command)
+        own_energy = self.energy(state, motor_command, command_change)
 
         # The rear unit has no spine joint behind it.
         squared_speeds = state.leg_joint_velocity.square().sum(dim=-1)

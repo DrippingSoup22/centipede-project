@@ -59,7 +59,7 @@ class StepFacts:
     """What happened in the last 20 ms step, in every world."""
 
     reward_parts: torch.Tensor = measure(
-        "Each reward part, (W, N, 12), in the order of reward_part_names: the line,"
+        "Each reward part, (W, N, 13), in the order of reward_part_names: the line,"
         " squeeze, motion, accelerations, energy's share, force share and carry in"
         " mm, the rest in mJ",
         parts=PART_NAMES,
@@ -92,7 +92,7 @@ class StepFacts:
         "How far the unit's centre went along the line, (W, N)", "m"
     )
     own_energy: torch.Tensor = measure(
-        "The unit's own energy, priced as the cost charges it, (W, N, 3)",
+        "The unit's own energy, priced as the cost charges it, (W, N, 4)",
         "mJ",
         parts=ENERGY_PARTS,
     )
@@ -201,7 +201,7 @@ class EpisodeSummary:
         parts=CHANNEL_NAMES,
     )
     energy: torch.Tensor = measure(
-        "Every unit's own energy over the episode, added up, (W, 3)",
+        "Every unit's own energy over the episode, added up, (W, 4)",
         "mJ",
         parts=ENERGY_PARTS,
     )

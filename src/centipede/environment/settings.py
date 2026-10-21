@@ -19,7 +19,13 @@ class RewardSettings:
     to none at (1 + 1/k) times the target and below none beyond.
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
-    ``force_price_w``, braking work ``braking_price`` of pushing work. Pain
+    ``force_price_w``, and a motor commanded u, as a share of its strongest,
+    that times |u| to the power ``force_exponent`` (2, the heat of an
+    electric motor; 1, a muscle's cost of holding force); braking work costs
+    ``braking_price`` of pushing work; switching force costs
+    ``switching_price`` mJ/s for a motor whose command changes at 1 a
+    second, as that rate squared (a muscle's cost of turning its force on
+    and off, van der Zee & Kuo 2021). Pain
     costs ``pain_price`` of a fully commanded motor at a leg's strongest push,
     hanging ``hanging_price`` of it for each unit weight held. A millijoule
     counts ``mm_per_mj`` millimetres (0: no millijoule part counts). The
@@ -58,7 +64,9 @@ class RewardSettings:
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
+    force_exponent: float
     braking_price: float
+    switching_price: float
     pain_price: float
     hanging_price: float
     motion_price: float
@@ -92,7 +100,9 @@ class RewardSettings:
             ),
             joint_force_scale=section.positive_number("joint_force_scale", default=0.3),
             force_price_w=section.number("force_price_w", default=0.0166, minimum=0.0),
+            force_exponent=section.positive_number("force_exponent", default=2.0),
             braking_price=section.number("braking_price", default=0.25, minimum=0.0),
+            switching_price=section.number("switching_price", default=0.0, minimum=0.0),
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
             hanging_price=section.number("hanging_price", default=2.0, minimum=0.0),
             motion_price=section.number("motion_price", default=0.0, minimum=0.0),
@@ -236,7 +246,9 @@ class EnvironmentSettings:
     ``spine_action_scale`` times its command. With ``observe_priced_forces``
     false a unit's block leaves out the forces only the old costs priced: its
     legs' press and the joint forces averaged over a second. With
-    ``observe_carry`` it holds its feet's load averaged as the carry is.
+    ``observe_carry`` it holds its feet's load averaged as the carry is,
+    and with ``observe_energy`` its energy in mJ/s averaged as the energy's
+    share is.
     """
 
     max_episode_steps: int
@@ -246,6 +258,7 @@ class EnvironmentSettings:
     spine_action_scale: float
     observe_priced_forces: bool
     observe_carry: bool
+    observe_energy: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
@@ -278,6 +291,7 @@ class EnvironmentSettings:
                 "observe_priced_forces", default=True
             ),
             observe_carry=section.boolean("observe_carry", default=False),
+            observe_energy=section.boolean("observe_energy", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),
             tow=TowSettings.from_section(section.table("tow")),
