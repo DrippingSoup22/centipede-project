@@ -12,12 +12,16 @@ likely. What really followed holds the unit's own action, its neighbours'
 and luck; the neighbours' share is noise to the unit, which averages out
 over many samples (131,072 per agent per update) but slows learning.
 
-## Two critics per agent
+## One critic per account
+
+From run 09 there is one account, the team's (the line, of which the
+body's energy takes a share), and one critic. Runs 01 to 04 and 06 to 08
+had two:
 
 | Critic | Predicts | Sees |
 | --- | --- | --- |
-| Team | The team account: the line, of which the joints' accelerations take a share (from run 08; subtracted in runs 06 and 07) | What its actor sees |
-| Own | The own account: its carry (from run 06) | What its actor sees, its feet's averaged load included |
+| Team | The team account: the line, less the accelerations' share (run 08) or price (runs 06 and 07) | What its actor sees |
+| Own | The own account: its carry (runs 06 to 08) | What its actor sees, its feet's averaged load included |
 
 - **One critic per account**, so that the clearer own signal is not drowned
   in the team's, and each weighs what its weight says whatever its size:
@@ -25,8 +29,8 @@ over many samples (131,072 per agent per update) but slows learning.
   then adds them 1 : 0.8, the team first (Sheikh & Bölöni 2020;
   cooperators, cycle 14). Runs 01 to 04 had these two critics, the own
   account holding the force share and hanging.
-- **One critic when there is one account.** Run 05's minimal reward had no
-  own term, so its agents had one critic (`own_account` false): an account
+- **One critic when there is one account.** Runs 05 and 09 have no own
+  term, so their agents have one critic (`own_account` false): an account
   always 0 would give its critic nothing but noise to learn, normalised up
   to the team's size (the user's decision, 2026-10-20).
 - **A local critic.** It sees its actor's view and nothing else: a critic of

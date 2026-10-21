@@ -197,7 +197,13 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     acceleration[0, -1, -1] = 50.0
 
     step = (state, command, progress, torch.zeros(1, SEGMENTS), distance, angle)
-    rest = (averaged, tow, acceleration, torch.zeros(1, SEGMENTS))
+    rest = (
+        averaged,
+        tow,
+        acceleration,
+        torch.zeros(1, SEGMENTS),
+        torch.zeros(1, SEGMENTS),
+    )
     rewards, parts, own_energy = reward.compute(*step, *rest)
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
@@ -260,6 +266,7 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
+        zeros,
     )
 
     at_135, at_200 = paid_above
@@ -269,15 +276,24 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
     )
 
 
-def test_the_accelerations_can_take_a_share_of_the_forward_pay_instead():
-    """With ``acceleration_halving`` 10⁴ (rad/s²)² at the ramp's 0.5, the
-    units' averaged accelerations, 2·10⁴ on average, keep half of the forward
-    pay (1.8 at the cap, 0.5, 0.5 and 0.5 mm, a mean of 0.66) and the step
-    back is charged in full (a mean of -0.1): the team gets 0.23 mm."""
-    settings = RewardSettings.from_section({"acceleration_halving": 1e4})
+@pytest.mark.parametrize(
+    ("setting", "part"),
+    [("acceleration_halving", "acceleration"), ("time_value_mj_per_s", "energy_share")],
+)
+def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting, part):
+    """With ``acceleration_halving`` 10⁴ (rad/s²)², or ``time_value_mj_per_s``
+    10⁴ mJ/s, at the ramp's 0.5, the units' averaged accelerations, or
+    energy, 2·10⁴ on average, keep half of the forward pay (1.8 at the cap,
+    0.5, 0.5 and 0.5 mm, a mean of 0.66) and the step back is charged in full
+    (a mean of -0.1): the team gets 0.23 mm."""
+    settings = RewardSettings.from_section({setting: 1e4})
     reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005)
     reward.ramp_weight = 0.5
     zeros = torch.zeros(1, SEGMENTS)
+    averaged = 1e4 * torch.tensor([[3.0, 1.0, 2.0, 2.0, 2.0]])
+    accelerations, energy = (
+        (averaged, zeros) if part == "acceleration" else (zeros, averaged)
+    )
 
     rewards, parts, _ = reward.compute(
         resting_state(1),
@@ -289,12 +305,13 @@ def test_the_accelerations_can_take_a_share_of_the_forward_pay_instead():
         torch.zeros(1, SEGMENTS, 6),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
-        1e4 * torch.tensor([[3.0, 1.0, 2.0, 2.0, 2.0]]),
+        accelerations,
+        energy,
     )
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
     torch.testing.assert_close(by_name["line"], 0.56 * torch.ones(SEGMENTS))
-    torch.testing.assert_close(by_name["acceleration"], -0.33 * torch.ones(SEGMENTS))
+    torch.testing.assert_close(by_name[part], -0.33 * torch.ones(SEGMENTS))
     torch.testing.assert_close(rewards[0, :, 0], 0.23 * torch.ones(SEGMENTS))
 
 

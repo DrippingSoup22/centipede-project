@@ -31,8 +31,14 @@ class RewardSettings:
     pay is multiplied by 1 / (1 + J / ``acceleration_halving``), J the units'
     mean of the same squared changes, each averaged over ``averaging_s``, so
     the pay halves at J = ``acceleration_halving`` (rad/s²)²; a step back is
-    still charged in full. Each unit's feet not carrying its weight, beyond its free support,
-    cost it ``carry_price`` mm a second for each unit weight on average. With
+    still charged in full. With ``time_value_mj_per_s`` h above 0, energy
+    takes such a share instead: the forward pay is multiplied by
+    h / (h + E), E the units' mean of their energy, priced as above, in mJ
+    a second averaged over ``averaging_s``; h is the value of a second of
+    the walk's time (the task's priority), so the team keeps most for the
+    walk that spends least for its distance and time. Each unit's feet not
+    carrying its weight, beyond its free support, cost it ``carry_price`` mm
+    a second for each unit weight on average. With
     ``own_account`` false every part counts in one account, the team's, and
     each agent has one critic. Forces are averaged over ``averaging_s``.
     Energy, the motion, the accelerations, the squeeze and pain are weighed
@@ -58,6 +64,7 @@ class RewardSettings:
     motion_price: float
     acceleration_price: float
     acceleration_halving: float
+    time_value_mj_per_s: float
     carry_price: float
     own_account: bool
     mm_per_mj: float
@@ -95,6 +102,9 @@ class RewardSettings:
             acceleration_halving=section.number(
                 "acceleration_halving", default=0.0, minimum=0.0
             ),
+            time_value_mj_per_s=section.number(
+                "time_value_mj_per_s", default=0.0, minimum=0.0
+            ),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
@@ -125,6 +135,11 @@ class RewardSettings:
                 "[environment.reward] the accelerations take either a price or a"
                 " share of the line: set acceleration_price or"
                 " acceleration_halving, not both"
+            )
+        if settings.acceleration_halving and settings.time_value_mj_per_s:
+            raise SettingsError(
+                "[environment.reward] the line's pay has one share: set"
+                " acceleration_halving or time_value_mj_per_s, not both"
             )
         if settings.ramp_shape != "linear" and not settings.ramp_start:
             raise SettingsError(
