@@ -85,6 +85,11 @@ class AgentSettings:
     mostly a constant push (83% of the noise over 32 steps with run 13's
     actors, 52% with fresh tanh ones; Training's
     ``analysis/gsde_feature_check.py``).
+    Without ``actor_sees_behind`` each actor acts only on its own block, the
+    units ahead and its trail: its first layer takes nothing from the units
+    behind, so the front unit leads and each unit can follow only those
+    ahead (Yasui et al. 2022), while its critics still see every unit whose
+    energy the team account charges it (docs/follow-line/critic.md).
     Normalised observations are clipped to plus or minus ``observation_clip``.
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
@@ -105,6 +110,7 @@ class AgentSettings:
     device: str
     hidden_layers: tuple[int, ...]
     actor_activation: str
+    actor_sees_behind: bool
     initial_action_std: float
     action_std_schedule: str
     final_action_std: float
@@ -171,6 +177,7 @@ class AgentSettings:
             actor_activation=section.choice(
                 "actor_activation", ACTIVATIONS, default="relu"
             ),
+            actor_sees_behind=section.boolean("actor_sees_behind", default=True),
             initial_action_std=initial_action_std,
             action_std_schedule=section.choice(
                 "action_std_schedule", ACTION_STD_SCHEDULES, default="learned"

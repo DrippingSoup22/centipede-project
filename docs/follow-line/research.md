@@ -158,6 +158,19 @@ senses of its own and its front neighbour's contact or load. A rhythm in
 these models comes from the leg's own dynamics or oscillator, set by
 speed; local sensing coordinates it.
 
+**Who sets a wave's lag** (searched 2026-10-22, after run 15's two waves
+leaving a middle unit). In a chain of oscillators coupled to their
+neighbours, coupling that runs mostly one way gives one lag along the whole
+chain, except in a short boundary at one end; Williams & Sigvardt (1994)
+found that boundary in the isolated lamprey cord, as Kopell and
+Ermentrout's theory predicts, and read it as the coupling running up the
+cord dominating (from their abstract; the theory is reviewed by Ashwin,
+Coombes & Nicks 2016). The dominant coupling there runs tail to head while
+the wave runs head to tail: who leads does not set the direction. A 2026
+segmented robot of 6 to 16 legs gives each segment input from the segment
+in front (Chen, Wang & Revzen, from its abstract; it uses state machines,
+not learning).
+
 ## 5. Our runs against the literature
 
 | What runs 01 to 11 showed | What the literature says |
@@ -226,3 +239,6 @@ Centipedes and decentralised walking
 - Diaz, Erickson, Chong, Soto & Goldman, Active and passive mechanics for rugose terrain traversal in centipedes, J. Exp. Biol. 226, 2023, [doi 10.1242/jeb.244688](https://doi.org/10.1242/jeb.244688)
 - Pierce et al., Legged locomotion in lattices: centipede traversal of obstacle-rich environments, Annals of the New York Academy of Sciences 1555, 2026, [PMC12831010](https://pmc.ncbi.nlm.nih.gov/articles/PMC12831010)
 - Dionne, Giardina & Mahadevan, Embodied intelligence solves the centipede's dilemma, 2026 (preprint), [arXiv 2603.08409](https://arxiv.org/abs/2603.08409)
+- Williams & Sigvardt, Intersegmental phase lags in the lamprey spinal cord: experimental confirmation of the existence of a boundary region, Journal of Computational Neuroscience 1, 1994, [doi 10.1007/BF00962718](https://link.springer.com/article/10.1007/BF00962718)
+- Ashwin, Coombes & Nicks, Mathematical frameworks for oscillatory network dynamics in neuroscience, Journal of Mathematical Neuroscience 6, 2016, [arXiv 1506.05828](https://arxiv.org/abs/1506.05828)
+- Chen, Wang & Revzen, Walking on rough terrain with any number of legs, 2026 (preprint), [arXiv 2603.09147](https://arxiv.org/abs/2603.09147)

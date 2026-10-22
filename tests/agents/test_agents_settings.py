@@ -17,6 +17,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         device="cpu",
         hidden_layers=(64, 64),
         actor_activation="relu",
+        actor_sees_behind=True,
         initial_action_std=0.5,
         action_std_schedule="learned",
         final_action_std=0.5,

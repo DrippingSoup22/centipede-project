@@ -36,6 +36,7 @@ class SegmentAgent:
         action_size: int,
         reward_channel_count: int = 1,
         advantage_weights: tuple[float, ...] = (),
+        actor_input_mask: torch.Tensor | None = None,
     ) -> None:
         """Build the agent's parts on its device; ``seed`` decides all its randomness.
 
@@ -44,7 +45,9 @@ class SegmentAgent:
         ``action_size`` is how many motors the segment commands: its leg
         motors, and with spine control the spine joint behind it. The agent
         has a critic for each of the ``reward_channel_count`` reward channels,
-        weighed by ``advantage_weights`` (empty: 1 each).
+        weighed by ``advantage_weights`` (empty: 1 each). The actor acts only
+        on the observation entries ``actor_input_mask`` keeps (None: all);
+        the critics see every entry.
         """
         self.segment_index = segment_index
         self.settings = settings
@@ -72,6 +75,16 @@ class SegmentAgent:
         actor_network.to(device)
         for network in critic_networks:
             network.to(device)
+        if actor_input_mask is not None:
+            # The masked entries reach the actor's first layers as zeros, so
+            # its actions and their gradients never depend on them, whatever
+            # weights a loaded checkpoint holds.
+            kept = actor_input_mask.to(device=device, dtype=torch.float32)
+            for layers in (actor_network.mean_network, actor_network.log_std_network):
+                if layers is not None:
+                    layers[0].register_forward_pre_hook(
+                        lambda _, inputs: (inputs[0] * kept,)
+                    )
         several_critics = reward_channel_count > 1
 
         self.ppo = PPO(

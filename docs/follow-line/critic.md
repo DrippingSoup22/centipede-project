@@ -29,7 +29,13 @@ over many samples (131,072 per agent per update) but slows learning.
   noise.
 - **Local**: it sees its actor's view and nothing else
   ([constraints.md](constraints.md)). After convergence central and local
-  critics give the same expected gradient (Lyu et al. 2021).
+  critics give the same expected gradient (Lyu et al. 2021). When the actor
+  leaves out the units behind (from run 16, [observations.md](observations.md)),
+  the critics still see all five units: the team account charges each unit
+  their energy, and a critic blind to part of its pay would judge every
+  action against noise. A critic that sees more than its actor is the usual
+  pattern of multi-agent learning (centralised training, decentralised
+  execution); here it still sees only the neighbourhood.
 - **What a reward depends on must be seen** (the pairing rule): the energy
   and the carry are averaged over a second, so each unit observes its own
   averages.

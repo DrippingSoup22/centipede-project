@@ -142,12 +142,14 @@ class RewardFunction:
             self.part_channels[index, int(own)] = rate
         self.part_channels = self.part_channels.to(device)
         # With neighbourhood_energy, the mean over the units each unit sees:
-        # row i weighs the units present within observation_radius of i.
+        # row i weighs the units present within observation_radius of i, the
+        # units behind it (higher numbers) at energy_weight_behind.
         self.neighbourhoods = None
         if settings.neighbourhood_energy:
             units = torch.arange(len(commanded_joints), device=device)
-            apart = (units[:, None] - units[None, :]).abs()
-            seen = (apart <= observation_radius).float()
+            behind = units[None, :] - units[:, None]
+            seen = (behind.abs() <= observation_radius).float()
+            seen[behind > 0] *= settings.energy_weight_behind
             self.neighbourhoods = seen / seen.sum(dim=1, keepdim=True)
 
     def _seen(self, distance: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
@@ -250,9 +252,10 @@ class RewardFunction:
         force along the body with the tows behind it taken out, a pull free,
         squared against the force scale and averaged over the joints. Energy:
         each unit's ``energy``, the team charged the units' mean, or with
-        ``neighbourhood_energy`` each unit the mean of the units it sees. Each
-        unit's own: its force share, the averaged net force of its joints along
-        the body plus its tow, squared against the force scale; its hanging, the
+        ``neighbourhood_energy`` each unit the mean of the units it sees, those
+        behind it weighed at ``energy_weight_behind``. Each unit's own: its
+        force share, the averaged net force of its joints along the body plus
+        its tow, squared against the force scale; its hanging, the
         weight its neighbours hold up for it beyond its free support and its
         belly's load; its pain, its legs' averaged press on other legs, squared;
         and its carry, the weight beyond its free support that its feet, on

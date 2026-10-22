@@ -354,7 +354,13 @@ def _agents_for(
 ) -> Agents:
     """Agents that fit the environment: its body and its reward channels; in
     training, the last ``mean_action_world_count`` worlds act with the mean
-    action and are not learned from."""
+    action and are not learned from. Without ``actor_sees_behind`` the
+    actors do not take the units behind."""
+    actor_input_mask = (
+        None
+        if configuration.agents.actor_sees_behind
+        else ~environment.behind_observation_entries
+    )
     return Agents(
         environment.segment_count,
         environment.observation_size,
@@ -366,6 +372,7 @@ def _agents_for(
         environment.leg_motor_count,
         environment.reward_channel_count,
         mean_action_world_count,
+        actor_input_mask,
     )
 
 

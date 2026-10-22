@@ -19,12 +19,19 @@ WORLDS, OBSERVATION_SIZE, WINDOW_STEPS = 4, 5, 3
 LEG_MOTORS = 6  # legs of three joints, no spine
 
 
-def make_agent(device="cpu", seed=0, **values) -> SegmentAgent:
+def make_agent(device="cpu", seed=0, actor_input_mask=None, **values) -> SegmentAgent:
     settings = AgentSettings.from_section(
         {"device": device, "hidden_layers": [8], "ppo": {"minibatch_size": 4}, **values}
     )
     return SegmentAgent(
-        0, WORLDS, OBSERVATION_SIZE, WINDOW_STEPS, settings, seed, LEG_MOTORS
+        0,
+        WORLDS,
+        OBSERVATION_SIZE,
+        WINDOW_STEPS,
+        settings,
+        seed,
+        LEG_MOTORS,
+        actor_input_mask=actor_input_mask,
     )
 
 
@@ -99,6 +106,27 @@ def test_update_learns_from_the_window_then_starts_a_new_one(device):
             strict=True,
         )
     )
+
+
+def test_a_masked_actor_ignores_its_masked_entries_and_its_critic_does_not():
+    kept = torch.tensor([True, True, True, False, False])
+    agent = make_agent(actor_input_mask=kept)
+    first_layer = agent.ppo.actor_network.mean_network[0]
+    masked_weights = first_layer.weight[:, ~kept].clone()
+    seen = observations(0)
+    changed = seen.clone()
+    changed[:, ~kept] += 5.0
+
+    torch.testing.assert_close(
+        agent.act(changed, training=False), agent.act(seen, training=False)
+    )
+    assert not torch.allclose(
+        agent.ppo.state_value(changed), agent.ppo.state_value(seen)
+    )
+    # Learning never moves the weights the masked entries would reach.
+    collect_window(agent)
+    agent.update()
+    torch.testing.assert_close(first_layer.weight[:, ~kept], masked_weights)
 
 
 def test_temporal_smoothness_learns_from_the_stored_next_observations():

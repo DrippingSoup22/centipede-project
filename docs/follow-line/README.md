@@ -33,11 +33,11 @@ checkpoint at a larger one ([reward.md](reward.md)).
 
 | Part | File | In short |
 | --- | --- | --- |
-| Task | [task.md](task.md) | The tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; a fading tow at the start |
+| Task | [task.md](task.md) | The tester on a straight line laid along the body (until run 15, at a small random angle); 20 s episodes; a world that loses the line restarts; a fading tow at the start |
 | Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s |
 | Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing what its actor sees; gSDE from 0.3; PPO, discount 0.99 |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3; PPO, discount 0.99 |
 
 ## The bodies
 
@@ -72,6 +72,13 @@ whatever its damping or range (±1 to ±5°), costs it 12 to 23%. The script
 was tuned on a body that could not twist.
 
 ## Open questions
+
+- **Who leads the wave** (runs 16 and 17, the user, 2026-10-22): local
+  views ordered run 15's body into waves leaving a middle unit, which the
+  reward pays as much as one wave. Two levers make the front unit lead,
+  tried side by side from run 14's cycle 128: what each actor sees (only
+  the units ahead, [observations.md](observations.md)) and what each unit
+  pays for (the units behind weighed less, [reward.md](reward.md)).
 
 - **Stage 2's curves**: a level that makes the line bend more as the walk
   allows (the user's idea, 2026-10-20).

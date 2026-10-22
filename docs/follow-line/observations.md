@@ -14,6 +14,17 @@ spacings, 16.5 mm on v5 (the user's definition).
   neighbour is all zeros.
 - **The environment** is seen as it is: only what lies inside the sphere at
   that moment, the line for now.
+- **From run 16 (`actor_sees_behind` off) the actor does not use the units
+  behind.** Seeing both sides, neighbouring units locked their steps but the
+  body split into waves leaving a middle unit (run 15). A chain whose
+  coupling runs mostly one way keeps one lag along its length (Kopell and
+  Ermentrout's chains of oscillators; Williams & Sigvardt 1994 in the
+  lamprey's cord), and centipede models get one wave from each leg
+  following the leg ahead (Yasui et al. 2022). So each actor acts on
+  itself, the two units ahead and its trail, and the front unit, with no
+  one ahead, leads. Its first layer takes nothing from the units behind;
+  its critics still see them ([critic.md](critic.md)). Who leads does not
+  set the wave's direction, which the reward leaves free.
 
 ## A unit's block: its body, 46 values
 

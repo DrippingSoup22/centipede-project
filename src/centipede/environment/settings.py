@@ -50,7 +50,10 @@ class RewardSettings:
     walk that spends least for its distance and time. With
     ``neighbourhood_energy`` the team account charges each unit the mean
     energy of the units it sees, itself and its neighbours (the units
-    present), instead of the units' mean. Each unit's feet not
+    present), instead of the units' mean; ``energy_weight_behind`` weighs
+    the units behind it against itself and the units ahead (1: all alike;
+    below 1, each unit answers more for the units ahead, which then lead).
+    Each unit's feet not
     carrying its weight, beyond its free support, cost it ``carry_price`` mm
     a second for each unit weight on average; with ``carry_per_leg`` each
     foot is charged instead for its averaged load's distance from half that
@@ -87,6 +90,7 @@ class RewardSettings:
     acceleration_halving: float
     time_value_mj_per_s: float
     neighbourhood_energy: bool
+    energy_weight_behind: float
     carry_price: float
     carry_per_leg: bool
     carry_band: float
@@ -135,6 +139,9 @@ class RewardSettings:
                 "time_value_mj_per_s", default=0.0, minimum=0.0
             ),
             neighbourhood_energy=section.boolean("neighbourhood_energy", default=False),
+            energy_weight_behind=section.number(
+                "energy_weight_behind", default=1.0, minimum=0.0, maximum=1.0
+            ),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
             carry_per_leg=section.boolean("carry_per_leg", default=False),
             carry_band=section.number(

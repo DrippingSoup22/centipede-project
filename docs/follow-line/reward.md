@@ -129,6 +129,19 @@ units within its radius, in the team account:
 - **No free ride, and a reason to coordinate.** A unit that leans on its
   neighbours or fights them through the chain pays for their extra effort;
   legs in step or in random phase spend more than a wave (the ledger).
+- **The units behind weighed less** (run 17, `energy_weight_behind`, the
+  user's idea, 2026-10-22). Weighed alike, the neighbourhood pays two waves
+  leaving a middle unit as much as one wave (the study's `ledger_15.txt`:
+  +0.3 mm/s), and run 15's units locked into such patches. Weighing the
+  units behind less, each unit answers more for the units ahead, the front
+  unit mostly for itself: the units behind adapt to those ahead, and the
+  front leads. The weight is the strongest tilt the ledger finds safe: the
+  less a unit pays for the units behind, the cheaper it is for it to be
+  pushed by them. Every weight from 1 to 0 moves the ledger's margins by
+  2 mm/s at most (the study's `ledger_16_17_w*.txt`), so run 17 uses 0:
+  each unit pays for itself and the units ahead. The scripted gaits cannot
+  show the tilt's real effect, which is on who adapts to whom while
+  learning.
 
 ## The carry
 

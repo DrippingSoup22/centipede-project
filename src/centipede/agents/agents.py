@@ -40,6 +40,7 @@ class Agents:
         leg_motor_count: int,
         reward_channel_count: int = 1,
         mean_action_world_count: int = 0,
+        actor_input_mask: torch.Tensor | None = None,
     ):
         """Create one segment agent per segment, each with its own seed.
 
@@ -51,7 +52,8 @@ class Agents:
         channel, weighed by ``advantage_weights``. In training, the last
         ``mean_action_world_count`` worlds act with the policies' mean action
         and are neither stored nor learned from, so that they measure what the
-        policies have learned while the others train.
+        policies have learned while the others train. Every actor acts only on
+        the observation entries ``actor_input_mask`` keeps (None: all).
         """
         self.segment_count = segment_count
         self.learning_world_count = world_count - mean_action_world_count
@@ -78,6 +80,7 @@ class Agents:
                 action_size=self.segment_action_sizes[segment_index],
                 reward_channel_count=reward_channel_count,
                 advantage_weights=weights,
+                actor_input_mask=actor_input_mask,
             )
             for segment_index in range(segment_count)
         ]

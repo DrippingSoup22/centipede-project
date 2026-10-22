@@ -383,6 +383,43 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         )
 
 
+def test_with_the_units_behind_weighed_less_each_unit_answers_more_for_those_ahead():
+    """Unit 2 pushes 2 mJ, the units behind weighed at a half: units 0 and 1,
+    ahead of it, are charged 0.5 / 2 and 0.5 / 3 of it; unit 2 itself 1 / 4;
+    units 3 and 4, behind it, 1 / 3.5 and 1 / 3 (alike: 2/5, 2/4, 2/3)."""
+    settings = RewardSettings.from_section(
+        {
+            "commanded_speed_mm_per_s": 67.0,
+            "neighbourhood_energy": True,
+            "energy_weight_behind": 0.5,
+            "mm_per_mj": 1.0,
+        }
+    )
+    reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005, 2)
+    state = resting_state(1)
+    state.motor_positive_work[0, 2] = 2e-3
+    zeros = torch.zeros(1, SEGMENTS)
+
+    _, parts, _ = reward.compute(
+        state,
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, 8),
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+    )
+
+    pushing = parts[0, :, PART_NAMES.index("pushing")]
+    charged = 2 * torch.tensor([0.5 / 2, 0.5 / 3, 1 / 4, 1 / 3.5, 1 / 3])
+    torch.testing.assert_close(pushing, -charged)
+
+
 def test_with_the_carry_per_leg_each_foot_is_charged_beyond_its_band():
     """Each foot's averaged load against half its unit's weight, 0.5, free
     within a quarter of it: feet carrying 0.5 and 0.5, or 0.6 and 0.4, pay
@@ -473,6 +510,9 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     # rear joint in unit 2's block, and nothing two ahead of it.
     torch.testing.assert_close(observations[0, 1, 3 * block + 33], torch.tensor(2.0))
     assert not observations[0, 1, 2 * block : 3 * block].any()
+    assert builder.behind_entries.nonzero().flatten().tolist() == list(
+        range(3 * block, 5 * block)
+    )
     torch.testing.assert_close(observations[..., 5 * block : -1], trail)
     torch.testing.assert_close(
         observations[..., -1], torch.tensor([[0.0], [0.25]]).expand(2, SEGMENTS)

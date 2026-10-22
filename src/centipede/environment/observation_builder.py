@@ -73,7 +73,8 @@ class ObservationBuilder:
     with ``line_speed`` its averaged forward line in mm/s.
     Forces are in unit weights. The blocks are laid end to end in the
     neighbour table's order, followed by the unit's trail
-    (``StraightLine.trail``) and its world's tow level.
+    (``StraightLine.trail``) and its world's tow level. ``behind_entries``
+    marks the entries of the units behind, ``(observation_size,)``.
     """
 
     def __init__(
@@ -111,6 +112,14 @@ class ObservationBuilder:
         self.observation_size = (
             self.neighbour_table.shape[1] * self.block_size + TRAIL_VALUES + 1
         )
+        # The units behind are the table's last observation_radius blocks.
+        self.behind_entries = torch.zeros(
+            self.observation_size, dtype=torch.bool, device=device
+        )
+        first_behind = (1 + observation_radius) * self.block_size
+        self.behind_entries[
+            first_behind : first_behind + observation_radius * self.block_size
+        ] = True
 
     def build(
         self,

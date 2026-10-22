@@ -19,7 +19,7 @@ restart: the model's pose, a new straight line at a small random angle
 | Setting | Value | Why |
 | --- | --- | --- |
 | Start pose | The model's pose, each leg angle moved by up to ±2° and each leg joint given a small random speed (main's reset), always facing the same way | The floor is the same everywhere and the agents sense no direction in the world, so a random heading would change nothing |
-| The line | Straight, through the mean of the units' centres, pointing where the body points turned by a random angle of up to ±10°; it stays for the episode | The body starts on the line; the small angle makes every episode start with a correction, so that following, not only walking straight, is practised all along (the user's worry, 2026-10-20). Curves are stage 2 |
+| The line | Straight, through the mean of the units' centres, pointing where the body points; it stays for the episode | First walk straight and stay on the line (the user, 2026-10-22, from run 16): runs 01 to 15 turned it by a random angle of up to ±10° so that every episode started with a correction, and the bodies walked turned to it, the rear units up to 9 mm off. Following a line that turns comes with the curves, stage 2 (`line_angle_range_deg`) |
 | Its direction | The line is an arrow: a step along it is paid, a step against it charged | Walking backward never pays, whichever way the body faces |
 | Episode | 20 s, 1,000 decisions | legged_gym's 20 s (Rudin et al. 2021); a world stuck early waits at most 20 s |
 | First episodes | In training, each world starts at a random moment of its first episode; evaluations start every world together | Otherwise all training worlds restart on the same step |

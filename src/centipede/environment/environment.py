@@ -4,8 +4,9 @@ simulation (docs/follow-line/).
 It keeps each world's episode state and coordinates the line, the averaged
 forces, the reward, the observations, the tow, the diagnostics and the
 physics simulation. The interaction loop uses only ``reset`` and ``step``;
-the experiment reads ``segment_count``, ``observation_size``, the action
-sizes and ``leg_motor_count`` to create the agents, sets the ramp's weight
+the experiment reads ``segment_count``, ``observation_size``,
+``behind_observation_entries``, the action sizes and ``leg_motor_count`` to
+create the agents, sets the ramp's weight
 before each update cycle of training with ``set_ramp_weight``, and in
 training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
 first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``,
@@ -107,6 +108,7 @@ class Environment:
             settings.reward.carry_per_leg,
         )
         self.observation_size = self.observation_builder.observation_size
+        self.behind_observation_entries = self.observation_builder.behind_entries
         self.tow = Tow(
             settings.tow,
             world_count,
