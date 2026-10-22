@@ -76,7 +76,7 @@ class Environment:
             body.unit_spacing_m,
             self.sight_radius_m,
             self.device,
-            settings.curves,
+            settings.curves if settings.line_shape == "curved" else None,
         )
         self.forces = AveragedForces(
             world_count,
@@ -373,6 +373,7 @@ class Environment:
             averaged_forces,
             strayed,
             truncated,
+            self.averaged_command,
         )
         self.tow.record(self.diagnostics.step)
 

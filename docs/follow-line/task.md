@@ -37,8 +37,11 @@ the line.
 
 Designed with the user on 2026-10-22, once the walk was learned (runs 16
 and 17): the body must follow a line that turns, never the same, so that it
-learns to follow lines in general. Each world's line is laid at every
-restart (`[environment.curves]`, off by default):
+learns to follow lines in general. One setting chooses the stage:
+`line_shape = "straight"` (the default, stage 1) or `"curved"`, which reads
+`[environment.curves]`; a curved run's file returns to stage 1 by that word
+alone, its inputs unchanged (on a straight line the command stays at
+67 mm/s). Each world's curved line is laid at every restart:
 
 - **Straight through the body** and half a body length beyond the head, so
   the body starts aligned with it, as in stage 1.

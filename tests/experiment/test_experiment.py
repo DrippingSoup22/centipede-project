@@ -107,7 +107,8 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
         'runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1'
     ).replace(
         "max_episode_steps = 3\n",
-        "max_episode_steps = 3\n[environment.reward]\nramp_start = 0.3\n"
+        'max_episode_steps = 3\nline_shape = "curved"\n'
+        "[environment.reward]\nramp_start = 0.3\n"
         "ramp_cycles = 2\nramp_after_line_share = 1.0\n"
         "[environment.curves]\nlevel_tightest_radius_body_lengths = [3.0, 1.0]\n"
         "level_straight_shares = [0.5, 0.2]\nlevel_judged_cycles = 2\n",

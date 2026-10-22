@@ -107,6 +107,16 @@ class StepFacts:
         "Angle between the unit's body and the line's direction, either way, (W, N)",
         "rad",
     )
+    line_bend: torch.Tensor = measure(
+        "The line's curvature at the unit's centre, either way; 0 on a straight"
+        " line, (W, N)",
+        "1/m",
+    )
+    commanded_speed: torch.Tensor = measure(
+        "The commanded speed, averaged as the body's speed is; lower in bends"
+        " with slow_in_bends, (W,)",
+        "mm/s",
+    )
     joint_forces: torch.Tensor = measure(
         "The averaged force of the unit ahead on the unit and the averaged net"
         " force of its two joints, along the body, in unit weights, (W, N, 2):"
@@ -337,6 +347,8 @@ class EnvironmentDiagnostics:
             spine_bend=zeros(segment_count),
             off_line=zeros(segment_count),
             line_angle=zeros(segment_count),
+            line_bend=zeros(segment_count),
+            commanded_speed=zeros(),
             joint_forces=zeros(segment_count, 2),
             body_height=zeros(segment_count),
             uprightness=zeros(segment_count),
@@ -397,6 +409,7 @@ class EnvironmentDiagnostics:
         averaged_forces: torch.Tensor,
         strayed: torch.Tensor,
         truncated: torch.Tensor,
+        averaged_command: torch.Tensor,
     ) -> None:
         """Refresh the step facts, add to the totals, and publish ended episodes.
 
@@ -405,7 +418,8 @@ class EnvironmentDiagnostics:
         ``rewards`` by account, ``(W, N, 2)``, the reward's parts, each unit's
         own energy, its step along the line (m), the line with each unit's
         place on it, the averaged forces (``AveragedForces.values``), the
-        worlds that lost the line and the worlds whose episode ends.
+        worlds that lost the line, the worlds whose episode ends and each
+        world's averaged commanded speed (mm/s).
         """
         state = physical_state
         step = self.step
@@ -433,6 +447,8 @@ class EnvironmentDiagnostics:
         step.spine_bend.copy_(state.spine_yaw_position.abs())
         step.off_line.copy_(line.distance)
         step.line_angle.copy_(line.angle.abs())
+        step.line_bend.copy_(line.curvature.abs())
+        step.commanded_speed.copy_(averaged_command)
         step.joint_forces.copy_(averaged_forces[..., [2, 0]])
         step.body_height.copy_(state.body_height)
         # The z component of each unit's up axis: 1 - 2(x² + y²).

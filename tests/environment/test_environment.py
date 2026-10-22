@@ -67,6 +67,11 @@ def test_the_settings_default_to_the_agreed_design_and_ramp_the_costs():
     settings = EnvironmentSettings.from_section({"simulation": HEADLESS})
     assert settings.observation_radius == 2
     assert settings.reward.line_speed_cap_mm_per_s == 90.0
+    assert settings.line_shape == "straight"  # stage 1's
+    with pytest.raises(SettingsError, match="levels"):
+        EnvironmentSettings.from_section(
+            {"simulation": HEADLESS, "line_shape": "curved"}
+        )
     assert settings.tow.start == 0.0  # no tow unless asked
     weights = [settings.reward.ramp_weight_at(cycle) for cycle in (1, 65, 129, 300)]
     assert weights == [0.5, 0.75, 1.0, 1.0]
@@ -712,6 +717,7 @@ def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised(
             torch.zeros(2, SEGMENTS, 5),
             torch.tensor([False, step == 39]),
             torch.full((2,), step == 39),
+            torch.full((2,), 67.0),
         )
         window.add()
 
@@ -757,6 +763,7 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
             "observe_energy": True,
             "observe_line_speed": True,
             "observe_command": True,
+            "line_shape": "curved",
             "simulation": HEADLESS,
             "curves": {
                 "level_tightest_radius_body_lengths": [3.0, 1.0],

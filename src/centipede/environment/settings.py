@@ -287,8 +287,9 @@ class TowSettings:
 
 @dataclass(frozen=True)
 class CurveSettings:
-    """The [environment.curves] section (docs/follow-line/task.md, the line);
-    every length in body lengths. Without levels the line is straight.
+    """The [environment.curves] section (docs/follow-line/task.md, the
+    curves), read when the environment's ``line_shape`` is "curved"; every
+    length in body lengths.
 
     The line runs straight through the body and ``lead_body_lengths`` beyond
     the head, then bends piece by piece: each piece between the two
@@ -368,8 +369,10 @@ class EnvironmentSettings:
     A unit sees within ``sight_radius_spacings`` unit spacings of its centre:
     the neighbours within it in the straight body, and the line within it.
     The line is laid at up to ``line_angle_range_deg`` either way of the
-    body's heading. With ``stagger_first_episodes`` each world starts its
-    first episode at a random step of it. Each spine motor receives
+    body's heading; ``line_shape`` "straight" keeps it straight (stage 1),
+    "curved" bends it beyond the head as the curves section says (stage
+    2). With ``stagger_first_episodes`` each world starts its first episode
+    at a random step of it. Each spine motor receives
     ``spine_action_scale`` times its command. With ``observe_priced_forces``
     false a unit's block leaves out the forces only the old costs priced: its
     legs' press and the joint forces averaged over a second. With
@@ -385,6 +388,7 @@ class EnvironmentSettings:
     max_episode_steps: int
     sight_radius_spacings: float
     line_angle_range_deg: float
+    line_shape: str
     stagger_first_episodes: bool
     spine_action_scale: float
     observe_priced_forces: bool
@@ -415,6 +419,9 @@ class EnvironmentSettings:
             line_angle_range_deg=section.number(
                 "line_angle_range_deg", default=10.0, minimum=0.0, maximum=90.0
             ),
+            line_shape=section.choice(
+                "line_shape", ("straight", "curved"), default="straight"
+            ),
             stagger_first_episodes=section.boolean(
                 "stagger_first_episodes", default=True
             ),
@@ -434,6 +441,15 @@ class EnvironmentSettings:
             curves=CurveSettings.from_section(section.table("curves")),
         )
         section.reject_unknown_keys()
+        if (
+            settings.line_shape == "curved"
+            and not settings.curves.level_tightest_radius_body_lengths
+        ):
+            raise SettingsError(
+                '[environment] a "curved" line needs its levels:'
+                " set [environment.curves] level_tightest_radius_body_lengths"
+                " and level_straight_shares"
+            )
         return settings
 
     @property
