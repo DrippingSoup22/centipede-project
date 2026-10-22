@@ -145,6 +145,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             completed_cycles = checkpoint["completed_cycles"]
             saved_tow_top = checkpoint.get("tow_top")
             ramp_from = checkpoint.get("ramp_from", ramp_from)
+            _set_curve_level(environment, checkpoint, checkpoint_path)
             ramp_weight = checkpoint.get("ramp_weight", ramp_weight)
         else:
             _check_agents_can_start_from(
@@ -287,6 +288,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         cycle = completed_cycles + session_cycle + 1
         if worlds_per_group:
             window_closed = environment.adjust_tow()
+            environment.adjust_curve_level()
             if ramp_from is None and environment.untowed_line() >= ramp_line_mm_per_s:
                 ramp_from = cycle + 1
             if adaptive_ramp and window_closed:
@@ -296,6 +298,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         record = {"cycle": cycle, "transitions": cycle * transitions_per_cycle}
         record |= {category.name: category.plain_values() for category in categories}
         record["ramp_weight"] = environment.reward.ramp_weight
+        if environment.line.level_count:
+            record["curve_level"] = environment.line.level
+            record["kept_line_share"] = environment.kept_line_share
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
@@ -333,6 +338,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 tow_top=environment.tow.top if towed else None,
                 ramp_from=ramp_from,
                 ramp_weight=ramp_weight if adaptive_ramp else None,
+                curve_level=environment.line.level
+                if environment.line.level_count
+                else None,
             )
         if out_of_time:
             print(
@@ -411,6 +419,20 @@ def _check_recording_fits(environment: Environment, frames: int, worlds: int) ->
             f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: record fewer worlds"
             " with [run] record_worlds"
         )
+
+
+def _set_curve_level(
+    environment: Environment, checkpoint: dict, checkpoint_path: Path
+) -> None:
+    """Lay the lines at the curves' level a checkpoint reached (none: the
+    first), which the configuration's curves must have."""
+    level = checkpoint.get("curve_level", 0)
+    if level and level >= environment.line.level_count:
+        raise SettingsError(
+            f"{checkpoint_path} reached curve level {level}; the configuration's"
+            f" [environment.curves] has {environment.line.level_count} levels"
+        )
+    environment.line.set_level(level)
 
 
 def _check_agents_can_start_from(
@@ -634,6 +656,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     agents = _agents_for(environment, configuration, 1)
     checkpoint = RunFolder.load_checkpoint(checkpoint_path, configuration.agents.device)
     agents.load_state_dict(checkpoint["agents"])
+    _set_curve_level(environment, checkpoint, checkpoint_path)
     loop = InteractionLoop(environment, agents, configuration.interaction_loop)
     categories = _evaluation_categories(loop, environment)
 

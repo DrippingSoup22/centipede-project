@@ -69,6 +69,21 @@ The task sets how fast to go, and the body finds how to walk that fast.
   the stride, a constraint on form.
 - **Symmetric**: as much for each mm/s too slow as too fast, as in the
   literature.
+- **Slower in bends** (stage 2, `slow_in_bends`): on a bend the outer feet
+  run on a wider circle than the centre, so the command falls just enough
+  for them to keep v*: v* / (1 + r k), r the feet's reach to the side of
+  the centre (17.7 mm on v5 and v6, measured from the model) and k the
+  line's curvature, the units' mean, averaged over 1 s as v̄ is. The team
+  is paid v* − |v̄ − command|: a bend lowers no pay, only the speed it
+  pays for. Walkers slow on curved paths (Hicheur et al. 2005). A free range
+  of speeds was set aside: with energy priced, the slowest speed in it would
+  be the cheapest, on straights too.
+
+| Radius | Command |
+| --- | --- |
+| Straight | 67 mm/s |
+| 3 body lengths | 61.5 mm/s |
+| 1 body length | 53 mm/s |
 
 ## The energy
 

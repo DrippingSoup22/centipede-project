@@ -15,7 +15,7 @@ import torch
 from centipede.diagnostics_category import WindowSummary
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
-from centipede.environment.line import StraightLine
+from centipede.environment.line import Line
 from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import (
     ENERGY_PARTS,
@@ -23,6 +23,7 @@ from centipede.environment.reward_function import (
     RewardFunction,
 )
 from centipede.environment.settings import (
+    CurveSettings,
     EnvironmentSettings,
     RewardSettings,
     TowSettings,
@@ -106,7 +107,7 @@ def test_the_line_is_laid_at_its_turn_and_measures_each_centre_on_it():
     world 0 goes 2 mm along its line. It moves 1.5 mm to the left: none goes
     along, every centre lies 1.5 mm from the line, unit 2, turned 30 degrees,
     at that angle."""
-    line = StraightLine(2, SEGMENTS, 0.01, 0.025, "cpu")
+    line = Line(2, SEGMENTS, 0.01, 0.025, "cpu")
     state = resting_state(2)
     line.restart(torch.ones(2, dtype=torch.bool), state, torch.tensor([0.0, 0.1]))
     torch.testing.assert_close(line.angle[1], torch.full((SEGMENTS,), -0.1))
@@ -130,7 +131,7 @@ def test_each_unit_sees_the_trail_within_its_sight_in_its_own_frame():
     five straight ahead and behind; unit 2, 6 mm to the left of the line,
     sees it to its right and not the outer two points (13.4 mm away); unit
     4, turned to face the line's left, sees the points ahead on its right."""
-    line = StraightLine(1, SEGMENTS, 0.006, 0.013, "cpu")
+    line = Line(1, SEGMENTS, 0.006, 0.013, "cpu")
     state = resting_state(1)
     line.restart(torch.tensor([True]), state, torch.zeros(1))
     state.body_planar_position[0, 2, 1] = 0.006
@@ -149,6 +150,50 @@ def test_each_unit_sees_the_trail_within_its_sight_in_its_own_frame():
     torch.testing.assert_close(
         trail[4], torch.stack((zeros, -offsets, seen), dim=-1), atol=1e-4, rtol=0
     )
+
+
+def test_a_curved_line_bends_smoothly_beyond_the_head_and_measures_each_centre_on_it():
+    """One level, its tightest radius a body length (five units 10 mm apart:
+    50 mm), no straight pieces, pieces of one to two body lengths, each bend
+    changed over a body length. The line runs straight through the body and
+    half a body length beyond the head (20 mm ahead of the middle), to 45
+    mm; then its curvature reaches toward 20 /m but never past it, and moves
+    by at most 40 /m over a body length, 0.8 /m a point: no corner. Its
+    points stay a millimetre apart. A unit set 2 mm to the left of the line
+    where it bends most, turned 10 degrees from it, measures that distance,
+    that angle, the point's place along the line and its curvature."""
+    curves = CurveSettings.from_section(
+        {
+            "level_tightest_radius_body_lengths": [1.0],
+            "level_straight_shares": [0.0],
+            "piece_body_lengths": [1.0, 2.0],
+        }
+    )
+    line = Line(1, SEGMENTS, 0.01, 0.025, "cpu", curves)
+    state = resting_state(1)
+    generator = torch.Generator().manual_seed(0)
+    line.restart(torch.tensor([True]), state, torch.zeros(1), generator)
+
+    curvature, along = line.curvatures[0], line.point_along
+    assert not curvature[along <= 0.045].any()
+    assert 10.0 < curvature.abs().max() <= 20.0 + 1e-4
+    assert curvature.diff().abs().max() <= 0.8 + 1e-4
+    gaps = line.points[0].diff(dim=0).norm(dim=-1)
+    torch.testing.assert_close(gaps, torch.full_like(gaps, 1e-3))
+    assert line.drawn_points().shape == (1, 21, 2)
+
+    bend = int(curvature.abs().argmax())
+    direction = line.directions[0, bend]
+    left = torch.stack((-direction[1], direction[0]))
+    state.body_planar_position[0, 2] = line.points[0, bend] + 0.002 * left
+    yaw = math.atan2(direction[1], direction[0]) + math.radians(10)
+    state.body_quaternion[0, 2] = turned(yaw)
+    line.nearest[0, 2] = bend
+    line.update(state)
+    assert line.distance[0, 2].item() == pytest.approx(0.002, abs=1e-6)
+    assert line.angle[0, 2].item() == pytest.approx(math.radians(10), abs=1e-5)
+    assert line.along[0, 2].item() == pytest.approx(along[bend].item(), abs=1e-6)
+    assert line.curvature[0, 2] == curvature[bend]
 
 
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():
@@ -209,6 +254,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
         torch.zeros(1, SEGMENTS),
         torch.zeros(1, SEGMENTS),
         torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
     )
     rewards, parts, own_energy = reward.compute(*step, *rest)
 
@@ -276,6 +322,7 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         zeros,
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
     )
 
     at_135, at_200 = paid_above
@@ -317,6 +364,7 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
         accelerations,
         energy,
         torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
     )
 
     by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
@@ -327,8 +375,9 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
 
 def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_energy():
     """A commanded speed of 67 mm/s: units' forward lines averaged at 60 to
-    100 mm/s, a mean of 80, pay 67 - 13 = 54 mm a second, 1.08 mm a step;
-    at a mean of 40, below the target, 40 mm a second. The forward line:
+    100 mm/s, a mean of 80, pay 67 - 13 = 54 mm a second, 1.08 mm a step.
+    World 1, in a bend whose averaged command has fallen to 40 mm/s, walks
+    at a mean of 40 and keeps the full 67 mm a second, 1.34 mm a step. The forward line:
     a step of 1 mm at 2.5 mm from the line (closeness 0.75 in a 5 mm band),
     one facing 60 degrees away (half), a step back in full. Unit 0 pushes
     2 mJ: each unit within two of it is charged the mean of the units it
@@ -361,12 +410,13 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         zeros,
         zeros,
         torch.zeros(2, SEGMENTS, LEGS + 1),
+        torch.tensor([67.0, 40.0]),
     )
 
     by_name = dict(zip(PART_NAMES, parts.unbind(dim=-1), strict=True))
     every = torch.ones(SEGMENTS)
     torch.testing.assert_close(
-        by_name["line"], torch.stack((1.08 * every, 0.8 * every))
+        by_name["line"], torch.stack((1.08 * every, 1.34 * every))
     )
     charged = torch.tensor([2 / 3, 2 / 4, 2 / 5, 0.0, 0.0])
     torch.testing.assert_close(by_name["pushing"][0], -charged)
@@ -413,6 +463,7 @@ def test_with_the_units_behind_weighed_less_each_unit_answers_more_for_those_ahe
         zeros,
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
     )
 
     pushing = parts[0, :, PART_NAMES.index("pushing")]
@@ -446,6 +497,7 @@ def test_with_the_carry_per_leg_each_foot_is_charged_beyond_its_band():
         zeros,
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
     )
 
     by_name = dict(zip(PART_NAMES, parts.unbind(dim=-1), strict=True))
@@ -641,7 +693,7 @@ def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised(
     diagnostics = EnvironmentDiagnostics(2, SEGMENTS, BODY.unit_weight_n, "cpu", None)
     window = WindowSummary(diagnostics.step)
     state = resting_state(2)
-    line = StraightLine(2, SEGMENTS, 0.01, 0.025, "cpu")
+    line = Line(2, SEGMENTS, 0.01, 0.025, "cpu")
     diagnostics.restart(torch.ones(2, dtype=torch.bool))
     delay = torch.arange(SEGMENTS)[:, None] + torch.tensor([0, 4])
     for step in range(40):
@@ -692,7 +744,10 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
     accelerations and the carry priced. World 1's line moved 20 mm to the
     side, beyond the sight radius, it restarts at once on a new line, its
     joints' last speeds taken afresh and its forward line averaged from 0;
-    world 0 at the time limit."""
+    world 0 at the time limit. With curves at two levels, judged every
+    cycle, and the command observed: world 1, the untowed measuring world,
+    lost its line once in an episode's worth of steps, kept none, and the
+    level stays; an episode's worth kept raises it, once, to the last."""
     settings = EnvironmentSettings.from_section(
         {
             "max_episode_steps": 3,
@@ -701,9 +756,16 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
             "observe_carry": True,
             "observe_energy": True,
             "observe_line_speed": True,
+            "observe_command": True,
             "simulation": HEADLESS,
+            "curves": {
+                "level_tightest_radius_body_lengths": [3.0, 1.0],
+                "level_straight_shares": [0.5, 0.2],
+                "level_judged_cycles": 1,
+            },
             "reward": {
                 "commanded_speed_mm_per_s": 67.0,
+                "slow_in_bends": True,
                 "neighbourhood_energy": True,
                 "acceleration_price": 1e-3,
                 "carry_price": 50.0,
@@ -711,8 +773,11 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
         }
     )
     environment = Environment(settings)
+    environment.reserve_measuring_worlds(1)
     observations = environment.reset(seed=0)
-    assert observations.shape == (2, 10, 246)
+    assert observations.shape == (2, 10, 247)
+    # The body on its line's straight part: the full command.
+    torch.testing.assert_close(observations[..., -1], torch.full((2, 10), 67.0))
     assert environment.sight_radius_m == pytest.approx(0.0165, abs=1e-4)
     # Units up to 30 mm from the body's middle, the line turned up to 10 deg.
     assert (environment.line.distance < 0.0055).all()
@@ -725,7 +790,8 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
 
     environment.simulation.step = recorded_step
     line = environment.line
-    line.origin[1] += 0.02 * torch.stack((-line.direction[1, 1], line.direction[1, 0]))
+    direction = line.directions[1, line.middle_point]
+    line.points[1] += 0.02 * torch.stack((-direction[1], direction[0]))
     action = torch.zeros(2, 10, 9)
     action[..., -1] = 1.0
     for expected in ([False, True], [False, False], [True, False]):
@@ -740,3 +806,8 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
             assert not environment.averaged_forward_line[1].any()
     torch.testing.assert_close(spine_commands[0], torch.full((2, 9), 0.35))
     assert (environment.line.distance[1] < 0.0055).all()
+    assert not environment.adjust_curve_level()
+    assert environment.kept_line_share == 0.0 and environment.line.level == 0
+    environment.judged_steps = 3
+    assert environment.adjust_curve_level() and environment.line.level == 1
+    assert not environment.adjust_curve_level()

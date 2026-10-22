@@ -31,7 +31,7 @@ from dataclasses import dataclass
 import torch
 
 from centipede.diagnostics_category import measure
-from centipede.environment.line import StraightLine
+from centipede.environment.line import DRAWN_POINTS, Line
 from centipede.environment.reward_function import (
     CHANNEL_NAMES,
     ENERGY_PARTS,
@@ -167,9 +167,10 @@ class StepFacts:
         summary="angle",
         counted_where="left_right_lag_measured",
     )
-    line_ends: torch.Tensor = measure(
+    line_points: torch.Tensor = measure(
         "The line from a body length behind the units' middle to a body length"
-        " ahead, world x and y of both ends, (W, 2, 2); kept for recordings",
+        " ahead, world x and y of 21 points along it, (W, 21, 2); kept for"
+        " recordings",
         "m",
         summary="recorded",
     )
@@ -295,8 +296,7 @@ class EnvironmentDiagnostics:
     ``step`` and ``episode`` are the categories the experiment reads, and
     ``simulation`` is the physics simulation's. ``reward_part_names`` labels
     the reward's parts and ``channel_names`` its accounts; a recording scores
-    each world by ``recording_score``, named ``score_name``, and draws the line
-    ``body_length_m`` either way of the body's middle.
+    each world by ``recording_score``, named ``score_name``.
     """
 
     reward_part_names = list(PART_NAMES)
@@ -310,12 +310,10 @@ class EnvironmentDiagnostics:
         unit_weight_n: float,
         device: torch.device | str,
         simulation_facts: SimulationFacts,
-        body_length_m: float = 0.0,
     ) -> None:
         """Allocate both categories and the running totals, all zero."""
         self.simulation = simulation_facts
         self.unit_weight_n = unit_weight_n
-        self.line_ends_m = torch.tensor([-body_length_m, body_length_m], device=device)
         self.feet = FootCycles(world_count, segment_count, device)
         self.legs = LegStrokes(world_count, segment_count, device)
 
@@ -350,7 +348,7 @@ class EnvironmentDiagnostics:
             neighbour_lag=zeros(segment_count - 1, 2),
             left_right_lag_measured=flags(segment_count),
             left_right_lag=zeros(segment_count),
-            line_ends=zeros(2, 2),
+            line_points=zeros(DRAWN_POINTS, 2),
         )
         self.episode = EpisodeSummary(
             episode_ended=flags(),
@@ -395,7 +393,7 @@ class EnvironmentDiagnostics:
         reward_parts: torch.Tensor,
         own_energy: torch.Tensor,
         progress: torch.Tensor,
-        line: StraightLine,
+        line: Line,
         averaged_forces: torch.Tensor,
         strayed: torch.Tensor,
         truncated: torch.Tensor,
@@ -456,10 +454,7 @@ class EnvironmentDiagnostics:
         step.neighbour_lag.copy_(phase[:, :-1])
         step.left_right_lag_measured.copy_(lift_off[..., 1] & known[..., 0])
         step.left_right_lag.copy_(phase[..., 0])
-        middle = line.origin + line.along.mean(dim=1, keepdim=True) * line.direction
-        step.line_ends.copy_(
-            middle[:, None] + self.line_ends_m[:, None] * line.direction[:, None]
-        )
+        step.line_points.copy_(line.drawn_points())
 
         self._steps += 1
         totals = self._totals

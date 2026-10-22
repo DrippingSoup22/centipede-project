@@ -10,7 +10,9 @@ create the agents, sets the ramp's weight
 before each update cycle of training with ``set_ramp_weight``, and in
 training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
 first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``,
-``untowed_line`` and ``untowed_walk``.
+``untowed_line`` and ``untowed_walk``. With curves it calls
+``adjust_curve_level`` after each update cycle of training and keeps the
+level in checkpoints (``line.level``, ``line.set_level``).
 """
 
 import math
@@ -18,7 +20,7 @@ import math
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
-from centipede.environment.line import StraightLine, forward_axis
+from centipede.environment.line import Line, forward_axis
 from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import (
     CHANNEL_NAMES,
@@ -32,7 +34,7 @@ from centipede.environment.tow import GROUPS, Tow
 
 
 class Environment:
-    """Batches of centipede worlds, each following its straight line.
+    """Batches of centipede worlds, each following its line.
 
     Every tensor passed in or out has the worlds as its first dimension.
     Every unit commands its leg motors and, but the rear, the spine joint
@@ -68,12 +70,13 @@ class Environment:
         self.motor_scale = torch.ones(legs + 1, device=self.device)
         self.motor_scale[-1] = settings.spine_action_scale
 
-        self.line = StraightLine(
+        self.line = Line(
             world_count,
             segment_count,
             body.unit_spacing_m,
             self.sight_radius_m,
             self.device,
+            settings.curves,
         )
         self.forces = AveragedForces(
             world_count,
@@ -106,6 +109,7 @@ class Environment:
             settings.observe_energy,
             settings.observe_line_speed,
             settings.reward.carry_per_leg,
+            settings.observe_command,
         )
         self.observation_size = self.observation_builder.observation_size
         self.behind_observation_entries = self.observation_builder.behind_entries
@@ -122,7 +126,6 @@ class Environment:
             body.unit_weight_n,
             self.device,
             self.simulation.diagnostics.facts,
-            body.body_length_m,
         )
 
         # Episode state, overwritten in place. The lines' angles and the first
@@ -173,6 +176,20 @@ class Environment:
         self.last_motor_force = torch.zeros(
             (world_count, segment_count, legs + 1), device=self.device
         )
+        # Each world's commanded speed, mm/s, averaged as the forward line is,
+        # from the straight command at an episode's start (the body on its
+        # straight part); with slow_in_bends it falls in bends.
+        self.commanded_speed = settings.reward.commanded_speed_mm_per_s
+        self.averaged_command = torch.full(
+            (world_count,), self.commanded_speed, device=self.device
+        )
+        # The untowed measuring worlds' lost lines and steps, and the update
+        # cycles, since the curves' level was last judged; the share of
+        # their episodes they kept the line through then (NaN before).
+        self.lost_lines = torch.zeros((), device=self.device)
+        self.judged_steps = 0
+        self.cycles_at_level = 0
+        self.kept_line_share = math.nan
 
     def set_ramp_weight(self, weight: float) -> None:
         """Weigh the ramped costs (energy, the squeeze, pain, the motion and
@@ -209,6 +226,35 @@ class Environment:
         facts = self.tow.facts
         stepping = facts.lift_offs[untowed].item() > self.settings.tow.lift_off_hz
         return facts.speed[untowed].item(), stepping
+
+    def adjust_curve_level(self) -> bool:
+        """After an update cycle of training: once ``level_judged_cycles``
+        cycles have passed since the curves' level was last judged, judge
+        it: raise it by one, up to the last, if the untowed measuring worlds
+        kept the line through ``level_up_kept_share`` of their episodes over
+        those cycles (lost lines per episode's worth of their steps), and
+        start counting again. Returns whether it rose; waits for the GPU once
+        each judgement."""
+        line = self.line
+        curves = self.settings.curves
+        if line.level >= line.level_count - 1 or not self.tow.worlds_per_group:
+            return False
+        self.cycles_at_level += 1
+        if self.cycles_at_level < curves.level_judged_cycles:
+            return False
+        episodes = (
+            self.tow.worlds_per_group
+            * self.judged_steps
+            / self.settings.max_episode_steps
+        )
+        self.kept_line_share = 1 - self.lost_lines.item() / episodes
+        self.lost_lines.zero_()
+        self.judged_steps = 0
+        self.cycles_at_level = 0
+        if self.kept_line_share < curves.level_up_kept_share:
+            return False
+        line.set_level(line.level + 1)
+        return True
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
@@ -272,6 +318,13 @@ class Environment:
         forward_line = self.reward.forward_line(
             progress, self.line.distance, self.line.angle
         )
+        command = self.commanded_speed
+        if self.settings.reward.slow_in_bends:
+            bend = self.line.curvature.abs().mean(dim=1)
+            command = self.commanded_speed / (1 + self.body.foot_reach_m * bend)
+        self.averaged_command += self.forces.averaging_rate * (
+            command - self.averaged_command
+        )
         self.averaged_forward_line += self.forces.averaging_rate * (
             forward_line / ACTION_DURATION_S - self.averaged_forward_line
         )
@@ -298,8 +351,13 @@ class Environment:
             self.averaged_accelerations,
             self.averaged_energy,
             force_change,
+            self.averaged_command,
         )
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
+        if self.line.level_count and self.tow.worlds_per_group:
+            untowed = self.tow.groups[GROUPS.index("without tow")]
+            self.lost_lines += strayed.float() @ untowed
+            self.judged_steps += 1
         truncated = (
             (self.episode_steps >= self.settings.max_episode_steps)
             | strayed
@@ -341,7 +399,7 @@ class Environment:
             self.world_count, generator=self.generator, device=self.device
         )
         turn = (2 * draw - 1) * math.radians(self.settings.line_angle_range_deg)
-        self.line.restart(world_mask, state, turn)
+        self.line.restart(world_mask, state, turn, self.generator)
         self.forces.restart(world_mask, state)
         self.tow.restart(world_mask)
         self.diagnostics.restart(world_mask)
@@ -351,6 +409,7 @@ class Environment:
         )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
         self.averaged_forward_line.masked_fill_(world_mask[:, None], 0.0)
+        self.averaged_command.masked_fill_(world_mask, self.commanded_speed)
         self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_energy.masked_fill_(world_mask[:, None], 0.0)
         self.last_motor_force.masked_fill_(world_mask[:, None, None], 0.0)
@@ -377,4 +436,5 @@ class Environment:
             self.tow.levels(),
             self.averaged_energy,
             self.averaged_forward_line,
+            self.averaged_command,
         )

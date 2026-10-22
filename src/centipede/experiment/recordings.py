@@ -127,10 +127,10 @@ def evaluation_recording(
 
 
 def _line_path(recorded: RecordedEpisodes) -> dict[str, Any]:
-    """The path keys of a recording: each world's line, a straight piece on
-    the ground around its body at each frame."""
-    ends = recorded.kept["line_ends"]
-    on_ground = np.concatenate((ends, np.zeros_like(ends[..., :1])), axis=-1)
+    """The path keys of a recording: each world's line, a piece on the
+    ground around its body at each frame."""
+    points = recorded.kept["line_points"]
+    on_ground = np.concatenate((points, np.zeros_like(points[..., :1])), axis=-1)
     return {
         "path_names": (LINE_PATH,),
         "path_points": on_ground[:, :, None].astype(np.float32),

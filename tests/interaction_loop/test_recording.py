@@ -29,7 +29,7 @@ def take_step(recorder, diagnostics, step, started, rewards, counted=None):
     )
     # The score: the line paid, the units' mean.
     diagnostics.step.reward_parts[..., 0] = torch.tensor(rewards)[:, None]
-    diagnostics.step.line_ends.fill_(float(step))
+    diagnostics.step.line_points.fill_(float(step))
     diagnostics.episode.episode_ended.copy_(torch.tensor(started))
     recorder.step_taken(counted)
 
@@ -54,9 +54,9 @@ def test_each_recorded_world_keeps_one_episode_from_its_own_start():
     np.testing.assert_allclose(episodes.qpos[:, :, 0], [[2.0, 10.0], [12.0, 20.0]])
     assert episodes.episode_start.tolist() == [[True, True], [False, False]]
     np.testing.assert_allclose(
-        episodes.kept["line_ends"][..., 0, 0], [[0.0, 1.0], [1.0, 2.0]]
+        episodes.kept["line_points"][..., 0, 0], [[0.0, 1.0], [1.0, 2.0]]
     )
-    assert set(episodes.kept) == {"line_ends"}
+    assert set(episodes.kept) == {"line_points"}
     assert not recorder.recording
 
 

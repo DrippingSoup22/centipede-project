@@ -186,6 +186,15 @@ front slower than order spreads, the defects are drastically suppressed
 and one ordered region grows behind it (Dziarmaga, Laguna & Zurek 1999,
 from their abstract).
 
+**Turning** (searched 2026-10-22, for stage 2). No turning radius or
+inner and outer stride of a centipede was found; the closest are conference
+abstracts. *S. heros* bends 4 to 8.5° a joint while running straight
+(Anderson, Shultz & Jayne 1995). People walking curved paths slow where the
+path bends more (Hicheur et al. 2005, a power law whose exponent depends on
+the path). Roads, railways and car-like robots follow paths whose curvature
+is bounded and changes at a bounded rate, made of straight lines, arcs and
+clothoids (Fraichard & Scheuer 2004).
+
 ## 5. Our runs against the literature
 
 | What runs 01 to 11 showed | What the literature says |
@@ -258,4 +267,6 @@ Centipedes and decentralised walking
 - Ashwin, Coombes & Nicks, Mathematical frameworks for oscillatory network dynamics in neuroscience, Journal of Mathematical Neuroscience 6, 2016, [arXiv 1506.05828](https://arxiv.org/abs/1506.05828)
 - Matsushima & Grillner, Neural mechanisms of intersegmental coordination in lamprey: local excitability changes modify the phase coupling along the spinal cord, Journal of Neurophysiology 67, 1992, [doi 10.1152/jn.1992.67.2.373](https://doi.org/10.1152/jn.1992.67.2.373)
 - Dziarmaga, Laguna & Zurek, Symmetry breaking with a slant: topological defects after an inhomogeneous quench, Physical Review Letters 82, 1999, [arXiv cond-mat/9810396](https://arxiv.org/abs/cond-mat/9810396)
+- Hicheur, Vieilledent, Richardson, Flash & Berthoz, Velocity and curvature in human locomotion along complex curved paths: a comparison with hand movements, Experimental Brain Research 162, 2005, [doi 10.1007/s00221-004-2122-8](https://link.springer.com/article/10.1007/s00221-004-2122-8)
+- Fraichard & Scheuer, From Reeds and Shepp's to continuous-curvature paths, IEEE Transactions on Robotics 20, 2004, [HAL inria-00000009](https://hal-univ-tlse3.archives-ouvertes.fr/INRIA/inria-00000009)
 - Chen, Wang & Revzen, Walking on rough terrain with any number of legs, 2026 (preprint), [arXiv 2603.09147](https://arxiv.org/abs/2603.09147)

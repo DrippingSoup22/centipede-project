@@ -212,15 +212,17 @@ class RewardFunction:
         averaged_accelerations: torch.Tensor,
         averaged_energy: torch.Tensor,
         force_change: torch.Tensor,
+        averaged_command: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 13)``
         in PART_NAMES' order, and each unit's own ``energy`` ``(W, N, 4)`` mJ.
 
         ``force_change`` ``(W, N, M + 1)`` is how much each motor's force
-        changed since the step before;
+        changed since the step before; ``averaged_command`` ``(W,)`` each
+        world's commanded speed averaged as the forward line is, mm/s;
         ``progress``, ``distance`` and ``angle`` ``(W, N)`` are each unit's
         step along the line (m), distance from it (m) and angle from its
-        direction (``StraightLine``); ``averaged_speed`` ``(W, N)`` its speed
+        direction (``Line``); ``averaged_speed`` ``(W, N)`` its speed
         along the line averaged as the forces are (m/s), and
         ``averaged_forward_line`` its ``forward_line`` as a speed, averaged
         the same way (mm/s); ``averaged_forces`` is
@@ -247,8 +249,9 @@ class RewardFunction:
         it), times its closeness, 1 - (distance / band)², and the cosine of its
         angle (none beyond the band or facing away), and a step back in full;
         the team is paid the units' mean. With ``commanded_speed_mm_per_s`` v*
-        the team is paid v* - |v - v*| a second instead, v the units' mean
-        ``averaged_forward_line``. The squeeze: at each joint, the averaged
+        the team is paid v* - |v - c| a second instead, v the units' mean
+        ``averaged_forward_line`` and c ``averaged_command`` (v*, or lower in
+        bends with ``slow_in_bends``). The squeeze: at each joint, the averaged
         force along the body with the tows behind it taken out, a pull free,
         squared against the force scale and averaged over the joints. Energy:
         each unit's ``energy``, the team charged the units' mean, or with
@@ -279,7 +282,8 @@ class RewardFunction:
         target = self.settings.commanded_speed_mm_per_s
         if target:
             body_speed = averaged_forward_line.mean(dim=1, keepdim=True)
-            team_line = (target - (body_speed - target).abs()) * ACTION_DURATION_S
+            command = averaged_command[:, None]
+            team_line = (target - (body_speed - command).abs()) * ACTION_DURATION_S
         else:
             team_line = line.mean(dim=1, keepdim=True)
 

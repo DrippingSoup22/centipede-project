@@ -68,10 +68,18 @@ nothing ahead of it.
 Its world's tow level, a force each unit feels on itself, zero in every
 evaluation ([task.md](task.md#the-tow)).
 
+## The command: 1 value (stage 2)
+
+Its world's commanded speed, averaged over 1 s, lower in bends
+([reward.md](reward.md#the-commanded-speed)) (`observe_command`): the bend
+lowers it across the whole body, beyond what the unit sees of the line;
+legged robots observe their command the same way (Rudin et al. 2021).
+
 ## In all
 
 5 × 46 + 15 + 1 = **246 values** for each of the ten agents; from run 14,
-with each foot's averaged load, 5 × 47 + 15 + 1 = **251**. Each agent
+with each foot's averaged load, 5 × 47 + 15 + 1 = **251**; in stage 2, with
+the command, **252**. Each agent
 normalises its own inputs with running statistics.
 
 ## Left out

@@ -21,7 +21,10 @@ class RewardSettings:
     mm a second instead, v the units' mean of their forward line (the line's
     pay for each step, uncapped) averaged over ``averaging_s`` from 0 at the
     episode's start: below v* its speed, above it 1 mm/s less for each mm/s
-    too fast.
+    too fast. With ``slow_in_bends`` the command in |v - v*| falls in a bend
+    so that the outer feet keep v*: v* / (1 + r k), r the feet's reach to
+    the side and k the line's curvature, the units' mean, averaged as v is;
+    the team keeps v* - |v - command|, so a bend lowers no pay.
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
     ``force_price_w``, and a motor commanded u, as a share of its strongest,
@@ -77,6 +80,7 @@ class RewardSettings:
     line_cap_averaged: bool
     line_overspeed_slope: float
     commanded_speed_mm_per_s: float
+    slow_in_bends: bool
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
@@ -118,6 +122,7 @@ class RewardSettings:
             commanded_speed_mm_per_s=section.number(
                 "commanded_speed_mm_per_s", default=0.0, minimum=0.0
             ),
+            slow_in_bends=section.boolean("slow_in_bends", default=False),
             reference_pay_mm_per_s=section.number(
                 "reference_pay_mm_per_s", default=53.0, minimum=0.0
             ),
@@ -180,6 +185,11 @@ class RewardSettings:
                 "[environment.reward] a commanded speed replaces the line's cap"
                 " and its shares: leave line_cap_averaged, acceleration_halving"
                 " and time_value_mj_per_s unset"
+            )
+        if settings.slow_in_bends and not settings.commanded_speed_mm_per_s:
+            raise SettingsError(
+                "[environment.reward] slow_in_bends lowers the commanded speed:"
+                " set commanded_speed_mm_per_s"
             )
         if settings.acceleration_price and settings.acceleration_halving:
             raise SettingsError(
@@ -276,6 +286,82 @@ class TowSettings:
 
 
 @dataclass(frozen=True)
+class CurveSettings:
+    """The [environment.curves] section (docs/follow-line/task.md, the line);
+    every length in body lengths. Without levels the line is straight.
+
+    The line runs straight through the body and ``lead_body_lengths`` beyond
+    the head, then bends piece by piece: each piece between the two
+    ``piece_body_lengths`` long, straight with the level's share in
+    ``level_straight_shares``, else curved to the left or right, its radius
+    drawn no tighter than the level's in ``level_tightest_radius_body_lengths``
+    (its curvature drawn evenly up to the tightest); the curvature moves from
+    the piece before's in a straight line over the first
+    ``bend_change_body_lengths`` of each piece, so the line has no corner.
+    The level starts at the first and rises by one, after at least
+    ``level_judged_cycles`` update cycles at it, when the untowed mean-action
+    worlds kept the line through ``level_up_kept_share`` of their episodes
+    over the last of those cycles.
+    """
+
+    level_tightest_radius_body_lengths: tuple[float, ...]
+    level_straight_shares: tuple[float, ...]
+    piece_body_lengths: tuple[float, float]
+    bend_change_body_lengths: float
+    lead_body_lengths: float
+    level_up_kept_share: float
+    level_judged_cycles: int
+
+    @classmethod
+    def from_section(cls, values: dict) -> "CurveSettings":
+        section = SettingsSection(values, "environment.curves")
+        settings = cls(
+            level_tightest_radius_body_lengths=section.number_list(
+                "level_tightest_radius_body_lengths", default=()
+            ),
+            level_straight_shares=section.number_list(
+                "level_straight_shares", default=(), minimum=0.0
+            ),
+            piece_body_lengths=section.number_range(
+                "piece_body_lengths", default=(1.0, 3.0), minimum=0.0
+            ),
+            bend_change_body_lengths=section.positive_number(
+                "bend_change_body_lengths", default=1.0
+            ),
+            lead_body_lengths=section.number(
+                "lead_body_lengths", default=0.5, minimum=0.0
+            ),
+            level_up_kept_share=section.number(
+                "level_up_kept_share", default=0.9, minimum=0.0, maximum=1.0
+            ),
+            level_judged_cycles=section.positive_integer(
+                "level_judged_cycles", default=16
+            ),
+        )
+        section.reject_unknown_keys()
+        radii = settings.level_tightest_radius_body_lengths
+        if len(radii) != len(settings.level_straight_shares):
+            raise SettingsError(
+                "[environment.curves] give each level a tightest radius and a"
+                " straight share: level_tightest_radius_body_lengths and"
+                " level_straight_shares must be as long"
+            )
+        if any(radius <= 0 for radius in radii) or any(
+            share > 1 for share in settings.level_straight_shares
+        ):
+            raise SettingsError(
+                "[environment.curves] radii must be above 0 and straight shares"
+                " at most 1"
+            )
+        if settings.bend_change_body_lengths > settings.piece_body_lengths[0]:
+            raise SettingsError(
+                "[environment.curves] a bend's change must fit in the shortest"
+                " piece: bend_change_body_lengths at most piece_body_lengths' low"
+            )
+        return settings
+
+
+@dataclass(frozen=True)
 class EnvironmentSettings:
     """The [environment] section, with its nested sections (docs/follow-line/).
 
@@ -291,7 +377,9 @@ class EnvironmentSettings:
     (each foot's, with the reward's ``carry_per_leg``), and with
     ``observe_energy`` its energy in mJ/s averaged as the energy's share is,
     and with ``observe_line_speed`` its forward line in mm/s averaged as the
-    commanded speed averages it.
+    commanded speed averages it. With ``observe_command`` every unit also
+    sees the commanded speed in mm/s, averaged as its speed is, which bends
+    lower with the reward's ``slow_in_bends``.
     """
 
     max_episode_steps: int
@@ -303,9 +391,11 @@ class EnvironmentSettings:
     observe_carry: bool
     observe_energy: bool
     observe_line_speed: bool
+    observe_command: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
+    curves: CurveSettings
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -337,9 +427,11 @@ class EnvironmentSettings:
             observe_carry=section.boolean("observe_carry", default=False),
             observe_energy=section.boolean("observe_energy", default=False),
             observe_line_speed=section.boolean("observe_line_speed", default=False),
+            observe_command=section.boolean("observe_command", default=False),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),
             tow=TowSettings.from_section(section.table("tow")),
+            curves=CurveSettings.from_section(section.table("curves")),
         )
         section.reject_unknown_keys()
         return settings

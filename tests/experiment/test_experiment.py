@@ -134,7 +134,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert recording.episode_start[0, 0]
     assert recording.score_name == "line paid"
     assert recording.path_names == ("line",)
-    assert recording.path_points.shape == (3, 1, 1, 2, 3)
+    assert recording.path_points.shape == (3, 1, 1, 21, 3)
     assert "<include" not in recording.model_xml
 
     # The continued run tows from the saved top, moved by a window a cycle,

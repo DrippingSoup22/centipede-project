@@ -26,7 +26,8 @@ class BodyMeasures:
     twice the way from its joint to its centre. ``segment_weights_n`` are
     each segment's own weight, its body and legs without the other segments.
     ``unit_spacing_m`` is the mean distance between neighbouring segments'
-    centres.
+    centres. ``foot_reach_m`` is how far a foot stands to the side of its
+    segment's centre, across the body.
     """
 
     unit_weight_n: float
@@ -36,6 +37,7 @@ class BodyMeasures:
     segment_lengths_m: tuple[float, ...]
     segment_weights_n: tuple[float, ...] = ()
     unit_spacing_m: float = 0.0
+    foot_reach_m: float = 0.0
 
 
 def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
@@ -76,6 +78,11 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
         model, data, _owned_shape(mapping, segment_count - 1, BODY_CATEGORY)
     )
     body_length = ((head_tip - rear_corners) @ forward).max()
+    # The first segment's left foot from its centre, across the body.
+    from_center = (
+        data.geom_xpos[foot_shape_id] - data.site_xpos[mapping.center_site_ids[0]]
+    )[:2]
+    foot_reach = abs(forward[0] * from_center[1] - forward[1] * from_center[0])
 
     # Centres a unit apart, each turned by the joint's limit from the last,
     # lie on a circle whose chord of one unit spans that angle.
@@ -100,6 +107,7 @@ def measure_body(model: mujoco.MjModel, mapping: ModelMapping) -> BodyMeasures:
         segment_lengths_m=tuple(float(length) for length in segment_lengths),
         segment_weights_n=tuple(float(mass * gravity) for mass in own_masses),
         unit_spacing_m=float(unit_spacing),
+        foot_reach_m=float(foot_reach),
     )
 
 
