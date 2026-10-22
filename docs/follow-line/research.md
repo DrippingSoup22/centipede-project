@@ -138,6 +138,14 @@ the least explored.
 | Aoi, Egi & Tsuchiya, Physical Review E 2013 | Model and centipedes | The body's undulation is absent at low speeds and appears beyond a critical speed, as an instability of straight walking |
 | Schilling & Cruse, PLOS Computational Biology 2020 (neuroWalknet) | Stick insect model | Local rules between neighbouring legs (a swinging leg inhibits the lift-off of the leg ahead; ending a swing excites it; position and load) give a continuum of gaits set by one speed input, no central pattern generator |
 | Owaki & Ishiguro, Scientific Reports 2017 | Quadruped robot | One oscillator per leg, coupled only through each foot's load: walk, trot and gallop as speed rises |
+| Ozkan-Aydin, Chong, Aydin & Goldman, RoboSoft 2020 | *S. heros*, 20 cm, on rough ground (a photo, Fig. 4a) | The trunk bends up and down as well as sideways; the body dips gently into hollows, spread over about ten segments (a few degrees a joint, read from the photo) |
+| Diaz, Erickson, Chong, Soto & Goldman, J. Exp. Biol. 2023 | *S. polymorpha*, *Scolopocryptops sexspinosus* on rugose ground | On flat ground the body lifts while walking; over large gaps segments are held in the air; limbs bend passively when they hit a block |
+| Pierce et al., Annals of the New York Academy of Sciences 2026 | *S. polymorpha*, 8.6 cm, through lattices of posts | In narrow lattices the body twists onto its side locally (at least four segments), and untwists again; complete twists not above 1.5 times the body's width |
+
+No measurement of the trunk's stiffness or of its range up-down or in twist
+was found (search of 2026-10-22): the papers show these bends, they do not
+measure them. One model infers that *S. heros* stiffens its trunk to run
+faster, sideways (Dionne, Giardina & Mahadevan 2026, preprint).
 
 No recording of a central pattern generator in a centipede's nerve cord was
 found in one search (a thesis reports head-removal experiments and a
@@ -214,3 +222,7 @@ Centipedes and decentralised walking
 - Aoi, Egi & Tsuchiya, Instability-based mechanism for body undulations in centipede locomotion, Physical Review E 87, 2013, [APS](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.87.012717)
 - Schilling & Cruse, Decentralized control of insect walking: a simple neural network explains a wide range of behavioral and neurophysiological results, PLOS Computational Biology 2020, [PMC7205325](https://pmc.ncbi.nlm.nih.gov/articles/PMC7205325)
 - Owaki & Ishiguro, A quadruped robot exhibiting spontaneous gait transitions from walking to trotting to galloping, Scientific Reports 7, 2017, [PMC5428244](https://pmc.ncbi.nlm.nih.gov/articles/PMC5428244)
+- Ozkan-Aydin, Chong, Aydin & Goldman, A systematic approach to creating terrain-capable hybrid soft/hard myriapod robots, RoboSoft 2020, [Georgia Tech](https://crablab.gatech.edu/pages/publications/pdf/Robosoft2020_Centipede.pdf)
+- Diaz, Erickson, Chong, Soto & Goldman, Active and passive mechanics for rugose terrain traversal in centipedes, J. Exp. Biol. 226, 2023, [doi 10.1242/jeb.244688](https://doi.org/10.1242/jeb.244688)
+- Pierce et al., Legged locomotion in lattices: centipede traversal of obstacle-rich environments, Annals of the New York Academy of Sciences 1555, 2026, [PMC12831010](https://pmc.ncbi.nlm.nih.gov/articles/PMC12831010)
+- Dionne, Giardina & Mahadevan, Embodied intelligence solves the centipede's dilemma, 2026 (preprint), [arXiv 2603.08409](https://arxiv.org/abs/2603.08409)

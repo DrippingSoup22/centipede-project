@@ -47,6 +47,30 @@ and v6 headless, the same body with target motors
 (`models/assembly_v6_headless.xml`, [actions.md](actions.md); run 11). The
 full body, with a head as its own segment, comes later.
 
+**v6's trunk** was made more mobile on 2026-10-22 (the user's decision;
+`archive/model_v6_spine/make_model_v6.py` in the study's folder). Runs 11
+and 12 used the first v6, whose links had only yaw and pitch hinges.
+
+| Link hinge | First v6 | v6 now | Why |
+| --- | --- | --- | --- |
+| Yaw (sideways) | ±15°, spring 2.2e-4 N·m/rad, the unit's motor | Unchanged | *S. heros* bends 4 to 8.5° a joint running, peaks near 15 (Anderson, Shultz & Jayne 1995) |
+| Pitch (up-down) | ±8°, spring 1.1e-3 | ±10°, spring 7.8e-4 (0.7 times) | A little looser: the body dips over rough ground a few degrees a joint (Ozkan-Aydin et al. 2020, Fig. 4a); the first range was an engineering guess |
+| Roll (twist) | None | ±5°, spring 5.0e-3 (4.5 times the first pitch spring), damped as pitch | Centipedes twist, but locally and over several segments (Pierce et al. 2026); the stiffest spring the 1.33 ms step keeps stable |
+
+No stiffness of a real trunk has been measured; the springs keep the first
+v6's character. On the scripted body (the study's
+`archive/model_v6_spine/body_tests_*.txt`):
+
+| Test | First v6 | v6 now |
+| --- | --- | --- |
+| Standing, unit 5 limp: how far it sinks, what its neighbours hold | 0.28 mm, 95% | 0.31 mm, 95% |
+| Standing, unit 5 on one foot: its roll | 0.1° | 0.6° |
+| The scripted wave: speed, energy for each mm, the units' mean roll | 104 mm/s, 0.025 mJ, 2.2° | 80 mm/s, 0.035 mJ, 2.6° |
+
+The pitch alone costs the scripted wave little (98 mm/s); any roll hinge,
+whatever its damping or range (±1 to ±5°), costs it 12 to 23%. The script
+was tuned on a body that could not twist.
+
 ## Open questions
 
 - **Stage 2's curves**: a level that makes the line bend more as the walk

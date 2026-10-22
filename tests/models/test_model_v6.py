@@ -1,10 +1,13 @@
-"""Validation of model v6 headless: v5's headless tester with target actuators.
+"""Validation of model v6 headless: v5's headless tester with a more mobile
+trunk and target actuators.
 
-Each motor keeps v5's joint, strength (gear) and command range, but a command
-u is a target angle in the joint's range, m + c u, and the motor pulls toward
-it as a spring and a damper, at full strength a quarter of the range away and
-critically damped at the starting pose
-(archive/model_v6_targets/make_model_v6.py in the study's folder).
+Every link between units gains a passive roll hinge beside its yaw and
+pitch hinges, and the pitch hinge's range widens from 8 to 10 degrees either
+way with a softer spring. Each motor keeps v5's joint, strength (gear) and
+command range, but a command u is a target angle in the joint's range,
+m + c u, and the motor pulls toward it as a spring and a damper, at full
+strength a quarter of the range away and critically damped at the starting
+pose (archive/model_v6_spine/make_model_v6.py in the study's folder).
 """
 
 import mujoco
@@ -16,6 +19,11 @@ pytestmark = pytest.mark.physics
 
 FLOOR, BODY, LEFT_FOOT, RIGHT_FOOT = 0, 1, 3, 4
 UNITS = 10
+# The trunk's hinges: each range either way, in degrees, and each spring,
+# in N m/rad, a factor of the first v6's (v5's) pitch spring.
+FIRST_PITCH_SPRING = 0.001114
+PITCH_RANGE, PITCH_SPRING = 10.0, 0.7 * FIRST_PITCH_SPRING
+ROLL_RANGE, ROLL_SPRING = 5.0, 4.5 * FIRST_PITCH_SPRING
 
 
 @pytest.fixture(scope="module")
@@ -34,20 +42,65 @@ def target_command(model, motor_id, angle):
     return (angle - (low + high) / 2) / ((high - low) / 2)
 
 
-def test_v6_is_v5s_body_whose_motors_pull_toward_their_targets(v5, v6):
-    """Bodies, joints and each motor's joint, strength and ranges are v5's;
-    the force, in shares of the strength, is kp (target - q) - kv dq/dt
-    within -1 and 1, kp reaching 1 a quarter of the range away and kv
-    damping the joint critically."""
+def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(v5, v6):
+    """Bodies, masses and every v5 joint are kept, the pitch hinges widened
+    and softened; each link adds a roll hinge, damped like its pitch hinge.
+    A positive roll turns the unit behind about the forward axis on both
+    sides of the root, as every other hinge keeps its sign."""
     assert v6.opt.timestep == v5.opt.timestep
     assert np.array_equal(v6.body_mass, v5.body_mass)
-    for field in ("jnt_range", "dof_damping", "dof_armature"):
-        assert np.array_equal(getattr(v6, field), getattr(v5, field)), field
-    for field in ("actuator_trnid", "actuator_gear", "actuator_ctrlrange",
-                  "actuator_forcerange"):
+    assert v6.nv == v5.nv + UNITS - 1
+    for old in range(v5.njnt):
+        name = v5.joint(old).name
+        new = v6.joint(name).id
+        old_dof, new_dof = v5.jnt_dofadr[old], v6.jnt_dofadr[new]
+        assert v6.dof_damping[new_dof] == v5.dof_damping[old_dof], name
+        assert v6.dof_armature[new_dof] == v5.dof_armature[old_dof], name
+        if name.endswith("_pitch"):
+            assert np.degrees(v6.jnt_range[new]) == pytest.approx(
+                [-PITCH_RANGE, PITCH_RANGE]
+            )
+            assert v6.jnt_stiffness[new] == pytest.approx(PITCH_SPRING)
+        else:
+            assert np.array_equal(v6.jnt_range[new], v5.jnt_range[old]), name
+            assert v6.jnt_stiffness[new] == v5.jnt_stiffness[old], name
+
+    rolls = [j for j in range(v6.njnt) if v6.joint(j).name.endswith("_roll")]
+    assert len(rolls) == UNITS - 1
+    for roll in rolls:
+        pitch = v6.joint(v6.joint(roll).name.replace("_roll", "_pitch")).id
+        roll_dof, pitch_dof = v6.jnt_dofadr[roll], v6.jnt_dofadr[pitch]
+        assert np.degrees(v6.jnt_range[roll]) == pytest.approx(
+            [-ROLL_RANGE, ROLL_RANGE]
+        )
+        assert v6.jnt_stiffness[roll] == pytest.approx(ROLL_SPRING)
+        assert v6.dof_damping[roll_dof] == v6.dof_damping[pitch_dof]
+
+    # Every roll hinge at +2 degrees: each unit is turned 2 degrees more
+    # about its forward axis than the unit ahead of it.
+    data = mujoco.MjData(v6)
+    data.qpos[v6.jnt_qposadr[rolls]] = np.radians(2.0)
+    mujoco.mj_kinematics(v6, data)
+    units = [v6.body(f"segment_{k:02d}").id for k in range(UNITS)]
+    roll_deg = [
+        np.degrees(np.arctan2(m[2, 1], m[2, 2]))
+        for m in data.xmat[units].reshape(-1, 3, 3)
+    ]
+    assert np.diff(roll_deg) == pytest.approx(2.0, abs=1e-6)
+
+
+def test_motors_pull_toward_their_targets(v5, v6):
+    """Each motor keeps v5's joint, strength and ranges; the force, in shares
+    of the strength, is kp (target - q) - kv dq/dt within -1 and 1, kp
+    reaching 1 a quarter of the range away and kv damping the joint
+    critically."""
+    for field in ("actuator_gear", "actuator_ctrlrange", "actuator_forcerange"):
         assert np.array_equal(getattr(v6, field), getattr(v5, field)), field
     assert [v6.actuator(a).name for a in range(v6.nu)] == [
         v5.actuator(a).name for a in range(v5.nu)
+    ]
+    assert [v6.joint(v6.actuator_trnid[a, 0]).name for a in range(v6.nu)] == [
+        v5.joint(v5.actuator_trnid[a, 0]).name for a in range(v5.nu)
     ]
 
     data = mujoco.MjData(v6)
