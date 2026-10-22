@@ -105,7 +105,15 @@ a large c separates the gaits more strongly. Training goes in stages:
   already loses 11 mm/s.
 - **Stage 2**, from stage 1's checkpoint: **c of at least 0.55**, once the
   agents walk, so that such waste costs as much as a leg held up (15 to
-  25 mm/s). Whether it jumps or rises gradually is decided then.
+  25 mm/s). Run 15 set **c = 2** at once on run 14's final checkpoint:
+  the energy for each mm fell from 0.062 to 0.026 and 0.029, below the
+  scripted wave's 0.035, and neighbouring legs locked their steps.
+- **From run 16, both stages in one run**: c stays at 0.4 until the
+  noise-free walk holds the command (its line paid at least 0.55 of the
+  90 mm/s cap, `ramp_after_line_share`), then rises to 2 over 128 cycles
+  (`ramp_start` 0.2, `ramp_cycles`). On a clumsy gait, near 0.4 mJ for
+  each mm, a price of 2 would make moving less pay nearly as much as
+  walking faster, so the price waits for the walk.
 
 An energy cost is needed from the start: run 03 learned its walk with none,
 and adding it at full price later changed nothing.
