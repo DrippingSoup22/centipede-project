@@ -13,12 +13,14 @@ def block_size(
     carry: bool = False,
     energy: bool = False,
     line_speed: bool = False,
+    carry_per_leg: bool = False,
 ) -> int:
     """Values in a unit's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
     spine joint behind (2), the feet's loads (4), the belly's load (1), the
     legs' press (1) and the averaged joint forces (3) if ``priced_forces``,
-    the feet's averaged load (1) if ``carry``, the averaged energy (1) if
+    the feet's averaged load (1, or each foot's, 2, with ``carry_per_leg``)
+    if ``carry``, the averaged energy (1) if
     ``energy``, the averaged forward line (1) if ``line_speed``, the step's
     joint forces (2), and the last action (M + 1): 47 with ankles, 43 without
     the priced forces, 44 with the carry instead."""
@@ -26,7 +28,7 @@ def block_size(
         19
         + 3 * leg_motor_count
         + (4 if priced_forces else 0)
-        + int(carry)
+        + int(carry) * (2 if carry_per_leg else 1)
         + int(energy)
         + int(line_speed)
     )
@@ -65,7 +67,8 @@ class ObservationBuilder:
     front joint force and net force along the body; and the action it sent
     last (the rear's last value goes to no motor). Without ``priced_forces``
     the legs' press and the averaged joint forces are left out; with
-    ``carry`` the feet's averaged load follows the averaged joint forces,
+    ``carry`` the feet's averaged load follows the averaged joint forces
+    (each foot's, left then right, with ``carry_per_leg``),
     with ``energy`` the unit's averaged energy in mJ/s follows them, and
     with ``line_speed`` its averaged forward line in mm/s.
     Forces are in unit weights. The blocks are laid end to end in the
@@ -85,6 +88,7 @@ class ObservationBuilder:
         carry: bool = False,
         energy: bool = False,
         line_speed: bool = False,
+        carry_per_leg: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -94,8 +98,9 @@ class ObservationBuilder:
         self.carry = carry
         self.energy = energy
         self.line_speed = line_speed
+        self.carry_per_leg = carry_per_leg
         self.block_size = block_size(
-            leg_motor_count, priced_forces, carry, energy, line_speed
+            leg_motor_count, priced_forces, carry, energy, line_speed, carry_per_leg
         )
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
@@ -146,7 +151,8 @@ class ObservationBuilder:
             loads.append(state.leg_leg_force[..., None])
             averaged = [averaged_forces[..., 2:3], averaged_forces[..., :2]]
         if self.carry:
-            averaged.append(averaged_forces[..., 5:6])
+            feet = slice(6, 8) if self.carry_per_leg else slice(5, 6)
+            averaged.append(averaged_forces[..., feet])
         if self.energy:
             averaged.append(averaged_energy[..., None])
         if self.line_speed:

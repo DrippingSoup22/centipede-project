@@ -188,7 +188,7 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     progress = 1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]])
     distance = 1e-3 * torch.tensor([[0.0, 0.0, 2.5, 0.0, 0.0]])
     angle = torch.tensor([[0.0, 0.0, 0.0, 0.0, math.radians(60)]])
-    averaged = torch.zeros(1, SEGMENTS, 6)
+    averaged = torch.zeros(1, SEGMENTS, 8)
     averaged[0, :, 0] = torch.tensor([0.3, -0.1, 0.0, -0.1, -0.1])  # along
     averaged[0, :, 1] = torch.tensor([1.0, 0.1, 0.0, 0.0, 0.0])  # up
     averaged[0, :, 2] = torch.tensor([0.0, -0.5, 0.2, -0.2, 0.0])  # front joint
@@ -270,7 +270,7 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         zeros,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 6),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
@@ -311,7 +311,7 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
         zeros,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 6),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         accelerations,
@@ -355,7 +355,7 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         averaged_forward_line,
         zeros,
         zeros,
-        torch.zeros(2, SEGMENTS, 6),
+        torch.zeros(2, SEGMENTS, 8),
         zeros,
         torch.zeros(2, SEGMENTS, LEGS + 1),
         zeros,
@@ -381,6 +381,40 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         RewardSettings.from_section(
             {"commanded_speed_mm_per_s": 67.0, "line_cap_averaged": True}
         )
+
+
+def test_with_the_carry_per_leg_each_foot_is_charged_beyond_its_band():
+    """Each foot's averaged load against half its unit's weight, 0.5, free
+    within a quarter of it: feet carrying 0.5 and 0.5, or 0.6 and 0.4, pay
+    nothing; one foot carrying the unit, 1.0 and 0, pays 0.375 twice; a unit
+    holding up its neighbours, 0.9 and 0.9, 0.275 twice; a foot carrying
+    0.2, 0.175. At 10 mm a second for each unit weight, 0.2 mm a step."""
+    settings = RewardSettings.from_section({"carry_price": 10.0, "carry_per_leg": True})
+    reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005, 2)
+    zeros = torch.zeros(1, SEGMENTS)
+    averaged = torch.zeros(1, SEGMENTS, 8)
+    averaged[0, :, 6] = torch.tensor([0.5, 0.6, 1.0, 0.9, 0.2])  # left feet
+    averaged[0, :, 7] = torch.tensor([0.5, 0.4, 0.0, 0.9, 0.5])  # right feet
+
+    _, parts, _ = reward.compute(
+        resting_state(1),
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        averaged,
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+    )
+
+    by_name = dict(zip(PART_NAMES, parts.unbind(dim=-1), strict=True))
+    torch.testing.assert_close(
+        by_name["carry"][0], -0.2 * torch.tensor([0.0, 0.0, 0.75, 0.55, 0.175])
+    )
 
 
 def test_energy_holds_force_to_its_exponent_and_charges_switching_by_its_rate():
@@ -419,7 +453,7 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     last_action = torch.rand(2, SEGMENTS, LEGS + 1)
     # Averaged: along, up, front joint; unit 1 pushes unit 0 with 0.5, and
     # unit 2 is pulled by unit 1 with 2.
-    averaged = torch.zeros(2, SEGMENTS, 6)
+    averaged = torch.zeros(2, SEGMENTS, 8)
     averaged[0, 1, :3] = torch.tensor([0.3, 1.0, -0.5])
     averaged[0, 1, 5] = 0.7  # the feet's load
     averaged[0, 2, 2] = 2.0
@@ -462,6 +496,27 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     torch.testing.assert_close(
         carry_observations[0, 1, :44],
         torch.cat((own[:32], torch.tensor([0.7]), own[36:])),
+    )
+    # With the carry per leg: each foot's averaged load, left then right.
+    averaged[0, 1, 6:8] = torch.tensor([0.5, 0.2])
+    per_leg = ObservationBuilder(
+        SEGMENTS,
+        2,
+        2,
+        LEGS,
+        BODY.unit_weight_n,
+        "cpu",
+        False,
+        True,
+        carry_per_leg=True,
+    )
+    per_leg_observations = per_leg.build(
+        state, last_action, averaged, trail, torch.tensor([0.0, 0.25])
+    )
+    assert per_leg.block_size == 45
+    torch.testing.assert_close(
+        per_leg_observations[0, 1, :45],
+        torch.cat((own[:32], torch.tensor([0.5, 0.2]), own[36:])),
     )
     # With the energy: the unit's averaged energy after the carry.
     energy = ObservationBuilder(

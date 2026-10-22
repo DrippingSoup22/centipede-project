@@ -104,6 +104,7 @@ class Environment:
             settings.observe_carry,
             settings.observe_energy,
             settings.observe_line_speed,
+            settings.reward.carry_per_leg,
         )
         self.observation_size = self.observation_builder.observation_size
         self.tow = Tow(

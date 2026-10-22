@@ -34,7 +34,7 @@ checkpoint at a larger one ([reward.md](reward.md)).
 | Part | File | In short |
 | --- | --- | --- |
 | Task | [task.md](task.md) | The tester on a straight line laid at a small random angle; 20 s episodes; a world that loses the line restarts; a fading tow at the start |
-| Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged the weight its feet do not carry |
+| Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s |
 | Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
 | Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing what its actor sees; gSDE from 0.3; PPO, discount 0.99 |
@@ -76,3 +76,5 @@ was tuned on a body that could not twist.
 - **Stage 2's curves**: a level that makes the line bend more as the walk
   allows (the user's idea, 2026-10-20).
 - **The head**, as its own segment, on a later model.
+- **The carry in turns**: the inner legs carry more in a bend, which the
+  per-leg carry's even share does not allow for (the user, 2026-10-22).

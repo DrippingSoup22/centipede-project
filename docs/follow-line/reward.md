@@ -1,7 +1,8 @@
 # Reward
 
 The reward agreed for run 12 (the user's decisions, 2026-10-21, after
-reviewing runs 01 to 11 against the literature, [research.md](research.md)).
+reviewing runs 01 to 11 against the literature, [research.md](research.md)),
+with the carry measured per leg from run 14 (2026-10-22).
 Earlier rewards, and what each taught, are in the study's
 `Training/results/follow-line/`.
 
@@ -27,7 +28,7 @@ own_i  = − carry_i
 | v* | The commanded speed, 67 mm/s | `commanded_speed_mm_per_s` |
 | Ē_i | The mean energy spent on the step by the units within unit i's radius, itself and up to two each side (those present), mJ/s | `neighbourhood_energy` |
 | c | The energy's price, in mm/s per mJ/s: 0.4 in stage 1 | `mm_per_mj` |
-| carry_i | The weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each | `carry_price` |
+| carry_i | Runs 12 and 13: the weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each. From run 14: each foot's load, averaged over 1 s, beyond a quarter either way of half the unit's weight, at the same price | `carry_price`, `carry_per_leg`, `carry_band` |
 
 The speed is averaged before it is compared with v*, because |v̄ − v*| is
 not linear: a stride's surges and dips must cancel first. The energy is
@@ -147,6 +148,42 @@ neighbours through the joints, its belly, or a leg resting on another's.
 - **Its strength** is not its price: its account holds only the carry and
   is normalised on its own, so the weight given to the own account against
   the team's decides it ([critic.md](critic.md)).
+
+### Per leg (from run 14)
+
+Run 12 showed the unit carry's two gaps (the study's
+`archive/checks/run_12/support_check_384.txt`):
+
+- **It charged the units that could not act.** The middle units hung on
+  their neighbours (seed 1's units 3 to 6 carried 0.21 to 0.73 of their
+  weight) with their lifts pressed to the low stop 93 to 100% of the time;
+  the units that held them up (up to 2.1 unit weights) had their lifts free
+  and paid nothing, the carry charging only a shortfall.
+- **One foot satisfied it.** Three legs a seed stayed up, their units
+  carried by the other foot and held level by their neighbours.
+
+So each foot is charged instead, in either direction, for its load
+averaged over 1 s beyond a quarter of half its unit's weight (0.375 to
+0.625 of the weight free). Over a unit, the forces balance: the weight goes
+through its two feet, its belly or its joints to its neighbours, and a foot
+carrying more than the other is held level by the other foot or by the
+trunk's roll. So feet each carrying half, on average, is the trunk carrying
+neither weight nor twist: the user's rule, "the spine keeps a unit only for
+a moment", read at the feet, where the signal is large (a unit on one foot
+rolls 0.6° on v6; its feet read 1 and 0 against 0.5). It says nothing of
+the rhythm: a foot may step as often and as briefly as it likes, and a
+stride's single-foot stances average out.
+
+| Gait, the body's total charge in unit weights | Unit carry | Per leg |
+| --- | --- | --- |
+| The scripted wave, first v6 | 0.72 | 0.11 |
+| The scripted wave, v6 | 0.63 | 0.03 |
+| Run 12's seed 1, final | 1.87 | 4.03 |
+| Run 12's seed 2, final | 1.62 | 3.75 |
+
+Left open: a foot that stays down and slides (the team's speed charges it),
+and turns, where the inner legs carry more (the user, 2026-10-22: to
+revisit when the line bends).
 
 ## Left out
 

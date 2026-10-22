@@ -26,7 +26,7 @@ spacings, 16.5 mm on v5 (the user's definition).
 | The spine joint behind it: angle, speed | 2 | The joint it commands; zeros for the rear |
 | Foot loads: each foot pressing down, and pushing fore or aft | 4 | Load sensing, the signal biology puts at the root of the wave (Yasui et al. 2017; Dallmann et al. 2017; Owaki & Ishiguro 2017) |
 | Its belly's load | 1 | Resting or dragging |
-| Its feet's load, averaged over 1 s | 1 | What its carry is charged on (the pairing rule) |
+| Its feet's load, averaged over 1 s (from run 14 each foot's: 2) | 1 | What its carry is charged on (the pairing rule) |
 | Its energy, averaged over 1 s, mJ/s | 1 | What its team account is charged, with its neighbours' (the pairing rule) |
 | Its forward line, averaged over 1 s, mm/s | 1 | What the commanded speed compares (the pairing rule): with its neighbours', most of the body's speed. Its own velocity swings within every stride and cannot tell it |
 | Joint forces of the step: the front joint's along the body, and its two joints' net force along | 2 | A reflex: being pulled now |
@@ -59,7 +59,8 @@ evaluation ([task.md](task.md#the-tow)).
 
 ## In all
 
-5 × 46 + 15 + 1 = **246 values** for each of the ten agents. Each agent
+5 × 46 + 15 + 1 = **246 values** for each of the ten agents; from run 14,
+with each foot's averaged load, 5 × 47 + 15 + 1 = **251**. Each agent
 normalises its own inputs with running statistics.
 
 ## Left out

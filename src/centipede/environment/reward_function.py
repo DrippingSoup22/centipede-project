@@ -37,12 +37,12 @@ ENERGY_PARTS = ("pushing", "braking", "force", "switching")
 
 class AveragedForces:
     """The forces on each unit that the reward prices, averaged through time,
-    ``values`` ``(W, N, 6)`` in unit weights: the net force of its two joints
+    ``values`` ``(W, N, 8)`` in unit weights: the net force of its two joints
     on it along the body and up, the front joint's force along the body
     (positive pulls it forward), the floor's push on its belly, the force
-    with which its legs press on other legs, and the floor's push on its two
-    feet. Each step moves the average ``averaging_rate`` of the way to the
-    step's value."""
+    with which its legs press on other legs, the floor's push on its two
+    feet, and on each foot (left, right). Each step moves the average
+    ``averaging_rate`` of the way to the step's value."""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class AveragedForces:
     ) -> None:
         self.unit_weight_n = unit_weight_n
         self.averaging_rate = averaging_rate
-        self.values = torch.zeros((world_count, segment_count, 6), device=device)
+        self.values = torch.zeros((world_count, segment_count, 8), device=device)
 
     def _current(self, state: PhysicalState) -> torch.Tensor:
         return (
@@ -65,6 +65,7 @@ class AveragedForces:
                     state.belly_normal_force[..., None],
                     state.leg_leg_force[..., None],
                     state.foot_normal_force.sum(dim=-1, keepdim=True),
+                    state.foot_normal_force,
                 ),
                 dim=-1,
             )
@@ -255,7 +256,8 @@ class RewardFunction:
         weight its neighbours hold up for it beyond its free support and its
         belly's load; its pain, its legs' averaged press on other legs, squared;
         and its carry, the weight beyond its free support that its feet, on
-        average, do not carry.
+        average, do not carry, or with ``carry_per_leg`` each foot's averaged
+        load's distance from half that weight beyond ``carry_band`` of it.
         """
         state = physical_state
         ramp = self.ramp_weight
@@ -278,7 +280,9 @@ class RewardFunction:
         else:
             team_line = line.mean(dim=1, keepdim=True)
 
-        along, up, front, belly, pressed, feet = averaged_forces.unbind(dim=-1)
+        along, up, front, belly, pressed, feet, left, right = averaged_forces.unbind(
+            dim=-1
+        )
         legs_push = front + tow_pushes.flip(-1).cumsum(dim=-1).flip(-1)
         pushed = (legs_push[:, 1:].clamp(max=0.0) / scale) ** 2
         squeeze = self.reference_mm * ramp * pushed.mean(dim=-1, keepdim=True)
@@ -322,7 +326,16 @@ class RewardFunction:
         force_share = self.reference_mm * ((along + tow_pushes) / scale) ** 2
         pain = (pressed * self.unit_weight_n) ** 2 * self.pain_price_mj * ramp
         hanging = (up - self.free_support).clamp(min=0.0) + belly
-        carry = self.carry_price_mm * (self.own_carry - feet).clamp(min=0.0)
+        if self.settings.carry_per_leg:
+            # Each foot's distance from half the weight, beyond the band.
+            share = self.own_carry / 2
+            free = self.settings.carry_band * share
+            off = sum(
+                ((foot - share).abs() - free).clamp(min=0.0) for foot in (left, right)
+            )
+            carry = self.carry_price_mm * off
+        else:
+            carry = self.carry_price_mm * (self.own_carry - feet).clamp(min=0.0)
 
         units = line.shape[1]
         team = torch.cat(

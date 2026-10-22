@@ -52,7 +52,11 @@ class RewardSettings:
     energy of the units it sees, itself and its neighbours (the units
     present), instead of the units' mean. Each unit's feet not
     carrying its weight, beyond its free support, cost it ``carry_price`` mm
-    a second for each unit weight on average. With
+    a second for each unit weight on average; with ``carry_per_leg`` each
+    foot is charged instead for its averaged load's distance from half that
+    weight, in either direction, beyond ``carry_band`` of the half: over a
+    second the unit's weight goes through its own two legs, not through its
+    neighbours, whatever the rhythm. With
     ``own_account`` false every part counts in one account, the team's, and
     each agent has one critic. Forces are averaged over ``averaging_s``.
     Energy, the motion, the accelerations, the squeeze and pain are weighed
@@ -84,6 +88,8 @@ class RewardSettings:
     time_value_mj_per_s: float
     neighbourhood_energy: bool
     carry_price: float
+    carry_per_leg: bool
+    carry_band: float
     own_account: bool
     mm_per_mj: float
     averaging_s: float
@@ -130,6 +136,10 @@ class RewardSettings:
             ),
             neighbourhood_energy=section.boolean("neighbourhood_energy", default=False),
             carry_price=section.number("carry_price", default=0.0, minimum=0.0),
+            carry_per_leg=section.boolean("carry_per_leg", default=False),
+            carry_band=section.number(
+                "carry_band", default=0.25, minimum=0.0, maximum=1.0
+            ),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
             averaging_s=section.positive_number("averaging_s", default=1.0),
@@ -270,10 +280,11 @@ class EnvironmentSettings:
     ``spine_action_scale`` times its command. With ``observe_priced_forces``
     false a unit's block leaves out the forces only the old costs priced: its
     legs' press and the joint forces averaged over a second. With
-    ``observe_carry`` it holds its feet's load averaged as the carry is,
-    and with ``observe_energy`` its energy in mJ/s averaged as the energy's
-    share is, and with ``observe_line_speed`` its forward line in mm/s
-    averaged as the commanded speed averages it.
+    ``observe_carry`` it holds its feet's load averaged as the carry is
+    (each foot's, with the reward's ``carry_per_leg``), and with
+    ``observe_energy`` its energy in mJ/s averaged as the energy's share is,
+    and with ``observe_line_speed`` its forward line in mm/s averaged as the
+    commanded speed averages it.
     """
 
     max_episode_steps: int
