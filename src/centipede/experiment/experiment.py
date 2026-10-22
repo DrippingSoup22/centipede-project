@@ -257,8 +257,9 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     progress.header()
     # The learning rate of each update follows the schedule over the run's
     # cycles (an adaptive one is each agent's own), and so do scheduled action
-    # spreads and the ramped costs' weight, unless it adapts; the loop pauses
-    # after every cycle, before the next window.
+    # spreads, the noise front, which starts with the ramped costs, and their
+    # weight, unless it adapts; the loop pauses after every cycle, before the
+    # next window.
     agent_settings = configuration.agents
 
     def follow_schedules(cycle: int) -> None:
@@ -268,6 +269,11 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         action_std = agent_settings.action_std_at(cycle, total_cycles)
         if action_std is not None:
             agents.set_action_std(action_std)
+        if agent_settings.noise_front_cycles_per_unit:
+            agents.hold_action_std(
+                agent_settings.units_released_at(cycle, ramp_from),
+                agent_settings.initial_action_std,
+            )
         environment.set_ramp_weight(
             ramp_weight
             if adaptive_ramp

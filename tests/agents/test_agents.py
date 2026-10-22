@@ -6,6 +6,7 @@ learns from its own segment only, the checkpoint bundle, and the baselines.
 """
 
 import io
+import math
 
 import pytest
 import torch
@@ -137,6 +138,60 @@ def test_an_adaptive_schedule_lets_each_actor_steer_its_rate_by_its_own_kl():
     first = agents.segment_agents[0]
     first.adapt_learning_rate(2.5)
     assert first.ppo.actor_optimizer.param_groups[0]["lr"] == pytest.approx(3e-4)
+
+
+def test_the_noise_front_holds_the_spreads_of_the_units_it_has_not_reached():
+    settings = AgentSettings.from_section(
+        {
+            "hidden_layers": [8],
+            "initial_action_std": 0.3,
+            "state_dependent_noise_steps": 4,
+            "noise_front_cycles_per_unit": 30,
+        }
+    )
+    # Nothing goes before the front starts; then one unit, and one more
+    # every 30 cycles.
+    assert settings.units_released_at(500, None) == 0
+    assert [settings.units_released_at(c, 100) for c in (99, 100, 129, 130)] == [
+        0,
+        1,
+        1,
+        2,
+    ]
+    agents = Agents(
+        SEGMENTS,
+        OBSERVATION_SIZE,
+        WORLDS,
+        WINDOW_STEPS,
+        settings,
+        SEED,
+        [LEG_MOTORS] * SEGMENTS,
+        LEG_MOTORS,
+    )
+    generator = torch.Generator().manual_seed(SEED)
+    learned = []
+    for agent in agents.segment_agents:
+        spreads = agent.ppo.actor_network.log_std
+        with torch.no_grad():  # spreads learned between 0.05 and 0.6
+            spreads.uniform_(math.log(0.05), math.log(0.6), generator=generator)
+        learned.append(spreads.detach().clone())
+
+    agents.hold_action_std(1, 0.3)
+
+    # The head keeps its spreads; behind it every spread below 0.3 rose to
+    # it, and every action's noise is at least 0.3 in every state.
+    observations = body_tensor(0, OBSERVATION_SIZE)
+    for segment_index, agent in enumerate(agents.segment_agents):
+        spreads = agent.ppo.actor_network.log_std.detach()
+        _, std = agent.ppo.actor_network(observations[:, segment_index])
+        if segment_index == 0:
+            assert torch.equal(spreads, learned[0])
+            assert std.min() < 0.3
+        else:
+            torch.testing.assert_close(
+                spreads, learned[segment_index].clamp(min=math.log(0.3))
+            )
+            assert std.min() >= 0.3
 
 
 def test_a_saved_file_restores_every_agent_and_rejects_another_body():

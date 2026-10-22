@@ -78,6 +78,15 @@ class AgentSettings:
     cannot copy; the noise is then not colored. Its spreads, one per feature
     and action, start at ``initial_action_std``, which an action's spread is
     while they are equal (RL_lib's ``GaussianPolicyNetwork``).
+    With ``noise_front_cycles_per_unit`` above 0 the noise cools from the head
+    backward: every unit's spreads stay at least ``initial_action_std`` until
+    a front reaches it. The front starts when the ramped costs do (at the
+    walk's gate, or in cycle 1) and lets one more unit go, from the head,
+    every that many cycles (``units_released_at``); a unit let go learns its
+    spreads as before. Order between neighbours forms only once their noise
+    falls, and each unit joining an ordered piece steps after it, so the
+    order grows from the head alone and its wave runs to the tail (Dziarmaga,
+    Laguna & Zurek 1999; docs/follow-line/critic.md).
     ``actor_activation`` is the actor's hidden activation, ReLU or tanh. gSDE
     wants tanh, as Raffin et al. and Stable-Baselines3's PPO use: the noise is
     made from the last hidden layer, and ReLU's features, never negative,
@@ -116,6 +125,7 @@ class AgentSettings:
     final_action_std: float
     exploration_noise_beta: float
     state_dependent_noise_steps: int
+    noise_front_cycles_per_unit: int
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
@@ -160,6 +170,14 @@ class AgentSettings:
             * (self.final_action_std / self.initial_action_std) ** progress
         )
 
+    def units_released_at(self, cycle: int, front_start: int | None) -> int:
+        """How many units, counted from the head, the noise front has let go
+        in ``cycle``: none before ``front_start`` (None: not yet known), then
+        one more every ``noise_front_cycles_per_unit`` cycles."""
+        if front_start is None or cycle < front_start:
+            return 0
+        return 1 + (cycle - front_start) // self.noise_front_cycles_per_unit
+
     @classmethod
     def from_section(cls, values: dict) -> "AgentSettings":
         """Check the section and hand the nested PPO section to its own class.
@@ -190,6 +208,9 @@ class AgentSettings:
             ),
             state_dependent_noise_steps=section.integer(
                 "state_dependent_noise_steps", default=0, minimum=0
+            ),
+            noise_front_cycles_per_unit=section.integer(
+                "noise_front_cycles_per_unit", default=0, minimum=0
             ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,

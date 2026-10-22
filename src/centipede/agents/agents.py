@@ -147,6 +147,12 @@ class Agents:
         for agent in self.segment_agents:
             agent.set_action_std(action_std)
 
+    def hold_action_std(self, released_count: int, floor: float) -> None:
+        """The noise front: every agent behind the first ``released_count``,
+        counted from the head, keeps its actions' spreads at least ``floor``."""
+        for agent in self.segment_agents[released_count:]:
+            agent.hold_action_std(floor)
+
     def update(self) -> None:
         """Let each agent learn from its own window, then fill the diagnostics;
         with the adaptive schedule, each agent then sets its next learning

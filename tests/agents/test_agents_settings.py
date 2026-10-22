@@ -23,6 +23,7 @@ def test_an_empty_section_gives_the_agreed_first_values():
         final_action_std=0.5,
         exploration_noise_beta=0.0,
         state_dependent_noise_steps=0,
+        noise_front_cycles_per_unit=0,
         optimizer="adam",
         learning_rate=3e-4,
         learning_rate_schedule="constant",

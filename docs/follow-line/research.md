@@ -171,6 +171,21 @@ segmented robot of 6 to 16 legs gives each segment input from the segment
 in front (Chen, Wang & Revzen, from its abstract; it uses state machines,
 not learning).
 
+**Where a wave starts** (searched 2026-10-22, after runs 16 and 17). In
+those runs every place that ordered first became a source: the units that
+joined later stepped after their ordered neighbour. The lamprey cord does
+the same. Matsushima & Grillner (1992) bathed parts of an isolated cord in
+more of an excitant: the most excited part always led and set the whole
+cord's cycle; the head end gave the forward wave, the tail end the
+backward one, and the middle waves running both ways (from their
+abstract). In oscillator chains a wave runs from the region of higher
+frequency to the lower (Ashwin, Coombes & Nicks 2016, section 6.3). Where
+order forms in several places at once, as when a material is cooled
+quickly, the pieces meet in defects that stay; when the cooling moves as a
+front slower than order spreads, the defects are drastically suppressed
+and one ordered region grows behind it (Dziarmaga, Laguna & Zurek 1999,
+from their abstract).
+
 ## 5. Our runs against the literature
 
 | What runs 01 to 11 showed | What the literature says |
@@ -241,4 +256,6 @@ Centipedes and decentralised walking
 - Dionne, Giardina & Mahadevan, Embodied intelligence solves the centipede's dilemma, 2026 (preprint), [arXiv 2603.08409](https://arxiv.org/abs/2603.08409)
 - Williams & Sigvardt, Intersegmental phase lags in the lamprey spinal cord: experimental confirmation of the existence of a boundary region, Journal of Computational Neuroscience 1, 1994, [doi 10.1007/BF00962718](https://link.springer.com/article/10.1007/BF00962718)
 - Ashwin, Coombes & Nicks, Mathematical frameworks for oscillatory network dynamics in neuroscience, Journal of Mathematical Neuroscience 6, 2016, [arXiv 1506.05828](https://arxiv.org/abs/1506.05828)
+- Matsushima & Grillner, Neural mechanisms of intersegmental coordination in lamprey: local excitability changes modify the phase coupling along the spinal cord, Journal of Neurophysiology 67, 1992, [doi 10.1152/jn.1992.67.2.373](https://doi.org/10.1152/jn.1992.67.2.373)
+- Dziarmaga, Laguna & Zurek, Symmetry breaking with a slant: topological defects after an inhomogeneous quench, Physical Review Letters 82, 1999, [arXiv cond-mat/9810396](https://arxiv.org/abs/cond-mat/9810396)
 - Chen, Wang & Revzen, Walking on rough terrain with any number of legs, 2026 (preprint), [arXiv 2603.09147](https://arxiv.org/abs/2603.09147)

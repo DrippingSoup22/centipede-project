@@ -195,6 +195,13 @@ class SegmentAgent:
         with torch.no_grad():
             self.ppo.actor_network.log_std.fill_(math.log(action_std))
 
+    def hold_action_std(self, floor: float) -> None:
+        """Raise every learned spread below ``floor`` to it. An action's
+        spread in a state mixes its spreads with weights that add up to 1
+        (gSDE), so it is then at least ``floor`` in every state."""
+        with torch.no_grad():
+            self.ppo.actor_network.log_std.clamp_(min=math.log(floor))
+
     def update(self) -> PPOUpdateSummary:
         """Learn from this agent's full window, then start a new one."""
         ppo_settings = self.settings.ppo
