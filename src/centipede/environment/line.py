@@ -142,17 +142,19 @@ class Line:
         """Lay the masked worlds' lines through the body as it stands, the
         front unit's heading turned by ``turn`` ``(W,)`` rad to the left, with
         curves drawn from ``generator``; every world is measured again as it
-        stands."""
-        centres = state.body_planar_position
+        stands. Only the masked worlds' lines are laid, usually a few: this
+        waits for the GPU to find them."""
+        worlds = world_mask.nonzero().squeeze(1)
+        centres = state.body_planar_position[worlds]
         origin = centres.mean(dim=1)
-        yaw = heading(state.body_quaternion[:, 0]) + turn
+        yaw = heading(state.body_quaternion[worlds, 0]) + turn[worlds]
         start = torch.stack((yaw.cos(), yaw.sin()), dim=-1)
         # Each centre's place along the straight part through the body.
         along = ((centres - origin[:, None]) * start[:, None]).sum(dim=-1)
         if self.level_count:
             curvatures = self._curvatures(along[:, 0], generator)
         else:
-            curvatures = torch.zeros_like(self.curvatures)
+            curvatures = torch.zeros_like(self.curvatures[worlds])
         # Each point's heading and position: the curvature turned through and
         # the direction walked over the points before it, from the middle.
         turned = (curvatures.cumsum(dim=1) - curvatures) * POINT_SPACING_M
@@ -161,12 +163,11 @@ class Line:
         walked = (directions.cumsum(dim=1) - directions) * POINT_SPACING_M
         points = origin[:, None] + walked - walked[:, self.middle_point, None]
 
-        mask = world_mask[:, None]
-        self.points.copy_(torch.where(mask[..., None], points, self.points))
-        self.directions.copy_(torch.where(mask[..., None], directions, self.directions))
-        self.curvatures.copy_(torch.where(mask, curvatures, self.curvatures))
+        self.points[worlds] = points
+        self.directions[worlds] = directions
+        self.curvatures[worlds] = curvatures
         nearest = (along / POINT_SPACING_M).round().long() + self.middle_point
-        self.nearest.copy_(torch.where(mask, nearest, self.nearest))
+        self.nearest[worlds] = nearest
         self.along.copy_(self._measure(state))
 
     def update(self, state: PhysicalState) -> torch.Tensor:
@@ -181,7 +182,7 @@ class Line:
         """The line from a body length behind the units' middle to a body
         length ahead, ``(W, 21, 2)`` world x and y, for recordings."""
         middle = self.along.mean(dim=1, keepdim=True)
-        return self._points_at(middle + self.drawn_offsets)
+        return self.points_at(middle + self.drawn_offsets)
 
     def _curvatures(
         self, head_along: torch.Tensor, generator: torch.Generator | None
@@ -240,7 +241,7 @@ class Line:
         self.curvature.copy_(self.curvatures.gather(1, nearest))
 
         # The trail's points from each centre, (W, N, 5, 2), in the unit's frame.
-        trail_points = self._points_at(along[..., None] + self.trail_offsets)
+        trail_points = self.points_at(along[..., None] + self.trail_offsets)
         seen_from = trail_points - centre[:, :, None]
         forward = torch.stack((yaw.cos(), yaw.sin()), dim=-1)[:, :, None]
         ahead = (seen_from * forward).sum(dim=-1)
@@ -250,7 +251,7 @@ class Line:
         self.trail.copy_(trail.flatten(start_dim=2))
         return along
 
-    def _points_at(self, along: torch.Tensor) -> torch.Tensor:
+    def points_at(self, along: torch.Tensor) -> torch.Tensor:
         """The line's positions at the places ``along`` it ``(W, ...)`` m,
         between its stored points: ``(W, ..., 2)``."""
         place = (along - self.point_along[0]) / POINT_SPACING_M
