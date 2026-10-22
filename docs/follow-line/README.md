@@ -37,7 +37,7 @@ checkpoint at a larger one ([reward.md](reward.md)).
 | Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s |
 | Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3, from run 18 cooling from the head; PPO, discount 0.99 |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3 (runs 18 to 20 also cooled it from the head); PPO, discount 0.99 |
 
 ## The bodies
 
@@ -79,9 +79,10 @@ was tuned on a body that could not twist.
   sees: only the units ahead, [observations.md](observations.md); what each
   unit pays for: the units behind weighed less, [reward.md](reward.md)):
   the waves run away from wherever order first forms, which the starting
-  networks decide. Runs 18 to 20 test a noise front that lets order form at
-  the head first ([critic.md](critic.md)), on the plain design and on each
-  lever, seed 2, whose order started at unit 5 in runs 15 to 17.
+  networks decide. A noise front meant to let order form at the head first
+  failed in runs 18 to 20 ([critic.md](critic.md)): order starts as the
+  walk is learned, at any noise or price used so far, most often at an end
+  pair or where a seed's networks put it.
 
 - **Stage 2's curves**: a level that makes the line bend more as the walk
   allows (the user's idea, 2026-10-20).
