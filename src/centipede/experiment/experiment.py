@@ -449,8 +449,10 @@ class CurveStart:
     def ready(self, record: dict[str, Any]) -> bool:
         """Take an update cycle's log ``record``; whether the curves may
         begin."""
-        # The log's speeds: the worlds at the tow's top, then the untowed.
-        self.speeds.append(record["tow"]["speed"][1])
+        # The log's speeds: the worlds at the tow's top, then the untowed;
+        # None before the tow's first window, which no cycle passes.
+        speed = record["tow"]["speed"][1]
+        self.speeds.append(math.nan if speed is None else speed)
         pairs = [
             [math.nan if value is None else value for value in sides]
             for sides in record["step_facts"]["neighbour_lag_consistency"]

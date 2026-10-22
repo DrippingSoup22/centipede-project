@@ -104,8 +104,8 @@ def test_the_curves_begin_once_the_walk_has_formed_and_a_pair_starts_ordering():
     """Over the last 8 cycles the untowed worlds walk 60 mm/s against a
     start of 50, and the second pair's consistency, both sides' mean, is
     0.26 against 0.25, the others at chance or unmeasured: the curves may
-    begin at the eighth cycle, not before, nor while the walk is slower or no
-    pair orders."""
+    begin at the eighth cycle, not before, nor while the walk is slower,
+    unmeasured (before the tow's first window) or no pair orders."""
     curves = CurveSettings.from_section(
         {
             "level_tightest_radius_body_lengths": [3.0],
@@ -128,6 +128,9 @@ def test_the_curves_begin_once_the_walk_has_formed_and_a_pair_starts_ordering():
     slow, unordered = CurveStart(curves), CurveStart(curves)
     assert not any(slow.ready(record(45.0, 0.3)) for _ in range(8))
     assert not any(unordered.ready(record(60.0, 0.22)) for _ in range(8))
+    unmeasured = CurveStart(curves)
+    unmeasured.ready(record(None, 0.3))
+    assert not any(unmeasured.ready(record(60.0, 0.3)) for _ in range(7))
 
 
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
