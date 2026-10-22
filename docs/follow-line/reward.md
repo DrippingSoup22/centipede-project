@@ -2,14 +2,17 @@
 
 The reward agreed for run 12 (the user's decisions, 2026-10-21, after
 reviewing runs 01 to 11 against the literature, [research.md](research.md)),
-with the carry measured per leg from run 14 (2026-10-22).
+with the carry measured per leg from run 14 (2026-10-22) and, from run 22,
+the speed matched plainly and the line kept by each unit's own price
+(2026-10-22).
 Earlier rewards, and what each taught, are in the study's
 `Training/results/follow-line/`.
 
 ## What it asks for
 
-The body walks along the line at a commanded speed, spending as little
-energy as its units' neighbourhoods can, each unit carrying its own weight.
+The body walks along the line at a commanded speed, every unit on the
+line, spending as little energy as its units' neighbourhoods can, each unit
+carrying its own weight.
 How it walks is left to the agents: no term judges a step's shape (the
 user's decision).
 
@@ -19,15 +22,17 @@ Each 20 ms step, for unit i, in mm/s:
 
 ```text
 team_i = v* − |v̄ − v*|  −  c · Ē_i
-own_i  = − carry_i
+own_i  = − carry_i  −  p · L_i        (p · L_i from run 22)
 ```
 
 | Symbol | What it is | Setting |
 | --- | --- | --- |
-| v̄ | The body's speed along the line: the units' mean forward line, each averaged over 1 s | |
+| v̄ | The body's speed along the line: the units' mean forward line, each averaged over 1 s; from run 22 their mean plain speed along it ([keeping the line](#keeping-the-line-from-run-22)) | `match_plain_speed` |
 | v* | The commanded speed, 67 mm/s | `commanded_speed_mm_per_s` |
 | Ē_i | The mean energy spent on the step by the units within unit i's radius, itself and up to two each side (those present), mJ/s | `neighbourhood_energy` |
 | c | The energy's price, in mm/s per mJ/s: 0.4 in stage 1 | `mm_per_mj` |
+| L_i | From run 22: the mean, over unit i and the units behind it within its radius, of 1 − exp(−d / σ), d each one's distance from the line | `line_distance_scale_mm` (σ) |
+| p | The line's price, in mm/s | `line_price_mm_per_s` |
 | carry_i | Runs 12 and 13: the weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each. From run 14: each foot's load, averaged over 1 s, beyond a quarter either way of half the unit's weight, at the same price | `carry_price`, `carry_per_leg`, `carry_band` |
 
 The speed is averaged before it is compared with v*, because |v̄ − v*| is
@@ -84,6 +89,52 @@ The task sets how fast to go, and the body finds how to walk that fast.
 | Straight | 67 mm/s |
 | 3 body lengths | 61.5 mm/s |
 | 1 body length | 53 mm/s |
+
+## Keeping the line (from run 22)
+
+The learned walks kept 1 to 2 mm from the line at the front and drifted at
+the rear (the user, 2026-10-22). Each unit's mean distance in the noise-free
+evaluations at cycle 512, front to rear, mm:
+
+| Run | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 16, seed 1 | 1.6 | 1.6 | 1.9 | 1.8 | 1.5 | 1.3 | 1.4 | 1.4 | 1.1 | 1.7 |
+| 16, seed 2 | 1.2 | 1.5 | 1.5 | 1.2 | 0.9 | 1.7 | 3.0 | 4.9 | 7.5 | 10.0 |
+| 17, seed 1 | 1.0 | 0.8 | 0.9 | 1.1 | 1.3 | 1.7 | 2.1 | 2.7 | 3.4 | 4.1 |
+| 17, seed 2 | 1.1 | 1.0 | 1.2 | 1.2 | 0.9 | 0.7 | 0.5 | 0.9 | 1.8 | 2.8 |
+
+The forward line (runs 12 to 21) explains it three ways:
+
+- **The line counted only through the speed.** Being off the line was the
+  same as walking slower, and above the command it cancelled the overspeed:
+  run 16 seed 2 walked 76 mm/s, its rear 3 to 10 mm off and turned 16 to
+  26°, which the forward line counted as about 69 mm/s, nearly the command.
+- **Flat near the line.** 1 − (d / 16.5 mm)² takes 1.5% of a unit's step at
+  2 mm and 3.3% at 3 mm; the team's mean, a tenth of that.
+- **Shared.** A unit's distance was a tenth of the reward all ten agents
+  share, the hardest kind of reward for each agent to learn from (Agogino &
+  Tumer 2005); and the rear unit has no spine motor: the joint the unit
+  ahead commands places it.
+
+So, from run 22 (the user's agreement, 2026-10-22):
+
+- **The speed, plainly** (`match_plain_speed`): v̄ is the units' mean plain
+  speed along the line, a step counted wherever the unit stands. Each unit
+  also observes this speed in place of its forward line.
+- **The line, in each unit's own account**: p · L_i, L_i the mean over unit
+  i and the units behind it within its radius (itself and two, those
+  present) of 1 − exp(−d / σ). The spine joint behind a unit places the
+  units behind it, and the unit sees them. The exponential of the distance
+  pulls hardest at the line and still pays a small improvement far from
+  it: a vessel learning to follow a path with PPO was paid e^(−γ|e|),
+  chosen over a Gaussian for its fatter tails (Meyer et al. 2020).
+
+| What each shape takes from a unit's step at a distance | 1 mm | 2 mm | 3 mm | 5 mm | 10 mm |
+| --- | --- | --- | --- | --- | --- |
+| The forward line, 1 − (d / 16.5 mm)² (runs 12 to 21) | 0.4% | 1.5% | 3.3% | 9% | 37% |
+| 1 − exp(−d / 4 mm) | 22% | 39% | 53% | 71% | 92% |
+
+p and σ are set by the ledger on the built code (below).
 
 ## The energy
 

@@ -10,9 +10,9 @@ from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 
 # The reward's parts, signed, each in its own unit: the line, the squeeze, the
-# motion, the accelerations, the energy's share, the force share and the carry
-# in millimetres, the rest in millijoules. The team account adds the first
-# TEAM_PART_COUNT, each unit's own account the rest.
+# motion, the accelerations, the energy's share, the force share, the carry
+# and being off the line in millimetres, the rest in millijoules. The team
+# account adds the first TEAM_PART_COUNT, each unit's own account the rest.
 PART_NAMES = (
     "line",
     "squeeze",
@@ -27,6 +27,7 @@ PART_NAMES = (
     "pain",
     "hanging",
     "carry",
+    "off_line",
 )
 TEAM_PART_COUNT = 9
 MILLIJOULE_PARTS = ("pushing", "braking", "force", "switching", "pain", "hanging")
@@ -124,6 +125,8 @@ class RewardFunction:
         self.acceleration_price_mm = settings.acceleration_price * ACTION_DURATION_S
         # Millimetres for a step of a unit weight its feet do not carry.
         self.carry_price_mm = settings.carry_price * ACTION_DURATION_S
+        # Millimetres for a step at the full cost of being off the line.
+        self.line_price_mm = settings.line_price_mm_per_s * ACTION_DURATION_S
         self.unit_weight_n = body.unit_weight_n
         # Each unit may take from its neighbours, for free, the weight it
         # carries beyond the others' mean, such as a head; none on the
@@ -151,6 +154,13 @@ class RewardFunction:
             seen = (behind.abs() <= observation_radius).float()
             seen[behind > 0] *= settings.energy_weight_behind
             self.neighbourhoods = seen / seen.sum(dim=1, keepdim=True)
+        # The units each unit answers for being off the line: itself and those
+        # behind it within observation_radius, which the spine joint behind
+        # it places; row i weighs them alike.
+        units = torch.arange(len(commanded_joints), device=device)
+        behind = units[None, :] - units[:, None]
+        placed = ((behind >= 0) & (behind <= observation_radius)).float()
+        self.placed_units = placed / placed.sum(dim=1, keepdim=True)
 
     def _seen(self, distance: torch.Tensor, angle: torch.Tensor) -> torch.Tensor:
         """Each unit's closeness to the line, 1 - (distance / band)², times the
@@ -164,8 +174,11 @@ class RewardFunction:
     ) -> torch.Tensor:
         """Each unit's forward line over the step, ``(W, N)`` mm: its step
         along the line times ``_seen``, uncapped, or a step back in full,
-        which the commanded speed averages."""
+        which the commanded speed averages; with ``match_plain_speed`` its
+        step, wherever it stands."""
         step_mm = progress * 1e3
+        if self.settings.match_plain_speed:
+            return step_mm
         forward = step_mm.clamp(min=0.0) * self._seen(distance, angle)
         return forward + step_mm.clamp(max=0.0)
 
@@ -214,7 +227,7 @@ class RewardFunction:
         force_change: torch.Tensor,
         averaged_command: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 13)``
+        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 14)``
         in PART_NAMES' order, and each unit's own ``energy`` ``(W, N, 4)`` mJ.
 
         ``force_change`` ``(W, N, M + 1)`` is how much each motor's force
@@ -264,6 +277,9 @@ class RewardFunction:
         and its carry, the weight beyond its free support that its feet, on
         average, do not carry, or with ``carry_per_leg`` each foot's averaged
         load's distance from half that weight beyond ``carry_band`` of it.
+        Being off the line, with ``line_price_mm_per_s``: the mean, over the
+        unit and the units behind it that it places, of 1 - exp(-d /
+        ``line_distance_scale_mm``), d each one's distance from the line.
         """
         state = physical_state
         ramp = self.ramp_weight
@@ -344,6 +360,9 @@ class RewardFunction:
         else:
             carry = self.carry_price_mm * (self.own_carry - feet).clamp(min=0.0)
 
+        lost = 1 - torch.exp(-distance * 1e3 / self.settings.line_distance_scale_mm)
+        off_line = self.line_price_mm * lost @ self.placed_units.T
+
         units = line.shape[1]
         team = torch.cat(
             [
@@ -360,7 +379,14 @@ class RewardFunction:
             dim=-1,
         )
         own = torch.stack(
-            (-force_share, -pain, -self.hanging_price_mj * hanging, -carry), dim=-1
+            (
+                -force_share,
+                -pain,
+                -self.hanging_price_mj * hanging,
+                -carry,
+                -off_line,
+            ),
+            dim=-1,
         )
         parts = torch.cat((team, own), dim=-1)
         return parts @ self.part_channels, parts, own_energy

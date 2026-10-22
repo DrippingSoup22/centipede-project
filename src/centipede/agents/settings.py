@@ -86,7 +86,10 @@ class AgentSettings:
     spreads as before. Order between neighbours forms only once their noise
     falls, and each unit joining an ordered piece steps after it, so the
     order grows from the head alone and its wave runs to the tail (Dziarmaga,
-    Laguna & Zurek 1999; docs/follow-line/critic.md).
+    Laguna & Zurek 1999; docs/follow-line/critic.md). With
+    ``action_std_floor`` above 0 every learned spread is raised to at least
+    that before each update cycle, so that the agents keep exploring as the
+    curves' later levels come (docs/follow-line/critic.md).
     ``actor_activation`` is the actor's hidden activation, ReLU or tanh. gSDE
     wants tanh, as Raffin et al. and Stable-Baselines3's PPO use: the noise is
     made from the last hidden layer, and ReLU's features, never negative,
@@ -126,6 +129,7 @@ class AgentSettings:
     exploration_noise_beta: float
     state_dependent_noise_steps: int
     noise_front_cycles_per_unit: int
+    action_std_floor: float
     optimizer: str
     learning_rate: float
     learning_rate_schedule: str
@@ -211,6 +215,9 @@ class AgentSettings:
             ),
             noise_front_cycles_per_unit=section.integer(
                 "noise_front_cycles_per_unit", default=0, minimum=0
+            ),
+            action_std_floor=section.number(
+                "action_std_floor", default=0.0, minimum=0.0
             ),
             optimizer=section.choice("optimizer", OPTIMIZERS, default="adam"),
             learning_rate=learning_rate,

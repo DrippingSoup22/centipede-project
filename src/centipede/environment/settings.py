@@ -25,6 +25,14 @@ class RewardSettings:
     so that the outer feet keep v*: v* / (1 + r k), r the feet's reach to
     the side and k the line's curvature, the units' mean, averaged as v is;
     the team keeps v* - |v - command|, so a bend lowers no pay.
+    With ``match_plain_speed`` v is instead the units' mean plain speed along
+    the line, each step counted whatever the unit's distance or angle from
+    it, and the line is kept by its own price: with ``line_price_mm_per_s``
+    above 0 each unit's own account is charged that many mm a second times
+    the mean, over itself and the units behind it that it sees (the spine
+    joint behind a unit places them), of 1 - exp(-d /
+    ``line_distance_scale_mm``), d each one's distance from the line:
+    steepest at the line, so that a few millimetres cost (Meyer et al. 2020).
     A squared force cost, at ``joint_force_scale`` unit weights, costs
     ``reference_pay_mm_per_s``. Energy: a motor fully commanded costs
     ``force_price_w``, and a motor commanded u, as a share of its strongest,
@@ -81,6 +89,7 @@ class RewardSettings:
     line_overspeed_slope: float
     commanded_speed_mm_per_s: float
     slow_in_bends: bool
+    match_plain_speed: bool
     reference_pay_mm_per_s: float
     joint_force_scale: float
     force_price_w: float
@@ -98,6 +107,8 @@ class RewardSettings:
     carry_price: float
     carry_per_leg: bool
     carry_band: float
+    line_price_mm_per_s: float
+    line_distance_scale_mm: float
     own_account: bool
     mm_per_mj: float
     averaging_s: float
@@ -123,6 +134,7 @@ class RewardSettings:
                 "commanded_speed_mm_per_s", default=0.0, minimum=0.0
             ),
             slow_in_bends=section.boolean("slow_in_bends", default=False),
+            match_plain_speed=section.boolean("match_plain_speed", default=False),
             reference_pay_mm_per_s=section.number(
                 "reference_pay_mm_per_s", default=53.0, minimum=0.0
             ),
@@ -151,6 +163,12 @@ class RewardSettings:
             carry_per_leg=section.boolean("carry_per_leg", default=False),
             carry_band=section.number(
                 "carry_band", default=0.25, minimum=0.0, maximum=1.0
+            ),
+            line_price_mm_per_s=section.number(
+                "line_price_mm_per_s", default=0.0, minimum=0.0
+            ),
+            line_distance_scale_mm=section.positive_number(
+                "line_distance_scale_mm", default=4.0
             ),
             own_account=section.boolean("own_account", default=True),
             mm_per_mj=section.number("mm_per_mj", default=1.59, minimum=0.0),
@@ -190,6 +208,11 @@ class RewardSettings:
             raise SettingsError(
                 "[environment.reward] slow_in_bends lowers the commanded speed:"
                 " set commanded_speed_mm_per_s"
+            )
+        if settings.match_plain_speed and not settings.commanded_speed_mm_per_s:
+            raise SettingsError(
+                "[environment.reward] match_plain_speed matches the commanded"
+                " speed: set commanded_speed_mm_per_s"
             )
         if settings.acceleration_price and settings.acceleration_halving:
             raise SettingsError(
@@ -302,7 +325,15 @@ class CurveSettings:
     The level starts at the first and rises by one, after at least
     ``level_judged_cycles`` update cycles at it, when the untowed mean-action
     worlds kept the line through ``level_up_kept_share`` of their episodes
-    over the last of those cycles.
+    over the last of those cycles. With ``start_speed_mm_per_s`` above 0 the
+    lines stay straight until the wave starts forming: once, over the last 8
+    update cycles, the untowed mean-action worlds' speed along the line
+    reaches it and some neighbour pair's wave consistency reaches
+    ``start_pair_consistency`` (chance is about 0.2), the first level begins
+    with the next cycle. With ``mixed_levels`` each world's line is laid at a
+    level drawn evenly from the first to the one reached, and only the worlds
+    at the one reached judge it (Rudin et al. 2022 send the robots that solve
+    the top level back to a random one, against forgetting).
     """
 
     level_tightest_radius_body_lengths: tuple[float, ...]
@@ -312,6 +343,9 @@ class CurveSettings:
     lead_body_lengths: float
     level_up_kept_share: float
     level_judged_cycles: int
+    start_speed_mm_per_s: float
+    start_pair_consistency: float
+    mixed_levels: bool
 
     @classmethod
     def from_section(cls, values: dict) -> "CurveSettings":
@@ -338,6 +372,13 @@ class CurveSettings:
             level_judged_cycles=section.positive_integer(
                 "level_judged_cycles", default=16
             ),
+            start_speed_mm_per_s=section.number(
+                "start_speed_mm_per_s", default=0.0, minimum=0.0
+            ),
+            start_pair_consistency=section.number(
+                "start_pair_consistency", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            mixed_levels=section.boolean("mixed_levels", default=False),
         )
         section.reject_unknown_keys()
         radii = settings.level_tightest_radius_body_lengths

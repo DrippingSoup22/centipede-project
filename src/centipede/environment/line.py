@@ -64,8 +64,10 @@ class Line:
     ``(W, N)``, each centre's distance from the line (m); ``angle`` ``(W,
     N)``, its body's angle from the line's direction (rad, positive to the
     left); ``curvature`` ``(W, N)``, the line's there (1/m, positive turning
-    left); and ``trail`` ``(W, N, 15)``, the trail each unit sees: for each
-    point, from the farthest back along the line to the farthest ahead, its
+    left); ``world_levels`` ``(W,)``, the level each world's line was laid
+    at (-1: straight, the curves not begun); and ``trail`` ``(W, N, 15)``,
+    the trail each unit sees: for each point, from the farthest back along
+    the line to the farthest ahead, its
     position forward and to the left in the unit's frame (m) and 1 if it lies
     within ``sight_radius_m`` of the unit's centre seen from above, else
     three zeros.
@@ -120,6 +122,14 @@ class Line:
         self.trail = torch.zeros(
             (world_count, segment_count, TRAIL_VALUES), device=device
         )
+        self.world_levels = torch.zeros(world_count, dtype=torch.long, device=device)
+        if curves is not None:
+            # Each level's tightest curvature (1/m) and straight share.
+            radii = torch.tensor(curves.level_tightest_radius_body_lengths)
+            self.level_tightest = (1 / (radii * self.body_length_m)).to(device)
+            self.level_straight_shares = torch.tensor(
+                curves.level_straight_shares, device=device
+            )
 
     @property
     def level_count(self) -> int:
@@ -129,7 +139,8 @@ class Line:
         return len(self.curves.level_tightest_radius_body_lengths)
 
     def set_level(self, level: int) -> None:
-        """Lay every line from the next restart on at ``level``."""
+        """Lay every line from the next restart on at ``level`` (or, with
+        ``mixed_levels``, up to it); -1 lays them straight."""
         self.level = level
 
     def restart(
@@ -152,7 +163,9 @@ class Line:
         # Each centre's place along the straight part through the body.
         along = ((centres - origin[:, None]) * start[:, None]).sum(dim=-1)
         if self.level_count:
-            curvatures = self._curvatures(along[:, 0], generator)
+            levels = self._levels(len(worlds), generator)
+            self.world_levels[worlds] = levels
+            curvatures = self._curvatures(along[:, 0], levels, generator)
         else:
             curvatures = torch.zeros_like(self.curvatures[worlds])
         # Each point's heading and position: the curvature turned through and
@@ -184,16 +197,33 @@ class Line:
         middle = self.along.mean(dim=1, keepdim=True)
         return self.points_at(middle + self.drawn_offsets)
 
+    def _levels(self, count: int, generator: torch.Generator | None) -> torch.Tensor:
+        """The levels ``count`` restarting worlds' lines are laid at: the one
+        reached, or with ``mixed_levels`` one drawn evenly up to it; -1 before
+        the curves begin."""
+        device = self.world_levels.device
+        if self.level >= 0 and self.curves.mixed_levels:
+            return torch.randint(
+                0, self.level + 1, (count,), generator=generator, device=device
+            )
+        return torch.full((count,), self.level, dtype=torch.long, device=device)
+
     def _curvatures(
-        self, head_along: torch.Tensor, generator: torch.Generator | None
+        self,
+        head_along: torch.Tensor,
+        levels: torch.Tensor,
+        generator: torch.Generator | None,
     ) -> torch.Tensor:
         """Every world's curvature at each point, ``(W, P)`` 1/m: none up to
         the lead beyond the head at ``head_along`` ``(W,)``, then piece by
-        piece at the level."""
+        piece at its level in ``levels`` ``(W,)``; none at -1."""
         curves = self.curves
         body = self.body_length_m
-        tightest = 1 / (curves.level_tightest_radius_body_lengths[self.level] * body)
-        straight_share = curves.level_straight_shares[self.level]
+        laid = levels.clamp(min=0)
+        curved = levels >= 0
+        tightest = torch.where(curved, self.level_tightest[laid], 0.0)[:, None]
+        shares = self.level_straight_shares[laid]
+        straight_share = torch.where(curved, shares, 1.0)[:, None]
         shortest, longest = curves.piece_body_lengths
         world_count = head_along.shape[0]
         piece_count = math.ceil(AHEAD_BODY_LENGTHS / shortest) + 1

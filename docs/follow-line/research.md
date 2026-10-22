@@ -270,3 +270,12 @@ Centipedes and decentralised walking
 - Hicheur, Vieilledent, Richardson, Flash & Berthoz, Velocity and curvature in human locomotion along complex curved paths: a comparison with hand movements, Experimental Brain Research 162, 2005, [doi 10.1007/s00221-004-2122-8](https://link.springer.com/article/10.1007/s00221-004-2122-8)
 - Fraichard & Scheuer, From Reeds and Shepp's to continuous-curvature paths, IEEE Transactions on Robotics 20, 2004, [HAL inria-00000009](https://hal-univ-tlse3.archives-ouvertes.fr/INRIA/inria-00000009)
 - Chen, Wang & Revzen, Walking on rough terrain with any number of legs, 2026 (preprint), [arXiv 2603.09147](https://arxiv.org/abs/2603.09147)
+
+Following a path, training in stages, exploring
+- Meyer, Robinson, Rasheed & San, Taming an autonomous surface vehicle for path following and collision avoidance using deep reinforcement learning, IEEE Access 8, 2020, [arXiv 1912.08578](https://arxiv.org/abs/1912.08578)
+- Agogino & Tumer, Multi-agent reward analysis for learning in noisy domains, AAMAS 2005, [PDF](https://cs.huji.ac.il/course/2005/aisemin/articles2006/docs/pa1b5_81.pdf)
+- Margolis, Yang, Paigwar, Chen & Agrawal, Rapid locomotion via reinforcement learning, RSS 2022, [arXiv 2205.02824](https://arxiv.org/abs/2205.02824)
+- Narvekar, Peng, Leonetti, Sinapov, Taylor & Stone, Curriculum learning for reinforcement learning domains: a framework and survey, JMLR 21, 2020, [JMLR](https://jmlr.org/papers/v21/20-212.html)
+- Wołczyk et al., Fine-tuning reinforcement learning models is secretly a forgetting mitigation problem, ICML 2024, [arXiv 2402.02868](https://arxiv.org/abs/2402.02868)
+- Juliani & Ash, A study of plasticity loss in on-policy deep reinforcement learning, NeurIPS 2024, [arXiv 2405.19153](https://arxiv.org/abs/2405.19153)
+- Andrychowicz et al., What matters for on-policy deep actor-critic methods? A large-scale study, ICLR 2021, [arXiv 2006.05990](https://arxiv.org/abs/2006.05990)

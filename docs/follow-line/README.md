@@ -33,11 +33,11 @@ checkpoint at a larger one ([reward.md](reward.md)).
 
 | Part | File | In short |
 | --- | --- | --- |
-| Task | [task.md](task.md) | The tester on a line laid along the body (until run 15, at a small random angle): straight in stage 1; in stage 2 (from run 21) bending piece by piece beyond the head, sharper at each level the body earns; 20 s episodes; a world that loses the line restarts; a fading tow at the start |
-| Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s |
+| Task | [task.md](task.md) | The tester on a line laid along the body (until run 15, at a small random angle): straight in stage 1; in stage 2 (from run 21) bending piece by piece beyond the head, sharper at each level the body earns (from run 22 the curves wait for the wave to start forming and mix the levels reached); 20 s episodes; a world that loses the line restarts; a fading tow at the start |
+| Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s; from run 22 the speed is matched plainly and each unit charged for being off the line, itself and the units behind it that it places |
 | Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3 (runs 18 to 20 also cooled it from the head); PPO, discount 0.99 |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3 (runs 18 to 20 also cooled it from the head; from run 22 a floor under it); PPO, discount 0.99 |
 
 ## The bodies
 

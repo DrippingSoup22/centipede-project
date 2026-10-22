@@ -30,6 +30,7 @@ import math
 import platform
 import subprocess
 import time
+from collections import deque
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
@@ -43,6 +44,7 @@ from centipede.agents.agents import Agents, RandomActionBaseline, ZeroActionBase
 from centipede.agents.settings import AgentSettings
 from centipede.diagnostics_category import descriptions, values
 from centipede.environment.environment import Environment
+from centipede.environment.settings import CurveSettings
 from centipede.experiment.configuration import (
     Configuration,
     EvaluationSettings,
@@ -84,6 +86,8 @@ RECORDED_PACKAGES = (
     "mujoco-warp",
     "warp-lang",
 )
+# How many update cycles the curves' start averages over.
+WAVE_WINDOW_CYCLES = 8
 
 
 def run(configuration_path: Path) -> Path:
@@ -275,6 +279,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
                 agent_settings.units_released_at(cycle, ramp_from),
                 agent_settings.initial_action_std,
             )
+        if agent_settings.action_std_floor:
+            agents.hold_action_std(0, agent_settings.action_std_floor)
         environment.set_ramp_weight(
             ramp_weight
             if adaptive_ramp
@@ -282,6 +288,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         )
 
     follow_schedules(completed_cycles + 1)
+    curve_start = CurveStart(configuration.environment.curves)
     cycles_start = time.monotonic()
     cycles = loop.train(seed=run_settings.seed + completed_cycles)
     for session_cycle in cycles:
@@ -302,6 +309,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
             record["curve_level"] = environment.line.level
             kept = environment.kept_line_share
             record["kept_line_share"] = None if math.isnan(kept) else kept
+            if environment.line.level < 0 and curve_start.ready(record):
+                environment.start_curves()
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
@@ -419,6 +428,41 @@ def _check_recording_fits(environment: Environment, frames: int, worlds: int) ->
             f" {needed / 2**30:.1f} GiB of device memory, more than"
             f" {RECORDING_MEMORY_LIMIT_BYTES / 2**30:.0f} GiB: record fewer worlds"
             " with [run] record_worlds"
+        )
+
+
+class CurveStart:
+    """Whether stage 2's curves may begin (``CurveSettings``' start): over
+    the last WAVE_WINDOW_CYCLES update cycles, the untowed mean-action
+    worlds' speed along the line, their mean, reaches
+    ``start_speed_mm_per_s``, and some neighbour pair's wave consistency,
+    its mean over both sides and those cycles, reaches
+    ``start_pair_consistency``. The walk has formed and the wave is starting
+    to form: in the study's runs 12 to 19 a pair passed 0.25 10 to 60 cycles
+    before it ordered, and the pairs froze one by one over 100 to 200 more."""
+
+    def __init__(self, curves: CurveSettings) -> None:
+        self.curves = curves
+        self.speeds: deque[float] = deque(maxlen=WAVE_WINDOW_CYCLES)
+        self.consistencies: deque[torch.Tensor] = deque(maxlen=WAVE_WINDOW_CYCLES)
+
+    def ready(self, record: dict[str, Any]) -> bool:
+        """Take an update cycle's log ``record``; whether the curves may
+        begin."""
+        # The log's speeds: the worlds at the tow's top, then the untowed.
+        self.speeds.append(record["tow"]["speed"][1])
+        pairs = [
+            [math.nan if value is None else value for value in sides]
+            for sides in record["step_facts"]["neighbour_lag_consistency"]
+        ]
+        self.consistencies.append(torch.tensor(pairs).nanmean(dim=1))
+        if len(self.speeds) < WAVE_WINDOW_CYCLES:
+            return False
+        order = torch.stack(tuple(self.consistencies)).nanmean(dim=0).nan_to_num()
+        walking = sum(self.speeds) / WAVE_WINDOW_CYCLES
+        return (
+            walking >= self.curves.start_speed_mm_per_s
+            and order.max().item() >= self.curves.start_pair_consistency
         )
 
 

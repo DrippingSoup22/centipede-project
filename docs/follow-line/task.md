@@ -81,6 +81,33 @@ the standard legged recipe raises its terrain's difficulty as the robots
 succeed (Rudin et al. 2021). The level is kept in checkpoints. On a bend
 the command falls ([reward.md](reward.md#the-commanded-speed)).
 
+**When the curves begin** (from run 22, the user's decision, 2026-10-22;
+`start_speed_mm_per_s`, `start_pair_consistency`). A run from scratch keeps
+its lines straight until the walk has formed and the wave starts forming, so
+that the bends are there while the order between neighbours sets: neither
+before the wave forms nor after it froze. In runs 12 to 19, from their
+training logs (the study's archive, `checks/run_12/wave_timeline_12_20.txt`):
+
+| What | When (update cycles) | The noise then |
+| --- | --- | --- |
+| The walk formed: the noise-free, never-towed speed at 50 mm/s | 58 to 93 | 0.28 to 0.30 |
+| A neighbour pair rose above chance: consistency 0.25 (chance about 0.2; before it the highest pair stays at 0.22 to 0.25) | 10 to 60 cycles before it ordered | |
+| The first pair ordered: 0.30. The first pair to fix its direction for good did so in that very cycle in 5 of 11 runs, within 11 cycles of it in 9 | 63 to 165 | 0.24 to 0.30 |
+| The other pairs fixed, one by one: 80% of them | 176 to 383 | 0.13 to 0.28 |
+
+So the first level begins once, over the last 8 update cycles, the untowed
+noise-free worlds walk at least 50 mm/s and some pair's consistency is at
+least 0.25. Before it the level is −1 (straight lines), in the log and in
+checkpoints.
+
+**Mixed levels** (from run 22, `mixed_levels`). Each world's line is laid
+at a level drawn evenly from the first to the one reached, so the easier
+lines and their straight pieces stay in training: the legged recipe sends
+the robots that solve its top level back to a random one, against
+forgetting (Rudin et al. 2021), and a policy trained on new states loses
+skills on those it no longer visits (Wołczyk et al. 2024). The level is
+judged by the worlds laid at it alone.
+
 ## The tow
 
 Training wheels that fade (`docs/cooperators/tow.md` on that branch).

@@ -201,6 +201,35 @@ def test_a_curved_line_bends_smoothly_beyond_the_head_and_measures_each_centre_o
     assert line.curvature[0, 2] == curvature[bend]
 
 
+def test_the_curves_may_wait_straight_and_mix_the_levels_reached():
+    """Two levels, radii of 5 and 1 body lengths (4 and 20 /m), no straight
+    pieces, mixed. Before the curves begin every line is straight; at the
+    second level each world's line is laid at the first or the second, and
+    only those at the second bend tighter than the first's 4 /m."""
+    curves = CurveSettings.from_section(
+        {
+            "level_tightest_radius_body_lengths": [5.0, 1.0],
+            "level_straight_shares": [0.0, 0.0],
+            "piece_body_lengths": [1.0, 2.0],
+            "mixed_levels": True,
+        }
+    )
+    line = Line(32, SEGMENTS, 0.01, 0.025, "cpu", curves)
+    state, every = resting_state(32), torch.ones(32, dtype=torch.bool)
+    generator = torch.Generator().manual_seed(0)
+    line.set_level(-1)
+    line.restart(every, state, torch.zeros(32), generator)
+    assert not line.curvatures.any()
+    assert (line.world_levels == -1).all()
+
+    line.set_level(1)
+    line.restart(every, state, torch.zeros(32), generator)
+    levels, tightest = line.world_levels, line.curvatures.abs().amax(dim=1)
+    assert set(levels.tolist()) == {0, 1}
+    assert (tightest[levels == 0] <= 4.0 + 1e-4).all()
+    assert (tightest[levels == 1] > 4.0 + 1e-4).any()
+
+
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():
     """Steps of 2, 0.5, 0.5, -0.5 and 0.5 mm along the line, unit 2 at 2.5 mm
     from it (closeness 0.75 in a 5 mm band), unit 4 facing 60 degrees away:
@@ -436,6 +465,52 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         RewardSettings.from_section(
             {"commanded_speed_mm_per_s": 67.0, "line_cap_averaged": True}
         )
+
+
+def test_with_the_line_priced_each_unit_pays_for_itself_and_the_units_it_places():
+    """With match_plain_speed the forward line is the plain step, whatever
+    the unit's distance or angle. The line priced at 10 mm/s on a 4 mm scale:
+    the rear unit 4 mm off costs 1 - 1/e of it, 0.2 mm a 20 ms step in full;
+    each unit pays the mean over itself and the units behind it within two,
+    which the spine joints behind it place: units 2, 3 and 4 a third, a half
+    and all of it, units 0 and 1 nothing."""
+    settings = RewardSettings.from_section(
+        {
+            "commanded_speed_mm_per_s": 67.0,
+            "match_plain_speed": True,
+            "line_price_mm_per_s": 10.0,
+            "line_distance_scale_mm": 4.0,
+        }
+    )
+    reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005, 2)
+    step = 1e-3 * torch.tensor([[1.0, 1.0, -0.5, 1.0, 1.0]])
+    forward = reward.forward_line(
+        step, torch.full((1, SEGMENTS), 3e-3), torch.full((1, SEGMENTS), 1.0)
+    )
+    torch.testing.assert_close(forward, 1e3 * step)
+
+    zeros = torch.zeros(1, SEGMENTS)
+    _, parts, _ = reward.compute(
+        resting_state(1),
+        zeros,
+        zeros,
+        zeros,
+        torch.tensor([[0.0, 0.0, 0.0, 0.0, 4e-3]]),
+        zeros,
+        torch.zeros(1, SEGMENTS, 8),
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.tensor([67.0]),
+    )
+    shares = torch.tensor([[0.0, 0.0, 1 / 3, 1 / 2, 1.0]])
+    torch.testing.assert_close(
+        parts[..., PART_NAMES.index("off_line")], -0.2 * (1 - math.exp(-1)) * shares
+    )
+    with pytest.raises(SettingsError):
+        RewardSettings.from_section({"match_plain_speed": True})
 
 
 def test_with_the_units_behind_weighed_less_each_unit_answers_more_for_those_ahead():
@@ -815,6 +890,6 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
     assert (environment.line.distance[1] < 0.0055).all()
     assert not environment.adjust_curve_level()
     assert environment.kept_line_share == 0.0 and environment.line.level == 0
-    environment.judged_steps = 3
+    environment.judged_world_steps.fill_(3)
     assert environment.adjust_curve_level() and environment.line.level == 1
     assert not environment.adjust_curve_level()

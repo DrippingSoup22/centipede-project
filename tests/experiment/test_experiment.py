@@ -14,7 +14,8 @@ import pytest
 import torch
 from mujoco_replay.recording import read_recording
 
-from centipede.experiment.experiment import run
+from centipede.environment.settings import CurveSettings
+from centipede.experiment.experiment import CurveStart, run
 from centipede.settings_section import SettingsError
 
 # Four worlds, the last two acting with the mean action, one at the tow's top
@@ -99,19 +100,53 @@ def test_an_adaptive_ramp_follows_the_untowed_walk_and_is_saved(tmp_path):
     assert weights == pytest.approx([0.5, 0.5 / 1.1**2], rel=0.01)
 
 
+def test_the_curves_begin_once_the_walk_has_formed_and_a_pair_starts_ordering():
+    """Over the last 8 cycles the untowed worlds walk 60 mm/s against a
+    start of 50, and the second pair's consistency, both sides' mean, is
+    0.26 against 0.25, the others at chance or unmeasured: the curves may
+    begin at the eighth cycle, not before, nor while the walk is slower or no
+    pair orders."""
+    curves = CurveSettings.from_section(
+        {
+            "level_tightest_radius_body_lengths": [3.0],
+            "level_straight_shares": [0.5],
+            "start_speed_mm_per_s": 50.0,
+            "start_pair_consistency": 0.25,
+        }
+    )
+
+    def record(speed, pair):
+        sides = [[0.2, 0.2], [pair - 0.01, pair + 0.01], [None, None]]
+        return {
+            "tow": {"speed": [0.0, speed]},
+            "step_facts": {"neighbour_lag_consistency": sides},
+        }
+
+    start = CurveStart(curves)
+    assert not any(start.ready(record(60.0, 0.26)) for _ in range(7))
+    assert start.ready(record(60.0, 0.26))
+    slow, unordered = CurveStart(curves), CurveStart(curves)
+    assert not any(slow.ready(record(45.0, 0.3)) for _ in range(8))
+    assert not any(unordered.ready(record(60.0, 0.22)) for _ in range(8))
+
+
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     # The ramp waits for a line no untrained body walks. The curves' level
     # is judged every two cycles: in 3-step episodes no line is lost, so it
-    # rises at cycle 2 to the last.
-    recorded = TRAINING_FILE.replace(
-        'runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1'
-    ).replace(
-        "max_episode_steps = 3\n",
-        'max_episode_steps = 3\nline_shape = "curved"\n'
-        "[environment.reward]\nramp_start = 0.3\n"
-        "ramp_cycles = 2\nramp_after_line_share = 1.0\n"
-        "[environment.curves]\nlevel_tightest_radius_body_lengths = [3.0, 1.0]\n"
-        "level_straight_shares = [0.5, 0.2]\nlevel_judged_cycles = 2\n",
+    # rises at cycle 2 to the last. The spreads never fall below their floor.
+    recorded = (
+        TRAINING_FILE.replace(
+            "hidden_layers = [8]\n", "hidden_layers = [8]\naction_std_floor = 0.5\n"
+        )
+        .replace('runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1')
+        .replace(
+            "max_episode_steps = 3\n",
+            'max_episode_steps = 3\nline_shape = "curved"\n'
+            "[environment.reward]\nramp_start = 0.3\n"
+            "ramp_cycles = 2\nramp_after_line_share = 1.0\n"
+            "[environment.curves]\nlevel_tightest_radius_body_lengths = [3.0, 1.0]\n"
+            "level_straight_shares = [0.5, 0.2]\nlevel_judged_cycles = 2\n",
+        )
     )
     folder = run_file(tmp_path, recorded, NAME="probe")
 
@@ -131,6 +166,13 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert [record["curve_level"] for record in log] == [0, 1, 1]
     assert [record["kept_line_share"] for record in log[:2]] == [None, 1.0]
     assert checkpoint["curve_level"] == 1
+    spreads = [
+        spread
+        for record in log
+        for agent in record["learning"]["action_std"]
+        for spread in agent
+    ]
+    assert min(spreads) > 0.49
 
     # In so short a run every recording would start at the first cycle: the
     # last, at 100%, records the first world's next episode, from its start,

@@ -78,6 +78,9 @@ class Environment:
             self.device,
             settings.curves if settings.line_shape == "curved" else None,
         )
+        # With a start, the lines stay straight until the wave starts forming.
+        if settings.line_shape == "curved" and settings.curves.start_speed_mm_per_s:
+            self.line.set_level(-1)
         self.forces = AveragedForces(
             world_count,
             segment_count,
@@ -183,11 +186,12 @@ class Environment:
         self.averaged_command = torch.full(
             (world_count,), self.commanded_speed, device=self.device
         )
-        # The untowed measuring worlds' lost lines and steps, and the update
-        # cycles, since the curves' level was last judged; the share of
-        # their episodes they kept the line through then (NaN before).
+        # The untowed measuring worlds' lost lines and steps, those laid at
+        # the level reached alone, and the update cycles, since the curves'
+        # level was last judged; the share of their episodes they kept the
+        # line through then (NaN before).
         self.lost_lines = torch.zeros((), device=self.device)
-        self.judged_steps = 0
+        self.judged_world_steps = torch.zeros((), device=self.device)
         self.cycles_at_level = 0
         self.kept_line_share = math.nan
 
@@ -232,29 +236,41 @@ class Environment:
         cycles have passed since the curves' level was last judged, judge
         it: raise it by one, up to the last, if the untowed measuring worlds
         kept the line through ``level_up_kept_share`` of their episodes over
-        those cycles (lost lines per episode's worth of their steps), and
-        start counting again. Returns whether it rose; waits for the GPU once
-        each judgement."""
+        those cycles (lost lines per episode's worth of their steps, the worlds
+        laid at that level alone), and start counting again; before the curves
+        begin, nothing. Returns whether it rose; waits for the GPU once each
+        judgement."""
         line = self.line
         curves = self.settings.curves
-        if line.level >= line.level_count - 1 or not self.tow.worlds_per_group:
+        if (
+            line.level < 0
+            or line.level >= line.level_count - 1
+            or not self.tow.worlds_per_group
+        ):
             return False
         self.cycles_at_level += 1
         if self.cycles_at_level < curves.level_judged_cycles:
             return False
-        episodes = (
-            self.tow.worlds_per_group
-            * self.judged_steps
-            / self.settings.max_episode_steps
-        )
+        episodes = self.judged_world_steps.item() / self.settings.max_episode_steps
+        if not episodes:
+            return False
         self.kept_line_share = 1 - self.lost_lines.item() / episodes
-        self.lost_lines.zero_()
-        self.judged_steps = 0
-        self.cycles_at_level = 0
+        self._restart_judgement()
         if self.kept_line_share < curves.level_up_kept_share:
             return False
         line.set_level(line.level + 1)
         return True
+
+    def start_curves(self) -> None:
+        """Begin the curves at their first level from the next restarts on,
+        once the wave starts forming (``CurveSettings``)."""
+        self.line.set_level(0)
+        self._restart_judgement()
+
+    def _restart_judgement(self) -> None:
+        self.lost_lines.zero_()
+        self.judged_world_steps.zero_()
+        self.cycles_at_level = 0
 
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
@@ -356,8 +372,9 @@ class Environment:
         strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
         if self.line.level_count and self.tow.worlds_per_group:
             untowed = self.tow.groups[GROUPS.index("without tow")]
-            self.lost_lines += strayed.float() @ untowed
-            self.judged_steps += 1
+            judged = untowed * (self.line.world_levels == self.line.level)
+            self.lost_lines += strayed.float() @ judged
+            self.judged_world_steps += judged.sum()
         truncated = (
             (self.episode_steps >= self.settings.max_episode_steps)
             | strayed
