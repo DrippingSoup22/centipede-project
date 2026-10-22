@@ -2,8 +2,8 @@
 
 How each file is read and written is tested with the configuration and the
 run folder; these tests cover what the front adds: the order of a run's
-files, the tow and the mean-action worlds, the ramp that waits for them,
-continuing a run, starting from
+files, the tow and the mean-action worlds, the ramp and the curves' level
+that wait for them, continuing a run, starting from
 another run's agents with its own learning rate and wider layers, and
 evaluating without changing anything.
 """
@@ -100,13 +100,17 @@ def test_an_adaptive_ramp_follows_the_untowed_walk_and_is_saved(tmp_path):
 
 
 def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
-    # The ramp waits for a line no untrained body walks.
+    # The ramp waits for a line no untrained body walks. The curves' level
+    # is judged every two cycles: in 3-step episodes no line is lost, so it
+    # rises at cycle 2 to the last.
     recorded = TRAINING_FILE.replace(
         'runs_folder = "RUNS"', 'runs_folder = "RUNS"\nrecord_worlds = 1'
     ).replace(
         "max_episode_steps = 3\n",
         "max_episode_steps = 3\n[environment.reward]\nramp_start = 0.3\n"
-        "ramp_cycles = 2\nramp_after_line_share = 1.0\n",
+        "ramp_cycles = 2\nramp_after_line_share = 1.0\n"
+        "[environment.curves]\nlevel_tightest_radius_body_lengths = [3.0, 1.0]\n"
+        "level_straight_shares = [0.5, 0.2]\nlevel_judged_cycles = 2\n",
     )
     folder = run_file(tmp_path, recorded, NAME="probe")
 
@@ -123,6 +127,9 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     assert checkpoint["tow_top"] == pytest.approx(log[-1]["tow"]["tow"])
     assert [record["ramp_weight"] for record in log] == [0.3] * 3
     assert checkpoint["ramp_from"] is None
+    assert [record["curve_level"] for record in log] == [0, 1, 1]
+    assert [record["kept_line_share"] for record in log[:2]] == [None, 1.0]
+    assert checkpoint["curve_level"] == 1
 
     # In so short a run every recording would start at the first cycle: the
     # last, at 100%, records the first world's next episode, from its start,
@@ -150,6 +157,7 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
     log = training_log(folder)
     assert [record["cycle"] for record in log] == [1, 2, 3, 4, 5]
     assert [record["ramp_weight"] for record in log[3:]] == pytest.approx([0.3, 0.65])
+    assert [record["curve_level"] for record in log[3:]] == [1, 1]
     assert saved_update_count(checkpoints / "cycle_0005.pt") == 5
     checkpoint = torch.load(checkpoints / "cycle_0005.pt", weights_only=True)
     assert checkpoint["tow_top"] == pytest.approx(0.1, abs=0.041)

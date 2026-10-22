@@ -300,7 +300,8 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
         record["ramp_weight"] = environment.reward.ramp_weight
         if environment.line.level_count:
             record["curve_level"] = environment.line.level
-            record["kept_line_share"] = environment.kept_line_share
+            kept = environment.kept_line_share
+            record["kept_line_share"] = None if math.isnan(kept) else kept
         folder.append_log(record)
         if cycle < total_cycles:
             follow_schedules(cycle + 1)
