@@ -39,7 +39,7 @@ spacings, 16.5 mm on v5 (the user's definition).
 | Its belly's load | 1 | Resting or dragging |
 | Its feet's load, averaged over 1 s (from run 14 each foot's: 2) | 1 | What its carry is charged on (the pairing rule) |
 | Its energy, averaged over 1 s, mJ/s | 1 | What its team account is charged, with its neighbours' (the pairing rule) |
-| Its forward line, averaged over 1 s, mm/s | 1 | What the commanded speed compares (the pairing rule): with its neighbours', most of the body's speed. Its own velocity swings within every stride and cannot tell it |
+| Its forward line, averaged over 1 s, mm/s (from run 22 its plain speed along the line, `match_plain_speed`) | 1 | What the commanded speed compares (the pairing rule): with its neighbours', most of the body's speed. Its own velocity swings within every stride and cannot tell it |
 | Joint forces of the step: the front joint's along the body, and its two joints' net force along | 2 | A reflex: being pulled now |
 | Its last action | 9 | What it is doing; across the blocks, what its neighbours just did |
 
@@ -74,6 +74,15 @@ Its world's commanded speed, averaged over 1 s, lower in bends
 ([reward.md](reward.md#the-commanded-speed)) (`observe_command`): the bend
 lowers it across the whole body, beyond what the unit sees of the line;
 legged robots observe their command the same way (Rudin et al. 2021).
+
+**Not where the lines start straight** (run 22, the review of 2026-10-23).
+Each input is normalised by its running spread, the square root of its
+variance plus 10⁻⁸. While every line is straight the command is exactly
+67 mm/s, so its spread is 0, and the first bend, 1 mm/s lower, comes out
+at −10,000, clipped to −10, on weights never trained; with the earlier
+cycles' hundreds of millions of samples in the statistics, it would stay
+near the clip for many cycles. Run 22, whose curves wait for the wave, does
+not observe it; the trail shows each unit the bends.
 
 ## In all
 
