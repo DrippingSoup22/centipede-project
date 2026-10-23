@@ -231,7 +231,8 @@ class CPUBackend:
         on the floor adds ``scale`` times its normal force, and a foot also
         the part along its segment's forward axis. Two legs touching press
         both segments alike; each segment's total adds ``scale`` times itself
-        and its square.
+        and its square, and the rear segment of the two adds ``scale`` times
+        the press to its press from ahead.
         """
         data = self.world_data[world_index]
         mapping = self.mapping
@@ -273,6 +274,13 @@ class CPUBackend:
         )
         effort["leg_leg_force"] += scale * pressed
         effort["leg_leg_force_squared"] += scale * pressed**2
+        legs = owners[~on_floor]
+        between = legs[:, 0] != legs[:, 1]
+        np.add.at(
+            effort["leg_ahead_force"],
+            legs[between].max(axis=1),
+            scale * normal_force[~on_floor][between],
+        )
 
         # The shape on the floor, and the floor's force on it.
         shape_end = floor_first[on_floor].astype(int)

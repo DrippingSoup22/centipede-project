@@ -22,7 +22,7 @@ Each 20 ms step, for unit i, in mm/s:
 
 ```text
 team_i = v* − |v̄ − v*|  −  c · Ē_i
-own_i  = − carry_i  −  p · L_i        (p · L_i from run 22)
+own_i  = − carry_i  −  p · L_i  −  pain_i      (p · L_i from run 22, pain_i from run 24)
 ```
 
 | Symbol | What it is | Setting |
@@ -33,6 +33,7 @@ own_i  = − carry_i  −  p · L_i        (p · L_i from run 22)
 | c | The energy's price, in mm/s per mJ/s: 0.4 in stage 1 | `mm_per_mj` |
 | L_i | From run 22: the mean, over unit i and the units behind it within its radius, of 1 − exp(−d / σ), d each one's distance from the line | `line_distance_scale_mm` (σ) |
 | p | The line's price, in mm/s | `line_price_mm_per_s` |
+| pain_i | From run 24: its legs' press with the legs of the units ahead, averaged over 1 s, squared ([pain](#pain-paid-by-the-unit-behind-from-run-24)) | `pain_price`, `pain_behind_only` |
 | carry_i | Runs 12 and 13: the weight its own feet do not carry, in unit weights, averaged over 1 s, at 50 mm/s each. From run 14: each foot's load, averaged over 1 s, beyond a quarter either way of half the unit's weight, at the same price | `carry_price`, `carry_per_leg`, `carry_band` |
 
 The speed is averaged before it is compared with v*, because |v̄ − v*| is
@@ -282,6 +283,46 @@ stride's single-foot stances average out.
 Left open: a foot that stays down and slides (the team's speed charges it),
 and turns, where the inner legs carry more (the user, 2026-10-22: to
 revisit when the line bends).
+
+## Pain, paid by the unit behind (from run 24)
+
+The user's design (2026-10-23), to give the following rule a side. Runs 12
+to 23 found every wave pattern paying about the same and each unit
+joining whichever neighbour ordered first; wherever order started first
+became a source, and the pattern froze. In centipede models each leg
+follows the leg ahead (Yasui et al. 2022, [research.md](research.md)).
+Here two legs touching press both units alike, as the cooperators' pain
+did, but only the unit behind pays: each unit is charged for keeping its
+legs out of the way of those ahead, and the front unit's legs are free,
+so that, while the walk forms, the unit behind is the one that adapts.
+
+- **The charge**: the unit's press with the legs of the units ahead, in
+  unit weights, averaged over 1 s as the carry's loads are, squared, at
+  `pain_price` fully commanded motors for a leg's strongest push. The
+  average keeps a single kick from setting a batch's own advantages (the
+  cooperators' critic check: a rare collision squared made most of the own
+  channel's spread); it also makes a brief kick nearly free.
+- **Ramped with the energy**: pain is weighed by the energy's ramp, 0.2
+  of its price until the walk holds the command, then full over 128
+  cycles, so that it does not take the start's exploring away.
+- **Seen**: each unit observes the press it pays for
+  ([observations.md](observations.md)), as it observes its energy and its
+  feet's loads.
+
+**The ledger** (Training's `archive/ledger/ledger_24_straight.txt` and
+`contact_measure.txt`, 2026-10-24). On v6 neighbouring legs touch rarely:
+the scripted wave over 7 units, the wave run backward, two waves and legs
+in step pay no pain at all (under 0.0005 mJ/s a unit at a price of 1);
+legs sweeping in random phase pay 0.055, fresh networks at most 0.0001,
+run 22 seed 2's walk 0.0006 at unit 1, whose legs the legs ahead press on
+a quarter of its steps. **Pain does not prefer a wave's direction**: it
+can act only on how the units learn, through the mistimed steps of the
+forming walk. At a price of 100 it is about nothing for fresh networks
+(0.02 mm/s), about 11 mm/s for legs sweeping in random phase, and
+sweeping half as far, pain's escape (the cooperators' run 22: the legs
+learned to sweep less long before they learned when), still loses to the
+timed wave by about 30 mm/s; above about 200 the escape would beat
+mistimed full sweeps. Every fault still pays less than the good walk.
 
 ## Left out
 

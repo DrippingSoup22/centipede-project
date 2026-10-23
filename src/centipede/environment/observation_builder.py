@@ -14,6 +14,7 @@ def block_size(
     energy: bool = False,
     line_speed: bool = False,
     carry_per_leg: bool = False,
+    pain: bool = False,
 ) -> int:
     """Values in a unit's block, for M leg motors: gravity's direction,
     velocity and turning rate (3 each), leg angles and speeds (M each), the
@@ -21,9 +22,10 @@ def block_size(
     legs' press (1) and the averaged joint forces (3) if ``priced_forces``,
     the feet's averaged load (1, or each foot's, 2, with ``carry_per_leg``)
     if ``carry``, the averaged energy (1) if
-    ``energy``, the averaged forward line (1) if ``line_speed``, the step's
-    joint forces (2), and the last action (M + 1): 47 with ankles, 43 without
-    the priced forces, 44 with the carry instead."""
+    ``energy``, the averaged forward line (1) if ``line_speed``, the averaged
+    press its pain is priced on (1) if ``pain``, the step's joint forces (2),
+    and the last action (M + 1): 47 with ankles, 43 without the priced
+    forces, 44 with the carry instead."""
     return (
         19
         + 3 * leg_motor_count
@@ -31,6 +33,7 @@ def block_size(
         + int(carry) * (2 if carry_per_leg else 1)
         + int(energy)
         + int(line_speed)
+        + int(pain)
     )
 
 
@@ -69,8 +72,10 @@ class ObservationBuilder:
     the legs' press and the averaged joint forces are left out; with
     ``carry`` the feet's averaged load follows the averaged joint forces
     (each foot's, left then right, with ``carry_per_leg``),
-    with ``energy`` the unit's averaged energy in mJ/s follows them, and
-    with ``line_speed`` its averaged forward line in mm/s.
+    with ``energy`` the unit's averaged energy in mJ/s follows them,
+    with ``line_speed`` its averaged forward line in mm/s, and with ``pain``
+    its legs' averaged press on others' legs (on those ahead only, with
+    ``pain_behind_only``).
     Forces are in unit weights. The blocks are laid end to end in the
     neighbour table's order, followed by the unit's trail
     (``Line.trail``) and its world's tow level, with ``command`` its world's
@@ -94,6 +99,8 @@ class ObservationBuilder:
         carry_per_leg: bool = False,
         command: bool = False,
         current_command: bool = False,
+        pain: bool = False,
+        pain_behind_only: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -106,8 +113,16 @@ class ObservationBuilder:
         self.carry_per_leg = carry_per_leg
         self.command = command
         self.current_command = current_command
+        self.pain = pain
+        self.pain_behind_only = pain_behind_only
         self.block_size = block_size(
-            leg_motor_count, priced_forces, carry, energy, line_speed, carry_per_leg
+            leg_motor_count,
+            priced_forces,
+            carry,
+            energy,
+            line_speed,
+            carry_per_leg,
+            pain,
         )
         self.neighbour_table = neighbour_table(
             segment_count, observation_radius, device
@@ -181,6 +196,9 @@ class ObservationBuilder:
             averaged.append(averaged_energy[..., None])
         if self.line_speed:
             averaged.append(averaged_forward_line[..., None])
+        if self.pain:
+            column = 8 if self.pain_behind_only else 4
+            averaged.append(averaged_forces[..., column, None])
         step_forces = torch.cat(
             (state.front_joint_force[..., None], state.net_joint_force[..., :1]),
             dim=-1,

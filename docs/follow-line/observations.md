@@ -94,12 +94,22 @@ and spread are taken over about the last 10 update cycles
 changing. The two inputs are new to run 22's walk: their weights start at
 0, and the walk starts as it was.
 
+## The pain: 1 value in each block (from run 24)
+
+The press of the unit's legs with the legs of the units ahead, in unit
+weights, averaged over 1 s: what its pain is priced on
+([reward.md](reward.md#pain-paid-by-the-unit-behind-from-run-24))
+(`observe_pain`), after the averaged forward line. The units see it for
+themselves and their neighbours, as they see the averaged energy.
+
 ## In all
 
 5 × 46 + 15 + 1 = **246 values** for each of the ten agents; from run 14,
 with each foot's averaged load, 5 × 47 + 15 + 1 = **251**; in stage 2, with
 the command, **252**; in stage 3, with the command averaged and as it
-stands, **253**. Each agent normalises its own inputs with running
+stands, **253**; from run 24, with the pain in each block (and without
+the command), 5 × 48 + 15 + 1 = **256**. Each agent normalises its own
+inputs with running
 statistics: over every step since the start, or from run 23 over about the
 last 10 update cycles.
 
