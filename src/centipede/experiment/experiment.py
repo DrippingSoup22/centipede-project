@@ -242,7 +242,7 @@ def train(configuration: Configuration, configuration_path: Path) -> Path:
     # leaves incomplete is not written.
     recorder = loop.diagnostics.recorder
     scene = (
-        RecordingScene.from_run(configuration, environment) if record_worlds else None
+        RecordingScene.from_run(environment) if record_worlds else None
     )
     recording_first_cycle = completed_cycles + 1
     if recording_first_cycle in recording_starts:
@@ -749,7 +749,7 @@ def evaluate(configuration: Configuration, evaluation: EvaluationSettings) -> Pa
     stem = f"{datetime.now():%Y-%m-%d_%H%M%S}_{checkpoint_path.stem}"
     recorder = loop.diagnostics.recorder
     scene = (
-        RecordingScene.from_run(configuration, environment)
+        RecordingScene.from_run(environment)
         if evaluation.record
         else None
     )

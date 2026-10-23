@@ -12,6 +12,50 @@ from centipede.environment.simulation.model_mapping import (
 )
 from centipede.environment.simulation.settings import SimulationSettings
 
+# The body file's flat floor, which a terrain replaces.
+FLOOR_NAME = "floor"
+# What every terrain shape takes from the floor: how it collides and its
+# contacts behave, its marks (owner -1, the floor's category) and its look.
+FLOOR_SETTINGS = (
+    "contype",
+    "conaffinity",
+    "condim",
+    "priority",
+    "friction",
+    "solref",
+    "solimp",
+    "solmix",
+    "margin",
+    "gap",
+    "userdata",
+    "material",
+)
+
+
+def model_spec(settings: SimulationSettings) -> mujoco.MjSpec:
+    """The body's model, standing on the terrain if the settings name one.
+
+    A body file brings its own flat floor, the shape named ``floor``. A
+    terrain file holds only ground: shapes in its world, such as a height
+    field, and the assets they use. MuJoCo's model editor (``MjSpec``) joins
+    the two in memory, so that neither file changes: the terrain's world is
+    attached to the body's, its names prefixed with ``terrain_``, every
+    shape there takes the floor's settings (``FLOOR_SETTINGS``), and the
+    floor is deleted. Only the ground's shape changes, never its contact.
+    """
+    spec = mujoco.MjSpec.from_file(str(settings.model_path))
+    if settings.terrain_path is None:
+        return spec
+    floor = spec.geom(FLOOR_NAME)
+    terrain = mujoco.MjSpec.from_file(str(settings.terrain_path))
+    spec.attach(terrain, prefix="terrain_", frame=spec.worldbody.add_frame())
+    for shape in spec.worldbody.geoms:
+        if shape.name != FLOOR_NAME:
+            for name in FLOOR_SETTINGS:
+                setattr(shape, name, getattr(floor, name))
+    spec.delete(floor)
+    return spec
+
 
 def physics_steps_per_action(model: mujoco.MjModel) -> int:
     """How many of the model's timesteps make one 20 ms action.
@@ -47,6 +91,8 @@ class PhysicsSimulation:
     backend. ``physical_state`` is refreshed in place by every ``reset`` and
     ``step``, and so is ``diagnostics.facts``, the simulation's diagnostics
     category. ``body_measures`` are the body's sizes, read from the model.
+    ``model_xml`` is the model as one XML document, the terrain joined in,
+    as recordings keep it.
     """
 
     def __init__(
@@ -61,7 +107,9 @@ class PhysicsSimulation:
         effort fields after every physics step, and with
         ``measure_joint_forces`` its front joint forces.
         """
-        model = mujoco.MjModel.from_xml_path(str(settings.model_path))
+        spec = model_spec(settings)
+        model = spec.compile()
+        self.model_xml = spec.to_xml()
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
         if measure_effort:

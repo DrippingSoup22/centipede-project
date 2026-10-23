@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import mujoco
 import numpy as np
 from mujoco_replay.recording import Recording
 
@@ -33,13 +32,11 @@ class RecordingScene:
     score_name: str
 
     @classmethod
-    def from_run(
-        cls, configuration: Configuration, environment: Environment
-    ) -> "RecordingScene":
-        """Read the model once as a single document, includes resolved."""
-        model_path = configuration.environment.simulation.model_path
+    def from_run(cls, environment: Environment) -> "RecordingScene":
+        """Read from the running environment, the model as one document:
+        includes resolved and the terrain joined in."""
         return cls(
-            model_xml=mujoco.MjSpec.from_file(str(model_path)).to_xml(),
+            model_xml=environment.simulation.model_xml,
             frame_seconds=environment.simulation.step_duration_s,
             score_name=environment.diagnostics.score_name,
         )

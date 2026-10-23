@@ -7,6 +7,8 @@ and forwarding.
 
 from pathlib import Path
 
+import mujoco
+import numpy as np
 import pytest
 import torch
 
@@ -47,6 +49,35 @@ def test_a_timestep_that_does_not_fit_the_action_is_rejected(tmp_path):
 
     with pytest.raises(ModelContractError, match="timestep"):
         PhysicsSimulation(settings(model_path=str(uneven)))
+
+
+def test_a_terrain_replaces_the_floor_and_keeps_its_contact(tmp_path):
+    """The joined model as a recording keeps it: the terrain's height field
+    in the floor's place, with the floor's contact settings and marks."""
+    terrain = tmp_path / "bump.xml"
+    terrain.write_text(
+        """<mujoco>
+  <asset>
+    <hfield name="bump" nrow="3" ncol="3" size="0.2 0.2 0.002 0.001"
+            elevation="0 0 0  0 1 0  0 0 0" />
+  </asset>
+  <worldbody><geom name="ground" type="hfield" hfield="bump" /></worldbody>
+</mujoco>""",
+        encoding="utf-8",
+    )
+    simulation = PhysicsSimulation(settings(terrain_path=str(terrain)))
+    simulation.reset(seed=1)
+    simulation.step(torch.zeros(1, 8, 6))
+
+    joined = mujoco.MjModel.from_xml_string(simulation.model_xml)
+    body = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    ground, floor = joined.geom("terrain_ground").id, body.geom("floor").id
+    assert joined.ngeom == body.ngeom
+    assert joined.geom_type[ground] == mujoco.mjtGeom.mjGEOM_HFIELD
+    for field in ("geom_friction", "geom_solref", "geom_solimp", "geom_condim"):
+        joined_value, floor_value = getattr(joined, field), getattr(body, field)
+        assert np.array_equal(joined_value[ground], floor_value[floor])
+    assert list(joined.geom_user[ground]) == [-1, 0]
 
 
 def test_body_measures_are_read_from_the_model():

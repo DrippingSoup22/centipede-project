@@ -18,6 +18,10 @@ class SimulationSettings:
     its episode ends there. MuJoCo Warp guards nothing against non-finite
     values by design, and mjlab, the framework its guide names, restarts such
     worlds the same way. With 0, the default, any such world stops the run.
+
+    ``terrain_path`` (from 2026-10-24) names a terrain file, whose ground
+    replaces the model's flat floor (``simulation.model_spec``). Without it,
+    the default, the body stands on the model's own floor.
     """
 
     model_path: Path
@@ -28,6 +32,7 @@ class SimulationSettings:
     constraints_per_world: int
     start_heading_range_deg: float
     max_restarted_worlds_per_action: int
+    terrain_path: Path | None = None
 
     @classmethod
     def from_section(cls, values: dict) -> "SimulationSettings":
@@ -50,6 +55,7 @@ class SimulationSettings:
             max_restarted_worlds_per_action=section.integer(
                 "max_restarted_worlds_per_action", default=0, minimum=0
             ),
+            terrain_path=section.path("terrain_path", default=None),
         )
         section.reject_unknown_keys()
         return settings
