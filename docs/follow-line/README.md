@@ -21,6 +21,10 @@ The body learns to walk by following a line on the ground (the user's plan,
    neighbouring legs in a steady phase lag.
 2. **Lines that curve**, gradually, so that the wave carries the body
    through turns.
+3. **A speed that changes** (the user's plan, 2026-10-23): one speed an
+   episode over a widening range, then changing within it, stops included,
+   so that the body has an economical gait at every speed before a head
+   chooses the speed.
 
 The next job, on its own branch, is `hunt-target`: a leader draws the line
 toward a target, and the body follows it.
@@ -33,11 +37,11 @@ checkpoint at a larger one ([reward.md](reward.md)).
 
 | Part | File | In short |
 | --- | --- | --- |
-| Task | [task.md](task.md) | The tester on a line laid along the body (until run 15, at a small random angle): straight in stage 1; in stage 2 (from run 21) bending piece by piece beyond the head, sharper at each level the body earns (from run 22 the curves wait for the wave to start forming and mix the levels reached); 20 s episodes; a world that loses the line restarts; a fading tow at the start |
+| Task | [task.md](task.md) | The tester on a line laid along the body (until run 15, at a small random angle): straight in stage 1; in stage 2 (from run 21) bending piece by piece beyond the head, sharper at each level the body earns (from run 22 the curves wait for the wave to start forming and mix the levels reached); in stage 3 (from run 23) the commanded speed drawn and held at levels that rise on speed, economy and the line: one speed an episode over a widening range, then changing every 10 to 3 s, stops included; 20 s episodes; a world that loses the line restarts; a fading tow at the start |
 | Reward | [reward.md](reward.md) | The team is paid near a commanded speed, 67 mm/s, and each unit charged its neighbourhood's muscle energy; each unit's own account is charged its carry: from run 14 each foot's load beyond a quarter either way of half the unit's weight, over 1 s; from run 22 the speed is matched plainly and each unit charged for being off the line, itself and the units behind it that it places |
-| Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1) |
+| Observations | [observations.md](observations.md) | Five units' bodies (46 values each), the line inside the unit's sight (15), the tow (1); from run 23 the command, averaged over 1 s and as it stands (2) |
 | Actions | [actions.md](actions.md) | Eight leg motors and the spine joint behind, every 20 ms: targets on v6, torques on v5 |
-| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3 (runs 18 to 20 also cooled it from the head; from run 22 a floor under it); PPO, discount 0.99 |
+| Critic and learning | [critic.md](critic.md) | Two critics per unit, team and own, 1 : 1, each seeing the five units (from run 16 the actor may see only those ahead); gSDE from 0.3 (runs 18 to 20 also cooled it from the head; from run 22 a floor under it); from run 23 the observations' statistics over about 10 update cycles; PPO, discount 0.99 |
 
 ## The bodies
 
@@ -82,7 +86,12 @@ was tuned on a body that could not twist.
   networks decide. A noise front meant to let order form at the head first
   failed in runs 18 to 20 ([critic.md](critic.md)): order starts as the
   walk is learned, at any noise or price used so far, most often at an end
-  pair or where a seed's networks put it.
+  pair or where a seed's networks put it. Curves while the wave formed (run
+  22) changed neither; the same seed's networks gave the same source in
+  runs 14, 16, 17 and 22. One wave is no longer sought at any cost (the
+  user, 2026-10-23): real centipedes change their wave with speed and
+  ground (Kuroda et al. 2022; Diaz et al. 2023), and stage 3 asks for
+  speeds.
 
 - **The head**, as its own segment, on a later model.
 - **The carry in turns**: the inner legs carry more in a bend, which the

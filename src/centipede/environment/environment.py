@@ -12,7 +12,9 @@ training with a tow calls ``start_tow`` and ``reserve_measuring_worlds``
 first, ``adjust_tow`` after each update cycle, and reads ``tow.facts``,
 ``untowed_line`` and ``untowed_walk``. With curves it calls
 ``adjust_curve_level`` after each update cycle of training and keeps the
-level in checkpoints (``line.level``, ``line.set_level``).
+level in checkpoints (``line.level``, ``line.set_level``); with the speeds'
+levels likewise ``adjust_speed_level``, reads ``speed_judgement`` and keeps
+``speeds.level``.
 """
 
 import math
@@ -30,6 +32,7 @@ from centipede.environment.reward_function import (
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.environment.simulation.constants import ACTION_DURATION_S
+from centipede.environment.speeds import CHANGE_WINDOW_S, Speeds
 from centipede.environment.tow import GROUPS, Tow
 
 
@@ -113,6 +116,7 @@ class Environment:
             settings.observe_line_speed,
             settings.reward.carry_per_leg,
             settings.observe_command,
+            settings.observe_current_command,
         )
         self.observation_size = self.observation_builder.observation_size
         self.behind_observation_entries = self.observation_builder.behind_entries
@@ -181,11 +185,29 @@ class Environment:
         )
         # Each world's commanded speed, mm/s, averaged as the forward line is,
         # from the straight command at an episode's start (the body on its
-        # straight part); with slow_in_bends it falls in bends.
+        # straight part), or with the speeds' schedule from 0, as the body's
+        # speed; with slow_in_bends it falls in bends.
         self.commanded_speed = settings.reward.commanded_speed_mm_per_s
         self.averaged_command = torch.full(
             (world_count,), self.commanded_speed, device=self.device
         )
+        # Stage 3: each world's command follows the speeds' schedule, whose
+        # levels begin at once or once the curves reach their last.
+        self.speeds = None
+        if settings.speeds.level_hold_s:
+            self.speeds = Speeds(
+                settings.speeds, self.commanded_speed, world_count, self.device
+            )
+            if not settings.speeds.start_after_curves:
+                self.speeds.set_level(0)
+        # The untowed measuring worlds drawn at the speeds' level reached,
+        # since it was last judged: their speed error's sum and steps, the
+        # same within CHANGE_WINDOW_S of a change, their energy in mJ and
+        # distance in mm while the command is above 0, and their lost lines;
+        # the update cycles since; the last judgement's facts (None before).
+        self.speed_sums = torch.zeros(7, device=self.device)
+        self.speed_cycles_at_level = 0
+        self.speed_judgement: dict[str, float] | None = None
         # The untowed measuring worlds' lost lines and steps, those laid at
         # the level reached alone, and the update cycles, since the curves'
         # level was last judged; the share of their episodes they kept the
@@ -272,6 +294,54 @@ class Environment:
         self.judged_world_steps.zero_()
         self.cycles_at_level = 0
 
+    def adjust_speed_level(self) -> bool:
+        """After an update cycle of training, with the speeds' levels: before
+        they begin, begin them once the curves reach their last level (with
+        ``start_after_curves``); then, once ``level_judged_cycles`` cycles
+        have passed since the level was last judged, judge it on the untowed
+        measuring worlds drawn at it (``SpeedSettings``), keep the facts in
+        ``speed_judgement``, raise the level by one, up to the last, if they
+        pass, and start counting again. Returns whether it rose; waits for
+        the GPU once each judgement."""
+        speeds = self.speeds
+        if speeds is None or not self.tow.worlds_per_group:
+            return False
+        settings = self.settings.speeds
+        if speeds.level < 0:
+            if self.line.level == self.line.level_count - 1:
+                speeds.set_level(0)
+                self.speed_sums.zero_()
+            return False
+        self.speed_cycles_at_level += 1
+        if self.speed_cycles_at_level < settings.level_judged_cycles:
+            return False
+        error, steps, early_error, early_steps, energy, distance, lost = (
+            self.speed_sums.tolist()
+        )
+        self.speed_sums.zero_()
+        self.speed_cycles_at_level = 0
+        if not steps:
+            return False
+        later_steps = steps - early_steps
+        self.speed_judgement = judgement = {
+            "level": speeds.level,
+            "error": error / steps,
+            "error_after_change": early_error / early_steps if early_steps else None,
+            "error_later": (error - early_error) / later_steps if later_steps else None,
+            "energy_per_mm": energy / distance if distance > 0 else None,
+            "kept_share": 1 - lost * self.settings.max_episode_steps / steps,
+        }
+        passed = (
+            judgement["error"] <= settings.level_up_speed_error_mm_per_s
+            and judgement["energy_per_mm"] is not None
+            and judgement["energy_per_mm"] <= settings.level_up_energy_mj_per_mm
+            and judgement["kept_share"] >= settings.level_up_kept_share
+        )
+        if not passed or speeds.level >= speeds.level_count - 1:
+            return False
+        speeds.set_level(speeds.level + 1)
+        return True
+
     def reset(self, seed: int | None = None) -> torch.Tensor:
         """Start a new episode in every world; return the observations.
 
@@ -334,12 +404,8 @@ class Environment:
         forward_line = self.reward.forward_line(
             progress, self.line.distance, self.line.angle
         )
-        command = self.commanded_speed
-        if self.settings.reward.slow_in_bends:
-            bend = self.line.curvature.abs().mean(dim=1)
-            command = self.commanded_speed / (1 + self.body.foot_reach_m * bend)
         self.averaged_command += self.forces.averaging_rate * (
-            command - self.averaged_command
+            self._command() - self.averaged_command
         )
         self.averaged_forward_line += self.forces.averaging_rate * (
             forward_line / ACTION_DURATION_S - self.averaged_forward_line
@@ -375,6 +441,32 @@ class Environment:
             judged = untowed * (self.line.world_levels == self.line.level)
             self.lost_lines += strayed.float() @ judged
             self.judged_world_steps += judged.sum()
+        speeds = self.speeds
+        if speeds is not None and speeds.level >= 0 and self.tow.worlds_per_group:
+            untowed = self.tow.groups[GROUPS.index("without tow")]
+            judged = untowed * (speeds.world_levels == speeds.level)
+            error = (
+                self.averaged_forward_line.mean(dim=1) - self.averaged_command
+            ).abs()
+            window = round(CHANGE_WINDOW_S / ACTION_DURATION_S)
+            early = (speeds.steps_since_change < window).float()
+            moving = (speeds.speeds > 0).float()
+            self.speed_sums += (
+                torch.stack(
+                    (
+                        error,
+                        torch.ones_like(error),
+                        error * early,
+                        early,
+                        own_energy.sum(dim=-1).mean(dim=-1) * moving,
+                        progress.mean(dim=-1) * 1e3 * moving,
+                        strayed.float(),
+                    )
+                )
+                @ judged
+            )
+        if speeds is not None:
+            speeds.step(self.generator)
         truncated = (
             (self.episode_steps >= self.settings.max_episode_steps)
             | strayed
@@ -427,7 +519,13 @@ class Environment:
         )
         self.last_action.masked_fill_(world_mask[:, None, None], 0.0)
         self.averaged_forward_line.masked_fill_(world_mask[:, None], 0.0)
-        self.averaged_command.masked_fill_(world_mask, self.commanded_speed)
+        if self.speeds is None:
+            self.averaged_command.masked_fill_(world_mask, self.commanded_speed)
+        else:
+            # A restart is a change from rest: the command is averaged from 0,
+            # as the body's speed is, so their gap is the body's own lag.
+            self.speeds.restart(world_mask, self.generator)
+            self.averaged_command.masked_fill_(world_mask, 0.0)
         self.averaged_accelerations.masked_fill_(world_mask[:, None], 0.0)
         self.averaged_energy.masked_fill_(world_mask[:, None], 0.0)
         self.last_motor_force.masked_fill_(world_mask[:, None, None], 0.0)
@@ -436,6 +534,16 @@ class Environment:
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity
             )
         )
+
+    def _command(self) -> torch.Tensor | float:
+        """Each world's command on this step, mm/s: the speeds' schedule's or
+        the reward's commanded speed, lowered in bends with ``slow_in_bends``
+        just enough for the outer feet to keep it."""
+        command = self.commanded_speed if self.speeds is None else self.speeds.speeds
+        if self.settings.reward.slow_in_bends:
+            bend = self.line.curvature.abs().mean(dim=1)
+            command = command / (1 + self.body.foot_reach_m * bend)
+        return command
 
     def _joint_velocity(self) -> torch.Tensor:
         """Each unit's leg joints' speeds and the spine joint's behind it,
@@ -446,6 +554,11 @@ class Environment:
         )
 
     def _observations(self) -> torch.Tensor:
+        current_command = None
+        if self.settings.observe_current_command:
+            current_command = torch.as_tensor(
+                self._command(), device=self.device
+            ).expand(self.world_count)
         return self.observation_builder.build(
             self.simulation.physical_state,
             self.last_action,
@@ -455,4 +568,5 @@ class Environment:
             self.averaged_energy,
             self.averaged_forward_line,
             self.averaged_command,
+            current_command,
         )

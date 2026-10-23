@@ -26,10 +26,12 @@ from centipede.environment.settings import (
     CurveSettings,
     EnvironmentSettings,
     RewardSettings,
+    SpeedSettings,
     TowSettings,
 )
 from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
+from centipede.environment.speeds import Speeds
 from centipede.environment.tow import Tow
 from centipede.settings_section import SettingsError
 
@@ -228,6 +230,85 @@ def test_the_curves_may_wait_straight_and_mix_the_levels_reached():
     assert set(levels.tolist()) == {0, 1}
     assert (tightest[levels == 0] <= 4.0 + 1e-4).all()
     assert (tightest[levels == 1] > 4.0 + 1e-4).any()
+
+
+def test_the_speeds_hold_each_draw_and_rise_only_on_an_economical_walk():
+    """Stage 3. Two levels, mixed: the first keeps a speed of 50 to 85 mm/s
+    the whole episode, the second holds one of 0 to 100 for 2 steps, half of
+    them stops; stops need a range from 0. Before the levels begin every
+    world holds 67. On the headless tester, levels judged every cycle: each
+    unit sees the command averaged, from 0 at a restart, and as it stands; a
+    walk within 8 mm/s of it at 0.04 mJ for each mm raises the level, one at
+    0.08 does not."""
+    with pytest.raises(SettingsError, match="stops"):
+        SpeedSettings.from_section(
+            {
+                "level_hold_s": [0.0],
+                "level_low_mm_per_s": [30.0],
+                "level_high_mm_per_s": [100.0],
+                "level_stop_share": [0.2],
+            }
+        )
+    settings = SpeedSettings.from_section(
+        {
+            "level_hold_s": [0.0, 0.04],
+            "level_low_mm_per_s": [50.0, 0.0],
+            "level_high_mm_per_s": [85.0, 100.0],
+            "level_stop_share": [0.0, 0.5],
+            "mixed_levels": True,
+        }
+    )
+    speeds, every = Speeds(settings, 67.0, 64, "cpu"), torch.ones(64, dtype=torch.bool)
+    generator = torch.Generator().manual_seed(0)
+    speeds.restart(every, generator)
+    assert (speeds.speeds == 67.0).all() and (speeds.world_levels == -1).all()
+
+    speeds.set_level(1)
+    speeds.restart(every, generator)
+    first, second = speeds.world_levels == 0, speeds.world_levels == 1
+    assert first.any() and second.any()
+    drawn = speeds.speeds.clone()
+    assert ((drawn[first] >= 50) & (drawn[first] <= 85)).all()
+    assert (drawn[second] == 0).any() and (drawn[second] <= 100).all()
+    speeds.step(generator)
+    speeds.step(generator)
+    assert (speeds.speeds[first] == drawn[first]).all()
+    assert (speeds.speeds[second] != drawn[second]).any()
+    assert (speeds.steps_since_change[second] == 0).all()
+    assert (speeds.steps_since_change[first] == 2).all()
+
+    environment = Environment(
+        EnvironmentSettings.from_section(
+            {
+                "max_episode_steps": 3,
+                "stagger_first_episodes": False,
+                "observe_command": True,
+                "observe_current_command": True,
+                "simulation": HEADLESS,
+                "reward": {"commanded_speed_mm_per_s": 67.0},
+                "speeds": {
+                    "level_hold_s": [0.0, 0.0],
+                    "level_low_mm_per_s": [30.0, 30.0],
+                    "level_high_mm_per_s": [30.0, 90.0],
+                    "level_stop_share": [0.0, 0.0],
+                    "level_judged_cycles": 1,
+                },
+            }
+        )
+    )
+    environment.reserve_measuring_worlds(1)
+    observations = environment.reset(seed=0)
+    # The command averaged from 0 at a restart, as the body's speed, and as
+    # it stands.
+    torch.testing.assert_close(
+        observations[..., -2:], torch.tensor([0.0, 30.0]).expand(2, 10, 2)
+    )
+    # An error of 6 mm/s over 300 steps, 0.08 mJ for each mm, none lost.
+    environment.speed_sums.copy_(torch.tensor([1800, 300, 0, 0, 80, 1000, 0.0]))
+    assert not environment.adjust_speed_level() and environment.speeds.level == 0
+    assert environment.speed_judgement["energy_per_mm"] == pytest.approx(0.08)
+    environment.speed_sums.copy_(torch.tensor([1800, 300, 0, 0, 40, 1000, 0.0]))
+    assert environment.adjust_speed_level() and environment.speeds.level == 1
 
 
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():

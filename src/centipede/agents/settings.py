@@ -103,6 +103,10 @@ class AgentSettings:
     ahead (Yasui et al. 2022), while its critics still see every unit whose
     energy the team account charges it (docs/follow-line/critic.md).
     Normalised observations are clipped to plus or minus ``observation_clip``.
+    The observations' running mean and spread weigh every observation since
+    the start or, with ``observation_normalization_horizon``, about that many
+    latest update cycles' (stage 3: an input that changes how it varies, such
+    as the command once the speeds' levels begin, is followed within it).
     Actor and critic each get their own ``optimizer``, with ``weight_decay``
     (and, for SGD, ``momentum``); their learning rate follows
     ``learning_rate_schedule`` over the run's update cycles
@@ -139,6 +143,7 @@ class AgentSettings:
     momentum: float
     normaliser_epsilon: float
     observation_clip: float
+    observation_normalization_horizon: int
     advantage_weights: tuple[float, ...]
     value_normalization: bool
     value_normalization_horizon: int
@@ -234,6 +239,9 @@ class AgentSettings:
                 "normaliser_epsilon", default=1e-8
             ),
             observation_clip=section.positive_number("observation_clip", default=10.0),
+            observation_normalization_horizon=section.integer(
+                "observation_normalization_horizon", default=0, minimum=0
+            ),
             advantage_weights=section.number_list(
                 "advantage_weights", default=(), minimum=0.0
             ),

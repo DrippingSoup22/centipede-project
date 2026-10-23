@@ -404,6 +404,93 @@ class CurveSettings:
 
 
 @dataclass(frozen=True)
+class SpeedSettings:
+    """The [environment.speeds] section (docs/follow-line/task.md, the
+    speeds, stage 3): the commanded speed changes, level by level. Without
+    levels every world keeps the reward's ``commanded_speed_mm_per_s``.
+
+    At each restart a world draws a speed at its level: 0 with the level's
+    share in ``level_stop_share``, else evenly between its
+    ``level_low_mm_per_s`` and ``level_high_mm_per_s``; it holds it for the
+    level's ``level_hold_s``, then draws again (a hold of 0 keeps it the
+    whole episode). Stops belong to the levels whose range starts at 0. The
+    levels begin at once, or with ``start_after_curves`` once the curves
+    reach their last level, and rise by one, after at least
+    ``level_judged_cycles`` update cycles at a level, when the untowed
+    mean-action worlds drawn at it, over those cycles, kept their speed,
+    averaged over 1 s, within ``level_up_speed_error_mm_per_s`` of the
+    command, averaged alike, on the mean; spent at most
+    ``level_up_energy_mj_per_mm`` for each mm while the command was above 0
+    (a unit's energy over its distance, so that a quick, tapping gait does
+    not pass); and kept the line through ``level_up_kept_share`` of their
+    episodes. With ``mixed_levels`` each world draws its level evenly up to
+    the one reached, as the curves do.
+    """
+
+    level_hold_s: tuple[float, ...]
+    level_low_mm_per_s: tuple[float, ...]
+    level_high_mm_per_s: tuple[float, ...]
+    level_stop_share: tuple[float, ...]
+    start_after_curves: bool
+    mixed_levels: bool
+    level_judged_cycles: int
+    level_up_speed_error_mm_per_s: float
+    level_up_energy_mj_per_mm: float
+    level_up_kept_share: float
+
+    @classmethod
+    def from_section(cls, values: dict) -> "SpeedSettings":
+        section = SettingsSection(values, "environment.speeds")
+        settings = cls(
+            level_hold_s=section.number_list("level_hold_s", default=(), minimum=0.0),
+            level_low_mm_per_s=section.number_list(
+                "level_low_mm_per_s", default=(), minimum=0.0
+            ),
+            level_high_mm_per_s=section.number_list(
+                "level_high_mm_per_s", default=(), minimum=0.0
+            ),
+            level_stop_share=section.number_list(
+                "level_stop_share", default=(), minimum=0.0
+            ),
+            start_after_curves=section.boolean("start_after_curves", default=False),
+            mixed_levels=section.boolean("mixed_levels", default=False),
+            level_judged_cycles=section.positive_integer(
+                "level_judged_cycles", default=16
+            ),
+            level_up_speed_error_mm_per_s=section.positive_number(
+                "level_up_speed_error_mm_per_s", default=8.0
+            ),
+            level_up_energy_mj_per_mm=section.positive_number(
+                "level_up_energy_mj_per_mm", default=0.05
+            ),
+            level_up_kept_share=section.number(
+                "level_up_kept_share", default=0.9, minimum=0.0, maximum=1.0
+            ),
+        )
+        section.reject_unknown_keys()
+        levels = (
+            settings.level_hold_s,
+            settings.level_low_mm_per_s,
+            settings.level_high_mm_per_s,
+            settings.level_stop_share,
+        )
+        if len({len(values) for values in levels}) > 1:
+            raise SettingsError(
+                "[environment.speeds] give each level a hold, a range and a stop"
+                " share: level_hold_s, level_low_mm_per_s, level_high_mm_per_s"
+                " and level_stop_share must be as long"
+            )
+        for low, high, stops in zip(*levels[1:], strict=True):
+            if low > high or stops > 1 or (stops and low):
+                raise SettingsError(
+                    "[environment.speeds] each level's low must be at most its"
+                    " high, its stop share at most 1, and only a range from 0"
+                    " stops"
+                )
+        return settings
+
+
+@dataclass(frozen=True)
 class EnvironmentSettings:
     """The [environment] section, with its nested sections (docs/follow-line/).
 
@@ -423,7 +510,9 @@ class EnvironmentSettings:
     and with ``observe_line_speed`` its forward line in mm/s averaged as the
     commanded speed averages it. With ``observe_command`` every unit also
     sees the commanded speed in mm/s, averaged as its speed is, which bends
-    lower with the reward's ``slow_in_bends``.
+    lower with the reward's ``slow_in_bends``, and with
+    ``observe_current_command`` the command as it stands on the step, so that
+    a change of the speeds' schedule shows at once.
     """
 
     max_episode_steps: int
@@ -437,10 +526,12 @@ class EnvironmentSettings:
     observe_energy: bool
     observe_line_speed: bool
     observe_command: bool
+    observe_current_command: bool
     simulation: SimulationSettings
     reward: RewardSettings
     tow: TowSettings
     curves: CurveSettings
+    speeds: SpeedSettings
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -476,12 +567,28 @@ class EnvironmentSettings:
             observe_energy=section.boolean("observe_energy", default=False),
             observe_line_speed=section.boolean("observe_line_speed", default=False),
             observe_command=section.boolean("observe_command", default=False),
+            observe_current_command=section.boolean(
+                "observe_current_command", default=False
+            ),
             simulation=SimulationSettings.from_section(section.table("simulation")),
             reward=RewardSettings.from_section(section.table("reward")),
             tow=TowSettings.from_section(section.table("tow")),
             curves=CurveSettings.from_section(section.table("curves")),
+            speeds=SpeedSettings.from_section(section.table("speeds")),
         )
         section.reject_unknown_keys()
+        if settings.speeds.level_hold_s and not (
+            settings.reward.commanded_speed_mm_per_s
+        ):
+            raise SettingsError(
+                "[environment.speeds] the levels change the commanded speed:"
+                " set [environment.reward] commanded_speed_mm_per_s"
+            )
+        if settings.speeds.start_after_curves and settings.line_shape != "curved":
+            raise SettingsError(
+                '[environment.speeds] start_after_curves waits for a "curved"'
+                " line's last level"
+            )
         if (
             settings.line_shape == "curved"
             and not settings.curves.level_tightest_radius_body_lengths

@@ -68,7 +68,7 @@ nothing ahead of it.
 Its world's tow level, a force each unit feels on itself, zero in every
 evaluation ([task.md](task.md#the-tow)).
 
-## The command: 1 value (stage 2)
+## The command: up to 2 values (stages 2 and 3)
 
 Its world's commanded speed, averaged over 1 s, lower in bends
 ([reward.md](reward.md#the-commanded-speed)) (`observe_command`): the bend
@@ -84,12 +84,24 @@ cycles' hundreds of millions of samples in the statistics, it would stay
 near the clip for many cycles. Run 22, whose curves wait for the wave, does
 not observe it; the trail shows each unit the bends.
 
+**From run 23 (stage 3)** the command changes ([task.md](task.md#the-speeds-stage-3)),
+and each unit sees it twice: averaged over 1 s, what its speed is compared
+with (`observe_command`), and as it stands on the step
+(`observe_current_command`), since a change moves the 1-s average by only
+2% of its size on the first step and would show late. Each input's mean
+and spread are taken over about the last 10 update cycles
+([critic.md](critic.md)), so the inputs follow the command once it starts
+changing. The two inputs are new to run 22's walk: their weights start at
+0, and the walk starts as it was.
+
 ## In all
 
 5 × 46 + 15 + 1 = **246 values** for each of the ten agents; from run 14,
 with each foot's averaged load, 5 × 47 + 15 + 1 = **251**; in stage 2, with
-the command, **252**. Each agent
-normalises its own inputs with running statistics.
+the command, **252**; in stage 3, with the command averaged and as it
+stands, **253**. Each agent normalises its own inputs with running
+statistics: over every step since the start, or from run 23 over about the
+last 10 update cycles.
 
 ## Left out
 

@@ -73,8 +73,9 @@ class ObservationBuilder:
     with ``line_speed`` its averaged forward line in mm/s.
     Forces are in unit weights. The blocks are laid end to end in the
     neighbour table's order, followed by the unit's trail
-    (``Line.trail``) and its world's tow level, and with ``command`` its
-    world's averaged commanded speed in mm/s. ``behind_entries``
+    (``Line.trail``) and its world's tow level, with ``command`` its world's
+    averaged commanded speed in mm/s, and with ``current_command`` the
+    command as it stands on the step, mm/s. ``behind_entries``
     marks the entries of the units behind, ``(observation_size,)``.
     """
 
@@ -92,6 +93,7 @@ class ObservationBuilder:
         line_speed: bool = False,
         carry_per_leg: bool = False,
         command: bool = False,
+        current_command: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -103,6 +105,7 @@ class ObservationBuilder:
         self.line_speed = line_speed
         self.carry_per_leg = carry_per_leg
         self.command = command
+        self.current_command = current_command
         self.block_size = block_size(
             leg_motor_count, priced_forces, carry, energy, line_speed, carry_per_leg
         )
@@ -117,6 +120,7 @@ class ObservationBuilder:
             + TRAIL_VALUES
             + 1
             + int(command)
+            + int(current_command)
         )
         # The units behind are the table's last observation_radius blocks.
         self.behind_entries = torch.zeros(
@@ -137,6 +141,7 @@ class ObservationBuilder:
         averaged_energy: torch.Tensor | None = None,
         averaged_forward_line: torch.Tensor | None = None,
         averaged_command: torch.Tensor | None = None,
+        current_command: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every unit's observation, ``(W, N, observation_size)``.
 
@@ -147,7 +152,9 @@ class ObservationBuilder:
         mJ/s, read with ``energy``; ``averaged_forward_line`` each unit's
         averaged forward line, ``(W, N)`` mm/s, read with ``line_speed``;
         ``averaged_command`` each world's averaged commanded speed, ``(W,)``
-        mm/s, read with ``command``. The gather creates a new tensor, so a
+        mm/s, read with ``command``; ``current_command`` each world's command
+        on the step, ``(W,)`` mm/s, read with ``current_command``. The gather
+        creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
         """
         state = physical_state
@@ -198,6 +205,8 @@ class ObservationBuilder:
         world_values = [tow_levels]
         if self.command:
             world_values.append(averaged_command)
+        if self.current_command:
+            world_values.append(current_command)
         worlds = torch.stack(world_values, dim=-1)[:, None]
         return torch.cat(
             (neighbour_blocks, trail, worlds.expand(-1, self.segment_count, -1)),

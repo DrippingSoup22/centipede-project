@@ -10,7 +10,8 @@ A headless tester, v5 or v6: ten units alike, ten agents
 ## A world's episode
 
 ```text
-restart: the model's pose, a new line through the body (stage 2: bending beyond the head)
+restart: the model's pose, a new line through the body (stage 2: bending beyond the head),
+         a commanded speed (stage 3: drawn at its level)
    │  every 20 ms each unit acts; the team is paid near a commanded speed
    ├─ the units lose the line (their mean distance beyond the sight radius) ─┐
    └─ 20 s pass ─────────────────────────────────────────────────────────────┴─ restart
@@ -107,6 +108,79 @@ the robots that solve its top level back to a random one, against
 forgetting (Rudin et al. 2021), and a policy trained on new states loses
 skills on those it no longer visits (Wołczyk et al. 2024). The level is
 judged by the worlds laid at it alone.
+
+## The speeds (stage 3)
+
+Designed with the user on 2026-10-23, once the body walked and followed
+curving lines (run 22): the commanded speed changes, so that the body finds
+an economical gait at every speed and learns to move between them. A head
+will choose the speed in a later stage; until then the task draws it and
+every unit sees it ([observations.md](observations.md#the-command-up-to-2-values-stages-2-and-3)),
+as an animal's descending command reaches every segment: the lamprey's
+reticulospinal cells start, keep and stop locomotion along the whole cord
+(Daghfous et al. 2016), and a fly's descending neurons start its forward
+walking (Bidaye et al. 2020). `[environment.speeds]` sets the levels;
+without them the command stays at 67 mm/s.
+
+- **Holds.** At each restart a world draws a speed at its level and holds
+  it for the level's hold, then draws again; a hold of 0 keeps it the whole
+  episode. The speed is drawn evenly in the level's range, or 0, a stop,
+  with the level's stop share; stops belong only to levels whose range
+  starts at 0 (the user, 2026-10-23).
+- **The pay is the same** ([reward.md](reward.md#the-commanded-speed)): the
+  body's speed and the command, each averaged over 1 s, so that the lag
+  after a change counts the same on both sides; a restart is a change from
+  rest. In bends the command falls as in stage 2, whatever the speed.
+
+| Level | The speed holds for | Range | Stops | What it teaches |
+| ---: | --- | --- | --- | --- |
+| 1 | the whole episode | 50 to 85 mm/s | none | a good gait near the old command |
+| 2 | the whole episode | 30 to 100 mm/s | none | a good gait at every speed |
+| 3 | the whole episode | 0 to 100 mm/s | one episode in five | standing when told |
+| 4 | 10 s | 0 to 100 mm/s | one hold in five | moving between speeds, slowly |
+| 5 | 7 s | 0 to 100 mm/s | one hold in five | |
+| 6 | 5 s | 0 to 100 mm/s | one hold in five | |
+| 7 | 3 s | 0 to 100 mm/s | one hold in five | moving between speeds, often |
+
+**Speeds first, then changes** (the user's agreement, 2026-10-23): the body
+finds an economical gait for each speed before it must move between them,
+so the changing levels teach only the moves; with mixed levels the easier
+ones stay in training.
+
+**The range's top, 100 mm/s**, 1.5 body lengths a second, the top of *S.
+heros*' 0.5 to 1.5 ([reward.md](reward.md#numbers-fixed-by-measurement)).
+The scripted wave reaches 135 mm/s at 7 strokes a second, but spends 0.053
+mJ for each mm there, against 0.030 to 0.037 from 46 to 99 mm/s (the study's
+archive, `ledger/speed_steps.txt`).
+
+**The holds leave time to learn, not to move.** A coordinated walk reaches a
+new speed within a stroke: after the largest jumps, from standing to 135
+mm/s and from 46 to 115, the scripted wave's speed, averaged over 1 s,
+stays within 6.5 mm/s of the command averaged alike, and within 3.6 mm/s
+after a jump between neighbouring speeds (0, 81, 135 mm/s) (the same file). What the body needs time for is finding an
+economical gait, which the level's judgement waits for.
+
+**A level rises** by one, at most once in 16 update cycles, when the untowed
+noise-free worlds drawn at it, over those cycles:
+
+- kept their speed within **8 mm/s** of the command on the mean, both
+  averaged over 1 s, as in stage 2's sign;
+- spent at most **0.05 mJ for each mm** while the command was above 0: a
+  unit's energy over its distance, which changes little with the speed (the
+  scripted wave spends 0.030 to 0.041 from 46 to 115 mm/s, run 22's learned
+  walk 0.035 to 0.044). A quick, tapping gait that holds the speed spends
+  several times as much (0.27 in run 11, against the scripted wave's 0.025
+  on v6; 0.10 to 0.17 in run 12) and does not pass: a body pushed through
+  the levels before it finds an economical gait would learn to tap (the
+  user, 2026-10-23);
+- kept the line through **90%** of their episodes.
+
+Legged robots widen their commands' range where they succeed in the same
+way (Margolis et al. 2022). Each judgement is logged: the speed error,
+within 2 s of a change and after, the energy for each mm and the lines kept.
+The level is kept in checkpoints. With `start_after_curves` the levels begin
+once the curves reach their last level; before, the level is −1 and the
+command 67 mm/s.
 
 ## The tow
 

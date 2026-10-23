@@ -195,6 +195,22 @@ the path). Roads, railways and car-like robots follow paths whose curvature
 is bounded and changes at a bounded rate, made of straight lines, arcs and
 clothoids (Fraichard & Scheuer 2004).
 
+**Speeds** (searched 2026-10-23, for stage 3). An animal's brain starts,
+keeps and stops locomotion through descending command cells: the lamprey's
+reticulospinal cells drive the whole cord (Daghfous et al. 2016), and two
+descending pathways start a fly's forward walking (Bidaye et al. 2020).
+Legged robots learn a controller that follows commanded speeds, drawn anew
+during training (Rudin et al. 2021), over a range widened where the robot
+succeeds (Margolis et al. 2022); minimising energy gives each speed its own
+gait (Fu et al. 2021). Centipedes speed up mostly with longer strides at a
+nearly constant tempo (Kuroda et al., above), and change their wave's
+direction with speed and ground (Kuroda et al. 2022): on rough ground *S.
+sexspinosus* turns its flat-ground direct wave into a retrograde one, the
+front leg stepping first (Diaz et al. 2023). A centipede model coordinates only when its
+body's stiffness suits the stepping rate, which centipedes adjust with
+speed (Dionne, Giardina & Mahadevan 2026, a preprint): our trunk's springs
+are fixed.
+
 ## 5. Our runs against the literature
 
 | What runs 01 to 11 showed | What the literature says |
@@ -253,7 +269,9 @@ Cooperation with local views
 
 Centipedes and decentralised walking
 - Anderson, Shultz & Jayne, Axial kinematics and muscle activity during terrestrial locomotion of the centipede *Scolopendra heros*, J. Exp. Biol. 198, 1995, [JEB](https://journals.biologists.com/jeb/article/198/5/1185/6885/Axial-Kinematics-and-Muscle-Activity-During)
-- Kuroda, Uchida & Nakagaki, Dynamic gait transition in the Scolopendromorpha *Scolopocryptops rubiginosus* L. Koch centipede, bioRxiv 2018 (preprint), [doi 10.1101/312280](https://www.biorxiv.org/content/10.1101/312280v1)
+- Kuroda, Uchida & Nakagaki, Dynamic gait transition in the Scolopendromorpha *Scolopocryptops rubiginosus* L. Koch centipede, bioRxiv 2018, [doi 10.1101/312280](https://www.biorxiv.org/content/10.1101/312280v1); Bioinspiration & Biomimetics 17(2) 026005, 2022
+- Daghfous, Green, Alford, Zielinski & Dubuc, Sensory activation of command cells for locomotion and modulatory mechanisms: lessons from lampreys, Frontiers in Neural Circuits 10, 2016, [doi 10.3389/fncir.2016.00018](https://www.frontiersin.org/articles/10.3389/fncir.2016.00018/full)
+- Bidaye, Laturney, Chang, Liu, Bockemühl, Büschges & Scott, Two brain pathways initiate distinct forward walking programs in *Drosophila*, Neuron 108(3), 2020, [doi 10.1016/j.neuron.2020.07.032](https://pmc.ncbi.nlm.nih.gov/articles/PMC9435592)
 - Yasui, Sakai, Kano, Owaki & Ishiguro, Decentralized control scheme for myriapod robot inspired by adaptive and resilient centipede locomotion, PLOS ONE 2017, [PMC5289600](https://pmc.ncbi.nlm.nih.gov/articles/PMC5289600)
 - Yasui, Takano, Kano & Ishiguro, Adaptive centipede walking via synergetic coupling between decentralized control and flexible body dynamics, Frontiers in Robotics and AI 9, 2022, [doi 10.3389/frobt.2022.797566](https://www.frontiersin.org/articles/10.3389/frobt.2022.797566/full)
 - Aoi, Egi & Tsuchiya, Instability-based mechanism for body undulations in centipede locomotion, Physical Review E 87, 2013, [APS](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.87.012717)

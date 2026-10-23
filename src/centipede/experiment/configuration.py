@@ -341,6 +341,11 @@ def _check_mean_action_worlds(configuration: Configuration) -> None:
             "[environment.curves] start_speed_mm_per_s waits for what the"
             " untowed mean-action worlds do: set [run] mean_action_worlds_per_group"
         )
+    if environment.speeds.level_hold_s and not worlds_per_group:
+        raise SettingsError(
+            "[environment.speeds] the levels rise by what the untowed"
+            " mean-action worlds do: set [run] mean_action_worlds_per_group"
+        )
 
 
 # -- Helpers --------------------------------------------------------------------

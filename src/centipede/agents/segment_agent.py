@@ -115,11 +115,14 @@ class SegmentAgent:
         # Scheduled spreads are set by the experiment, never learned.
         if settings.action_std_schedule != "learned":
             actor_network.log_std.requires_grad_(False)
+        # The statistics take one batch a step: a horizon in update cycles is
+        # a window's steps each.
         self.observation_normaliser = ObservationNormalizer(
             observation_size,
             "running",
             epsilon=settings.normaliser_epsilon,
             clip_limit=settings.observation_clip,
+            horizon=settings.observation_normalization_horizon * rollout_window_steps,
             device=device,
         )
         self.rollout_storage = RolloutStorage(

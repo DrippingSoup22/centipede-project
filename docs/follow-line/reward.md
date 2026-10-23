@@ -28,7 +28,7 @@ own_i  = − carry_i  −  p · L_i        (p · L_i from run 22)
 | Symbol | What it is | Setting |
 | --- | --- | --- |
 | v̄ | The body's speed along the line: the units' mean forward line, each averaged over 1 s; from run 22 their mean plain speed along it ([keeping the line](#keeping-the-line-from-run-22)) | `match_plain_speed` |
-| v* | The commanded speed, 67 mm/s | `commanded_speed_mm_per_s` |
+| v* | The commanded speed, 67 mm/s; from stage 3 (run 23) the speeds' schedule's, the pay keeping 67 as its constant ([the commanded speed](#the-commanded-speed)) | `commanded_speed_mm_per_s`, `[environment.speeds]` |
 | Ē_i | The mean energy spent on the step by the units within unit i's radius, itself and up to two each side (those present), mJ/s | `neighbourhood_energy` |
 | c | The energy's price, in mm/s per mJ/s: 0.4 in stage 1 | `mm_per_mj` |
 | L_i | From run 22: the mean, over unit i and the units behind it within its radius, of 1 − exp(−d / σ), d each one's distance from the line | `line_distance_scale_mm` (σ) |
@@ -89,6 +89,17 @@ The task sets how fast to go, and the body finds how to walk that fast.
 | Straight | 67 mm/s |
 | 3 body lengths | 61.5 mm/s |
 | 1 body length | 53 mm/s |
+
+- **A changing command** (stage 3, from run 23, [task.md](task.md#the-speeds-stage-3)).
+  The command is the speeds' schedule's speed, lowered in bends as above,
+  and the team is paid 67 − |v̄ − command|: the constant stays, so a stop
+  pays as much as walking at the command, and only the gap is charged.
+  Both are averaged over 1 s, so the lag after a change counts the same on
+  both sides; a restart is a change from rest, the command averaged from 0
+  as the body's speed is. At c = 2 the pay keeps the body at the command
+  up to 100 mm/s and beyond: each mm/s below it costs 1, while the energy a
+  scripted wave saves by going 1 mm/s slower is worth 0.1 (near 90 mm/s) to
+  0.25 (near 125) (the study's archive, `ledger/speed_steps.txt`).
 
 ## Keeping the line (from run 22)
 
