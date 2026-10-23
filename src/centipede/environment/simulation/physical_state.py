@@ -10,7 +10,6 @@ EFFORT_FIELDS = (
     "floor_forward_force",
     "leg_leg_force",
     "leg_leg_force_squared",
-    "leg_ahead_force",
     "motor_positive_work",
     "motor_negative_work",
     "motor_force",
@@ -65,10 +64,6 @@ class PhysicalState:
     floor_forward_force: torch.Tensor
     leg_leg_force: torch.Tensor  # (W, N), between the segment's and others' legs
     leg_leg_force_squared: torch.Tensor  # (W, N), its square's mean, N²
-    # (W, N), the part of leg_leg_force between the segment's legs and those
-    # of the segments ahead of it (lower numbers): each contact counts once,
-    # for its rear segment
-    leg_ahead_force: torch.Tensor
     motor_positive_work: torch.Tensor  # (W, N), leg motors and spine motor behind
     motor_negative_work: torch.Tensor  # (W, N), the same motors braking, positive
     # (W, N, M + 1), each leg motor's force and the spine motor's behind,
@@ -121,7 +116,6 @@ class PhysicalState:
             floor_forward_force=zeros(n),
             leg_leg_force=zeros(n),
             leg_leg_force_squared=zeros(n),
-            leg_ahead_force=zeros(n),
             motor_positive_work=zeros(n),
             motor_negative_work=zeros(n),
             motor_force=zeros(n, m + 1),

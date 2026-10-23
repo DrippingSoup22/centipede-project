@@ -355,7 +355,6 @@ def _clear_effort(
     floor_forward_force: wp.array2d[float],
     leg_leg_force: wp.array2d[float],
     leg_leg_force_squared: wp.array2d[float],
-    leg_ahead_force: wp.array2d[float],
     motor_positive_work: wp.array2d[float],
     motor_negative_work: wp.array2d[float],
     motor_force: wp.array3d[float],
@@ -373,7 +372,6 @@ def _clear_effort(
     floor_forward_force[world_index, segment_index] = 0.0
     leg_leg_force[world_index, segment_index] = 0.0
     leg_leg_force_squared[world_index, segment_index] = 0.0
-    leg_ahead_force[world_index, segment_index] = 0.0
     motor_positive_work[world_index, segment_index] = 0.0
     motor_negative_work[world_index, segment_index] = 0.0
 
@@ -400,7 +398,6 @@ def _add_contact_forces(
     belly_normal_force: wp.array2d[float],
     floor_forward_force: wp.array2d[float],
     leg_leg_pressed: wp.array2d[float],
-    leg_ahead_force: wp.array2d[float],
 ) -> None:
     """Add one physics step's contact forces of the masked worlds.
 
@@ -414,9 +411,8 @@ def _add_contact_forces(
     as a push); a foot or body shape also its normal force, and a foot the
     part along the tilted axis, as the segment feels it; two legs touching
     add their normal force, unscaled, to both owners' ``leg_leg_pressed``,
-    which ``_add_segment_effort`` then takes in, and ``scale`` times it to the
-    rear owner's ``leg_ahead_force``. Several contacts may touch one shape, so
-    the forces are added atomically.
+    which ``_add_segment_effort`` then takes in. Several contacts may touch
+    one shape, so the forces are added atomically.
     """
     contact_index = wp.tid()
     if contact_index >= nacon[0]:
@@ -439,15 +435,6 @@ def _add_contact_forces(
                 world_index,
                 geom_owner_indices[pair[end]],
                 normal_force,
-            )
-        owner_a = geom_owner_indices[pair[0]]
-        owner_b = geom_owner_indices[pair[1]]
-        if owner_a != owner_b:
-            wp.atomic_add(
-                leg_ahead_force,
-                world_index,
-                wp.max(owner_a, owner_b),
-                scale * normal_force,
             )
         return
 
@@ -980,7 +967,6 @@ class GPUBackend:
             floor_forward,
             leg_leg,
             leg_leg_squared,
-            leg_ahead,
             *motors,
         ) = self._effort
         wp.launch(
@@ -1006,7 +992,6 @@ class GPUBackend:
                 belly,
                 floor_forward,
                 self._leg_leg_pressed,
-                leg_ahead,
             ],
             device=self.device,
         )

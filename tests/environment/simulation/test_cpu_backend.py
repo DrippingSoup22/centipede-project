@@ -311,8 +311,7 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     assert state.motor_positive_work.sum() == state.motor_negative_work.sum() == 0
 
     # Segments 2 and 3 sweep their left legs toward each other: both feel the
-    # same press, and only they; a mean of squares is at least the squared mean;
-    # the press from ahead is segment 3's alone, the rear one of the two.
+    # same press, and only they; a mean of squares is at least the squared mean.
     actions = torch.zeros(1, SEGMENT_COUNT, 6)
     actions[0, 2, 0], actions[0, 3, 0] = -1.0, 1.0
     for _ in range(3):
@@ -321,9 +320,6 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     assert pressed[2] == pressed[3] > 0.1 * weight / SEGMENT_COUNT
     assert pressed.sum() == pytest.approx(2 * pressed[2].item())
     assert state.leg_leg_force_squared[0, 2] >= pressed[2] ** 2
-    expected_ahead = torch.zeros(SEGMENT_COUNT)
-    expected_ahead[3] = pressed[3]
-    assert torch.allclose(state.leg_ahead_force[0], expected_ahead)
     assert (state.motor_positive_work[0, 2:4] > 0).all()
     # A torque motor's force is its command, as a share of its strength.
     assert torch.allclose(state.motor_force[0, :, :-1], actions[0])

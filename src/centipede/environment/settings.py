@@ -43,12 +43,9 @@ class RewardSettings:
     second, as that rate squared (a muscle's cost of turning its force on
     and off, van der Zee & Kuo 2021). Pain
     costs ``pain_price`` of a fully commanded motor at a leg's strongest push,
-    hanging ``hanging_price`` of it for each unit weight held. Two legs
-    touching press both units alike, and both pay the pain; with
-    ``pain_behind_only`` only the unit behind pays it, so that each unit's
-    legs keep out of the way of those ahead and the front unit's are free.
-    A millijoule counts ``mm_per_mj`` millimetres (0: no millijoule part
-    counts). The motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
+    hanging ``hanging_price`` of it for each unit weight held. A millijoule
+    counts ``mm_per_mj`` millimetres (0: no millijoule part counts). The
+    motion costs ``motion_price`` mm a second for each (rad/s)² of a unit's
     joints' squared speeds, added up, and the accelerations
     ``acceleration_price`` for each (rad/s²)² of their squared changes of
     speed. With ``acceleration_halving`` above 0 the accelerations take a
@@ -100,7 +97,6 @@ class RewardSettings:
     braking_price: float
     switching_price: float
     pain_price: float
-    pain_behind_only: bool
     hanging_price: float
     motion_price: float
     acceleration_price: float
@@ -148,7 +144,6 @@ class RewardSettings:
             braking_price=section.number("braking_price", default=0.25, minimum=0.0),
             switching_price=section.number("switching_price", default=0.0, minimum=0.0),
             pain_price=section.number("pain_price", default=1.0, minimum=0.0),
-            pain_behind_only=section.boolean("pain_behind_only", default=False),
             hanging_price=section.number("hanging_price", default=2.0, minimum=0.0),
             motion_price=section.number("motion_price", default=0.0, minimum=0.0),
             acceleration_price=section.number(
@@ -513,9 +508,7 @@ class EnvironmentSettings:
     (each foot's, with the reward's ``carry_per_leg``), and with
     ``observe_energy`` its energy in mJ/s averaged as the energy's share is,
     and with ``observe_line_speed`` its forward line in mm/s averaged as the
-    commanded speed averages it; with ``observe_pain`` it holds the press its
-    pain is priced on, averaged as the pain averages it, in unit weights.
-    With ``observe_command`` every unit also
+    commanded speed averages it. With ``observe_command`` every unit also
     sees the commanded speed in mm/s, averaged as its speed is, which bends
     lower with the reward's ``slow_in_bends``, and with
     ``observe_current_command`` the command as it stands on the step, so that
@@ -532,7 +525,6 @@ class EnvironmentSettings:
     observe_carry: bool
     observe_energy: bool
     observe_line_speed: bool
-    observe_pain: bool
     observe_command: bool
     observe_current_command: bool
     simulation: SimulationSettings
@@ -574,7 +566,6 @@ class EnvironmentSettings:
             observe_carry=section.boolean("observe_carry", default=False),
             observe_energy=section.boolean("observe_energy", default=False),
             observe_line_speed=section.boolean("observe_line_speed", default=False),
-            observe_pain=section.boolean("observe_pain", default=False),
             observe_command=section.boolean("observe_command", default=False),
             observe_current_command=section.boolean(
                 "observe_current_command", default=False

@@ -117,8 +117,6 @@ class Environment:
             settings.reward.carry_per_leg,
             settings.observe_command,
             settings.observe_current_command,
-            settings.observe_pain,
-            settings.reward.pain_behind_only,
         )
         self.observation_size = self.observation_builder.observation_size
         self.behind_observation_entries = self.observation_builder.behind_entries

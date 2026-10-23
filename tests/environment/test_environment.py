@@ -348,13 +348,12 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     progress = 1e-3 * torch.tensor([[2.0, 0.5, 0.5, -0.5, 0.5]])
     distance = 1e-3 * torch.tensor([[0.0, 0.0, 2.5, 0.0, 0.0]])
     angle = torch.tensor([[0.0, 0.0, 0.0, 0.0, math.radians(60)]])
-    averaged = torch.zeros(1, SEGMENTS, 9)
+    averaged = torch.zeros(1, SEGMENTS, 8)
     averaged[0, :, 0] = torch.tensor([0.3, -0.1, 0.0, -0.1, -0.1])  # along
     averaged[0, :, 1] = torch.tensor([1.0, 0.1, 0.0, 0.0, 0.0])  # up
     averaged[0, :, 2] = torch.tensor([0.0, -0.5, 0.2, -0.2, 0.0])  # front joint
     averaged[0, 2, 3] = 0.2  # belly
     averaged[0, 4, 4] = 2.0  # legs pressed
-    averaged[0, 4, 8] = 1.0  # by the legs of the units ahead
     averaged[0, :, 5] = torch.tensor([1.2, 0.5, 1.0, 1.0, 1.0])  # feet
     tow = torch.tensor([[0.0, 0.0, 0.0, 0.1, 0.1]])
     acceleration = torch.zeros(1, SEGMENTS, LEGS + 1)
@@ -404,14 +403,6 @@ def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs()
     one_account, _, _ = one.compute(*step, *rest)
     torch.testing.assert_close(one_account[..., 0], rewards.sum(dim=-1))
     assert not one_account[..., 1].any()
-    # With pain_behind_only, unit 4 pays for its press with the units ahead.
-    behind = RewardFunction(
-        replace(settings, pain_behind_only=True), body, commanded, 0.005, 2
-    )
-    behind.ramp_weight = 0.5
-    _, parts, _ = behind.compute(*step, *rest)
-    pain = parts[0, :, PART_NAMES.index("pain")]
-    torch.testing.assert_close(pain, -0.0415 * torch.eye(SEGMENTS)[4])
 
 
 @pytest.mark.parametrize(
@@ -440,7 +431,7 @@ def test_the_averaged_speed_caps_the_line_or_sets_its_target(slope, paid_above):
         zeros,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 9),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
@@ -482,7 +473,7 @@ def test_the_accelerations_or_energy_can_take_a_share_of_the_forward_pay(setting
         zeros,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 9),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         accelerations,
@@ -528,7 +519,7 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         averaged_forward_line,
         zeros,
         zeros,
-        torch.zeros(2, SEGMENTS, 9),
+        torch.zeros(2, SEGMENTS, 8),
         zeros,
         torch.zeros(2, SEGMENTS, LEGS + 1),
         zeros,
@@ -587,7 +578,7 @@ def test_with_the_line_priced_each_unit_pays_for_itself_and_the_units_it_places(
         zeros,
         torch.tensor([[0.0, 0.0, 0.0, 0.0, 4e-3]]),
         zeros,
-        torch.zeros(1, SEGMENTS, 9),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
@@ -627,7 +618,7 @@ def test_with_the_units_behind_weighed_less_each_unit_answers_more_for_those_ahe
         zeros,
         zeros,
         zeros,
-        torch.zeros(1, SEGMENTS, 9),
+        torch.zeros(1, SEGMENTS, 8),
         zeros,
         torch.zeros(1, SEGMENTS, LEGS + 1),
         zeros,
@@ -650,7 +641,7 @@ def test_with_the_carry_per_leg_each_foot_is_charged_beyond_its_band():
     settings = RewardSettings.from_section({"carry_price": 10.0, "carry_per_leg": True})
     reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005, 2)
     zeros = torch.zeros(1, SEGMENTS)
-    averaged = torch.zeros(1, SEGMENTS, 9)
+    averaged = torch.zeros(1, SEGMENTS, 8)
     averaged[0, :, 6] = torch.tensor([0.5, 0.6, 1.0, 0.9, 0.2])  # left feet
     averaged[0, :, 7] = torch.tensor([0.5, 0.4, 0.0, 0.9, 0.5])  # right feet
 
@@ -712,7 +703,7 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     last_action = torch.rand(2, SEGMENTS, LEGS + 1)
     # Averaged: along, up, front joint; unit 1 pushes unit 0 with 0.5, and
     # unit 2 is pulled by unit 1 with 2.
-    averaged = torch.zeros(2, SEGMENTS, 9)
+    averaged = torch.zeros(2, SEGMENTS, 8)
     averaged[0, 1, :3] = torch.tensor([0.3, 1.0, -0.5])
     averaged[0, 1, 5] = 0.7  # the feet's load
     averaged[0, 2, 2] = 2.0
