@@ -17,7 +17,7 @@ from centipede.diagnostics_category import WindowSummary
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
 from centipede.environment.ground_view import GROUND_VIEW_VALUES
-from centipede.environment.line import TRAIL_VALUES, Line
+from centipede.environment.line import TRAIL_VALUES, Line, heading
 from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import (
     ENERGY_PARTS,
@@ -1019,3 +1019,49 @@ def test_episodes_start_in_the_weighted_areas_and_the_front_unit_sees_ahead(tmp_
     rise = 0.05 * (2 / 3) * environment.sight_radius_m
     assert (far[:, 2] - near[:, 2]).tolist() == pytest.approx([rise] * 2, rel=0.05)
     assert (far[:, 0] - far[:, 4]).abs().max() < 0.1 * rise
+
+
+def test_a_start_near_the_edge_faces_ground_for_a_whole_episode(tmp_path):
+    """From a start area 5 cm inside the terrain's east edge, with any
+    heading allowed, every world faces a way whose straight walk of an
+    episode at the command (2 s here, 134 mm) stays over the ground, and the
+    ways still differ."""
+    cells, half_m = 41, 0.4
+    with open(tmp_path / "flat.hfield", "wb") as file:
+        np.array([cells, cells], dtype=np.int32).tofile(file)
+        np.zeros((cells, cells), dtype=np.float32).tofile(file)
+    (tmp_path / "flat.xml").write_text(
+        """<mujoco>
+  <asset><hfield name="flat" file="flat.hfield" size="0.4 0.4 0.01 0.01" /></asset>
+  <worldbody>
+    <geom name="ground" type="hfield" hfield="flat" />
+    <site name="start_edge" type="box" pos="0.35 0 0" size="0.01 0.01 0.001" />
+  </worldbody>
+</mujoco>""",
+        encoding="utf-8",
+    )
+    simulation = HEADLESS | {
+        "terrain_path": str(tmp_path / "flat.xml"),
+        "world_count": 16,
+        "start_heading_range_deg": 180.0,
+    }
+    settings = EnvironmentSettings.from_section(
+        {
+            "simulation": simulation,
+            "start_area_weights": {"edge": 1.0},
+            "max_episode_steps": 100,
+            "reward": {"commanded_speed_mm_per_s": 67.0},
+            "stagger_first_episodes": False,
+        }
+    )
+    environment = Environment(settings)
+    environment.reset(seed=1)
+
+    state = environment.simulation.physical_state
+    yaw = heading(state.body_quaternion[:, 0])
+    reach_m = 100 * 0.02 * settings.reward.commanded_speed_mm_per_s / 1000
+    # The front unit's centre stands up to 27 mm ahead of the root, whose
+    # start the rule judges.
+    ends = state.body_planar_position[:, 0, 0] + reach_m * yaw.cos()
+    assert ends.max() < half_m + 0.03
+    assert yaw.std() > 0.3

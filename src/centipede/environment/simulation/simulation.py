@@ -181,6 +181,14 @@ class PhysicsSimulation:
         root = mapping.root_qpos_address
         self._root_qpos = model.qpos0[root : root + 3].copy()
         self._body_reach_m = body_reach_m(model, self._root_qpos)
+        # The front segment's heading in the model pose, which a start's turn
+        # turns (the yaw of its forward axis, as the line reads it).
+        pose = mujoco.MjData(model)
+        mujoco.mj_kinematics(model, pose)
+        w, x, y, z = pose.xquat[mapping.body_ids[0]]
+        self.model_heading_rad = math.atan2(
+            2 * (w * z + x * y), 1 - 2 * (y * y + z * z)
+        )
         # (W,) flags, refreshed by every step: the worlds the GPU backend put
         # back to the step's start after MuJoCo Warp made them non-finite.
         self.restarted_worlds = self.diagnostics.facts.restarted_worlds
@@ -190,12 +198,16 @@ class PhysicsSimulation:
         world_mask: torch.Tensor | None = None,
         seed: int | None = None,
         start_positions: torch.Tensor | None = None,
+        start_turns: torch.Tensor | None = None,
     ) -> None:
         """Reset the selected worlds (all if no mask); see the backends' ``reset``.
 
-        With ``start_positions``, ``(W, 2)`` m, each selected world's body
-        is then moved so that its root stands over its position, lifted by
-        the highest ground within the body's reach of it, plus
+        With ``start_turns``, ``(W,)`` rad, each selected world's body is
+        turned about the vertical by its turn from the model pose (from
+        ``model_heading_rad``) instead of a random one. With
+        ``start_positions``, ``(W, 2)`` m, each selected world's body is
+        then moved so that its root stands over its position, lifted by the
+        highest ground within the body's reach of it, plus
         ``START_CLEARANCE_M``: whatever its heading, it starts above the
         ground and drops onto it.
         """
@@ -207,7 +219,7 @@ class PhysicsSimulation:
             root_offsets = torch.cat(
                 (start_positions - root[:2], lift[:, None] + START_CLEARANCE_M), dim=-1
             )
-        self._backend.reset(world_mask, seed, root_offsets)
+        self._backend.reset(world_mask, seed, root_offsets, start_turns)
 
     def step(
         self,

@@ -106,6 +106,7 @@ class CPUBackend:
         world_mask: torch.Tensor | None = None,
         seed: int | None = None,
         root_offsets: torch.Tensor | None = None,
+        root_turns: torch.Tensor | None = None,
     ) -> None:
         """Return the selected worlds to the model pose with small leg noise.
 
@@ -117,6 +118,8 @@ class CPUBackend:
         amount. With a start heading range, the whole body is then turned about
         the vertical by a uniform angle within it; the turn is drawn after the
         legs, so the legs' noise is the same with or without it. With
+        ``root_turns``, ``(W,)`` rad, each selected world is turned by its own
+        instead, and nothing is drawn. With
         ``root_offsets``, ``(W, 3)`` m, each selected world's root, and so the
         whole body, is then moved by its offset. The selected worlds' rows of
         the physical state are refreshed.
@@ -129,6 +132,7 @@ class CPUBackend:
         noise_shape = self.mapping.leg_qpos_addresses.shape
         root = self.mapping.root_qpos_address
         offsets = None if root_offsets is None else root_offsets.cpu().numpy()
+        turns = None if root_turns is None else root_turns.cpu().numpy()
         for world_index in selected_world_indices:
             if seed is not None:
                 self.reset_generators[world_index] = np.random.default_rng(
@@ -145,10 +149,13 @@ class CPUBackend:
             data.qvel[self.mapping.leg_dof_addresses] = generator.normal(
                 0.0, LEG_SPEED_NOISE_RAD_S, noise_shape
             )
-            if self.start_heading_range_rad > 0:
-                heading = generator.uniform(
-                    -self.start_heading_range_rad, self.start_heading_range_rad
-                )
+            if turns is not None or self.start_heading_range_rad > 0:
+                if turns is not None:
+                    heading = turns[world_index]
+                else:
+                    heading = generator.uniform(
+                        -self.start_heading_range_rad, self.start_heading_range_rad
+                    )
                 # Turning the root's orientation about the world's vertical
                 # turns the whole body tree with it.
                 address = self.mapping.root_qpos_address + 3

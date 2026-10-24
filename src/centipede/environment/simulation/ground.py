@@ -18,9 +18,10 @@ class Ground:
     ``heights`` and ``highest_near`` read the grid's points (a height field
     is drawn through them; between them MuJoCo cuts each cell into two
     triangles, which the bilinear blend here stands in for). Points beyond
-    the grid take its edge. Without a height field the ground is the plane
-    at height 0. ``start_areas`` maps each ground's name to its area's
-    centre and half sizes, ``(2,)`` m each.
+    the grid take its edge, and ``contains`` tells which points lie over it.
+    Without a height field the ground is the plane at height 0, everywhere.
+    ``start_areas`` maps each ground's name to its area's centre and half
+    sizes, ``(2,)`` m each.
     """
 
     def __init__(self, model: mujoco.MjModel, device: torch.device | str) -> None:
@@ -46,6 +47,9 @@ class Ground:
             ).to(device)
             self.cell = torch.tensor(
                 2 * size[:2] / (np.array([cols, rows]) - 1), dtype=torch.float32
+            ).to(device)
+            self.far_corner = self.corner + 2 * torch.tensor(
+                size[:2], dtype=torch.float32
             ).to(device)
         self.start_areas = {
             model.site(site).name.removeprefix(START_AREA_PREFIX): (
@@ -80,6 +84,13 @@ class Ground:
             + (1 - x) * y * grid[row + 1, col]
             + x * y * grid[row + 1, col + 1]
         )
+
+    def contains(self, points: torch.Tensor) -> torch.Tensor:
+        """Whether each of ``points`` ``(..., 2)`` m lies over the grid:
+        ``(...)``."""
+        if self.flat:
+            return torch.ones(points.shape[:-1], dtype=torch.bool, device=points.device)
+        return ((points >= self.corner) & (points <= self.far_corner)).all(dim=-1)
 
     def highest_near(self, points: torch.Tensor, radius_m: float) -> torch.Tensor:
         """The highest grid point within ``radius_m`` of each of ``points``

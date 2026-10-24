@@ -517,10 +517,13 @@ class EnvironmentSettings:
     From 2026-10-24 (the terrain park, docs/follow-line/terrain.md): with
     ``start_area_weights``, ground name to weight, every episode starts at a
     point drawn uniformly in one of the terrain's start areas, chosen with
-    these weights (the areas left out are never chosen); without them the
-    body starts where the model puts it. With ``observe_ground_ahead`` the
-    front unit sees the ground ahead of it (``GROUND_VIEW_VALUES`` heights,
-    ``environment.ground_view``); the others see zeros there.
+    these weights (the areas left out are never chosen), facing, within the
+    start heading range, a way with ground straight ahead for a whole
+    episode at the command, so that its line leads over the ground; without
+    them the body starts where the model puts it. With
+    ``observe_ground_ahead`` the front unit sees the ground ahead of it
+    (``GROUND_VIEW_VALUES`` heights, ``environment.ground_view``); the
+    others see zeros there.
     """
 
     max_episode_steps: int

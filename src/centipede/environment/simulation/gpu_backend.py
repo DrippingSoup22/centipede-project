@@ -863,6 +863,7 @@ class GPUBackend:
         world_mask: torch.Tensor | None = None,
         seed: int | None = None,
         root_offsets: torch.Tensor | None = None,
+        root_turns: torch.Tensor | None = None,
     ) -> None:
         """Return the selected worlds to the model pose with small leg noise.
 
@@ -871,7 +872,8 @@ class GPUBackend:
         worlds' random sequences, so the same seed repeats the same resets;
         without one, each world's sequence continues with its next reset count.
         With a start heading range, the whole body is then turned about the
-        vertical by a uniform angle within it. With ``root_offsets``, ``(W,
+        vertical by a uniform angle within it; with ``root_turns``, ``(W,)``
+        rad, by each world's own instead. With ``root_offsets``, ``(W,
         3)`` m, each selected world's root, and so the whole body, is then
         moved by its offset.
         """
@@ -905,7 +907,18 @@ class GPUBackend:
             ],
             device=self.device,
         )
-        if self.start_heading_range_rad > 0:
+        if root_turns is not None:
+            # The turn (cos, 0, 0, sin) of each half angle times the root's
+            # orientation (w, x, y, z), as _turn_reset_heading does.
+            address = self.root_quaternion_address
+            qpos = wp.to_torch(self.gpu_data.qpos)
+            w, x, y, z = qpos[mask, address : address + 4].unbind(dim=-1)
+            half = 0.5 * root_turns[mask]
+            c, s = half.cos(), half.sin()
+            qpos[mask, address : address + 4] = torch.stack(
+                (c * w - s * z, c * x - s * y, c * y + s * x, c * z + s * w), dim=-1
+            )
+        elif self.start_heading_range_rad > 0:
             wp.launch(
                 _turn_reset_heading,
                 dim=self.world_count,

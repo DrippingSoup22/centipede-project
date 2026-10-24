@@ -36,6 +36,12 @@ from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.environment.speeds import CHANGE_WINDOW_S, Speeds
 from centipede.environment.tow import GROUPS, Tow
 
+# A start's turns drawn at once, of which the first that faces ground for a
+# whole episode is kept; from the outer corner of the terrain park's corner
+# start areas, the worst place, 44% do, so 16 all miss once in 10,000 starts
+# there (the park's flat border then holds the body).
+START_TURN_TRIES = 16
+
 
 class Environment:
     """Batches of centipede worlds, each following its line.
@@ -372,7 +378,8 @@ class Environment:
         if seed is not None:
             self.generator.manual_seed(seed)
             self.tow.generator.manual_seed(seed)
-        self.simulation.reset(seed=seed, start_positions=self._start_positions())
+        positions, turns = self._starts()
+        self.simulation.reset(seed=seed, start_positions=positions, start_turns=turns)
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
         self.episode_steps.zero_()
         if self.settings.stagger_first_episodes:
@@ -509,7 +516,10 @@ class Environment:
         self.last_action.copy_(joint_action)
         final_observations = observations = self._observations()
         if truncated.any():
-            self.simulation.reset(truncated, start_positions=self._start_positions())
+            positions, turns = self._starts()
+            self.simulation.reset(
+                truncated, start_positions=positions, start_turns=turns
+            )
             self.episode_steps.masked_fill_(truncated, 0)
             self._restart(truncated)
             observations = self._observations()
@@ -521,11 +531,17 @@ class Environment:
             final_observations,
         )
 
-    def _start_positions(self) -> torch.Tensor | None:
-        """Every world's next start, ``(W, 2)`` m: a point drawn uniformly in
-        a start area chosen with ``start_area_weights``; None without them."""
+    def _starts(self) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Every world's next start, or None for both without
+        ``start_area_weights``: a point, ``(W, 2)`` m, drawn uniformly in a
+        start area chosen with the weights, and the body's turn from the
+        model pose, ``(W,)`` rad, drawn within the start heading range among
+        those that face ground for a whole episode, at the command (or the
+        line's cap without one), straight ahead (the first of
+        ``START_TURN_TRIES`` draws that does, else the first): the line laid
+        along the body then leads over the ground."""
         if self._start_weights is None:
-            return None
+            return None, None
         area = torch.multinomial(
             self._start_weights,
             self.world_count,
@@ -535,7 +551,29 @@ class Environment:
         draw = torch.rand(
             (self.world_count, 2), generator=self.generator, device=self.device
         )
-        return self._start_centres[area] + (2 * draw - 1) * self._start_halves[area]
+        positions = (
+            self._start_centres[area] + (2 * draw - 1) * self._start_halves[area]
+        )
+        draw = torch.rand(
+            (self.world_count, START_TURN_TRIES),
+            generator=self.generator,
+            device=self.device,
+        )
+        span = math.radians(self.settings.simulation.start_heading_range_deg)
+        turns = (2 * draw - 1) * span
+        headings = self.simulation.model_heading_rad + turns
+        speed_mm_per_s = (
+            self.commanded_speed or self.settings.reward.line_speed_cap_mm_per_s
+        )
+        reach_m = (
+            self.settings.max_episode_steps * ACTION_DURATION_S * speed_mm_per_s / 1000
+        )
+        ends = positions[:, None] + reach_m * torch.stack(
+            (headings.cos(), headings.sin()), dim=-1
+        )
+        facing = self.simulation.ground.contains(ends)
+        first = facing.int().argmax(dim=1, keepdim=True)
+        return positions, turns.gather(1, first).squeeze(1)
 
     def _restart(self, world_mask: torch.Tensor) -> None:
         """Start the masked worlds' episodes afresh, as they stand after the
