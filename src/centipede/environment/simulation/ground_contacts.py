@@ -716,7 +716,9 @@ def _add_ground_contacts(
     hfield_ncol: wp.array1d[int],
     hfield_adr: wp.array1d[int],
     hfield_data: wp.array1d[float],
-    # The pairs, a height field and a sphere, capsule or convex mesh each:
+    # The pairs, a height field and a sphere, capsule or convex mesh each,
+    # this launch's from first_pair on:
+    first_pair: int,
     pair_geoms: wp.array1d[wp.vec2i],
     pair_field: wp.array1d[int],
     pair_kind: wp.array1d[int],
@@ -763,7 +765,8 @@ def _add_ground_contacts(
     capsule or convex mesh: one for every column the shape overlaps
     (MuJoCo's ``mjc_ConvexHField``), each at the shortest way out of that
     column."""
-    world_index, pair_index = wp.tid()
+    world_index, launch_index = wp.tid()
+    pair_index = first_pair + launch_index
     geoms = pair_geoms[pair_index]
     field = pair_field[pair_index]
     size = hfield_size[field]
@@ -1108,8 +1111,14 @@ class GroundContacts:
         self.gpu_source.geom_conaffinity[fields] = 0
         self.gpu_source.geom_conaffinity[others] |= free_bit
 
-        pairs = [(int(f), int(s)) for f in fields for s in shapes]
+        # The meshes last: their checks take far longer, so they are launched
+        # apart, and the quick ones need not wait for them in the same warp.
+        pairs = sorted(
+            ((int(f), int(s)) for f in fields for s in shapes),
+            key=lambda pair: kinds[shape_types[pair[1]]] == 2,
+        )
         self.pair_count = len(pairs)
+        self.round_pair_count = sum(kinds[shape_types[s]] != 2 for _, s in pairs)
         self._pairs = np.array(pairs, dtype=np.int32).reshape(-1, 2)
         self._field_ids = np.array(
             [model.geom_dataid[f] for f, _ in pairs], dtype=np.int32
@@ -1230,19 +1239,28 @@ class GroundContacts:
     def add(self, gpu_model, gpu_data) -> None:
         """Append the contacts of the data's shape positions (after
         ``mjw.kinematics``) to its contact pool (after ``mjw.collision``)."""
-        if self.pair_count == 0:
-            return
         m, d = gpu_model, gpu_data
         contact = d.contact
+        # The spheres and capsules, then the meshes.
+        for first_pair, count in (
+            (0, self.round_pair_count),
+            (self.round_pair_count, self.pair_count - self.round_pair_count),
+        ):
+            if count > 0:
+                self._launch(m, d, contact, first_pair, count)
+
+    def _launch(self, m, d, contact, first_pair: int, count: int) -> None:
+        """One launch of the kernel over ``count`` pairs from ``first_pair``."""
         wp.launch(
             _add_ground_contacts,
-            dim=(d.nworld, self.pair_count),
+            dim=(d.nworld, count),
             inputs=[
                 m.hfield_size,
                 m.hfield_nrow,
                 m.hfield_ncol,
                 m.hfield_adr,
                 m.hfield_data,
+                first_pair,
                 self.pair_geoms,
                 self.pair_field,
                 self.pair_kind,
