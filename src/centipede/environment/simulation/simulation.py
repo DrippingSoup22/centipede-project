@@ -7,6 +7,9 @@ from centipede.environment.simulation.body_measures import measure_body
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.environment.simulation.cpu_backend import CPUBackend
 from centipede.environment.simulation.model_mapping import (
+    LEFT_FOOT_CATEGORY,
+    LEG_CATEGORY,
+    RIGHT_FOOT_CATEGORY,
     ModelContractError,
     ModelMapping,
 )
@@ -42,6 +45,12 @@ def model_spec(settings: SimulationSettings) -> mujoco.MjSpec:
     attached to the body's, its names prefixed with ``terrain_``, every
     shape there takes the floor's settings (``FLOOR_SETTINGS``), and the
     floor is deleted. Only the ground's shape changes, never its contact.
+
+    On a terrain only a leg's last link, the one carrying its foot, may
+    touch the ground: in run 23's walk the links above it never touched it,
+    flat or rough, and every shape that may touch a height field costs time
+    at every physics step (2026-10-24, benchmarks on the RTX 5090). Their
+    pairs with other legs stay.
     """
     spec = mujoco.MjSpec.from_file(str(settings.model_path))
     if settings.terrain_path is None:
@@ -54,6 +63,13 @@ def model_spec(settings: SimulationSettings) -> mujoco.MjSpec:
             for name in FLOOR_SETTINGS:
                 setattr(shape, name, getattr(floor, name))
     spec.delete(floor)
+    feet = (LEFT_FOOT_CATEGORY, RIGHT_FOOT_CATEGORY)
+    feet_bodies = {
+        shape.parent.name for shape in spec.geoms if shape.userdata[1] in feet
+    }
+    for shape in spec.geoms:
+        if shape.userdata[1] == LEG_CATEGORY and shape.parent.name not in feet_bodies:
+            shape.conaffinity = 0
     return spec
 
 

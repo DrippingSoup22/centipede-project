@@ -53,7 +53,8 @@ def test_a_timestep_that_does_not_fit_the_action_is_rejected(tmp_path):
 
 def test_a_terrain_replaces_the_floor_and_keeps_its_contact(tmp_path):
     """The joined model as a recording keeps it: the terrain's height field
-    in the floor's place, with the floor's contact settings and marks."""
+    in the floor's place, with the floor's contact settings and marks; of a
+    leg, only the link carrying the foot (v3's lower link) touches it."""
     terrain = tmp_path / "bump.xml"
     terrain.write_text(
         """<mujoco>
@@ -78,6 +79,11 @@ def test_a_terrain_replaces_the_floor_and_keeps_its_contact(tmp_path):
         joined_value, floor_value = getattr(joined, field), getattr(body, field)
         assert np.array_equal(joined_value[ground], floor_value[floor])
     assert list(joined.geom_user[ground]) == [-1, 0]
+    upper, lower = (
+        joined.geom(f"segment_00_left_{link}_geom").id for link in ("upper", "lower")
+    )
+    assert joined.geom_conaffinity[upper] == 0
+    assert joined.geom_conaffinity[lower] == body.geom_conaffinity[lower]
 
 
 def test_body_measures_are_read_from_the_model():
