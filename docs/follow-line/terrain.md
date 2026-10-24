@@ -221,8 +221,13 @@ CPU's walked at 59 mm/s. Only the flat ground came out right.
   against a column by its nearest point, or its nearest face when its centre
   is inside; a capsule's axis against a column by the separating-axis test
   when it crosses the column, by the nearest points otherwise; a body shell's
-  convex hull by the separating-axis test (the column's and the hull's face
-  normals and each pair of edges crossed). Every length is taken from the
+  convex hull by the separating-axis test on the faces of the two shapes'
+  Minkowski difference: the column's faces, the hull's, and only the pairs
+  of a hull edge and a column edge whose arcs of face normals cross on the
+  unit sphere (Fogel and Halperin 2007, *Computer-Aided Design* 39(11),
+  doi 10.1016/j.cad.2007.05.017), the other pairs making no face.
+  Testing every pair of edges gives the same contacts, to 0.0005 um over
+  20,000 random poses, ten times slower. Every length is taken from the
   column's own corner, so the field's size costs no precision. MuJoCo Warp
   makes every other contact and is told not to collide inside its step
   (`run_collision_detection`, its way of taking contacts made outside it);
@@ -270,9 +275,11 @@ cost is the height field itself.
   50 prisms at once overflowed MuJoCo Warp's height-field limit and the
   physics went non-finite.
 
-A Pascal GPU (the laptop's MX330) cannot build MuJoCo Warp's convex check
-of a capsule against a height field (its kernel needs more than 4 KB of
-parameters); the park runs on Volta or newer.
+The table measures MuJoCo Warp's own height-field check, before the GPU's
+ground contacts replaced it. A Pascal GPU (the laptop's MX330) runs those
+contacts, but cannot build MuJoCo Warp's checks of the border's boxes (their
+kernels need more than 4 KB of parameters); the whole park runs on Volta or
+newer.
 
 ## Left out
 

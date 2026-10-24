@@ -4,7 +4,8 @@
 # pyright: reportIndexIssue=false, reportAssignmentType=false, reportGeneralTypeIssues=false
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportOperatorIssue=false
 
-"""The contacts of the feet and leg links with a height field, on the GPU.
+"""The contacts of the feet, leg links and body shells with a height field,
+on the GPU.
 
 MuJoCo makes a height field's contacts column by column: each triangle of
 its grid is a column reaching down to the field's base, and a shape gets one
@@ -14,17 +15,17 @@ general convex check (GJK and EPA) in single precision, and at the body's
 scale, feet 0.57 mm wide on columns 3 mm wide, the check fails: a foot whose
 centre dips inside a steep column gets a contact millimetres deep, metres at
 the far end of a 9 m field, and the solver throws the body (2026-10-24, the
-study's Centipede ``archive/gpu_hfield_check/``). A sphere's or a capsule's
-way out of a column has an exact answer, so the GPU computes these contacts
-here, by MuJoCo's rule, with every length taken from the column's own corner
-so that the field's size costs no precision.
+study's Centipede ``archive/gpu_hfield_check/``). A sphere's, a capsule's or
+a convex mesh's way out of a column has an exact answer, so the GPU computes
+these contacts here, by MuJoCo's rule, with every length taken from the
+column's own corner so that the field's size costs no precision.
 
-MuJoCo Warp makes every other contact, the body shells' with the field
-included, and is given a copy of the model in which the spheres and capsules
-no longer meet the field. Its step then runs without its own collision stage
-(``run_collision_detection``, its way of taking contacts made outside it);
-the GPU backend collides before every step instead: MuJoCo Warp's contacts,
-then these.
+MuJoCo Warp makes every other contact, and is given a copy of the model in
+which these shapes no longer meet the field. Its step then runs without its
+own collision stage (``run_collision_detection``, its way of taking contacts
+made outside it); the GPU backend collides before every step instead:
+MuJoCo Warp's contacts, then these. The meshes' checks take the longest and
+are launched apart, so that the others need not wait for them.
 """
 
 import copy
@@ -45,6 +46,8 @@ wp.set_module_options({"enable_backward": False})
 MAX_CONTACTS_PER_SHAPE = mujoco.mjMAXCONPAIR
 # A length below which a direction is taken as none, in m.
 TINY_LENGTH = 1.0e-12
+# The sine of the angle below which two edges count as nearly parallel.
+PARALLEL_SINE = 1.0e-3
 FAR = 1.0e30
 # The shapes' kinds in the kernel.
 SPHERE, CAPSULE, HULL = wp.constant(0), wp.constant(1), wp.constant(2)
@@ -437,7 +440,66 @@ def _column_corner(
 
 
 @wp.func
-def _hull_overlap_along(
+def _outward(normal: wp.vec3, face_point: wp.vec3, middle: wp.vec3) -> wp.vec3:
+    """A face's ``normal`` as a unit vector pointing out of a convex shape:
+    away from ``middle``, a point inside, at ``face_point``, one of the
+    face's."""
+    n = wp.normalize(normal)
+    if wp.dot(n, face_point - middle) < 0.0:
+        n = -n
+    return n
+
+
+@wp.func
+def _side_of(index: int, side_ab: wp.vec3, side_bc: wp.vec3, side_ca: wp.vec3):
+    """The column's side holding the top edge ``index`` modulo 3: a-b, b-c or
+    c-a."""
+    side = side_ab
+    if index % 3 == 1:
+        side = side_bc
+    elif index % 3 == 2:
+        side = side_ca
+    return side
+
+
+@wp.func
+def _column_edge(
+    index: int,
+    a: wp.vec3,
+    b: wp.vec3,
+    c: wp.vec3,
+    a_low: wp.vec3,
+    b_low: wp.vec3,
+    c_low: wp.vec3,
+    top: wp.vec3,
+    bottom: wp.vec3,
+    side_ab: wp.vec3,
+    side_bc: wp.vec3,
+    side_ca: wp.vec3,
+):
+    """One of a column's nine edges: its two ends and the outward normals of
+    its two faces."""
+    # The top's edges, the bottom's, then the three upright ones.
+    start = _column_corner(index % 3, a, b, c, a_low, b_low, c_low)
+    end = _column_corner((index + 1) % 3, a, b, c, a_low, b_low, c_low)
+    if index >= 3 and index < 6:
+        start = _column_corner(3 + index % 3, a, b, c, a_low, b_low, c_low)
+        end = _column_corner(3 + (index + 1) % 3, a, b, c, a_low, b_low, c_low)
+    elif index >= 6:
+        end = _column_corner(3 + index % 3, a, b, c, a_low, b_low, c_low)
+    # Each side by the top edge it holds: a-b, b-c, c-a.
+    first = top
+    if index >= 3 and index < 6:
+        first = bottom
+    elif index >= 6:
+        # An upright edge at a corner joins the side before it and its own.
+        first = _side_of(index + 2, side_ab, side_bc, side_ca)
+    second = _side_of(index, side_ab, side_bc, side_ca)
+    return start, end, first, second
+
+
+@wp.func
+def _projected_gap(
     axis: wp.vec3,
     hull_vertices: wp.array1d[wp.vec3],
     vertex_span: wp.vec2i,
@@ -447,36 +509,26 @@ def _hull_overlap_along(
     a_low: wp.vec3,
     b_low: wp.vec3,
     c_low: wp.vec3,
-    depth: float,
-    normal: wp.vec3,
 ):
-    """``_overlap_along`` for a convex hull: the hull's vertices against the
-    column's six corners, all in the hull's frame."""
-    length = wp.length(axis)
-    if length < TINY_LENGTH:
-        return False, depth, normal
-    n = axis / length
+    """The gap between a convex hull and a column along the unit ``axis``,
+    both projected on it, all in the hull's frame: positive when they are
+    apart, minus the overlap otherwise; and the way to push the hull, along
+    the axis or against it, that the gap measures."""
     hull_min = float(FAR)  # noqa: UP018 (Warp: a variable the loop changes)
     hull_max = float(-FAR)  # noqa: UP018 (Warp: a variable the loop changes)
     for index in range(vertex_span[0], vertex_span[0] + vertex_span[1]):
-        along = wp.dot(n, hull_vertices[index])
+        along = wp.dot(axis, hull_vertices[index])
         hull_min = wp.min(hull_min, along)
         hull_max = wp.max(hull_max, along)
     column_min = float(FAR)  # noqa: UP018 (Warp: a variable the loop changes)
     column_max = float(-FAR)  # noqa: UP018 (Warp: a variable the loop changes)
     for corner in range(6):
-        along = wp.dot(n, _column_corner(corner, a, b, c, a_low, b_low, c_low))
+        along = wp.dot(axis, _column_corner(corner, a, b, c, a_low, b_low, c_low))
         column_min = wp.min(column_min, along)
         column_max = wp.max(column_max, along)
-    if hull_max < column_min or column_max < hull_min:
-        return True, depth, normal
-    if column_max - hull_min < depth:
-        depth = column_max - hull_min
-        normal = n
-    if hull_max - column_min < depth:
-        depth = hull_max - column_min
-        normal = -n
-    return False, depth, normal
+    if column_min - hull_max > hull_min - column_max:
+        return column_min - hull_max, -axis
+    return hull_min - column_max, axis
 
 
 @wp.func
@@ -489,18 +541,24 @@ def _hull_and_column(
     base: float,
     hull_vertices: wp.array1d[wp.vec3],
     vertex_span: wp.vec2i,
-    hull_normals: wp.array1d[wp.vec3],
-    normal_span: wp.vec2i,
-    hull_edges: wp.array1d[wp.vec3],
+    hull_planes: wp.array1d[wp.vec4],
+    plane_span: wp.vec2i,
+    hull_edges: wp.array2d[wp.vec3],
     edge_span: wp.vec2i,
 ):
     """A convex hull, placed at ``centre`` and turned by ``rotation`` (its
     axes in the column's frame), against a column, as ``_segment_and_column``
     for a hull that counts only when it overlaps the column: the distance is
-    then minus the shortest push out, among the column's and the hull's face
-    normals and each hull edge crossed with each column edge (the
-    separating-axis test), and the contact joins the two shapes' deepest
-    features along that push. Apart, the distance is FAR."""
+    then minus the shortest push out, and the contact joins the two shapes'
+    deepest features along that push. Apart, the distance is FAR.
+
+    The push is found by the separating-axis test on the faces of the two
+    shapes' Minkowski difference (Fogel and Halperin 2007): the column's
+    faces, the hull's, and each pair of a hull edge and a column edge whose
+    arcs of face normals cross on the unit sphere, a pair whose gap is then
+    the distance between their lines. The other edge pairs make no face and
+    are skipped; a pair nearly parallel, whose cross product is too uncertain
+    a direction for that test, is measured by projecting both shapes."""
     to_hull = wp.transpose(rotation)
     a = to_hull @ (column_a - centre)
     b = to_hull @ (column_b - centre)
@@ -508,66 +566,86 @@ def _hull_and_column(
     a_low = to_hull @ (wp.vec3(column_a[0], column_a[1], base) - centre)
     b_low = to_hull @ (wp.vec3(column_b[0], column_b[1], base) - centre)
     c_low = to_hull @ (wp.vec3(column_c[0], column_c[1], base) - centre)
-    depth = float(FAR)  # noqa: UP018 (Warp: a variable the branches change)
+    middle = (a + b + c + a_low + b_low + c_low) / 6.0
+    top = _outward(wp.cross(b - a, c - a), a, middle)
+    bottom = _outward(wp.cross(b_low - a_low, c_low - a_low), a_low, middle)
+    side_ab = _outward(wp.cross(b - a, a_low - a), a, middle)
+    side_bc = _outward(wp.cross(c - b, b_low - b), b, middle)
+    side_ca = _outward(wp.cross(a - c, c_low - c), c, middle)
+    no_contact = wp.vec3(0.0, 0.0, 1.0)
+
+    # The largest gap found, and the way to push the hull out it measures.
+    largest = float(-FAR)  # noqa: UP018 (Warp: a variable the loops change)
     normal = wp.vec3(0.0, 0.0, 1.0)
-    apart = bool(False)  # noqa: UP018 (Warp: a variable the branches change)
+    # The column's faces, its top first: the hull's lowest point along each.
     for face in range(5):
-        axis = wp.cross(b - a, c - a)
+        outward = top
+        point = a
         if face == 1:
-            axis = to_hull @ wp.vec3(0.0, 0.0, 1.0)
+            outward = side_ab
         elif face == 2:
-            axis = wp.cross(b - a, b_low - a)
+            outward = side_bc
+            point = b
         elif face == 3:
-            axis = wp.cross(c - b, c_low - b)
+            outward = side_ca
+            point = c
         elif face == 4:
-            axis = wp.cross(a - c, a_low - c)
-        if not apart:
-            apart, depth, normal = _hull_overlap_along(
-                axis,
-                hull_vertices,
-                vertex_span,
-                a,
-                b,
-                c,
-                a_low,
-                b_low,
-                c_low,
-                depth,
-                normal,
+            outward = bottom
+            point = a_low
+        lowest = float(FAR)  # noqa: UP018 (Warp: a variable the loop changes)
+        for index in range(vertex_span[0], vertex_span[0] + vertex_span[1]):
+            lowest = wp.min(lowest, wp.dot(outward, hull_vertices[index]))
+        gap = lowest - wp.dot(outward, point)
+        if gap > 0.0:
+            return float(FAR), no_contact, centre, centre
+        if gap > largest:
+            largest = gap
+            normal = outward
+    # The hull's faces: the column's lowest corner along each.
+    for index in range(plane_span[0], plane_span[0] + plane_span[1]):
+        plane = hull_planes[index]
+        outward = wp.vec3(plane[0], plane[1], plane[2])
+        lowest = float(FAR)  # noqa: UP018 (Warp: a variable the loop changes)
+        for corner in range(6):
+            lowest = wp.min(
+                lowest,
+                wp.dot(outward, _column_corner(corner, a, b, c, a_low, b_low, c_low)),
             )
-    for index in range(normal_span[0], normal_span[0] + normal_span[1]):
-        if not apart:
-            apart, depth, normal = _hull_overlap_along(
-                hull_normals[index],
-                hull_vertices,
-                vertex_span,
-                a,
-                b,
-                c,
-                a_low,
-                b_low,
-                c_low,
-                depth,
-                normal,
-            )
-    for index in range(edge_span[0], edge_span[0] + edge_span[1]):
-        for column_edge in range(7):
-            edge = b - a
-            if column_edge == 1:
-                edge = c - b
-            elif column_edge == 2:
-                edge = a - c
-            elif column_edge == 3:
-                edge = b_low - a_low
-            elif column_edge == 4:
-                edge = c_low - b_low
-            elif column_edge == 5:
-                edge = a_low - c_low
-            elif column_edge == 6:
-                edge = a - a_low
-            if not apart:
-                apart, depth, normal = _hull_overlap_along(
-                    wp.cross(hull_edges[index], edge),
+        gap = lowest - plane[3]
+        if gap > 0.0:
+            return float(FAR), no_contact, centre, centre
+        if gap > largest:
+            largest = gap
+            normal = -outward
+    # The edge pairs: the hull's arc runs between its edge's two face
+    # normals, the column's between its edge's two, turned the other way.
+    for column_edge in range(9):
+        start, end, first, second = _column_edge(
+            column_edge,
+            a,
+            b,
+            c,
+            a_low,
+            b_low,
+            c_low,
+            top,
+            bottom,
+            side_ab,
+            side_bc,
+            side_ca,
+        )
+        along = wp.normalize(end - start)
+        c_arc = -first
+        d_arc = -second
+        d_x_c = wp.cross(d_arc, c_arc)
+        for index in range(edge_span[0], edge_span[0] + edge_span[1]):
+            axis = wp.cross(hull_edges[index, 1], along)
+            sine = wp.length(axis)
+            if sine < TINY_LENGTH:
+                continue
+            if sine < PARALLEL_SINE:
+                gap, push = _projected_gap(
+                    axis / sine,
                     hull_vertices,
                     vertex_span,
                     a,
@@ -576,11 +654,31 @@ def _hull_and_column(
                     a_low,
                     b_low,
                     c_low,
-                    depth,
-                    normal,
                 )
-    if apart:
-        return float(FAR), wp.vec3(0.0, 0.0, 1.0), centre, centre
+                if gap > 0.0:
+                    return float(FAR), no_contact, centre, centre
+                if gap > largest:
+                    largest = gap
+                    normal = push
+                continue
+            a_arc = hull_edges[index, 2]
+            b_arc = hull_edges[index, 3]
+            b_x_a = wp.cross(b_arc, a_arc)
+            cba = wp.dot(c_arc, b_x_a)
+            dba = wp.dot(d_arc, b_x_a)
+            adc = wp.dot(a_arc, d_x_c)
+            bdc = wp.dot(b_arc, d_x_c)
+            if cba * dba < 0.0 and adc * bdc < 0.0 and cba * bdc > 0.0:
+                # Out of the hull at its edge, toward the column.
+                axis = axis / sine
+                if wp.dot(axis, a_arc + b_arc) < 0.0:
+                    axis = -axis
+                gap = wp.dot(axis, start - hull_edges[index, 0])
+                if gap > 0.0:
+                    return float(FAR), no_contact, centre, centre
+                if gap > largest:
+                    largest = gap
+                    normal = -axis
 
     # The deepest features along the push: the hull's lowest vertices and
     # the column's highest corners, within 0.1 um.
@@ -723,11 +821,11 @@ def _add_ground_contacts(
     pair_field: wp.array1d[int],
     pair_kind: wp.array1d[int],
     pair_hull_vertices: wp.array1d[wp.vec2i],
-    pair_hull_normals: wp.array1d[wp.vec2i],
+    pair_hull_planes: wp.array1d[wp.vec2i],
     pair_hull_edges: wp.array1d[wp.vec2i],
     hull_vertices: wp.array1d[wp.vec3],
-    hull_normals: wp.array1d[wp.vec3],
-    hull_edges: wp.array1d[wp.vec3],
+    hull_planes: wp.array1d[wp.vec4],
+    hull_edges: wp.array2d[wp.vec3],
     pair_radius: wp.array1d[float],
     pair_half_length: wp.array1d[float],
     pair_margin: wp.array1d[float],
@@ -883,8 +981,8 @@ def _add_ground_contacts(
                             base,
                             hull_vertices,
                             vertex_span,
-                            hull_normals,
-                            pair_hull_normals[pair_index],
+                            hull_planes,
+                            pair_hull_planes[pair_index],
                             hull_edges,
                             pair_hull_edges[pair_index],
                         )
@@ -1015,12 +1113,15 @@ def _pair_parameters(
 def convex_hull(
     model: mujoco.MjModel, mesh: int
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """A mesh's convex hull, the shape MuJoCo collides, in the mesh's frame:
-    its vertices, its distinct face normals and its distinct edge
-    directions, from MuJoCo's own hull (``mesh_graph``)."""
+    """A mesh's convex hull, the shape MuJoCo collides, in the mesh's frame,
+    from MuJoCo's own hull (``mesh_graph``): its vertices, (V, 3); its face
+    planes, each outward normal once with its offset, (P, 4); and its edges,
+    each a point, its direction and the outward normals of its two faces,
+    (E, 4, 3). An edge between two triangles of one face is left out."""
     address = model.mesh_graphadr[mesh]
+    name = model.mesh(mesh).name
     if address < 0:
-        raise ValueError(f"Mesh {model.mesh(mesh).name} has no convex hull.")
+        raise ValueError(f"Mesh {name} has no convex hull.")
     graph = model.mesh_graph[address:]
     vertex_count, face_count = int(graph[0]), int(graph[1])
     first = model.mesh_vertadr[mesh]
@@ -1028,30 +1129,39 @@ def convex_hull(
     faces = graph[
         2 + 3 * vertex_count + 3 * face_count : 2 + 3 * vertex_count + 6 * face_count
     ].reshape(-1, 3)
-    corners = model.mesh_vert[first + faces]  # (F, 3 corners, 3)
+    vertices = model.mesh_vert[first + ids].astype(np.float64)
+    middle = vertices.mean(axis=0)
+    corners = model.mesh_vert[first + faces].astype(np.float64)  # (F, 3 corners, 3)
     normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
-    edges = np.concatenate([corners[:, (i + 1) % 3] - corners[:, i] for i in range(3)])
-    edges /= np.linalg.norm(edges, axis=1, keepdims=True)
+    # Out of the hull, away from a point inside it.
+    outward = np.einsum("fi,fi->f", normals, corners[:, 0] - middle)
+    normals *= np.sign(outward)[:, None]
 
-    def distinct(directions: np.ndarray, either_way: bool) -> np.ndarray:
-        kept: list[np.ndarray] = []
-        for direction in directions:
-            alike = [
-                abs(np.dot(direction, k)) if either_way else np.dot(direction, k)
-                for k in kept
-            ]
-            if not alike or max(alike) < 1 - 1e-9:
-                kept.append(direction)
-        return np.array(kept)
-
-    # The separating-axis test needs each direction once; a face normal's
-    # sign does not matter to it either.
-    return (
-        model.mesh_vert[first + ids],
-        distinct(normals, either_way=True),
-        distinct(edges, either_way=True),
-    )
+    planes: list[np.ndarray] = []
+    for normal in normals:
+        if all(np.dot(normal, plane[:3]) < 1 - 1e-9 for plane in planes):
+            planes.append(np.append(normal, (vertices @ normal).max()))
+    faces_of: dict[tuple[int, int], list[int]] = {}
+    for face, face_ids in enumerate(faces):
+        for corner in range(3):
+            ends = sorted((int(face_ids[corner]), int(face_ids[(corner + 1) % 3])))
+            faces_of.setdefault((ends[0], ends[1]), []).append(face)
+    edges: list[np.ndarray] = []
+    for (start, end), around in faces_of.items():
+        if len(around) != 2:
+            raise ValueError(
+                f"Mesh {name}'s convex hull is not closed: an edge has"
+                f" {len(around)} faces."
+            )
+        first_normal, second_normal = normals[around]
+        if np.dot(first_normal, second_normal) > 1 - 1e-9:
+            continue
+        point = model.mesh_vert[first + start]
+        direction = model.mesh_vert[first + end] - point
+        direction = direction / np.linalg.norm(direction)
+        edges.append(np.stack((point, direction, first_normal, second_normal)))
+    return vertices, np.array(planes), np.array(edges)
 
 
 class GroundContacts:
@@ -1161,8 +1271,8 @@ class GroundContacts:
         self._hull_tables = [
             np.concatenate(table).astype(np.float32)
             if table
-            else np.zeros((1, 3), np.float32)
-            for table in tables
+            else np.zeros(empty, np.float32)
+            for table, empty in zip(tables, ((1, 3), (1, 4), (1, 4, 3)), strict=True)
         ]
 
     def attach(self, gpu_model) -> None:
@@ -1175,7 +1285,7 @@ class GroundContacts:
         self.pair_radius = wp.array(self._radii, dtype=float, device=device)
         self.pair_half_length = wp.array(self._half_lengths, dtype=float, device=device)
         self.pair_kind = wp.array(self._kinds, dtype=int, device=device)
-        self.pair_hull_vertices, self.pair_hull_normals, self.pair_hull_edges = (
+        self.pair_hull_vertices, self.pair_hull_planes, self.pair_hull_edges = (
             wp.array(
                 np.ascontiguousarray(self._hull_spans[:, which]),
                 dtype=wp.vec2i,
@@ -1183,8 +1293,13 @@ class GroundContacts:
             )
             for which in range(3)
         )
-        self.hull_vertices, self.hull_normals, self.hull_edges = (
-            wp.array(table, dtype=wp.vec3, device=device) for table in self._hull_tables
+        # Vertices; face planes (outward normal, offset); edges (a point, the
+        # direction, the outward normals of the two faces).
+        self.hull_vertices, self.hull_planes, self.hull_edges = (
+            wp.array(table, dtype=dtype, device=device)
+            for table, dtype in zip(
+                self._hull_tables, (wp.vec3, wp.vec4, wp.vec3), strict=True
+            )
         )
         self.pair_margin = wp.zeros(count, dtype=float, device=device)
         self.pair_gap = wp.zeros(count, dtype=float, device=device)
@@ -1265,10 +1380,10 @@ class GroundContacts:
                 self.pair_field,
                 self.pair_kind,
                 self.pair_hull_vertices,
-                self.pair_hull_normals,
+                self.pair_hull_planes,
                 self.pair_hull_edges,
                 self.hull_vertices,
-                self.hull_normals,
+                self.hull_planes,
                 self.hull_edges,
                 self.pair_radius,
                 self.pair_half_length,
