@@ -299,11 +299,10 @@ class CPUBackend:
             force_on_second[on_floor],
             -force_on_second[on_floor],
         )
-        floor_normal = normal_force[on_floor]
+        # The weight a shape carries: the floor's force on it, upward.
+        floor_up = force[:, 2]
         belly = category == BODY_CATEGORY
-        np.add.at(
-            effort["belly_normal_force"], owner[belly], scale * floor_normal[belly]
-        )
+        np.add.at(effort["belly_vertical_force"], owner[belly], scale * floor_up[belly])
         # Each body's forward axis: the first column of its rotation matrix. A
         # foot's push is taken along it, as the segment feels it; the floor's
         # push on the segment along it laid flat on the floor, or a pitched
@@ -316,7 +315,7 @@ class CPUBackend:
         foot = (category == LEFT_FOOT_CATEGORY) | (category == RIGHT_FOOT_CATEGORY)
         foot_index = (owner[foot], category[foot] - LEFT_FOOT_CATEGORY)
         along = (force[foot] * forward_axes[owner[foot]]).sum(axis=1)
-        np.add.at(effort["foot_normal_force"], foot_index, scale * floor_normal[foot])
+        np.add.at(effort["foot_vertical_force"], foot_index, scale * floor_up[foot])
         np.add.at(effort["foot_forward_force"], foot_index, scale * along)
 
     def _add_joint_forces(self, world_index: int, scale: float) -> None:

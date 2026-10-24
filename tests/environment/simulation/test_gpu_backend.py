@@ -33,7 +33,11 @@ from centipede.environment.simulation.model_mapping import ModelMapping  # noqa:
 from centipede.environment.simulation.physical_state import (  # noqa: E402
     EFFORT_FIELDS,
 )
+from centipede.environment.simulation.settings import (  # noqa: E402
+    SimulationSettings,
+)
 from centipede.environment.simulation.simulation import (  # noqa: E402
+    model_spec,
     physics_steps_per_action,
 )
 
@@ -428,8 +432,8 @@ def test_gpu_effort_matches_cpu_effort():
     # solver stops at its iteration limit), so only the totals compare;
     # friction, the least converged, only roughly.
     for field, tolerance in (
-        ("foot_normal_force", 0.03),
-        ("belly_normal_force", 0.03),
+        ("foot_vertical_force", 0.03),
+        ("belly_vertical_force", 0.03),
         ("foot_forward_force", 0.5),
         ("floor_forward_force", 0.5),
     ):
@@ -437,6 +441,39 @@ def test_gpu_effort_matches_cpu_effort():
         assert actual.sum().item() == pytest.approx(
             expected.sum().item(), rel=tolerance
         )
+
+
+TILTED_GROUND = """<mujoco>
+  <worldbody>
+    <geom name="ground" type="plane" size="1 1 0.01" euler="0 -20 0" />
+  </worldbody>
+</mujoco>"""
+
+
+def test_on_tilted_ground_the_feet_and_belly_carry_the_whole_weight(tmp_path):
+    """At rest on a 20 degree slope, the floor's vertical push on the feet
+    and belly is the body's weight; their normal force would be its cosine,
+    0.94, the rest held by friction."""
+    (tmp_path / "tilted.xml").write_text(TILTED_GROUND, encoding="utf-8")
+    settings = SimulationSettings.from_section(
+        {
+            "model_path": "models/assembly_v3.xml",
+            "backend": "gpu",
+            "terrain_path": str(tmp_path / "tilted.xml"),
+        }
+    )
+    model = model_spec(settings).compile()
+    mapping = ModelMapping.from_model(model)
+    backend = GPUBackend(
+        model, mapping, 1, STEPS, SOLVER, 128, 512, measure_effort=True
+    )
+    backend.reset(seed=0)
+    for _ in range(25):
+        backend.step(torch.zeros(1, mapping.segment_count, 6, device="cuda"))
+    state = backend.physical_state
+    weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    support = state.foot_vertical_force.sum() + state.belly_vertical_force.sum()
+    assert support.item() == pytest.approx(weight, rel=1e-2)
 
 
 @pytest.mark.parametrize(

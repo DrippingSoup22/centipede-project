@@ -699,7 +699,7 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     block = builder.block_size
     assert (block, builder.observation_size) == (47, 5 * 47 + 15 + 1)
     state = resting_state(2)
-    state.foot_normal_force[0, 1] = torch.tensor([2e-3, 1e-3])
+    state.foot_vertical_force[0, 1] = torch.tensor([2e-3, 1e-3])
     state.front_joint_force[0, 1] = -0.5e-3
     state.net_joint_force[0, 1] = torch.tensor([0.2e-3, 0.7e-3])
     last_action = torch.rand(2, SEGMENTS, LEGS + 1)
@@ -861,7 +861,7 @@ def test_the_gait_is_read_from_the_feet_and_legs_and_each_episode_is_summarised(
     delay = torch.arange(SEGMENTS)[:, None] + torch.tensor([0, 4])
     for step in range(40):
         standing = (step - delay) % 8 < 4
-        state.foot_normal_force.copy_(standing * BODY.unit_weight_n)
+        state.foot_vertical_force.copy_(standing * BODY.unit_weight_n)
         state.leg_joint_position[..., 1] = math.radians(20) * math.sin(
             math.pi * step / 2
         )

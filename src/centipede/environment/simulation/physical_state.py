@@ -4,9 +4,9 @@ import torch
 
 # The fields measured with ``measure_effort``, which the backends fill.
 EFFORT_FIELDS = (
-    "foot_normal_force",
+    "foot_vertical_force",
     "foot_forward_force",
-    "belly_normal_force",
+    "belly_vertical_force",
     "floor_forward_force",
     "leg_leg_force",
     "leg_leg_force_squared",
@@ -55,9 +55,13 @@ class PhysicalState:
     # when the simulation is asked to (``measure_effort``), zeros otherwise:
     # forces are means over the step, in newtons, work is added up, in joules.
     # A reset measures the forces of the starting pose, and no work.
-    foot_normal_force: torch.Tensor  # (W, N, 2), left and right, from the floor
-    foot_forward_force: torch.Tensor  # (W, N, 2), the same, along the segment
-    belly_normal_force: torch.Tensor  # (W, N), the body shape's, from the floor
+    # The floor's force on each foot (left, right) and on the body shape, its
+    # vertical part: the weight each carries. On the flat floor it is the
+    # contact's normal force; on uneven ground a foot pressed against a
+    # stone's side carries little of it (from 2026-10-24).
+    foot_vertical_force: torch.Tensor  # (W, N, 2)
+    foot_forward_force: torch.Tensor  # (W, N, 2), along the segment
+    belly_vertical_force: torch.Tensor  # (W, N)
     # (W, N), the floor's force on every shape of the segment it touches (feet,
     # the legs' other parts, the body), along the segment's forward axis laid
     # flat on the floor
@@ -110,9 +114,9 @@ class PhysicalState:
             spine_yaw_position=zeros(n),
             spine_yaw_velocity=zeros(n),
             front_end_position=zeros(n, 2),
-            foot_normal_force=zeros(n, 2),
+            foot_vertical_force=zeros(n, 2),
             foot_forward_force=zeros(n, 2),
-            belly_normal_force=zeros(n),
+            belly_vertical_force=zeros(n),
             floor_forward_force=zeros(n),
             leg_leg_force=zeros(n),
             leg_leg_force_squared=zeros(n),

@@ -19,7 +19,11 @@ from centipede.environment.simulation.model_mapping import (
     LEG_SIDES,
     ModelMapping,
 )
-from centipede.environment.simulation.simulation import physics_steps_per_action
+from centipede.environment.simulation.settings import SimulationSettings
+from centipede.environment.simulation.simulation import (
+    model_spec,
+    physics_steps_per_action,
+)
 
 SEGMENT_COUNT = 8
 
@@ -306,7 +310,7 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     backend = settled_backend_measuring_effort(model, mapping)
     state = backend.physical_state
     weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
-    support = state.foot_normal_force.sum() + state.belly_normal_force.sum()
+    support = state.foot_vertical_force.sum() + state.belly_vertical_force.sum()
     assert support.item() == pytest.approx(weight, rel=1e-3)
     assert state.motor_positive_work.sum() == state.motor_negative_work.sum() == 0
 
@@ -328,6 +332,38 @@ def test_effort_measures_the_floors_support_the_legs_pressing_and_the_work(
     actions[..., 0] = actions[..., 3] = -0.8
     backend.step(actions)
     assert state.foot_forward_force.sum() > 0
+
+
+TILTED_GROUND = """<mujoco>
+  <worldbody>
+    <geom name="ground" type="plane" size="1 1 0.01" euler="0 -20 0" />
+  </worldbody>
+</mujoco>"""
+
+
+def tilted_model(tmp_path):
+    """Model v3 on ground tilted 20 degrees (a terrain file)."""
+    (tmp_path / "tilted.xml").write_text(TILTED_GROUND, encoding="utf-8")
+    settings = SimulationSettings.from_section(
+        {
+            "model_path": "models/assembly_v3.xml",
+            "backend": "cpu",
+            "terrain_path": str(tmp_path / "tilted.xml"),
+        }
+    )
+    return model_spec(settings).compile()
+
+
+def test_on_tilted_ground_the_feet_and_belly_carry_the_whole_weight(tmp_path):
+    """At rest on a 20 degree slope, the floor's vertical push on the feet
+    and belly is the body's weight; their normal force would be its cosine,
+    0.94, the rest held by friction."""
+    model = tilted_model(tmp_path)
+    backend = settled_backend_measuring_effort(model, ModelMapping.from_model(model))
+    state = backend.physical_state
+    weight = model.body_mass.sum() * np.linalg.norm(model.opt.gravity)
+    support = state.foot_vertical_force.sum() + state.belly_vertical_force.sum()
+    assert support.item() == pytest.approx(weight, rel=1e-2)
 
 
 def test_the_floor_push_counts_every_shape_on_the_floor_along_it():

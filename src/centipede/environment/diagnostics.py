@@ -438,8 +438,8 @@ class EnvironmentDiagnostics:
                 dim=-1,
             )
         )
-        step.feet_carry.copy_(state.foot_normal_force.sum(dim=-1) / unit)
-        step.belly_carry.copy_(state.belly_normal_force / unit)
+        step.feet_carry.copy_(state.foot_vertical_force.sum(dim=-1) / unit)
+        step.belly_carry.copy_(state.belly_vertical_force / unit)
         step.feet_push.copy_(state.foot_forward_force.sum(dim=-1) / unit)
         step.floor_push.copy_(state.floor_forward_force / unit)
         step.segment_progress.copy_(progress)
@@ -456,7 +456,7 @@ class EnvironmentDiagnostics:
             1 - 2 * (quaternion[..., 1] ** 2 + quaternion[..., 2] ** 2)
         )
 
-        standing = state.foot_normal_force >= STANCE_LOAD_SHARE * unit
+        standing = state.foot_vertical_force >= STANCE_LOAD_SHARE * unit
         lift_off, phase, known = self.feet.step(standing)
         step.foot_standing.copy_(standing)
         step.support.copy_(standing.any(dim=1).all(dim=-1))

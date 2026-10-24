@@ -175,9 +175,9 @@ class ObservationBuilder:
             dim=-1,
         )
         loads = [
-            state.foot_normal_force,
+            state.foot_vertical_force,
             state.foot_forward_force,
-            state.belly_normal_force[..., None],
+            state.belly_vertical_force[..., None],
         ]
         averaged = []
         if self.priced_forces:

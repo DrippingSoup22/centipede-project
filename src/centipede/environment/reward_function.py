@@ -63,10 +63,10 @@ class AveragedForces:
                 (
                     state.net_joint_force,
                     state.front_joint_force[..., None],
-                    state.belly_normal_force[..., None],
+                    state.belly_vertical_force[..., None],
                     state.leg_leg_force[..., None],
-                    state.foot_normal_force.sum(dim=-1, keepdim=True),
-                    state.foot_normal_force,
+                    state.foot_vertical_force.sum(dim=-1, keepdim=True),
+                    state.foot_vertical_force,
                 ),
                 dim=-1,
             )

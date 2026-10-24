@@ -349,9 +349,9 @@ def _clear_effort(
     # In
     world_mask: wp.array1d[wp.bool],
     # Out
-    foot_normal_force: wp.array3d[float],
+    foot_vertical_force: wp.array3d[float],
     foot_forward_force: wp.array3d[float],
-    belly_normal_force: wp.array2d[float],
+    belly_vertical_force: wp.array2d[float],
     floor_forward_force: wp.array2d[float],
     leg_leg_force: wp.array2d[float],
     leg_leg_force_squared: wp.array2d[float],
@@ -364,11 +364,11 @@ def _clear_effort(
     if not world_mask[world_index]:
         return
     for side in range(2):
-        foot_normal_force[world_index, segment_index, side] = 0.0
+        foot_vertical_force[world_index, segment_index, side] = 0.0
         foot_forward_force[world_index, segment_index, side] = 0.0
     for motor_index in range(motor_force.shape[2]):
         motor_force[world_index, segment_index, motor_index] = 0.0
-    belly_normal_force[world_index, segment_index] = 0.0
+    belly_vertical_force[world_index, segment_index] = 0.0
     floor_forward_force[world_index, segment_index] = 0.0
     leg_leg_force[world_index, segment_index] = 0.0
     leg_leg_force_squared[world_index, segment_index] = 0.0
@@ -393,9 +393,9 @@ def _add_contact_forces(
     world_mask: wp.array1d[wp.bool],
     scale: float,
     # Out
-    foot_normal_force: wp.array3d[float],
+    foot_vertical_force: wp.array3d[float],
     foot_forward_force: wp.array3d[float],
-    belly_normal_force: wp.array2d[float],
+    belly_vertical_force: wp.array2d[float],
     floor_forward_force: wp.array2d[float],
     leg_leg_pressed: wp.array2d[float],
 ) -> None:
@@ -408,8 +408,9 @@ def _add_contact_forces(
     shape on the floor adds ``scale`` times the force's part along its
     segment's forward axis laid flat on the floor to ``floor_forward_force``
     (along the tilted axis, a pitched segment would read part of its support
-    as a push); a foot or body shape also its normal force, and a foot the
-    part along the tilted axis, as the segment feels it; two legs touching
+    as a push); a foot or body shape also the force's vertical part, the
+    weight it carries, and a foot the part along the tilted axis, as the
+    segment feels it; two legs touching
     add their normal force, unscaled, to both owners' ``leg_leg_pressed``,
     which ``_add_segment_effort`` then takes in. Several contacts may touch
     one shape, so the forces are added atomically.
@@ -453,13 +454,11 @@ def _add_contact_forces(
         floor_forward_force, world_index, owner_index, scale * wp.dot(force, flat)
     )
     if category == BODY_CATEGORY:
-        wp.atomic_add(
-            belly_normal_force, world_index, owner_index, scale * normal_force
-        )
+        wp.atomic_add(belly_vertical_force, world_index, owner_index, scale * force[2])
     elif category == LEFT_FOOT_CATEGORY or category == RIGHT_FOOT_CATEGORY:
         side = category - LEFT_FOOT_CATEGORY
         wp.atomic_add(
-            foot_normal_force, world_index, owner_index, side, scale * normal_force
+            foot_vertical_force, world_index, owner_index, side, scale * force[2]
         )
         wp.atomic_add(
             foot_forward_force,
