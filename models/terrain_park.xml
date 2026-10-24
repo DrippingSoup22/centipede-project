@@ -4,12 +4,17 @@
        Flat ground in the middle; ground A (procedural); and seven Poly Haven scans, CC0, at
        their true size (polyhaven.com): forest_ground_04 (Rob Tuytel), coast_sand_04,
        rock_ground_02, dry_ground_rocks, dry_ground_01, gravel_ground_01, aerial_ground_rock.
-       The heights are in terrain_park.hfield; each start_<ground> site marks a start area. -->
+       The heights are in terrain_park.hfield; each start_<ground> site marks a start area.
+       A flat border, 1.5 m wide at level 0, surrounds the park. -->
   <asset>
     <hfield name="ground" file="terrain_park.hfield" size="4.5 4.5 0.126920 0.01" />
   </asset>
   <worldbody>
     <geom name="ground" type="hfield" hfield="ground" pos="0 0 -0.062217" />
+    <geom name="border_south" type="box" pos="0 -5.25 -0.025" size="6 0.75 0.025" />
+    <geom name="border_north" type="box" pos="0 5.25 -0.025" size="6 0.75 0.025" />
+    <geom name="border_west" type="box" pos="-5.25 0 -0.025" size="0.75 4.5 0.025" />
+    <geom name="border_east" type="box" pos="5.25 0 -0.025" size="0.75 4.5 0.025" />
     <site name="start_forest_ground_04" type="box" pos="-3 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
     <site name="start_coast_sand_04" type="box" pos="0 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
     <site name="start_rock_ground_02" type="box" pos="3 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
