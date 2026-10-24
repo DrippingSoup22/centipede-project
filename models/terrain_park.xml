@@ -1,0 +1,23 @@
+<mujoco model="terrain_park">
+  <!-- The terrain park (Centipede's archive/terrain_prototypes/make_park.py, 2026-10-24):
+       a 3 x 3 grid of 3 m grounds at 3 mm cells, each fading to level 0 over its edges' 40 cm.
+       Flat ground in the middle; ground A (procedural); and seven Poly Haven scans, CC0, at
+       their true size (polyhaven.com): forest_ground_04 (Rob Tuytel), coast_sand_04,
+       rock_ground_02, dry_ground_rocks, dry_ground_01, gravel_ground_01, aerial_ground_rock.
+       The heights are in terrain_park.hfield; each start_<ground> site marks a start area. -->
+  <asset>
+    <hfield name="ground" file="terrain_park.hfield" size="4.5 4.5 0.126920 0.01" />
+  </asset>
+  <worldbody>
+    <geom name="ground" type="hfield" hfield="ground" pos="0 0 -0.062217" />
+    <site name="start_forest_ground_04" type="box" pos="-3 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_coast_sand_04" type="box" pos="0 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_rock_ground_02" type="box" pos="3 -3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_procedural" type="box" pos="-3 0 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_flat" type="box" pos="0 0 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_dry_ground_rocks" type="box" pos="3 0 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_dry_ground_01" type="box" pos="-3 3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_gravel_ground_01" type="box" pos="0 3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+    <site name="start_aerial_ground_rock" type="box" pos="3 3 0" size="0.75 0.75 0.001" rgba="0 0 0 0" />
+  </worldbody>
+</mujoco>
