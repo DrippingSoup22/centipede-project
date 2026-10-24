@@ -190,7 +190,9 @@ a large c separates the gaits more strongly. Training goes in stages:
   90 mm/s cap, `ramp_after_line_share`), then rises to 2 over 128 cycles
   (`ramp_start` 0.2, `ramp_cycles`). On a clumsy gait, near 0.4 mJ for
   each mm, a price of 2 would make moving less pay nearly as much as
-  walking faster, so the price waits for the walk.
+  walking faster, so the price waits for the walk. On uneven ground (run
+  25) the same walk is slower, and the price waits for a line share of
+  0.36 ([terrain.md](terrain.md#the-gates-on-the-mix)).
 
 An energy cost is needed from the start: run 03 learned its walk with none,
 and adding it at full price later changed nothing.

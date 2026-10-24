@@ -94,12 +94,51 @@ and spread are taken over about the last 10 update cycles
 changing. The two inputs are new to run 22's walk: their weights start at
 0, and the walk starts as it was.
 
+## The ground ahead: 15 values, the front unit only (from run 25)
+
+On uneven ground ([terrain.md](terrain.md)) nothing on a headless body
+senses what lies ahead of it. Until a head with antennae does (the user,
+2026-10-24: the head, which draws the line, is its own later branch), the
+front unit sees the ground inside its sight sphere: the ground's height at
+15 points of a 90° cone straight ahead of it, level, turning with its
+heading.
+
+```text
+  seen from above, the front unit facing up the page, to scale
+                        3
+              3                   3
+                                                 1: 5.5 mm away
+     3                                     3     2: 11 mm
+                 2      2      2                 3: 16.5 mm, the sight radius
+            2                       2
+                                                 directions: −45°, −22.5°,
+                     1  1  1                     0°, +22.5° and +45° from
+                  1           1                  its heading
+
+                     unit 0
+```
+
+Each value is the ground's height at the point less the height of the
+unit's centre, in metres, ordered by distance, nearest first, and within a
+distance from right to left (`observe_ground_ahead`). The heights come from
+the terrain's map, not from a ray: the unit also sees behind a hill, which
+is accepted as a stand-in for the antennae (the user, 2026-10-24).
+
+**Only the front unit.** Every other unit has the group, all zeros, and
+learns the ground from the units ahead of it: their tilt, loads and joint
+forces arrive in its blocks before the ground arrives under it. This keeps
+the front-to-rear flow of [what a unit sees](#what-a-unit-sees): a view for
+every unit would let each one step on its own. The front unit still
+follows the line, which its trail shows; the view lets it shape its steps
+to the ground.
+
 ## In all
 
 5 × 46 + 15 + 1 = **246 values** for each of the ten agents; from run 14,
 with each foot's averaged load, 5 × 47 + 15 + 1 = **251**; in stage 2, with
 the command, **252**; in stage 3, with the command averaged and as it
-stands, **253**. Each agent normalises its own inputs with running
+stands, **253**; in run 25, run 22's 251 and the ground ahead, **266**.
+Each agent normalises its own inputs with running
 statistics: over every step since the start, or from run 23 over about the
 last 10 update cycles.
 

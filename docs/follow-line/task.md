@@ -19,7 +19,7 @@ restart: the model's pose, a new line through the body (stage 2: bending beyond 
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Start pose | The model's pose, each leg angle moved by up to ±2° and each leg joint given a small random speed (main's reset), always facing the same way | The floor is the same everywhere and the agents sense no direction in the world, so a random heading would change nothing |
+| Start pose | The model's pose, each leg angle moved by up to ±2° and each leg joint given a small random speed (main's reset), always facing the same way. From run 25, on uneven ground: at a random point of a ground drawn from a fixed mix, facing any way, set down just above the ground ([terrain.md](terrain.md#a-start)) | The floor is the same everywhere and the agents sense no direction in the world, so a random heading would change nothing. On uneven ground where and which way the body starts decide what it meets |
 | The line | Through the mean of the units' centres, pointing where the body points; it stays for the episode. Stage 1: straight. Stage 2 (from run 21): straight through the body, then bending piece by piece ([the curves](#the-curves-stage-2)) | First walk straight and stay on the line (the user, 2026-10-22, from run 16): runs 01 to 15 turned it by a random angle of up to ±10° so that every episode started with a correction, and the bodies walked turned to it, the rear units up to 9 mm off (`line_angle_range_deg`). Then follow a line that turns |
 | Its direction | The line is an arrow: a step along it is paid, a step against it charged | Walking backward never pays, whichever way the body faces |
 | Episode | 20 s, 1,000 decisions | legged_gym's 20 s (Rudin et al. 2021); a world stuck early waits at most 20 s |
@@ -83,7 +83,8 @@ succeed (Rudin et al. 2021). The level is kept in checkpoints. On a bend
 the command falls ([reward.md](reward.md#the-commanded-speed)).
 
 **When the curves begin** (from run 22, the user's decision, 2026-10-22;
-`start_speed_mm_per_s`, `start_pair_consistency`). A run from scratch keeps
+`start_speed_mm_per_s`, `start_pair_consistency`; on uneven ground, run 25,
+the speed is 33 mm/s, [terrain.md](terrain.md#the-gates-on-the-mix)). A run from scratch keeps
 its lines straight until the walk has formed and the wave starts forming, so
 that the bends are there while the order between neighbours sets: neither
 before the wave forms nor after it froze. In runs 12 to 19, from their
