@@ -24,10 +24,11 @@ LINE_PATH = "line"
 
 @dataclass(frozen=True)
 class RecordingScene:
-    """What every recording of a run shares: the model, timing, and what each
-    world's score counts."""
+    """What every recording of a run shares: the model and the files it reads
+    (a terrain's height field), timing, and what each world's score counts."""
 
     model_xml: str
+    model_assets: dict[str, bytes]
     frame_seconds: float
     score_name: str
 
@@ -37,6 +38,7 @@ class RecordingScene:
         includes resolved and the terrain joined in."""
         return cls(
             model_xml=environment.simulation.model_xml,
+            model_assets=environment.simulation.model_assets,
             frame_seconds=environment.simulation.step_duration_s,
             score_name=environment.diagnostics.score_name,
         )
@@ -60,6 +62,7 @@ def training_recording(
     session = _last_session(folder)
     return Recording(
         model_xml=scene.model_xml,
+        assets=scene.model_assets,
         frame_seconds=scene.frame_seconds,
         qpos=recorded.qpos,
         score=recorded.score,
@@ -101,6 +104,7 @@ def evaluation_recording(
     """
     return Recording(
         model_xml=scene.model_xml,
+        assets=scene.model_assets,
         frame_seconds=scene.frame_seconds,
         qpos=recorded.qpos,
         score=recorded.score,

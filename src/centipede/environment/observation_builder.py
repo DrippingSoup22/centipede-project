@@ -3,6 +3,7 @@ and its neighbours', the trail it sees, and its world's tow level."""
 
 import torch
 
+from centipede.environment.ground_view import GROUND_VIEW_VALUES
 from centipede.environment.line import TRAIL_VALUES
 from centipede.environment.simulation import PhysicalState
 
@@ -75,7 +76,9 @@ class ObservationBuilder:
     neighbour table's order, followed by the unit's trail
     (``Line.trail``) and its world's tow level, with ``command`` its world's
     averaged commanded speed in mm/s, and with ``current_command`` the
-    command as it stands on the step, mm/s. ``behind_entries``
+    command as it stands on the step, mm/s. With ``ground_ahead`` the
+    trail is followed by the front unit's view of the ground
+    (``ground_view``), zeros for every other unit. ``behind_entries``
     marks the entries of the units behind, ``(observation_size,)``.
     """
 
@@ -94,6 +97,7 @@ class ObservationBuilder:
         carry_per_leg: bool = False,
         command: bool = False,
         current_command: bool = False,
+        ground_ahead: bool = False,
     ) -> None:
         """Build the neighbour table and the reusable block tensor, whose last
         row stays zero for missing neighbours."""
@@ -106,6 +110,7 @@ class ObservationBuilder:
         self.carry_per_leg = carry_per_leg
         self.command = command
         self.current_command = current_command
+        self.ground_ahead = ground_ahead
         self.block_size = block_size(
             leg_motor_count, priced_forces, carry, energy, line_speed, carry_per_leg
         )
@@ -118,6 +123,7 @@ class ObservationBuilder:
         self.observation_size = (
             self.neighbour_table.shape[1] * self.block_size
             + TRAIL_VALUES
+            + int(ground_ahead) * GROUND_VIEW_VALUES
             + 1
             + int(command)
             + int(current_command)
@@ -142,6 +148,7 @@ class ObservationBuilder:
         averaged_forward_line: torch.Tensor | None = None,
         averaged_command: torch.Tensor | None = None,
         current_command: torch.Tensor | None = None,
+        ground_view: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Every unit's observation, ``(W, N, observation_size)``.
 
@@ -153,7 +160,9 @@ class ObservationBuilder:
         averaged forward line, ``(W, N)`` mm/s, read with ``line_speed``;
         ``averaged_command`` each world's averaged commanded speed, ``(W,)``
         mm/s, read with ``command``; ``current_command`` each world's command
-        on the step, ``(W,)`` mm/s, read with ``current_command``. The gather
+        on the step, ``(W,)`` mm/s, read with ``current_command``;
+        ``ground_view`` the front unit's view, ``(W, GROUND_VIEW_VALUES)`` m,
+        read with ``ground_ahead``. The gather
         creates a new tensor, so a
         returned observation never changes when ``build`` runs again.
         """
@@ -208,7 +217,14 @@ class ObservationBuilder:
         if self.current_command:
             world_values.append(current_command)
         worlds = torch.stack(world_values, dim=-1)[:, None]
+        sights = [trail]
+        if self.ground_ahead:
+            views = torch.zeros(
+                (*trail.shape[:2], GROUND_VIEW_VALUES), device=trail.device
+            )
+            views[:, 0] = ground_view
+            sights.append(views)
         return torch.cat(
-            (neighbour_blocks, trail, worlds.expand(-1, self.segment_count, -1)),
+            (neighbour_blocks, *sights, worlds.expand(-1, self.segment_count, -1)),
             dim=-1,
         )

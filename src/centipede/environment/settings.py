@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from centipede.environment.simulation import SimulationSettings
 from centipede.settings_section import SettingsError, SettingsSection
@@ -513,6 +513,14 @@ class EnvironmentSettings:
     lower with the reward's ``slow_in_bends``, and with
     ``observe_current_command`` the command as it stands on the step, so that
     a change of the speeds' schedule shows at once.
+
+    From 2026-10-24 (the terrain park, docs/follow-line/terrain.md): with
+    ``start_area_weights``, ground name to weight, every episode starts at a
+    point drawn uniformly in one of the terrain's start areas, chosen with
+    these weights (the areas left out are never chosen); without them the
+    body starts where the model puts it. With ``observe_ground_ahead`` the
+    front unit sees the ground ahead of it (``GROUND_VIEW_VALUES`` heights,
+    ``environment.ground_view``); the others see zeros there.
     """
 
     max_episode_steps: int
@@ -532,6 +540,8 @@ class EnvironmentSettings:
     tow: TowSettings
     curves: CurveSettings
     speeds: SpeedSettings
+    observe_ground_ahead: bool = False
+    start_area_weights: dict[str, float] = field(default_factory=dict)
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -575,6 +585,8 @@ class EnvironmentSettings:
             tow=TowSettings.from_section(section.table("tow")),
             curves=CurveSettings.from_section(section.table("curves")),
             speeds=SpeedSettings.from_section(section.table("speeds")),
+            observe_ground_ahead=section.boolean("observe_ground_ahead", default=False),
+            start_area_weights=_weights(section.table("start_area_weights")),
         )
         section.reject_unknown_keys()
         if settings.speeds.level_hold_s and not (
@@ -605,3 +617,13 @@ class EnvironmentSettings:
         """The neighbours a unit sees on each side: those within its sight
         in the straight body."""
         return int(self.sight_radius_spacings)
+
+
+def _weights(values: dict) -> dict[str, float]:
+    """The [environment.start_area_weights] table: non-negative numbers, at
+    least one of them positive if any are given."""
+    section = SettingsSection(values, "environment.start_area_weights")
+    weights = {name: section.number(name, minimum=0.0) for name in values}
+    if weights and not any(weights.values()):
+        raise SettingsError("environment.start_area_weights needs a positive weight")
+    return weights

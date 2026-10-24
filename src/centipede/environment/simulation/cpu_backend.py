@@ -102,7 +102,10 @@ class CPUBackend:
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
 
     def reset(
-        self, world_mask: torch.Tensor | None = None, seed: int | None = None
+        self,
+        world_mask: torch.Tensor | None = None,
+        seed: int | None = None,
+        root_offsets: torch.Tensor | None = None,
     ) -> None:
         """Return the selected worlds to the model pose with small leg noise.
 
@@ -113,8 +116,10 @@ class CPUBackend:
         are varied: each angle by up to 2 degrees, each speed by a small normal
         amount. With a start heading range, the whole body is then turned about
         the vertical by a uniform angle within it; the turn is drawn after the
-        legs, so the legs' noise is the same with or without it. The selected
-        worlds' rows of the physical state are refreshed.
+        legs, so the legs' noise is the same with or without it. With
+        ``root_offsets``, ``(W, 3)`` m, each selected world's root, and so the
+        whole body, is then moved by its offset. The selected worlds' rows of
+        the physical state are refreshed.
         """
         if world_mask is None:
             selected_world_indices = range(self.world_count)
@@ -122,6 +127,8 @@ class CPUBackend:
             selected_world_indices = world_mask.nonzero().flatten().tolist()
 
         noise_shape = self.mapping.leg_qpos_addresses.shape
+        root = self.mapping.root_qpos_address
+        offsets = None if root_offsets is None else root_offsets.cpu().numpy()
         for world_index in selected_world_indices:
             if seed is not None:
                 self.reset_generators[world_index] = np.random.default_rng(
@@ -151,6 +158,8 @@ class CPUBackend:
                     turn,
                     data.qpos[address : address + 4].copy(),
                 )
+            if offsets is not None:
+                data.qpos[root : root + 3] += offsets[world_index]
 
             mujoco.mj_forward(self.model, data)
             self._read_world(world_index)

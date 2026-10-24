@@ -862,6 +862,7 @@ class GPUBackend:
         self,
         world_mask: torch.Tensor | None = None,
         seed: int | None = None,
+        root_offsets: torch.Tensor | None = None,
     ) -> None:
         """Return the selected worlds to the model pose with small leg noise.
 
@@ -870,7 +871,9 @@ class GPUBackend:
         worlds' random sequences, so the same seed repeats the same resets;
         without one, each world's sequence continues with its next reset count.
         With a start heading range, the whole body is then turned about the
-        vertical by a uniform angle within it.
+        vertical by a uniform angle within it. With ``root_offsets``, ``(W,
+        3)`` m, each selected world's root, and so the whole body, is then
+        moved by its offset.
         """
         if world_mask is None:
             mask = torch.ones(
@@ -917,6 +920,10 @@ class GPUBackend:
                 outputs=[self.gpu_data.qpos],
                 device=self.device,
             )
+        if root_offsets is not None:
+            root = self.root_quaternion_address - 3
+            qpos = wp.to_torch(self.gpu_data.qpos)
+            qpos[mask, root : root + 3] += root_offsets[mask]
         self.reset_counts += mask
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()

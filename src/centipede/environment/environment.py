@@ -22,6 +22,7 @@ import math
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
+from centipede.environment.ground_view import ground_view
 from centipede.environment.line import Line, forward_axis
 from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import (
@@ -117,6 +118,7 @@ class Environment:
             settings.reward.carry_per_leg,
             settings.observe_command,
             settings.observe_current_command,
+            settings.observe_ground_ahead,
         )
         self.observation_size = self.observation_builder.observation_size
         self.behind_observation_entries = self.observation_builder.behind_entries
@@ -138,6 +140,24 @@ class Environment:
         # Episode state, overwritten in place. The lines' angles and the first
         # episodes' staggering have their own random sequence.
         self.generator = torch.Generator(device=self.device)
+        # The start areas the episodes start in (start_area_weights), read
+        # from the terrain; a name the terrain lacks is the file's mistake.
+        self._start_weights = None
+        if settings.start_area_weights:
+            areas = self.simulation.ground.start_areas
+            unknown = sorted(set(settings.start_area_weights) - set(areas))
+            if unknown:
+                raise ValueError(
+                    f"start_area_weights names grounds without a start area in the"
+                    f" terrain: {', '.join(unknown)}"
+                )
+            names = list(settings.start_area_weights)
+            self._start_weights = torch.tensor(
+                [settings.start_area_weights[name] for name in names],
+                device=self.device,
+            )
+            self._start_centres = torch.stack([areas[name][0] for name in names])
+            self._start_halves = torch.stack([areas[name][1] for name in names])
         self.episode_steps = torch.zeros(
             world_count, dtype=torch.int32, device=self.device
         )
@@ -349,10 +369,10 @@ class Environment:
         random sequences. With ``stagger_first_episodes`` every world starts
         its episode at a random step of it.
         """
-        self.simulation.reset(seed=seed)
         if seed is not None:
             self.generator.manual_seed(seed)
             self.tow.generator.manual_seed(seed)
+        self.simulation.reset(seed=seed, start_positions=self._start_positions())
         every_world = torch.ones(self.world_count, dtype=torch.bool, device=self.device)
         self.episode_steps.zero_()
         if self.settings.stagger_first_episodes:
@@ -489,7 +509,7 @@ class Environment:
         self.last_action.copy_(joint_action)
         final_observations = observations = self._observations()
         if truncated.any():
-            self.simulation.reset(truncated)
+            self.simulation.reset(truncated, start_positions=self._start_positions())
             self.episode_steps.masked_fill_(truncated, 0)
             self._restart(truncated)
             observations = self._observations()
@@ -500,6 +520,22 @@ class Environment:
             truncated,
             final_observations,
         )
+
+    def _start_positions(self) -> torch.Tensor | None:
+        """Every world's next start, ``(W, 2)`` m: a point drawn uniformly in
+        a start area chosen with ``start_area_weights``; None without them."""
+        if self._start_weights is None:
+            return None
+        area = torch.multinomial(
+            self._start_weights,
+            self.world_count,
+            replacement=True,
+            generator=self.generator,
+        )
+        draw = torch.rand(
+            (self.world_count, 2), generator=self.generator, device=self.device
+        )
+        return self._start_centres[area] + (2 * draw - 1) * self._start_halves[area]
 
     def _restart(self, world_mask: torch.Tensor) -> None:
         """Start the masked worlds' episodes afresh, as they stand after the
@@ -569,4 +605,11 @@ class Environment:
             self.averaged_forward_line,
             self.averaged_command,
             current_command,
+            ground_view(
+                self.simulation.physical_state,
+                self.simulation.ground,
+                self.sight_radius_m,
+            )
+            if self.settings.observe_ground_ahead
+            else None,
         )

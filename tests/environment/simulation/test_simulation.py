@@ -86,6 +86,48 @@ def test_a_terrain_replaces_the_floor_and_keeps_its_contact(tmp_path):
     assert joined.geom_conaffinity[lower] == body.geom_conaffinity[lower]
 
 
+def test_a_start_puts_the_body_above_the_terrain(tmp_path):
+    """A ramp rising 50 mm a metre along x, from a height field file: the
+    ground's heights and start area are read from it, a start puts the body
+    over its position above the ground, and recordings get the file."""
+    cells, half_m = 21, 0.2
+    x = np.linspace(-half_m, half_m, cells)
+    ramp = np.tile(0.05 * x, (cells, 1)).astype(np.float32)
+    field = tmp_path / "ramp.hfield"
+    with open(field, "wb") as file:
+        np.array([cells, cells], dtype=np.int32).tofile(file)
+        ramp.tofile(file)
+    terrain = tmp_path / "ramp.xml"
+    terrain.write_text(
+        f"""<mujoco>
+  <asset>
+    <hfield name="ramp" file="ramp.hfield" size="{half_m} {half_m} 0.02 0.01" />
+  </asset>
+  <worldbody>
+    <geom name="ground" type="hfield" hfield="ramp" pos="0 0 -0.01" />
+    <site name="start_east" type="box" pos="0.1 0 0" size="0.02 0.03 0.001" />
+  </worldbody>
+</mujoco>""",
+        encoding="utf-8",
+    )
+    simulation = PhysicsSimulation(settings(terrain_path=str(terrain)))
+    ground = simulation.ground
+
+    points = torch.tensor([[0.1, 0.0], [-0.1, 0.05]])
+    assert ground.heights(points) == pytest.approx([0.005, -0.005], abs=1e-6)
+    centre, half = ground.start_areas["east"]
+    assert centre.tolist() == pytest.approx([0.1, 0.0])
+    assert half.tolist() == pytest.approx([0.02, 0.03])
+    assert simulation.model_assets == {"ramp.hfield": field.read_bytes()}
+
+    simulation.reset(start_positions=torch.tensor([[0.1, 0.0]]))
+    state = simulation.physical_state
+    clearance = state.body_height[0] - ground.heights(state.body_planar_position[0])
+    assert clearance.min() > 0
+    assert state.body_planar_position[0, :, 1].abs().max() < 0.01
+    assert state.body_planar_position[0, :, 0].mean() == pytest.approx(0.1, abs=0.03)
+
+
 def test_body_measures_are_read_from_the_model():
     """Model v4's, as docs/cooperators/forces.md and task.md quote them."""
     simulation = PhysicsSimulation(settings(model_path="models/assembly_v4.xml"))

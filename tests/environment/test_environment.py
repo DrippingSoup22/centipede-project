@@ -9,13 +9,15 @@ import math
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
 from centipede.diagnostics_category import WindowSummary
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
-from centipede.environment.line import Line
+from centipede.environment.ground_view import GROUND_VIEW_VALUES
+from centipede.environment.line import TRAIL_VALUES, Line
 from centipede.environment.observation_builder import ObservationBuilder
 from centipede.environment.reward_function import (
     ENERGY_PARTS,
@@ -974,3 +976,46 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
     environment.judged_world_steps.fill_(3)
     assert environment.adjust_curve_level() and environment.line.level == 1
     assert not environment.adjust_curve_level()
+
+
+def test_episodes_start_in_the_weighted_areas_and_the_front_unit_sees_ahead(tmp_path):
+    """On a ramp rising 50 mm a metre along x: every world starts in the only
+    weighted area, and the front unit, facing +x, sees the ground rise ahead
+    of it, alike to its left and right; the other units see zeros."""
+    cells, half_m = 41, 0.4
+    ramp = np.tile(0.05 * np.linspace(-half_m, half_m, cells), (cells, 1))
+    with open(tmp_path / "ramp.hfield", "wb") as file:
+        np.array([cells, cells], dtype=np.int32).tofile(file)
+        ramp.astype(np.float32).tofile(file)
+    (tmp_path / "ramp.xml").write_text(
+        """<mujoco>
+  <asset><hfield name="ramp" file="ramp.hfield" size="0.4 0.4 0.04 0.01" /></asset>
+  <worldbody>
+    <geom name="ground" type="hfield" hfield="ramp" pos="0 0 -0.02" />
+    <site name="start_east" type="box" pos="0.15 0 0" size="0.01 0.01 0.001" />
+    <site name="start_west" type="box" pos="-0.15 0 0" size="0.01 0.01 0.001" />
+  </worldbody>
+</mujoco>""",
+        encoding="utf-8",
+    )
+    settings = EnvironmentSettings.from_section(
+        {
+            "simulation": HEADLESS | {"terrain_path": str(tmp_path / "ramp.xml")},
+            "start_area_weights": {"east": 1.0, "west": 0.0},
+            "observe_ground_ahead": True,
+            "stagger_first_episodes": False,
+        }
+    )
+    environment = Environment(settings)
+    observations = environment.reset(seed=1)
+
+    centres = environment.simulation.physical_state.body_planar_position.mean(dim=1)
+    assert (centres[:, 0] - 0.15).abs().max() < 0.04
+    builder = environment.observation_builder
+    first = builder.neighbour_table.shape[1] * builder.block_size + TRAIL_VALUES
+    views = observations[..., first : first + GROUND_VIEW_VALUES]
+    assert torch.count_nonzero(views[:, 1:]) == 0
+    near, far = views[:, 0].reshape(-1, 3, 5)[:, 0], views[:, 0].reshape(-1, 3, 5)[:, 2]
+    rise = 0.05 * (2 / 3) * environment.sight_radius_m
+    assert (far[:, 2] - near[:, 2]).tolist() == pytest.approx([rise] * 2, rel=0.05)
+    assert (far[:, 0] - far[:, 4]).abs().max() < 0.1 * rise

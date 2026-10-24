@@ -1,11 +1,13 @@
 import math
 
 import mujoco
+import numpy as np
 import torch
 
 from centipede.environment.simulation.body_measures import measure_body
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.environment.simulation.cpu_backend import CPUBackend
+from centipede.environment.simulation.ground import Ground
 from centipede.environment.simulation.model_mapping import (
     LEFT_FOOT_CATEGORY,
     LEG_CATEGORY,
@@ -17,6 +19,8 @@ from centipede.environment.simulation.settings import SimulationSettings
 
 # The body file's flat floor, which a terrain replaces.
 FLOOR_NAME = "floor"
+# How far above the highest ground within its reach a start puts the body.
+START_CLEARANCE_M = 0.001
 # What every terrain shape takes from the floor: how it collides and its
 # contacts behave, its marks (owner -1, the floor's category) and its look.
 FLOOR_SETTINGS = (
@@ -73,6 +77,18 @@ def model_spec(settings: SimulationSettings) -> mujoco.MjSpec:
     return spec
 
 
+def body_reach_m(model: mujoco.MjModel, root_position: np.ndarray) -> float:
+    """How far the body's shapes reach from its root seen from above, in
+    the model's pose: the farthest shape's distance plus its bounding radius."""
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    body_shapes = model.geom_bodyid > 0
+    distances = np.linalg.norm(
+        data.geom_xpos[body_shapes, :2] - root_position[:2], axis=1
+    )
+    return float((distances + model.geom_rbound[body_shapes]).max())
+
+
 def physics_steps_per_action(model: mujoco.MjModel) -> int:
     """How many of the model's timesteps make one 20 ms action.
 
@@ -108,7 +124,9 @@ class PhysicsSimulation:
     ``step``, and so is ``diagnostics.facts``, the simulation's diagnostics
     category. ``body_measures`` are the body's sizes, read from the model.
     ``model_xml`` is the model as one XML document, the terrain joined in,
-    as recordings keep it.
+    as recordings keep it, and ``model_assets`` the files it reads, by name
+    (a terrain's height field). ``ground`` is the ground's height anywhere
+    and the terrain's start areas (``Ground``).
     """
 
     def __init__(
@@ -126,6 +144,11 @@ class PhysicsSimulation:
         spec = model_spec(settings)
         model = spec.compile()
         self.model_xml = spec.to_xml()
+        self.model_assets = {
+            field.file: (settings.terrain_path.parent / field.file).read_bytes()
+            for field in spec.hfields
+            if field.file
+        }
         mapping = ModelMapping.from_model(model)
         steps_per_action = physics_steps_per_action(model)
         if measure_effort:
@@ -170,15 +193,37 @@ class PhysicsSimulation:
         self.step_duration_s = ACTION_DURATION_S
         self.physical_state = self._backend.physical_state
         self.diagnostics = self._backend.diagnostics
+        self.ground = Ground(model, self.physical_state.body_height.device)
+        root = mapping.root_qpos_address
+        self._root_qpos = model.qpos0[root : root + 3].copy()
+        self._body_reach_m = body_reach_m(model, self._root_qpos)
         # (W,) flags, refreshed by every step: the worlds the GPU backend put
         # back to the step's start after MuJoCo Warp made them non-finite.
         self.restarted_worlds = self.diagnostics.facts.restarted_worlds
 
     def reset(
-        self, world_mask: torch.Tensor | None = None, seed: int | None = None
+        self,
+        world_mask: torch.Tensor | None = None,
+        seed: int | None = None,
+        start_positions: torch.Tensor | None = None,
     ) -> None:
-        """Reset the selected worlds (all if no mask); see the backends' ``reset``."""
-        self._backend.reset(world_mask, seed)
+        """Reset the selected worlds (all if no mask); see the backends' ``reset``.
+
+        With ``start_positions``, ``(W, 2)`` m, each selected world's body
+        is then moved so that its root stands over its position, lifted by
+        the highest ground within the body's reach of it, plus
+        ``START_CLEARANCE_M``: whatever its heading, it starts above the
+        ground and drops onto it.
+        """
+        root_offsets = None
+        if start_positions is not None:
+            lift = self.ground.highest_near(start_positions, self._body_reach_m)
+            root = torch.as_tensor(self._root_qpos, dtype=torch.float32)
+            root = root.to(start_positions.device)
+            root_offsets = torch.cat(
+                (start_positions - root[:2], lift[:, None] + START_CLEARANCE_M), dim=-1
+            )
+        self._backend.reset(world_mask, seed, root_offsets)
 
     def step(
         self,
