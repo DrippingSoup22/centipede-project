@@ -46,7 +46,6 @@ MAX_CONTACTS_PER_SHAPE = mujoco.mjMAXCONPAIR
 # A length below which a direction is taken as none, in m.
 TINY_LENGTH = 1.0e-12
 FAR = 1.0e30
-ROUND_SHAPES = (mujoco.mjtGeom.mjGEOM_SPHERE, mujoco.mjtGeom.mjGEOM_CAPSULE)
 # The shapes' kinds in the kernel.
 SPHERE, CAPSULE, HULL = wp.constant(0), wp.constant(1), wp.constant(2)
 
@@ -1087,14 +1086,17 @@ class GroundContacts:
 
         moving = np.flatnonzero(model.geom_bodyid != 0)
         touching = [g for g in moving if any(meets(f, g) for f in fields)]
+        # Plain integers: on Linux MuJoCo's enum does not equal NumPy's number,
+        # so a lookup keyed by the enum misses every shape.
         kinds = {
-            mujoco.mjtGeom.mjGEOM_SPHERE: 0,
-            mujoco.mjtGeom.mjGEOM_CAPSULE: 1,
-            mujoco.mjtGeom.mjGEOM_MESH: 2,
+            int(mujoco.mjtGeom.mjGEOM_SPHERE): 0,
+            int(mujoco.mjtGeom.mjGEOM_CAPSULE): 1,
+            int(mujoco.mjtGeom.mjGEOM_MESH): 2,
         }
-        shapes = [g for g in touching if model.geom_type[g] in kinds]
+        shape_types = {g: int(model.geom_type[g]) for g in touching}
+        shapes = [g for g in touching if shape_types[g] in kinds]
         # Other shapes, if any, keep MuJoCo Warp's contacts.
-        others = [g for g in touching if model.geom_type[g] not in kinds]
+        others = [g for g in touching if shape_types[g] not in kinds]
         # A collision bit no geom uses: the fields keep meeting only the
         # other shapes, through it.
         used = np.bitwise_or.reduce(
@@ -1114,7 +1116,7 @@ class GroundContacts:
         )
         self._radii = np.array([model.geom_size[s][0] for _, s in pairs], np.float32)
         self._kinds = np.array(
-            [kinds[model.geom_type[s]] for _, s in pairs], dtype=np.int32
+            [kinds[shape_types[s]] for _, s in pairs], dtype=np.int32
         )
         # A sphere's or a mesh's core is a point: its half length is 0, and a
         # mesh's radius too.
