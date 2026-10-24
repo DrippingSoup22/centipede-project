@@ -193,6 +193,52 @@ body held higher, on the command) pays more than every fault on the mix,
 on straight lines and on the sharpest curves (the study's
 `Training/archive/ledger/ledger_25_*.txt`), as it does on the floor.
 
+## The GPU's ground contacts
+
+MuJoCo makes a height field's contacts column by column: each triangle of
+the grid is a column reaching down to the field's base, and a shape gets one
+contact for every column it overlaps, at the shortest way out of that column.
+MuJoCo Warp finds that way out with its general convex check (GJK and EPA)
+in single precision, and at the body's scale the check fails (2026-10-24,
+run 25's review; the study's Centipede `archive/gpu_hfield_check/`). For
+the same body poses, taken from the CPU's walk on each ground, it put feet
+and leg links more than 1 mm deeper than the CPU in up to 3% of their
+contacts, up to 2.9 m deep at the park's far corners, and the solver threw
+the bodies: on loose stones the GPU's walk cut 379 episodes in 6 s, where the
+CPU's walked at 59 mm/s. Only the flat ground came out right.
+
+- **Why.** A foot whose centre dips a few micrometres inside a steep column
+  should leave it sideways, by about its radius, as on the CPU; MuJoCo Warp's
+  EPA, the search for the shortest way out, left through a face millimetres
+  away. Far from the field's centre, single precision (0.5 um at 4 m) turned
+  millimetres into metres. More iterations and the fix proposed upstream
+  (MuJoCo Warp issue 1740) did not help; MuJoCo Warp's main branch has not
+  changed this path. Its body shells failed too, more rarely: once in about
+  600 shell contacts on the forest, 4.5 mm deep, out through a column's
+  bottom.
+- **The fix.** The physics simulation's `ground_contacts.py` makes these
+  contacts on the GPU itself, by MuJoCo's rule, with exact answers: a ball
+  against a column by its nearest point, or its nearest face when its centre
+  is inside; a capsule's axis against a column by the separating-axis test
+  when it crosses the column, by the nearest points otherwise; a body shell's
+  convex hull by the separating-axis test (the column's and the hull's face
+  normals and each pair of edges crossed). Every length is taken from the
+  column's own corner, so the field's size costs no precision. MuJoCo Warp
+  makes every other contact and is told not to collide inside its step
+  (`run_collision_detection`, its way of taking contacts made outside it);
+  the GPU backend collides before every step instead.
+- **Proof** (`tests/environment/simulation/test_ground_contacts.py`, and the
+  archive's comparison on every ground). For the same poses, the feet's and
+  links' contacts match MuJoCo's on the CPU on all nine grounds: the same
+  contacts, one per column, their depths within 1.2 um (99.9% within
+  0.5 um), their normals within 0.1 degrees but for a few contacts barely
+  touching. For the shells MuJoCo's own height-field check on the CPU is
+  less exact, off by up to tens of micrometres; ours match MuJoCo's convex
+  mesh check of the same column where it converges (to 0.1 um), and where
+  it stops early ours is the true shortest way out (checked by a search
+  over directions). The shells' contacts on the CPU, the ledger's, are
+  thus off by tens of micrometres, a small part of their contacts' depths.
+
 ## The cost
 
 On a 5090, 4,352 worlds, one 20 ms action (2026-10-24,

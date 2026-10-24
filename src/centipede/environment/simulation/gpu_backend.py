@@ -18,6 +18,7 @@ from centipede.environment.simulation.diagnostics import (
     SimulationDiagnostics,
     SimulationFacts,
 )
+from centipede.environment.simulation.ground_contacts import GroundContacts
 from centipede.environment.simulation.model_mapping import (
     BODY_CATEGORY,
     FLOOR_CATEGORY,
@@ -661,7 +662,16 @@ class GPUBackend:
         memory, so kernels writing a view fill the tensor directly.
         """
         model.opt.solver = SOLVERS[solver]
-        self.gpu_model = mjw.put_model(model)
+        # A height field's contacts with the feet and leg links are made by
+        # GroundContacts, not by MuJoCo Warp, whose convex check fails at the
+        # body's scale; ``_collide`` makes every contact before each step.
+        self.ground_contacts = GroundContacts.find(model)
+        if self.ground_contacts is None:
+            self.gpu_model = mjw.put_model(model)
+        else:
+            self.gpu_model = mjw.put_model(self.ground_contacts.gpu_source)
+            self.gpu_model.opt.run_collision_detection = False
+            self.ground_contacts.attach(self.gpu_model)
         self.gpu_model.opt.run_rne_postconstraint = measure_joint_forces
         self.gpu_data = mjw.make_data(
             model,
@@ -852,6 +862,7 @@ class GPUBackend:
         else:
             wp.capture_launch(self._physics_graph)
         restarted = self._check_worlds()
+        self._collide()
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
         if restarted:
@@ -937,6 +948,7 @@ class GPUBackend:
             qpos = wp.to_torch(self.gpu_data.qpos)
             qpos[mask, root : root + 3] += root_offsets[mask]
         self.reset_counts += mask
+        self._collide()
         mjw.forward(self.gpu_model, self.gpu_data)
         self._read_state()
         self._measure_start(mask_view)
@@ -957,6 +969,7 @@ class GPUBackend:
         if self.measure_effort:
             self._clear_effort(self._every_world)
         for step_index in range(steps):
+            self._collide()
             mjw.step(self.gpu_model, self.gpu_data)
             if self.measure_effort:
                 self._measure_effort(self._every_world, 1 / steps)
@@ -964,6 +977,17 @@ class GPUBackend:
                 self._measure_joint_forces(
                     self._every_world, 1 / steps, start=step_index == 0
                 )
+
+    def _collide(self) -> None:
+        """On a height field, the contacts of the current positions for the
+        next ``step`` or ``forward``, which then skip their own collision
+        stage: MuJoCo Warp's, then the feet's and leg links' with the field
+        (``GroundContacts``). Without one, MuJoCo Warp collides within them."""
+        if self.ground_contacts is None:
+            return
+        mjw.kinematics(self.gpu_model, self.gpu_data)
+        mjw.collision(self.gpu_model, self.gpu_data)
+        self.ground_contacts.add(self.gpu_model, self.gpu_data)
 
     def _clear_effort(self, world_mask: wp.array) -> None:
         """Zero the masked worlds' effort measures."""
