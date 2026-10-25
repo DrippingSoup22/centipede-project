@@ -278,7 +278,9 @@ cost is the height field itself.
   physics went non-finite.
 
 The table measures MuJoCo Warp's own height-field check, before the GPU's
-ground contacts replaced it. A Pascal GPU (the laptop's MX330) runs those
+ground contacts replaced it. With them, run 25 trained on the park at about
+18.5 s a cycle (4,352 worlds, 32 actions and the update, on a 5090), where
+run 22 took about 8.5 s on the model's floor. A Pascal GPU (the laptop's MX330) runs those
 contacts, but cannot build MuJoCo Warp's checks of the border's boxes (their
 kernels need more than 4 KB of parameters); the whole park runs on Volta or
 newer.
