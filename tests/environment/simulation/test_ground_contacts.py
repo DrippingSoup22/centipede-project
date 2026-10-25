@@ -17,6 +17,7 @@ import warp as wp  # noqa: E402
 
 from centipede.environment.simulation.ground_contacts import (  # noqa: E402
     GroundContacts,
+    _point_and_column,
     convex_hull,
 )
 from centipede.environment.simulation.model_mapping import ModelMapping  # noqa: E402
@@ -330,3 +331,51 @@ def test_gpu_shell_contacts_match_mujocos_convex_meshes():
             if depth > -2e-6:
                 continue
             assert mine[column][0] >= depth - DEPTH_TOLERANCE_M
+
+
+@wp.kernel
+def _ways_out(
+    points: wp.array1d[wp.vec3],
+    corners: wp.array2d[wp.vec3],
+    distances: wp.array1d[float],
+    normals: wp.array1d[wp.vec3],
+):
+    index = wp.tid()
+    distance, normal, _ = _point_and_column(
+        points[index], corners[index, 0], corners[index, 1], corners[index, 2], -0.01
+    )
+    distances[index] = distance
+    normals[index] = normal
+
+
+def test_a_point_on_a_columns_top_gets_the_tops_normal():
+    """A foot's centre within a nanometre of a column's top, in or out, gets
+    the top's normal: single precision once turned the direction toward a
+    nearest point that close into 0/0, and one such contact made a run's
+    learning non-finite (run 25, 2026-10-25)."""
+    count = 100_000
+    rng = np.random.default_rng(0)
+    heights = rng.uniform(0, RELIEF_M, (count, 3))
+    # MuJoCo's first triangle of a cell, in the cell corner's frame.
+    a = np.stack([np.zeros(count), np.full(count, CELL_M), heights[:, 0]], 1)
+    b = np.stack([np.zeros(count), np.zeros(count), heights[:, 1]], 1)
+    c = np.stack([np.full(count, CELL_M), np.full(count, CELL_M), heights[:, 2]], 1)
+    top = np.cross(b - a, c - a)
+    top /= np.linalg.norm(top, axis=1, keepdims=True)
+    # Well inside the triangle, then nudged along the top's normal.
+    u, v = rng.uniform(0.05, 0.45, (2, count))
+    points = a + u[:, None] * (b - a) + v[:, None] * (c - a)
+    points += rng.uniform(-1e-9, 1e-9, (count, 1)) * top
+    distances = wp.zeros(count, dtype=float)
+    normals = wp.zeros(count, dtype=wp.vec3)
+    wp.launch(
+        _ways_out,
+        dim=count,
+        inputs=[
+            wp.array(points.astype(np.float32), dtype=wp.vec3),
+            wp.array(np.stack([a, b, c], 1).astype(np.float32), dtype=wp.vec3),
+        ],
+        outputs=[distances, normals],
+    )
+    assert np.abs(distances.numpy()).max() < 1e-8
+    np.testing.assert_allclose(normals.numpy(), top, atol=1e-5)

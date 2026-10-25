@@ -46,6 +46,10 @@ wp.set_module_options({"enable_backward": False})
 MAX_CONTACTS_PER_SHAPE = mujoco.mjMAXCONPAIR
 # A length below which a direction is taken as none, in m.
 TINY_LENGTH = 1.0e-12
+# How far outside a column a point still counts as on its surface, in m: at
+# lengths of millimetres single precision resolves about 1 nm, and a nearest
+# point closer than this would give a direction made of rounding (or 0/0).
+ON_SURFACE = 1.0e-7
 # The sine of the angle below which two edges count as nearly parallel.
 PARALLEL_SINE = 1.0e-3
 FAR = 1.0e30
@@ -176,28 +180,25 @@ def _point_and_column(x: wp.vec3, a: wp.vec3, b: wp.vec3, c: wp.vec3, base: floa
     beyond_ab = wp.dot(side_ab, x - a)
     beyond_bc = wp.dot(side_bc, x - b)
     beyond_ca = wp.dot(side_ca, x - c)
-    if (
-        above_top <= 0.0
-        and below_bottom <= 0.0
-        and beyond_ab <= 0.0
-        and beyond_bc <= 0.0
-        and beyond_ca <= 0.0
-    ):
-        # Inside: out through the nearest face.
-        nearest = above_top
-        normal = top
-        if below_bottom > nearest:
-            nearest = below_bottom
-            normal = bottom
-        if beyond_ab > nearest:
-            nearest = beyond_ab
-            normal = side_ab
-        if beyond_bc > nearest:
-            nearest = beyond_bc
-            normal = side_bc
-        if beyond_ca > nearest:
-            nearest = beyond_ca
-            normal = side_ca
+    # The face the point is farthest in front of, or, inside, nearest behind.
+    nearest = above_top
+    normal = top
+    if below_bottom > nearest:
+        nearest = below_bottom
+        normal = bottom
+    if beyond_ab > nearest:
+        nearest = beyond_ab
+        normal = side_ab
+    if beyond_bc > nearest:
+        nearest = beyond_bc
+        normal = side_bc
+    if beyond_ca > nearest:
+        nearest = beyond_ca
+        normal = side_ca
+    if nearest <= ON_SURFACE:
+        # Inside, out through the nearest face; or on the surface, closer
+        # than single precision can turn into a direction, out through the
+        # face it is on.
         return nearest, normal, x - nearest * normal
 
     # Outside: the nearest of the faces it is in front of, and of the edges.

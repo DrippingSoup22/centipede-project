@@ -219,7 +219,9 @@ CPU's walked at 59 mm/s. Only the flat ground came out right.
 - **The fix.** The physics simulation's `ground_contacts.py` makes these
   contacts on the GPU itself, by MuJoCo's rule, with exact answers: a ball
   against a column by its nearest point, or its nearest face when its centre
-  is inside; a capsule's axis against a column by the separating-axis test
+  is inside or within 0.1 um of the surface (closer, single precision cannot
+  turn the gap into a direction: run 25's first launch learnt from a 0/0
+  normal and its networks went non-finite); a capsule's axis against a column by the separating-axis test
   when it crosses the column, by the nearest points otherwise; a body shell's
   convex hull by the separating-axis test on the faces of the two shapes'
   Minkowski difference: the column's faces, the hull's, and only the pairs
