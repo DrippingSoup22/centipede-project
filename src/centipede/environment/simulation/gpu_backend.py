@@ -4,6 +4,8 @@
 # pyright: reportIndexIssue=false, reportAssignmentType=false, reportGeneralTypeIssues=false
 # pyright: reportArgumentType=false, reportAttributeAccessIssue=false, reportOperatorIssue=false
 
+import dataclasses
+
 import mujoco
 import mujoco_warp as mjw
 import numpy as np
@@ -867,6 +869,7 @@ class GPUBackend:
         self._read_state()
         if restarted:
             self._measure_start(wp.from_torch(self._restarted_worlds))
+            self._check_restarted_worlds()
 
     def reset(
         self,
@@ -1121,6 +1124,25 @@ class GPUBackend:
             f"Physics failed in world {world_index}: MuJoCo Warp produced a "
             "non-finite position or velocity (the simulation became unstable)."
         )
+
+    def _check_restarted_worlds(self) -> None:
+        """Stop the run if a restarted world's physical state, read and
+        measured after the step's ``forward``, is not finite: a world whose
+        physics fails from the action's very start fails the same way again,
+        and its non-finite forces would pass into the rewards and from there
+        into every network (run 25, 2026-10-25, through a ground contact's
+        0/0 normal)."""
+        finite = torch.ones_like(self._restarted_worlds)
+        for field in dataclasses.fields(self.physical_state):
+            values = getattr(self.physical_state, field.name)
+            finite &= torch.isfinite(values.float()).flatten(1).all(dim=1)
+        failed_again = self._restarted_worlds & ~finite
+        if failed_again.any():
+            world_index = int(torch.nonzero(failed_again)[0].item())
+            raise RuntimeError(
+                f"Physics failed in world {world_index}: restarted at its "
+                "action's start, it came out non-finite again."
+            )
 
     def _restart_worlds(self, world_mask: torch.Tensor) -> None:
         """Put the masked worlds back to their state at the action's start and

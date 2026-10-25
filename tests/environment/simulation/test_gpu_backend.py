@@ -545,7 +545,8 @@ def test_allowed_non_finite_worlds_restart_from_the_actions_start(
 ):
     """With one restart allowed per action, a world the physics makes
     non-finite goes back to the action's start, flagged for the environment,
-    with finite state and effort; the other world steps on."""
+    with finite state and effort; the other world steps on. A world that
+    fails again from the action's start stops the run."""
     backend = GPUBackend(model, mapping, 2, STEPS, SOLVER, 128, 512, 0.0, True, True, 1)
     backend.reset(seed=0)
     actions = torch.rand(2, mapping.segment_count, 6, device="cuda") * 2 - 1
@@ -566,3 +567,11 @@ def test_allowed_non_finite_worlds_restart_from_the_actions_start(
     for field in dataclasses.fields(backend.physical_state):
         values = getattr(backend.physical_state, field.name)
         assert torch.isfinite(values.float()).all(), field.name
+
+    def replay_spoiling_world_1_from_the_start(graph):
+        replay_spoiling_world_1(graph)
+        wp.to_torch(backend._action_start["qvel"])[1, 10] = float("nan")
+
+    monkeypatch.setattr(wp, "capture_launch", replay_spoiling_world_1_from_the_start)
+    with pytest.raises(RuntimeError, match="world 1: restarted"):
+        backend.step(actions)
