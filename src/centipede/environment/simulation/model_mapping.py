@@ -9,7 +9,8 @@ LEG_CATEGORY = 2
 LEFT_FOOT_CATEGORY = 3
 RIGHT_FOOT_CATEGORY = 4
 MEMBRANE_CATEGORY = 5
-ALL_CATEGORIES = range(6)
+HEAD_CATEGORY = 6
+ALL_CATEGORIES = range(7)
 
 # A leg's joints, from the body outward. Every leg has the first three; a
 # model's legs may also have an ankle, all of them or none.
@@ -81,7 +82,13 @@ class ModelMapping:
         )
         root_qpos_address = _find_root_joint(model, body_ids)
         geom_owner_indices, geom_categories = _read_geom_metadata(model, segment_count)
-        is_head_shape = (geom_owner_indices == 0) & (geom_categories == BODY_CATEGORY)
+        # The head's own shape where the head is a body of its own (v6), else
+        # the first segment's body shape, which carries the head (v1 to v5).
+        is_head_shape = geom_categories == HEAD_CATEGORY
+        if not is_head_shape.any():
+            is_head_shape = (geom_owner_indices == 0) & (
+                geom_categories == BODY_CATEGORY
+            )
         head_shape_id = int(np.flatnonzero(is_head_shape)[0])
         head_outline = _head_outline(
             model, head_shape_id, int(body_ids[0]), int(center_site_ids[0])
@@ -317,16 +324,26 @@ def spine_joint_force_bodies(
 
 
 def _head_outline(
-    model: mujoco.MjModel, shape_id: int, head_body_id: int, center_site_id: int
+    model: mujoco.MjModel, shape_id: int, first_body_id: int, center_site_id: int
 ) -> HeadOutline:
-    """The rectangle that encloses the head's body shape, seen from above.
+    """The rectangle that encloses the head's shape, seen from above.
 
     MuJoCo gives each shape a box around it in the shape's own frame; its
-    corners are turned into the head body's frame and measured from the head's
-    centre site, whose axes are the body's.
+    corners are turned into the first segment's frame and measured from its
+    centre site, whose axes are the body's. The shape belongs to the first
+    segment's body (v1 to v5) or to the head's, which v6 attaches to it in
+    the same frame: the outline is then the head's with its neck straight.
     """
-    if model.geom_bodyid[shape_id] != head_body_id:
-        raise ModelContractError("The head's body shape must belong to segment_00")
+    body_id = model.geom_bodyid[shape_id]
+    in_first_frame = body_id == first_body_id or (
+        model.body_parentid[body_id] == first_body_id
+        and not model.body_pos[body_id].any()
+        and np.array_equal(model.body_quat[body_id], [1.0, 0.0, 0.0, 0.0])
+    )
+    if not in_first_frame:
+        raise ModelContractError(
+            "The head's shape must belong to segment_00 or to a body in its frame"
+        )
     box_center, box_half_size = (
         model.geom_aabb[shape_id, :3],
         model.geom_aabb[shape_id, 3:],
@@ -350,7 +367,9 @@ def _read_geom_metadata(
 
     Each shape stores ``user="owner category"`` in the XML. The floor's owner
     is -1; every other shape belongs to a segment, and every segment owns
-    exactly one body, one left foot, and one right foot.
+    exactly one body, one left foot, and one right foot. A head with a body
+    of its own (v6) has at most one shape, owned by the first segment, which
+    carries it.
     """
     if model.nuser_geom < 2:
         raise ModelContractError(
@@ -365,11 +384,19 @@ def _read_geom_metadata(
         owner_index, category = owner_indices[geom_id], categories[geom_id]
         if category not in ALL_CATEGORIES:
             raise ModelContractError(f"Shape {name} has unknown category {category}")
-        expected_owner_indices = (
-            {-1} if category == FLOOR_CATEGORY else set(range(segment_count))
-        )
+        if category == FLOOR_CATEGORY:
+            expected_owner_indices = {-1}
+        elif category == HEAD_CATEGORY:
+            expected_owner_indices = {0}
+        else:
+            expected_owner_indices = set(range(segment_count))
         if owner_index not in expected_owner_indices:
             raise ModelContractError(f"Shape {name} has invalid owner {owner_index}")
+    head_shape_count = int((categories == HEAD_CATEGORY).sum())
+    if head_shape_count > 1:
+        raise ModelContractError(
+            f"The model has {head_shape_count} head shapes, expected at most 1"
+        )
 
     for segment_index in range(segment_count):
         owned = categories[owner_indices == segment_index]

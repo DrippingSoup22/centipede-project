@@ -23,8 +23,9 @@ separately.
 ## Status
 
 - **Model: complete and frozen.** The newest body, v6, is v5's with a more
-  mobile trunk and target motors, each pulling its joint toward an angle the
-  command sets, in the same three files: the whole body in
+  mobile trunk, target motors, each pulling its joint toward an angle the
+  command sets, and the head as a body of its own on a neck, in the same
+  three files: the whole body in
   [`models/assembly_v6_full.xml`](models/assembly_v6_full.xml), its first
   ten units in [`models/assembly_v6_half.xml`](models/assembly_v6_half.xml)
   and without the head in

@@ -97,11 +97,14 @@ it drives the right joint and accepts commands from −1 to 1, and that every mo
 is found exactly once with none left over (`MN + N − 1`: 55 for v1 to v3, 107
 for v4), so an ankle on only some legs is rejected. It
 also checks that every collision shape records its owning segment and its
-category (floor, body, leg, left foot, right foot, or membrane; see
-[model.md](model.md#contacts-and-friction)). From the head's body shape it
-measures the head's **outline** seen from above, the rectangle that encloses
-it, measured from the head's centre site: how far it reaches behind and ahead,
-and its half-width. The environment reads it from the simulation
+category (floor, body, leg, left foot, right foot, membrane, or head; see
+[model.md](model.md#contacts-and-friction)), and that a head with a shape of
+its own, as v6 has, has one, owned by the first segment. From the head's
+shape, or where the head has none of its own the first segment's body
+shape, which carries it (v1 to v5), it measures the head's **outline**
+seen from above, the rectangle that encloses it, measured from the first
+segment's centre site with v6's neck straight: how far it reaches behind
+and ahead, and its half-width. The environment reads it from the simulation
 (`head_outline`) to decide arrival and the closest distance progress counts.
 
 If any check fails, the program stops with a clear error; after that, the
