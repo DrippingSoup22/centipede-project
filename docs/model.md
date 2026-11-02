@@ -839,7 +839,7 @@ what it carries, the head on the first:
 | Standing, every leg planted, 4 s: what each unit's feet carry, in its own weight | The first unit's 1.70, the second's 1.21, the others' 0.81 to 0.94, the trunk's springs passing part of the head's load back; the first unit 6.4 mm high, 0.8 mm below the others; the head clear of the floor | 1.00 every unit, all 7.21 mm high |
 | Standing with unit 5 limp | It sinks 0.28 mm, its neighbours holding 88% of its weight | 0.31 mm, 95% |
 | Standing with unit 5 on one foot | It rolls 0.5° | 0.6° |
-| The scripted wave, over 6 s | 79 mm/s, 0.036 mJ for each mm; no belly touches, but the head knocks on the floor on 13% of the steps, which push it up with 0.57 of a unit's weight on average, up to 11 in an impact; the neck bends 0.5 to 1.3° up and down, 4° to either side | 81 mm/s, 0.035 mJ for each mm; no belly touches |
+| The scripted wave, over 6 s | 79 mm/s, 0.036 mJ for each mm; no belly touches, but the head knocks on the floor on 12% of the steps, which push it up with 0.54 of a unit's weight on average, up to 10 in an impact; the neck, its motors aimed straight, bends 0.6 to 1.5° up and down, 2° to either side | 81 mm/s, 0.035 mJ for each mm; no belly touches |
 
 The head rests on the first unit, whose two legs carry it, through the
 neck, as well as their own unit. Standing, they hold it up; on the scripted
