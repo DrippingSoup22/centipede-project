@@ -807,20 +807,22 @@ On CPU MuJoCo 3.16.0, at the model's timestep. The automated tests in
   head, which stays clear of the floor.
 
 On a scripted body, with the scripted walk and muscle-energy measure of
-the follow-line branch's program (2 worlds; `archive/model_v6/body_tests.py`
-in the main folder):
+the follow-footsteps branch's program (2 worlds; `archive/model_v6/body_tests.py`
+and `head_on_floor.py` in the main folder), each unit's weight counting
+what it carries, the head on the first:
 
 | Check | The half | The headless tester |
 | --- | --- | --- |
-| Standing, every leg planted, 4 s: what each unit's feet carry, in its own weight | The first unit's 1.73, the second's 1.21, the others' 0.79 to 0.94, the trunk's springs passing part of the head's load back; the first unit 6.4 mm high, 0.8 mm below the others | 1.00 every unit, all 7.21 mm high |
+| Standing, every leg planted, 4 s: what each unit's feet carry, in its own weight | The first unit's 1.70, the second's 1.21, the others' 0.81 to 0.94, the trunk's springs passing part of the head's load back; the first unit 6.4 mm high, 0.8 mm below the others; the head clear of the floor | 1.00 every unit, all 7.21 mm high |
 | Standing with unit 5 limp | It sinks 0.28 mm, its neighbours holding 88% of its weight | 0.31 mm, 95% |
 | Standing with unit 5 on one foot | It rolls 0.5° | 0.6° |
-| The scripted wave, over 6 s | 78 mm/s, 0.036 mJ for each mm; the first unit's belly carries 0.49 of its weight, and no other belly touches | 81 mm/s, 0.035 mJ for each mm; no belly touches |
+| The scripted wave, over 6 s | 79 mm/s, 0.036 mJ for each mm; no belly touches, but the head knocks on the floor on 13% of the steps, which push it up with 0.57 of a unit's weight on average, up to 11 in an impact; the neck bends 0.5 to 1.3° up and down, 4° to either side | 81 mm/s, 0.035 mJ for each mm; no belly touches |
 
-The head rests on the first unit, whose two legs carry it as well as their
-own unit. Standing, they hold it up; on the scripted wave, which was tuned
-on the headless tester, the first unit drags its belly. A body with its
-head must learn to carry it, as the headless tester's description foresees
+The head rests on the first unit, whose two legs carry it, through the
+neck, as well as their own unit. Standing, they hold it up; on the scripted
+wave, which was tuned on the headless tester, the front dips and the head
+knocks on the floor. A body with its head must learn to carry it, as the
+headless tester's description foresees
 ([Two lengths, and a headless tester](#two-lengths-and-a-headless-tester)).
 The whole body was checked by the automated tests alone. The main
 environment loads and steps the three files on the CPU; the GPU backend has
