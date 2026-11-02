@@ -7,19 +7,21 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The newest model is **v5**, the body of a real species, *Scolopendra
-heros*: a head without legs and 21 leg-bearing units at the animal's
-measured length and mass, with v4's physics scaled to its size (see
-[Model v5](#model-v5)). It comes in two lengths, the whole animal and its
-first ten units, a tester that screens a design quickly before the whole
-body trains it; the tester also comes without its head, ten units alike,
-the simplest body to learn walking on. **v4** has twelve body units, and legs of three
+The newest model is **v6**, v5's body with a more mobile trunk and target
+motors, which pull each joint toward an angle the command sets, in v5's
+three files (see [Model v6](#model-v6)). **v5** is the body of a real
+species, *Scolopendra heros*: a head without legs and 21 leg-bearing units
+at the animal's measured length and mass, with v4's physics scaled to its
+size (see [Model v5](#model-v5)). It comes in two lengths, the whole animal
+and its first ten units, a tester that screens a design quickly before the
+whole body trains it; the tester also comes without its head, ten units
+alike, the simplest body to learn walking on. **v4** has twelve body units, and legs of three
 links with a fourth joint, the ankle, with v3's torque motors, leg armature,
 and a 0.5 ms physics timestep (see [Model v4](#model-v4)). **v3**, which the
 example configurations use, is v2 with a longer physics timestep (see
 [Model v3](#model-v3)). v2 has exactly the body and physics of the original
 **v1 flat-ground baseline**. v2 and v1 are kept unchanged for reference. All
-five are frozen: training work may change observations, rewards, targets,
+six are frozen: training work may change observations, rewards, targets,
 and learning, but never a model. A physical
 change requires a new, separately named version with its own validation. The
 two exceptions, each made before any training had used the model, by the
@@ -29,7 +31,8 @@ user's decision: v4's physics were revised in place on 2026-10-15
 ([Physics of v5](#physics-of-v5)).
 
 **MuJoCo version.** The program runs on MuJoCo 3.16.0 and MuJoCo Warp
-3.16.0, which v5 was validated with ([Validation of v5](#validation-of-v5)).
+3.16.0, which v5 and v6 were validated with ([Validation of
+v5](#validation-of-v5), [Validation of v6](#validation-of-v6)).
 v1 to v4 were validated with MuJoCo 3.12.0, and their validations have not
 been repeated under 3.16.0. Their automated tests pass under it, and it
 compiles them to the same bodies but for one part: v4's tarsus, a 0.6 mg
@@ -38,6 +41,9 @@ smaller. A model of v1 to v4 is validated again before it is trained on.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
+| [`models/assembly_v6_full.xml`](../models/assembly_v6_full.xml) | **v6**, v5's body with a more mobile trunk and target motors | `2bed121348bb5cdd232ff08404b5778d6c9aaa15cf4a6b1593a28678c3f70e68` |
+| [`models/assembly_v6_half.xml`](../models/assembly_v6_half.xml) | **v6's half**, its first ten units: the tester | `385e4b423a204939925c06cf6699ab2519c3d9074c39d30d65bb22b4863316a0` |
+| [`models/assembly_v6_headless.xml`](../models/assembly_v6_headless.xml) | **v6's headless tester**, the half without its head | `5d884f2f7d638f5d96730d852d5f6fde809fc9174181dcde8fcaa759af249c51` |
 | [`models/assembly_v5_full.xml`](../models/assembly_v5_full.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 15 physics steps per action | `8d2dd3e433feb5d710b176cd73c3b0dfc35c18bca57ca0d367de86293d280cec` |
 | [`models/assembly_v5_half.xml`](../models/assembly_v5_half.xml) | **v5's half**, its first ten units: the tester | `13773151d9468b5778ea65f0b67b472539a100bf67616b03e4cdff8ca04f55f1` |
 | [`models/assembly_v5_headless.xml`](../models/assembly_v5_headless.xml) | **v5's headless tester**, the half without its head | `5841d8f0e5c7000f1df07bacc7f4afcb107deff8ee7c58aa6cf9d956512ccba9` |
@@ -683,3 +689,120 @@ no leg passes through a body under random commands.
   order Scolopendromorpha (Chilopoda). *Virginia Museum of Natural History
   Memoir* 5; *S. heros*' antennae as Myriatrix summarises it
   (myriatrix.myspecies.info, *Scolopendra heros*).
+
+## Model v6
+
+v6 is v5's body with two changes to its physics, both the user's decisions
+(2026-10-21 and 22): a trunk that bends a little in every direction, and
+target motors, each pulling its joint toward an angle that the command
+sets. Every shape, mass, leg and simulation setting is v5's. One generator,
+`archive/model_v6/make_model_v6.py` in the main folder, makes v6's three
+files from v5's file of the same length:
+
+| File | Units | Mass | Degrees of freedom | Motors |
+| --- | ---: | ---: | ---: | ---: |
+| `assembly_v6_full.xml` | 21, the whole animal | 11.56 g | 234 | 188 |
+| `assembly_v6_half.xml` | 10, the first ten: the tester | 5.71 g | 113 | 89 |
+| `assembly_v6_headless.xml` | 10, the first ten without the head | 5.32 g | 113 | 89 |
+
+### A more mobile trunk
+
+Every link between units keeps its yaw hinge and its yaw motor, and gains
+a passive roll hinge beside its pitch hinge, which turns further on a
+softer spring:
+
+| Link hinge | v5 | v6 | Why |
+| --- | --- | --- | --- |
+| Yaw, sideways | ±15°, spring 2.23e-4 N·m/rad, the unit's motor | Unchanged | *S. heros* bends 4 to 8.5° a joint running, with peaks near 15° (Anderson et al. 1995) |
+| Pitch, up and down | ±8°, spring 1.11e-3 N·m/rad | ±10°, spring 7.80e-4 (0.7 times v5's) | The body dips into hollows over rough ground, a few degrees a joint spread over about ten segments (Ozkan-Aydin et al. 2020, Fig. 4a) |
+| Roll, twist | None | ±5°, spring 5.01e-3 (4.5 times v5's pitch spring), with the pitch hinge's damping and armature | Centipedes twist, but locally, spread over several segments (Pierce et al. 2026) |
+
+No stiffness of a real centipede's trunk has been measured, so the springs
+stay close to v5's. The tree runs out from its root, the middle unit, so a
+link's hinges are read from the front behind the root and from the rear
+ahead of it, in the reverse order with their axes negated. The roll hinge
+follows that convention, after the pitch hinge behind the root and before
+it ahead, so that a positive roll turns the unit behind the same way on
+both sides.
+
+### Target motors
+
+Each motor keeps v5's name, joint, strength, owner and command range, −1
+to 1, but a command is no longer a share of its strength. A command u is a
+target angle across the joint's range, m + c·u, where m is the range's
+middle and c half its width, and the motor pulls the joint toward it as a
+spring and a damper:
+
+```text
+force = kp · (m + c·u − q) − kv · q̇,   within ±1 of the motor's strength
+```
+
+kp gives the full strength a quarter of the range away from the target,
+and kv damps the joint's own inertia, its armature included, critically at
+the starting pose, so that a held target is reached without ringing. In
+MuJoCo each motor is a general actuator with a fixed gain and an affine
+bias, so the force law is part of the model file: the program sends every
+command to its motor unchanged, as for v1 to v5. A muscle pulls a limb
+toward the position its activation sets in the same way (the
+equilibrium-point hypothesis: Feldman 1966; Bizzi et al. 1992), and on
+simulated legged bodies, target angles were learned faster and more
+robustly than torques (Peng & van de Panne 2017). A spine motor's target
+spans its joint's whole ±15°.
+
+Because a command is an angle, the reward's optional command cost
+([environment.md](environment.md#optional-costs)) is no measure of effort
+on v6: it charges the posture asked for, while the effort is the force each
+motor exerts.
+
+### Validation of v6
+
+On CPU MuJoCo 3.16.0, at the model's timestep. The automated tests in
+`tests/models/test_model_v6.py` check, on the three files:
+
+- that every body, mass and v5 joint is kept, the pitch hinges widened and
+  softened, and every link given a roll hinge, damped as its pitch hinge,
+  that turns the unit behind the same way on both sides of the root;
+- that every motor's force is kp (target − q) − kv q̇ within its strength,
+  with kp and kv as above;
+- that with every lift aimed 10° down the body stands on all its feet, no
+  body on the floor, each lift within 3° of its aim at under a fifth of its
+  strength. On the half and the whole body the first unit, which carries
+  the head, stands 2° higher than the others, its lifts pulling at 0.25 of
+  their strength against the others' 0.13.
+
+On a scripted body, with the scripted walk and muscle-energy measure of
+the follow-line branch's program (2 worlds; `archive/model_v6/body_tests.py`
+in the main folder):
+
+| Check | The half | The headless tester |
+| --- | --- | --- |
+| Standing, every leg planted, 4 s: what each unit's feet carry, in its own weight | The first unit's 1.73, the second's 1.21, the others' 0.79 to 0.94, the trunk's springs passing part of the head's load back; the first unit 6.4 mm high, 0.8 mm below the others | 1.00 every unit, all 7.21 mm high |
+| Standing with unit 5 limp | It sinks 0.28 mm, its neighbours holding 88% of its weight | 0.31 mm, 95% |
+| Standing with unit 5 on one foot | It rolls 0.5° | 0.6° |
+| The scripted wave, over 6 s | 78 mm/s, 0.036 mJ for each mm; the first unit's belly carries 0.49 of its weight, and no other belly touches | 81 mm/s, 0.035 mJ for each mm; no belly touches |
+
+The head rests on the first unit, whose two legs carry it as well as their
+own unit. Standing, they hold it up; on the scripted wave, which was tuned
+on the headless tester, the first unit drags its belly. A body with its
+head must learn to carry it, as the headless tester's description foresees
+([Two lengths, and a headless tester](#two-lengths-and-a-headless-tester)).
+The whole body was checked by the automated tests alone. The main
+environment loads and steps the three files on the CPU; the GPU backend has
+not yet been compared with CPU MuJoCo on v6.
+
+### Sources for v6
+
+- Anderson et al. (1995) and Pierce et al. (2026), as for v5.
+- Ozkan-Aydin, Y., Chong, B., Aydin, E. and Goldman, D. I. (2020). A
+  systematic approach to creating terrain-capable hybrid soft/hard
+  myriapod robots. *IEEE International Conference on Soft Robotics
+  (RoboSoft)*.
+- Feldman, A. G. (1966). Functional tuning of the nervous system with
+  control of movement or maintenance of a steady posture. II.
+  Controllable parameters of the muscles. *Biophysics* 11, 565–578.
+- Bizzi, E., Hogan, N., Mussa-Ivaldi, F. A. and Giszter, S. (1992). Does
+  the nervous system use equilibrium-point control to guide single and
+  multiple joint movements? *Behavioral and Brain Sciences* 15, 603–613.
+- Peng, X. B. and van de Panne, M. (2017). Learning locomotion skills
+  using DeepRL: does the choice of action space matter? *ACM SIGGRAPH /
+  Eurographics Symposium on Computer Animation*.

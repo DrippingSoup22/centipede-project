@@ -22,9 +22,15 @@ separately.
 
 ## Status
 
-- **Model: complete and frozen.** The newest body, v5, is that of the
-  centipede *Scolopendra heros*: a head without legs and 21 leg-bearing
-  units at the animal's measured size, in
+- **Model: complete and frozen.** The newest body, v6, is v5's with a more
+  mobile trunk and target motors, each pulling its joint toward an angle the
+  command sets, in the same three files: the whole body in
+  [`models/assembly_v6_full.xml`](models/assembly_v6_full.xml), its first
+  ten units in [`models/assembly_v6_half.xml`](models/assembly_v6_half.xml)
+  and without the head in
+  [`models/assembly_v6_headless.xml`](models/assembly_v6_headless.xml).
+  v5 is the body of the centipede *Scolopendra heros*: a head without legs
+  and 21 leg-bearing units at the animal's measured size, in
   [`models/assembly_v5_full.xml`](models/assembly_v5_full.xml), and its
   first ten units, a quicker tester, in
   [`models/assembly_v5_half.xml`](models/assembly_v5_half.xml), also without
