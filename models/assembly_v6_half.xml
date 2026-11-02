@@ -375,8 +375,8 @@
                 <geom name="segment_00_trunk_look" type="mesh" pos="0 0 0" mass="0" contype="0" conaffinity="0" rgba="0.20 0.07 0.03 1" group="2" user="0 5" mesh="trunk_envelope" />
                 <site name="segment_00_center" pos="0 0 0" size="0.0003" rgba="0 0 0 0" group="3" />
                 <body name="head" pos="0 0 0">
-                  <joint name="neck_pitch" pos="0.00330434782609 0 0" type="hinge" axis="0 -1 0" range="-10 10" stiffness="0.0007798" springref="0" damping="7.406e-06" armature="3.939e-10" />
-                  <joint name="neck_yaw" pos="0.00330434782609 0 0" type="hinge" axis="0 0 -1" range="-15 15" damping="4.444e-06" armature="3.939e-10" stiffness="0.0002228" springref="0" />
+                  <joint name="neck_pitch" pos="0.00330434782609 0 0" type="hinge" axis="0 -1 0" range="-30 30" stiffness="0" springref="0" damping="7.406e-06" armature="3.939e-10" />
+                  <joint name="neck_yaw" pos="0.00330434782609 0 0" type="hinge" axis="0 0 -1" range="-30 30" damping="4.444e-06" armature="3.939e-10" stiffness="0" springref="0" />
                   <geom name="head_body" type="mesh" pos="0 0 0" mass="0.000397033" rgba="0 0 0 0" group="3" contype="2" conaffinity="1" user="0 6" mesh="head_shell" />
                   <geom name="head_look" type="mesh" pos="0 0 0" mass="0" contype="0" conaffinity="0" rgba="0.55 0.13 0.05 1" group="2" user="0 5" mesh="head_shell" />
                   <site name="head_tip" pos="0.0137654 0 0" size="0.0005" rgba="0 0 0 0" />
@@ -1310,5 +1310,7 @@
     <general name="segment_09_right_lift_motor" joint="segment_09_right_lift" gear="0.0002006" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="9" gaintype="fixed" gainprm="2" biastype="affine" biasprm="0.461538 -17576.7 -117.314" />
     <general name="segment_09_right_knee_motor" joint="segment_09_right_knee" gear="0.0001114" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="9" gaintype="fixed" gainprm="2" biastype="affine" biasprm="0.666667 -34288.3 -208.632" />
     <general name="segment_09_right_ankle_motor" joint="segment_09_right_ankle" gear="5.571e-05" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="9" gaintype="fixed" gainprm="2" biastype="affine" biasprm="0.285714 -58769.4 -546.17" />
+    <general name="neck_pitch_motor" joint="neck_pitch" gear="0.0001671" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="-1" gaintype="fixed" gainprm="2" biastype="affine" biasprm="0 -22858.9 -178.903" />
+    <general name="neck_yaw_motor" joint="neck_yaw" gear="0.0001671" ctrlrange="-1 1" ctrllimited="true" forcerange="-1 1" forcelimited="true" user="-1" gaintype="fixed" gainprm="2" biastype="affine" biasprm="0 -22858.9 -205.072" />
   </actuator>
 </mujoco>

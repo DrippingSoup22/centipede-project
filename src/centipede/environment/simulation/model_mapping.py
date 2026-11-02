@@ -11,6 +11,7 @@ RIGHT_FOOT_CATEGORY = 4
 MEMBRANE_CATEGORY = 5
 HEAD_CATEGORY = 6
 ALL_CATEGORIES = range(7)
+HEAD_OWNER = -1  # the owner a head's motors store: no segment
 
 # A leg's joints, from the body outward. Every leg has the first three; a
 # model's legs may also have an ankle, all of them or none.
@@ -46,7 +47,8 @@ class ModelMapping:
     action order: the left leg's joints from the body outward, then the
     right leg's. The spine tables have one entry per spine joint, ``(N - 1,)``:
     entry ``i`` is the yaw joint that joins segment ``i`` to segment ``i + 1``
-    behind it.
+    behind it. ``head_actuator_ids`` are the motors of a head that is a body
+    of its own (v6's neck), owned by no segment; none on v1 to v5.
     """
 
     segment_count: int
@@ -64,6 +66,7 @@ class ModelMapping:
     geom_owner_indices: np.ndarray
     geom_categories: np.ndarray
     head_outline: HeadOutline
+    head_actuator_ids: np.ndarray
 
     @classmethod
     def from_model(cls, model: mujoco.MjModel) -> "ModelMapping":
@@ -76,7 +79,6 @@ class ModelMapping:
         spine_actuator_ids, spine_qpos_addresses, spine_dof_addresses = (
             _map_spine_motors(model, segment_count)
         )
-        _check_all_motors_found(model, leg_actuator_ids, spine_actuator_ids)
         body_ids, center_site_ids, head_tip_site_id = _map_bodies_and_sites(
             model, segment_count
         )
@@ -92,6 +94,10 @@ class ModelMapping:
         head_shape_id = int(np.flatnonzero(is_head_shape)[0])
         head_outline = _head_outline(
             model, head_shape_id, int(body_ids[0]), int(center_site_ids[0])
+        )
+        head_actuator_ids = _map_head_motors(model, head_shape_id, int(body_ids[0]))
+        _check_all_motors_found(
+            model, leg_actuator_ids, spine_actuator_ids, head_actuator_ids
         )
         return cls(
             segment_count=segment_count,
@@ -109,6 +115,7 @@ class ModelMapping:
             geom_owner_indices=geom_owner_indices,
             geom_categories=geom_categories,
             head_outline=head_outline,
+            head_actuator_ids=head_actuator_ids,
         )
 
 
@@ -124,13 +131,15 @@ def _find_id(
 
 
 def _count_segments(model: mujoco.MjModel) -> int:
-    """Number of segments, read from the owner stored with every motor."""
+    """Number of segments, read from the owner stored with every motor; a
+    head's motors are owned by -1, no segment."""
     if model.nuser_actuator < 1:
         raise ModelContractError("Motors carry no owning segment (actuator user)")
 
     owner_indices = model.actuator_user[:, 0].astype(int)
-    if owner_indices.min() < 0:
+    if owner_indices.min() < HEAD_OWNER:
         raise ModelContractError("A motor has a negative owning segment")
+    owner_indices = owner_indices[owner_indices != HEAD_OWNER]
     segment_count = int(owner_indices.max()) + 1
 
     missing = set(range(segment_count)) - set(owner_indices.tolist())
@@ -245,12 +254,45 @@ def _map_spine_motors(
     return motor_ids, qpos_addresses, qvel_addresses
 
 
+def _map_head_motors(
+    model: mujoco.MjModel, head_shape_id: int, first_body_id: int
+) -> np.ndarray:
+    """The motors the head owns: each drives a joint of the head's own body,
+    the one carrying its shape (v6's neck), and takes commands from -1 to 1.
+    A head that is part of the first segment's body (v1 to v5) has none."""
+    owners = model.actuator_user[:, 0].astype(int)
+    motor_ids = np.flatnonzero(owners == HEAD_OWNER).astype(np.int32)
+    head_body_id = int(model.geom_bodyid[head_shape_id])
+    for motor_id in motor_ids:
+        name = model.actuator(motor_id).name
+        drives_head = (
+            head_body_id != first_body_id
+            and model.actuator_trntype[motor_id] == mujoco.mjtTrn.mjTRN_JOINT
+            and model.jnt_bodyid[model.actuator_trnid[motor_id, 0]] == head_body_id
+        )
+        if not drives_head:
+            raise ModelContractError(
+                f"{name} is the head's but drives no joint of a head body of its own"
+            )
+        if not model.actuator_ctrllimited[motor_id] or list(
+            model.actuator_ctrlrange[motor_id]
+        ) != [-1, 1]:
+            raise ModelContractError(f"{name} must accept commands from -1 to 1")
+    return motor_ids
+
+
 def _check_all_motors_found(
-    model: mujoco.MjModel, leg_motor_ids: np.ndarray, spine_motor_ids: np.ndarray
+    model: mujoco.MjModel,
+    leg_motor_ids: np.ndarray,
+    spine_motor_ids: np.ndarray,
+    head_motor_ids: np.ndarray,
 ) -> None:
-    """Check that the model has no motors besides the legs' and the spine's."""
-    found_motor_ids = set(leg_motor_ids.ravel().tolist()) | set(
-        spine_motor_ids.tolist()
+    """Check that the model has no motors besides the legs', the spine's and
+    the head's."""
+    found_motor_ids = (
+        set(leg_motor_ids.ravel().tolist())
+        | set(spine_motor_ids.tolist())
+        | set(head_motor_ids.tolist())
     )
     leftover_motor_ids = set(range(model.nu)) - found_motor_ids
     if leftover_motor_ids:

@@ -95,7 +95,11 @@ addresses. It then
 checks that each motor's name matches the owning segment stored in the XML, that
 it drives the right joint and accepts commands from −1 to 1, and that every motor
 is found exactly once with none left over (`MN + N − 1`: 55 for v1 to v3, 107
-for v4), so an ankle on only some legs is rejected. It
+for v4), so an ankle on only some legs is rejected. Motors owned by −1 are the
+head's (v6's neck): each must drive a joint of the head's own body and accept
+commands from −1 to 1, and they are kept apart as `head_actuator_ids`. The
+environment commands none of them, so on v6 the neck's target motors hold it
+straight. It
 also checks that every collision shape records its owning segment and its
 category (floor, body, leg, left foot, right foot, membrane, or head; see
 [model.md](model.md#contacts-and-friction)), and that a head with a shape of
