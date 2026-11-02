@@ -1,5 +1,5 @@
-"""Validation of model v6: v5's three files with a more mobile trunk and
-target actuators.
+"""Validation of model v6: v5's three files with a more mobile trunk,
+target actuators and, where there is a head, the head on its own body.
 
 Every link between units gains a passive roll hinge beside its yaw and
 pitch hinges, and the pitch hinge's range widens from 8 to 10 degrees either
@@ -7,7 +7,8 @@ way with a softer spring. Each motor keeps v5's joint, strength (gear) and
 command range, but a command u is a target angle in the joint's range,
 m + c u, and the motor pulls toward it as a spring and a damper, at full
 strength a quarter of the range away and critically damped at the starting
-pose (docs/model.md, "Model v6").
+pose. The head, part of the first unit's body in v5, is a body of its own
+on a passive neck (docs/model.md, "Model v6").
 """
 
 import mujoco
@@ -17,8 +18,9 @@ import pytest
 # A physics check (pyproject.toml): run with -m physics when a model changes.
 pytestmark = pytest.mark.physics
 
-FLOOR, BODY, LEFT_FOOT, RIGHT_FOOT = 0, 1, 3, 4
+FLOOR, BODY, LEFT_FOOT, RIGHT_FOOT, HEAD = 0, 1, 3, 4, 6
 UNITS = {"full": 21, "half": 10, "headless": 10}
+NECK_HINGES = {"full": 2, "half": 2, "headless": 0}
 # The trunk's hinges: each range either way, in degrees, and each spring,
 # in N m/rad, a factor of v5's pitch spring.
 V5_PITCH_SPRING = 0.001114
@@ -54,8 +56,12 @@ def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(length, v5, v6):
     sides of the root, as every other hinge keeps its sign."""
     units = UNITS[length]
     assert v6.opt.timestep == v5.opt.timestep
-    assert np.array_equal(v6.body_mass, v5.body_mass)
-    assert v6.nv == v5.nv + units - 1
+    assert v6.body_subtreemass[0] == pytest.approx(v5.body_subtreemass[0], rel=1e-6)
+    for body in range(1, v5.nbody):
+        name = v5.body(body).name
+        if name != "segment_00" or length == "headless":
+            assert v6.body(name).mass[0] == v5.body_mass[body], name
+    assert v6.nv == v5.nv + units - 1 + NECK_HINGES[length]
     for old in range(v5.njnt):
         name = v5.joint(old).name
         new = v6.joint(name).id
@@ -93,6 +99,45 @@ def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(length, v5, v6):
         for m in data.xmat[unit_bodies].reshape(-1, 3, 3)
     ]
     assert np.diff(roll_deg) == pytest.approx(2.0, abs=1e-6)
+
+
+def test_the_head_is_its_own_body_on_a_passive_neck(length, v6):
+    """The first unit is the headless tester's trunk unit; the head, in its
+    frame, carries v5's head shape (the head's category, owned by the first
+    unit), the weight it added to that unit, its drawn parts and the tip,
+    on a pitch and a yaw hinge at the seam with a trunk link's ranges,
+    springs, damping and armature, and no motor."""
+    if length == "headless":
+        pytest.skip("the headless tester has no head")
+    headless = mujoco.MjModel.from_xml_path("models/assembly_v6_headless.xml")
+    v5_half = mujoco.MjModel.from_xml_path("models/assembly_v5_half.xml")
+    first, head = v6.body("segment_00"), v6.body("head")
+    assert head.parentid[0] == first.id
+    assert not head.pos.any() and np.array_equal(head.quat, [1.0, 0.0, 0.0, 0.0])
+    assert first.mass[0] == headless.body("segment_00").mass[0]
+    assert first.mass[0] + head.mass[0] == pytest.approx(
+        v5_half.body("segment_00").mass[0], rel=1e-5
+    )
+    shape = v6.geom("head_body")
+    assert shape.bodyid[0] == head.id
+    assert v6.geom_user[shape.id, :2].tolist() == [0, HEAD]
+    assert v6.geom_dataid[shape.id] == v6.mesh("head_shell").id
+    for name in ("head_look", "head_left_antenna_00", "head_right_forcipule_3"):
+        assert v6.geom(name).bodyid[0] == head.id
+    assert v6.site("head_tip").bodyid[0] == head.id
+
+    for kind in ("pitch", "yaw"):
+        neck, link = v6.joint(f"neck_{kind}"), v6.joint(f"segment_01_{kind}")
+        assert neck.bodyid[0] == head.id
+        assert neck.pos[0] == pytest.approx(-link.pos[0])
+        assert np.array_equal(neck.axis, link.axis)
+        for field in ("jnt_range", "jnt_stiffness"):
+            assert np.array_equal(getattr(v6, field)[neck.id], getattr(v6, field)[link.id])
+        for field in ("dof_damping", "dof_armature"):
+            assert getattr(v6, field)[neck.dofadr[0]] == getattr(v6, field)[link.dofadr[0]]
+    assert head.jntnum[0] == 2
+    driven = set(v6.actuator_trnid[:, 0].tolist())
+    assert not {v6.joint("neck_pitch").id, v6.joint("neck_yaw").id} & driven
 
 
 def test_motors_pull_toward_their_targets(v5, v6):

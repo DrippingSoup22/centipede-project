@@ -7,9 +7,10 @@ simulation loads it (see the [architecture](architecture.md)).
 
 ## Status
 
-The newest model is **v6**, v5's body with a more mobile trunk and target
-motors, which pull each joint toward an angle the command sets, in v5's
-three files (see [Model v6](#model-v6)). **v5** is the body of a real
+The newest model is **v6**, v5's body with a more mobile trunk, target
+motors, which pull each joint toward an angle the command sets, and the
+head as a body of its own on a neck, in v5's three files (see
+[Model v6](#model-v6)). **v5** is the body of a real
 species, *Scolopendra heros*: a head without legs and 21 leg-bearing units
 at the animal's measured length and mass, with v4's physics scaled to its
 size (see [Model v5](#model-v5)). It comes in two lengths, the whole animal
@@ -24,11 +25,12 @@ example configurations use, is v2 with a longer physics timestep (see
 six are frozen: training work may change observations, rewards, targets,
 and learning, but never a model. A physical
 change requires a new, separately named version with its own validation. The
-two exceptions, each made before any training had used the model, by the
+three exceptions, each made before any training had used the model, by the
 user's decision: v4's physics were revised in place on 2026-10-15
-([Physics of v4](#physics-of-v4)), and v5's simulation settings on
+([Physics of v4](#physics-of-v4)), v5's simulation settings on
 2026-10-19, when its file was split into the two lengths
-([Physics of v5](#physics-of-v5)).
+([Physics of v5](#physics-of-v5)), and v6's head was made a body of its
+own on 2026-11-02, the day v6 was made ([Model v6](#model-v6)).
 
 **MuJoCo version.** The program runs on MuJoCo 3.16.0 and MuJoCo Warp
 3.16.0, which v5 and v6 were validated with ([Validation of
@@ -41,8 +43,8 @@ smaller. A model of v1 to v4 is validated again before it is trained on.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v6_full.xml`](../models/assembly_v6_full.xml) | **v6**, v5's body with a more mobile trunk and target motors | `2bed121348bb5cdd232ff08404b5778d6c9aaa15cf4a6b1593a28678c3f70e68` |
-| [`models/assembly_v6_half.xml`](../models/assembly_v6_half.xml) | **v6's half**, its first ten units: the tester | `385e4b423a204939925c06cf6699ab2519c3d9074c39d30d65bb22b4863316a0` |
+| [`models/assembly_v6_full.xml`](../models/assembly_v6_full.xml) | **v6**, v5's body with a more mobile trunk, target motors and the head on its own neck | `a462f4a26a39dd80e8a0d5b73ddd029d5b5e04c4572a0e990f2cdb64ac4acff8` |
+| [`models/assembly_v6_half.xml`](../models/assembly_v6_half.xml) | **v6's half**, its first ten units: the tester | `b4dbdaaade390dab9bfb8bbc9a3b4e83a7977aaa5acb86ec97b0a4bd32935145` |
 | [`models/assembly_v6_headless.xml`](../models/assembly_v6_headless.xml) | **v6's headless tester**, the half without its head | `5d884f2f7d638f5d96730d852d5f6fde809fc9174181dcde8fcaa759af249c51` |
 | [`models/assembly_v5_full.xml`](../models/assembly_v5_full.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 15 physics steps per action | `8d2dd3e433feb5d710b176cd73c3b0dfc35c18bca57ca0d367de86293d280cec` |
 | [`models/assembly_v5_half.xml`](../models/assembly_v5_half.xml) | **v5's half**, its first ten units: the tester | `13773151d9468b5778ea65f0b67b472539a100bf67616b03e4cdff8ca04f55f1` |
@@ -203,9 +205,10 @@ decides what it may collide with:
 | 3 | Left feet | Floor, legs, and feet |
 | 4 | Right feet | Floor, legs, and feet |
 | 5 | Visual membranes | Nothing |
+| 6 | The head, where it is a body of its own (v6), owned by the first segment, which carries it | Floor only |
 
 This is set with MuJoCo's collision bitmasks: floor `contype 1, conaffinity 1`,
-bodies `2, 1`, legs and feet `4, 5`. Two shapes collide when either one's
+bodies and the head `2, 1`, legs and feet `4, 5`. Two shapes collide when either one's
 `contype` shares a bit with the other's `conaffinity`. MuJoCo also never tests a
 body against its own parent body. Leg-leg contact is deliberately on, so that
 avoiding it is part of what the agents must learn.
@@ -692,17 +695,18 @@ no leg passes through a body under random commands.
 
 ## Model v6
 
-v6 is v5's body with two changes to its physics, both the user's decisions
-(2026-10-21 and 22): a trunk that bends a little in every direction, and
-target motors, each pulling its joint toward an angle that the command
-sets. Every shape, mass, leg and simulation setting is v5's. One generator,
-`archive/model_v6/make_model_v6.py` in the main folder, makes v6's three
-files from v5's file of the same length:
+v6 is v5's body with three changes, all the user's decisions: a trunk that
+bends a little in every direction and target motors, each pulling its
+joint toward an angle that the command sets (2026-10-21 and 22), and the
+head as a body of its own, on a neck (2026-11-02). Every shape, leg and
+simulation setting is v5's, and so is the mass, the head's included. One
+generator, `archive/model_v6/make_model_v6.py` in the main folder, makes
+v6's three files from v5's file of the same length:
 
 | File | Units | Mass | Degrees of freedom | Motors |
 | --- | ---: | ---: | ---: | ---: |
-| `assembly_v6_full.xml` | 21, the whole animal | 11.56 g | 234 | 188 |
-| `assembly_v6_half.xml` | 10, the first ten: the tester | 5.71 g | 113 | 89 |
+| `assembly_v6_full.xml` | 21, the whole animal, and the head | 11.56 g | 236 | 188 |
+| `assembly_v6_half.xml` | 10, the first ten, and the head: the tester | 5.71 g | 115 | 89 |
 | `assembly_v6_headless.xml` | 10, the first ten without the head | 5.32 g | 113 | 89 |
 
 ### A more mobile trunk
@@ -754,21 +758,53 @@ Because a command is an angle, the reward's optional command cost
 on v6: it charges the posture asked for, while the effort is the force each
 motor exerts.
 
+### The head on its own neck
+
+In v5 the head is part of the first unit's body: one collision shape
+covers both, and the red head, its antennae and its forcipules are drawn
+on it, so the head cannot turn on its own ([The body](#the-body)). In v6
+the first unit keeps the trunk unit's shape, as in the headless tester, and
+the head is a body of its own:
+
+- **Its shape and mass.** v5's head shape, the one the red head is drawn
+  with, is its collision shape, of category 6, owned by the first segment,
+  which carries it ([Contacts and friction](#contacts-and-friction)). It
+  weighs what the head added to v5's first unit, 0.397 g: that unit's body
+  with the head less the headless tester's, 0.874 against 0.477 g. The
+  drawn parts and the `head_tip` site are the head's.
+- **The neck.** A pitch and a yaw hinge at the seam, half a unit spacing
+  ahead of the first unit's centre, as every link's hinges sit half a
+  spacing behind the unit they carry. They have a trunk link's ranges,
+  springs, damping and armature, ±10° and ±15°, and no motor: the neck is
+  passive and holds the head up with its springs. The neck's real range
+  has not been measured, and the head has no motors of its own yet.
+- **The frame.** The head's body sits in the first unit's frame, so every
+  part it carries keeps v5's coordinates, and the program measures the
+  head's outline from its shape with the neck straight
+  ([environment.md](environment.md#loading-the-model)).
+
 ### Validation of v6
 
 On CPU MuJoCo 3.16.0, at the model's timestep. The automated tests in
 `tests/models/test_model_v6.py` check, on the three files:
 
-- that every body, mass and v5 joint is kept, the pitch hinges widened and
-  softened, and every link given a roll hinge, damped as its pitch hinge,
-  that turns the unit behind the same way on both sides of the root;
+- that every v5 body and joint is kept with v5's mass, the total mass too,
+  the pitch hinges widened and softened, and every link given a roll
+  hinge, damped as its pitch hinge, that turns the unit behind the same
+  way on both sides of the root;
+- on the half and the whole body, that the first unit is the headless
+  tester's, and the head its own body in that unit's frame, with v5's head
+  shape, the weight it added to the first unit, its drawn parts and its
+  tip, on a pitch and a yaw hinge with a trunk link's ranges, springs,
+  damping and armature, and no motor;
 - that every motor's force is kp (target − q) − kv q̇ within its strength,
   with kp and kv as above;
 - that with every lift aimed 10° down the body stands on all its feet, no
   body on the floor, each lift within 3° of its aim at under a fifth of its
   strength. On the half and the whole body the first unit, which carries
   the head, stands 2° higher than the others, its lifts pulling at 0.25 of
-  their strength against the others' 0.13.
+  their strength against the others' 0.13; the neck bends 1° under the
+  head, which stays clear of the floor.
 
 On a scripted body, with the scripted walk and muscle-energy measure of
 the follow-line branch's program (2 worlds; `archive/model_v6/body_tests.py`

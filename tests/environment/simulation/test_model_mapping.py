@@ -107,6 +107,23 @@ def test_legs_with_an_ankle_map_four_joints_each():
         ModelMapping.from_model(load(without_head_ankle))
 
 
+def test_a_head_of_its_own_gives_the_outline():
+    """v6's head is its own body on a neck: its shape, of the head's category
+    and owned by the first segment, gives the outline, which lies wholly
+    ahead of the first unit's centre and ends at the head's tip; a head shape
+    owned by another segment is rejected."""
+    v6_xml = Path("models/assembly_v6_half.xml").read_text(encoding="utf-8")
+    model = load(v6_xml)
+    outline = ModelMapping.from_model(model).head_outline
+
+    assert outline.rear_m > 0
+    # The box MuJoCo puts around a mesh, in the mesh's own frame, reaches a
+    # little past it: here 0.1 mm beyond the tip.
+    assert outline.front_m == pytest.approx(model.site("head_tip").pos[0], abs=2e-4)
+    with pytest.raises(ModelContractError, match="head_body has invalid owner 1"):
+        ModelMapping.from_model(load(v6_xml.replace('user="0 6"', 'user="1 6"')))
+
+
 def test_v1_is_rejected_because_its_feet_share_one_category():
     v1 = mujoco.MjModel.from_xml_path("models/assembly.xml")
 
