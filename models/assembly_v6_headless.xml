@@ -1,9 +1,9 @@
 <mujoco model="scolopendra_heros_10">
-  <!-- Centipede model v6, v5 headless with a more mobile trunk and target
-       actuators (archive/model_v6_spine/make_model_v6.py): every link has
+  <!-- Centipede model v6, v5 with a more mobile trunk and target
+       actuators (archive/model_v6/make_model_v6.py): every link has
        a passive roll hinge (+-5 deg) beside its yaw and pitch
        (+-10 deg) hinges, their springs 4.5 and 0.7 times
-       the first v6's pitch spring; each motor pulls its joint toward a
+       v5's pitch spring; each motor pulls its joint toward a
        target in its range, at full strength 25% of the range
        away, critically damped. v5, described in docs/model.md: the body of
        Scolopendra heros, its first 10 leg-bearing units, without the head

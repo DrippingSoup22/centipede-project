@@ -1,5 +1,5 @@
-"""Validation of model v6 headless: v5's headless tester with a more mobile
-trunk and target actuators.
+"""Validation of model v6: v5's three files with a more mobile trunk and
+target actuators.
 
 Every link between units gains a passive roll hinge beside its yaw and
 pitch hinges, and the pitch hinge's range widens from 8 to 10 degrees either
@@ -7,7 +7,7 @@ way with a softer spring. Each motor keeps v5's joint, strength (gear) and
 command range, but a command u is a target angle in the joint's range,
 m + c u, and the motor pulls toward it as a spring and a damper, at full
 strength a quarter of the range away and critically damped at the starting
-pose (archive/model_v6_spine/make_model_v6.py in the study's folder).
+pose (docs/model.md, "Model v6").
 """
 
 import mujoco
@@ -18,22 +18,27 @@ import pytest
 pytestmark = pytest.mark.physics
 
 FLOOR, BODY, LEFT_FOOT, RIGHT_FOOT = 0, 1, 3, 4
-UNITS = 10
+UNITS = {"full": 21, "half": 10, "headless": 10}
 # The trunk's hinges: each range either way, in degrees, and each spring,
-# in N m/rad, a factor of the first v6's (v5's) pitch spring.
-FIRST_PITCH_SPRING = 0.001114
-PITCH_RANGE, PITCH_SPRING = 10.0, 0.7 * FIRST_PITCH_SPRING
-ROLL_RANGE, ROLL_SPRING = 5.0, 4.5 * FIRST_PITCH_SPRING
+# in N m/rad, a factor of v5's pitch spring.
+V5_PITCH_SPRING = 0.001114
+PITCH_RANGE, PITCH_SPRING = 10.0, 0.7 * V5_PITCH_SPRING
+ROLL_RANGE, ROLL_SPRING = 5.0, 4.5 * V5_PITCH_SPRING
+
+
+@pytest.fixture(scope="module", params=UNITS)
+def length(request):
+    return request.param
 
 
 @pytest.fixture(scope="module")
-def v5():
-    return mujoco.MjModel.from_xml_path("models/assembly_v5_headless.xml")
+def v5(length):
+    return mujoco.MjModel.from_xml_path(f"models/assembly_v5_{length}.xml")
 
 
 @pytest.fixture(scope="module")
-def v6():
-    return mujoco.MjModel.from_xml_path("models/assembly_v6_headless.xml")
+def v6(length):
+    return mujoco.MjModel.from_xml_path(f"models/assembly_v6_{length}.xml")
 
 
 def target_command(model, motor_id, angle):
@@ -42,14 +47,15 @@ def target_command(model, motor_id, angle):
     return (angle - (low + high) / 2) / ((high - low) / 2)
 
 
-def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(v5, v6):
+def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(length, v5, v6):
     """Bodies, masses and every v5 joint are kept, the pitch hinges widened
     and softened; each link adds a roll hinge, damped like its pitch hinge.
     A positive roll turns the unit behind about the forward axis on both
     sides of the root, as every other hinge keeps its sign."""
+    units = UNITS[length]
     assert v6.opt.timestep == v5.opt.timestep
     assert np.array_equal(v6.body_mass, v5.body_mass)
-    assert v6.nv == v5.nv + UNITS - 1
+    assert v6.nv == v5.nv + units - 1
     for old in range(v5.njnt):
         name = v5.joint(old).name
         new = v6.joint(name).id
@@ -66,7 +72,7 @@ def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(v5, v6):
             assert v6.jnt_stiffness[new] == v5.jnt_stiffness[old], name
 
     rolls = [j for j in range(v6.njnt) if v6.joint(j).name.endswith("_roll")]
-    assert len(rolls) == UNITS - 1
+    assert len(rolls) == units - 1
     for roll in rolls:
         pitch = v6.joint(v6.joint(roll).name.replace("_roll", "_pitch")).id
         roll_dof, pitch_dof = v6.jnt_dofadr[roll], v6.jnt_dofadr[pitch]
@@ -81,10 +87,10 @@ def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(v5, v6):
     data = mujoco.MjData(v6)
     data.qpos[v6.jnt_qposadr[rolls]] = np.radians(2.0)
     mujoco.mj_kinematics(v6, data)
-    units = [v6.body(f"segment_{k:02d}").id for k in range(UNITS)]
+    unit_bodies = [v6.body(f"segment_{k:02d}").id for k in range(units)]
     roll_deg = [
         np.degrees(np.arctan2(m[2, 1], m[2, 2]))
-        for m in data.xmat[units].reshape(-1, 3, 3)
+        for m in data.xmat[unit_bodies].reshape(-1, 3, 3)
     ]
     assert np.diff(roll_deg) == pytest.approx(2.0, abs=1e-6)
 
@@ -130,10 +136,14 @@ def test_motors_pull_toward_their_targets(v5, v6):
         )
 
 
-def test_lifts_aimed_down_hold_the_body_up_on_its_motors(v6):
+def test_lifts_aimed_down_hold_the_body_up_on_its_motors(length, v6):
     """Every lift aimed 10 degrees down and every other joint straight, the
-    body stands on its 20 feet within 3 degrees of the aim, its lifts pulling
-    at a fifth of their strength or less, off their stops."""
+    body stands on all its feet within 3 degrees of the aim, its lifts
+    pulling at a fifth of their strength or less, off their stops. Where the
+    head rests on the first unit, that unit's lifts carry it too: they pull
+    about twice as hard as the others' (0.25 of their strength against
+    0.13) and stand 2 degrees higher, so they are held to 5 degrees and a
+    third of their strength."""
     data = mujoco.MjData(v6)
     lifts = [a for a in range(v6.nu) if v6.actuator(a).name.endswith("_lift_motor")]
     for motor_id in range(v6.nu):
@@ -148,8 +158,13 @@ def test_lifts_aimed_down_hold_the_body_up_on_its_motors(v6):
         for a, b in zip(data.contact.geom1, data.contact.geom2, strict=True)
         if FLOOR in (categories[a], categories[b])
     }
-    assert sum(categories[g] in (LEFT_FOOT, RIGHT_FOOT) for g in touching) == 2 * UNITS
+    feet = sum(categories[g] in (LEFT_FOOT, RIGHT_FOOT) for g in touching)
+    assert feet == 2 * UNITS[length]
     assert not any(categories[g] == BODY for g in touching)
-    lift_angles = data.qpos[v6.jnt_qposadr[v6.actuator_trnid[lifts, 0]]]
-    assert np.degrees(lift_angles) == pytest.approx(-10.0, abs=3.0)
-    assert np.abs(data.actuator_force[lifts]).max() < 0.2
+    lift_angles = np.degrees(data.qpos[v6.jnt_qposadr[v6.actuator_trnid[lifts, 0]]])
+    lift_forces = np.abs(data.actuator_force[lifts])
+    head_lifts = 0 if length == "headless" else 2  # the first unit's two
+    assert lift_angles[head_lifts:] == pytest.approx(-10.0, abs=3.0)
+    assert lift_forces[head_lifts:].max() < 0.2
+    assert lift_angles[:head_lifts] == pytest.approx(-10.0, abs=5.0)
+    assert lift_forces[:head_lifts].max(initial=0.0) < 1 / 3

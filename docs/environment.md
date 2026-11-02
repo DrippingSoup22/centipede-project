@@ -125,8 +125,11 @@ the right leg's, always in this order:
 | 5 | 6 | Right knee |
 | | 7 | Right ankle |
 
-Each number goes unchanged to its motor, which applies that share of the
-joint's maximum torque ([model.md](model.md#motors)).
+Each number goes unchanged to its motor. On models v1 to v5 the motor
+applies that share of the joint's maximum torque
+([model.md](model.md#motors)); on v6 the number is a target angle across
+the joint's range, which the motor pulls the joint toward
+([Model v6](model.md#target-motors)).
 
 With **spine control** (`spine_control = true`), every segment but the rear
 also commands the spine yaw motor of the joint **behind** it, as one more
@@ -543,7 +546,8 @@ r_i = … − w_move × M_i − w_command × C_i
   Gymnasium's Ant (Towers et al., 2024), with a weight that is a multiple of
   the step cost's, `w_command = command_cost_ratio × w_step`. It lies outside
   the cost budget, so with it the worst arrival no longer balances to zero
-  (rule R1).
+  (rule R1). On v6, whose commands are target angles, it charges the
+  posture asked for, not effort ([Model v6](model.md#target-motors)).
 
 ### Earlier forms of the reward
 
