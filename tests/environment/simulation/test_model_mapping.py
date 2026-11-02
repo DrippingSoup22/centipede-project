@@ -107,21 +107,35 @@ def test_legs_with_an_ankle_map_four_joints_each():
         ModelMapping.from_model(load(without_head_ankle))
 
 
-def test_a_head_of_its_own_gives_the_outline():
+def test_a_head_of_its_own_gives_the_outline_and_its_motors():
     """v6's head is its own body on a neck: its shape, of the head's category
     and owned by the first segment, gives the outline, which lies wholly
-    ahead of the first unit's centre and ends at the head's tip; a head shape
-    owned by another segment is rejected."""
+    ahead of the first unit's centre and ends at the head's tip; its neck's
+    motors, owned by -1, are the head's, apart from every segment's. A head
+    shape owned by another segment, and a head's motor on a segment's
+    joint, are rejected."""
     v6_xml = Path("models/assembly_v6_half.xml").read_text(encoding="utf-8")
     model = load(v6_xml)
-    outline = ModelMapping.from_model(model).head_outline
+    mapping = ModelMapping.from_model(model)
+    outline = mapping.head_outline
 
     assert outline.rear_m > 0
     # The box MuJoCo puts around a mesh, in the mesh's own frame, reaches a
     # little past it: here 0.1 mm beyond the tip.
     assert outline.front_m == pytest.approx(model.site("head_tip").pos[0], abs=2e-4)
+    assert mapping.segment_count == 10
+    assert mapping.head_actuator_ids.tolist() == [
+        model.actuator("neck_pitch_motor").id,
+        model.actuator("neck_yaw_motor").id,
+    ]
     with pytest.raises(ModelContractError, match="head_body has invalid owner 1"):
         ModelMapping.from_model(load(v6_xml.replace('user="0 6"', 'user="1 6"')))
+    wrong_joint = v6_xml.replace(
+        'name="neck_yaw_motor" joint="neck_yaw"',
+        'name="neck_yaw_motor" joint="segment_01_pitch"',
+    )
+    with pytest.raises(ModelContractError, match="drives no joint of a head body"):
+        ModelMapping.from_model(load(wrong_joint))
 
 
 def test_v1_is_rejected_because_its_feet_share_one_category():

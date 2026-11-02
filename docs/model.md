@@ -43,8 +43,8 @@ smaller. A model of v1 to v4 is validated again before it is trained on.
 
 | File | Purpose | SHA-256 |
 | --- | --- | --- |
-| [`models/assembly_v6_full.xml`](../models/assembly_v6_full.xml) | **v6**, v5's body with a more mobile trunk, target motors and the head on its own neck | `a462f4a26a39dd80e8a0d5b73ddd029d5b5e04c4572a0e990f2cdb64ac4acff8` |
-| [`models/assembly_v6_half.xml`](../models/assembly_v6_half.xml) | **v6's half**, its first ten units: the tester | `b4dbdaaade390dab9bfb8bbc9a3b4e83a7977aaa5acb86ec97b0a4bd32935145` |
+| [`models/assembly_v6_full.xml`](../models/assembly_v6_full.xml) | **v6**, v5's body with a more mobile trunk, target motors and the head on its own neck | `bc909fc71e02adcf6656258fcc0e3dc1453545ed075cbd77e0fb993612e9041d` |
+| [`models/assembly_v6_half.xml`](../models/assembly_v6_half.xml) | **v6's half**, its first ten units: the tester | `89058be588b02816b74a85eaf8e6c6f54194e719c14da6f115b8a8c20b6c7b25` |
 | [`models/assembly_v6_headless.xml`](../models/assembly_v6_headless.xml) | **v6's headless tester**, the half without its head | `5d884f2f7d638f5d96730d852d5f6fde809fc9174181dcde8fcaa759af249c51` |
 | [`models/assembly_v5_full.xml`](../models/assembly_v5_full.xml) | **v5**, *Scolopendra heros*: a head and 21 leg-bearing units, 15 physics steps per action | `8d2dd3e433feb5d710b176cd73c3b0dfc35c18bca57ca0d367de86293d280cec` |
 | [`models/assembly_v5_half.xml`](../models/assembly_v5_half.xml) | **v5's half**, its first ten units: the tester | `13773151d9468b5778ea65f0b67b472539a100bf67616b03e4cdff8ca04f55f1` |
@@ -774,10 +774,18 @@ the head is a body of its own:
   drawn parts and the `head_tip` site are the head's.
 - **The neck.** A pitch and a yaw hinge at the seam, half a unit spacing
   ahead of the first unit's centre, as every link's hinges sit half a
-  spacing behind the unit they carry. They have a trunk link's ranges,
-  springs, damping and armature, ±10° and ±15°, and no motor: the neck is
-  passive and holds the head up with its springs. The neck's real range
-  has not been measured, and the head has no motors of its own yet.
+  spacing behind the unit they carry, with a trunk link's damping and
+  armature and no spring. Each has a target motor as strong as a spine
+  motor (1.67 × 10⁻⁴ N·m, about 8 times what holding the head level takes),
+  owned by the head, not by any segment (`user="-1"`), so that the head can
+  lift, lower and turn itself to feel the ground with its antennae (the
+  user's decision, 2026-11-02). A positive pitch lifts the head. Both turn
+  30° either way: **an estimate**, since no limit of a centipede's neck has
+  been measured. Photos show the head turned about 12° to the side
+  (*S. heros*) and tilted down 10 to 20° (*S. dehaani*), well inside it.
+  The range is symmetric so that a zero command aims the neck straight: a
+  program without a head agent sends none, and the neck holds the head
+  straight.
 - **The frame.** The head's body sits in the first unit's frame, so every
   part it carries keeps v5's coordinates, and the program measures the
   head's outline from its shape with the neck straight
@@ -795,16 +803,31 @@ On CPU MuJoCo 3.16.0, at the model's timestep. The automated tests in
 - on the half and the whole body, that the first unit is the headless
   tester's, and the head its own body in that unit's frame, with v5's head
   shape, the weight it added to the first unit, its drawn parts and its
-  tip, on a pitch and a yaw hinge with a trunk link's ranges, springs,
-  damping and armature, and no motor;
-- that every motor's force is kp (target − q) − kv q̇ within its strength,
-  with kp and kv as above;
+  tip, on a pitch and a yaw hinge with a trunk link's damping and armature,
+  no spring, ±30° and a motor each, owned by the head and as strong as a
+  spine motor;
+- that every v5 motor keeps its joint, strength and ranges, the neck's two
+  being the only motors added, and that every motor's force is
+  kp (target − q) − kv q̇ within its strength, with kp and kv as above;
 - that with every lift aimed 10° down the body stands on all its feet, no
   body on the floor, each lift within 3° of its aim at under a fifth of its
   strength. On the half and the whole body the first unit, which carries
   the head, stands 2° higher than the others, its lifts pulling at 0.25 of
-  their strength against the others' 0.13; the neck bends 1° under the
-  head, which stays clear of the floor.
+  their strength against the others' 0.13; the neck, its motors aimed
+  straight, bends 1° under the head, which stays clear of the floor.
+
+On the half standing, the neck's motors aimed at each end of its range
+(1.5 s, CPU), with the antennae's roots turned across the range a later
+model is to give them (−15° to +40° from the head's plane, from photos):
+
+| Neck | The head | The neck motor's pull | An antenna's tip, from the floor's level |
+| --- | --- | --- | --- |
+| Straight | 6° below level | 0.08 of its strength | −3.6 to +19.6 mm, 25 mm out |
+| Fully up, +29° | 24° above level | 0.08 | +13 to +34 mm |
+| Fully down, −30° | 34° below level, clear of the floor | 0.00 | −17 to +3.7 mm, 21 mm out |
+
+With its neck, the head can feel 17 mm below the floor's level, where a
+level head feels 3.6 mm: a hole's depth, not only its edge.
 
 On a scripted body, with the scripted walk and muscle-energy measure of
 the follow-footsteps branch's program (2 worlds; `archive/model_v6/body_tests.py`

@@ -21,6 +21,7 @@ pytestmark = pytest.mark.physics
 FLOOR, BODY, LEFT_FOOT, RIGHT_FOOT, HEAD = 0, 1, 3, 4, 6
 UNITS = {"full": 21, "half": 10, "headless": 10}
 NECK_HINGES = {"full": 2, "half": 2, "headless": 0}
+NECK_RANGE, HEAD_OWNER = 30.0, -1
 # The trunk's hinges: each range either way, in degrees, and each spring,
 # in N m/rad, a factor of v5's pitch spring.
 V5_PITCH_SPRING = 0.001114
@@ -101,12 +102,13 @@ def test_v6_is_v5s_body_with_a_roll_hinge_on_every_link(length, v5, v6):
     assert np.diff(roll_deg) == pytest.approx(2.0, abs=1e-6)
 
 
-def test_the_head_is_its_own_body_on_a_passive_neck(length, v6):
+def test_the_head_is_its_own_body_on_a_neck_it_moves(length, v6):
     """The first unit is the headless tester's trunk unit; the head, in its
     frame, carries v5's head shape (the head's category, owned by the first
     unit), the weight it added to that unit, its drawn parts and the tip,
-    on a pitch and a yaw hinge at the seam with a trunk link's ranges,
-    springs, damping and armature, and no motor."""
+    on a pitch and a yaw hinge at the seam with a trunk link's damping and
+    armature, no spring, and a motor each, owned by the head, as strong as
+    a spine motor, turning 30 degrees either way."""
     if length == "headless":
         pytest.skip("the headless tester has no head")
     headless = mujoco.MjModel.from_xml_path("models/assembly_v6_headless.xml")
@@ -126,33 +128,39 @@ def test_the_head_is_its_own_body_on_a_passive_neck(length, v6):
         assert v6.geom(name).bodyid[0] == head.id
     assert v6.site("head_tip").bodyid[0] == head.id
 
+    spine_motor = v6.actuator("segment_01_yaw_motor")
     for kind in ("pitch", "yaw"):
         neck, link = v6.joint(f"neck_{kind}"), v6.joint(f"segment_01_{kind}")
         assert neck.bodyid[0] == head.id
         assert neck.pos[0] == pytest.approx(-link.pos[0])
         assert np.array_equal(neck.axis, link.axis)
-        for field in ("jnt_range", "jnt_stiffness"):
-            assert np.array_equal(getattr(v6, field)[neck.id], getattr(v6, field)[link.id])
+        assert np.degrees(neck.range) == pytest.approx([-NECK_RANGE, NECK_RANGE])
+        assert neck.stiffness[0] == 0
         for field in ("dof_damping", "dof_armature"):
             assert getattr(v6, field)[neck.dofadr[0]] == getattr(v6, field)[link.dofadr[0]]
+        motor = v6.actuator(f"neck_{kind}_motor")
+        assert motor.trnid[0] == neck.id
+        assert v6.actuator_user[motor.id, 0] == HEAD_OWNER
+        assert motor.gear[0] == spine_motor.gear[0]
     assert head.jntnum[0] == 2
-    driven = set(v6.actuator_trnid[:, 0].tolist())
-    assert not {v6.joint("neck_pitch").id, v6.joint("neck_yaw").id} & driven
 
 
 def test_motors_pull_toward_their_targets(v5, v6):
-    """Each motor keeps v5's joint, strength and ranges; the force, in shares
-    of the strength, is kp (target - q) - kv dq/dt within -1 and 1, kp
-    reaching 1 a quarter of the range away and kv damping the joint
-    critically."""
-    for field in ("actuator_gear", "actuator_ctrlrange", "actuator_forcerange"):
-        assert np.array_equal(getattr(v6, field), getattr(v5, field)), field
-    assert [v6.actuator(a).name for a in range(v6.nu)] == [
+    """Each of v5's motors keeps its joint, strength and ranges, the neck's
+    two the only motors added; the force, in shares of the strength, is
+    kp (target - q) - kv dq/dt within -1 and 1, kp reaching 1 a quarter of
+    the range away and kv damping the joint critically."""
+    added = {v6.actuator(a).name for a in range(v6.nu)} - {
         v5.actuator(a).name for a in range(v5.nu)
-    ]
-    assert [v6.joint(v6.actuator_trnid[a, 0]).name for a in range(v6.nu)] == [
-        v5.joint(v5.actuator_trnid[a, 0]).name for a in range(v5.nu)
-    ]
+    }
+    assert added == ({"neck_pitch_motor", "neck_yaw_motor"} if v6.nu > v5.nu else set())
+    for old in range(v5.nu):
+        new = v6.actuator(v5.actuator(old).name).id
+        for field in ("actuator_gear", "actuator_ctrlrange", "actuator_forcerange"):
+            assert np.array_equal(getattr(v6, field)[new], getattr(v5, field)[old]), field
+        assert v6.joint(v6.actuator_trnid[new, 0]).name == v5.joint(
+            v5.actuator_trnid[old, 0]
+        ).name
 
     data = mujoco.MjData(v6)
     mujoco.mj_forward(v6, data)
