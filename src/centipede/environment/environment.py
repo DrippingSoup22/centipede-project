@@ -21,6 +21,7 @@ import math
 
 import torch
 
+from centipede.environment.command_relay import CommandRelay
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.footprints import Footprints
 from centipede.environment.ground_view import ground_view
@@ -98,10 +99,10 @@ class Environment:
             self.device,
             settings.curves if settings.line_shape == "curved" else None,
         )
-        # Follow-footsteps: the prints and marks, and stage A's scripted
-        # leader laying unit 1's footholds along the line, which then only
-        # places them.
-        self.footprints = self.leader = None
+        # Follow-footsteps: the prints and marks, stage A's scripted leader
+        # laying unit 1's footholds along the line, which then only places
+        # them, and the leader's command passed back along the body.
+        self.footprints = self.leader = self.relay = None
         footsteps = settings.footsteps
         if footsteps.enabled:
             self.footprints = Footprints(
@@ -119,6 +120,12 @@ class Environment:
             # the last step, m.
             self.mark_distances = torch.zeros(
                 (world_count, segment_count, 2), device=self.device
+            )
+            self.relay = CommandRelay(
+                world_count,
+                segment_count,
+                min(1.0, ACTION_DURATION_S / settings.reward.averaging_s),
+                self.device,
             )
         # With a start, the lines stay straight until the wave starts forming.
         if settings.line_shape == "curved" and settings.curves.start_speed_mm_per_s:
@@ -472,6 +479,8 @@ class Environment:
         self.averaged_command += self.forces.averaging_rate * (
             self._command() - self.averaged_command
         )
+        if self.relay is not None:
+            self.relay.step(self._world_command())
         self.averaged_forward_line += self.forces.averaging_rate * (
             forward_line / ACTION_DURATION_S - self.averaged_forward_line
         )
@@ -659,6 +668,8 @@ class Environment:
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity
             )
         )
+        if self.relay is not None:
+            self.relay.restart(world_mask, self._world_command(), self.averaged_command)
 
     def _follow_footsteps(self, state) -> torch.Tensor | None:
         """Following footsteps, record the step's prints, give unit 1 the
@@ -689,6 +700,12 @@ class Environment:
             command = command / (1 + self.body.foot_reach_m * bend)
         return command
 
+    def _world_command(self) -> torch.Tensor:
+        """``_command`` for every world, ``(W,)`` mm/s."""
+        return torch.as_tensor(self._command(), device=self.device).expand(
+            self.world_count
+        )
+
     def _joint_velocity(self) -> torch.Tensor:
         """Each unit's leg joints' speeds and the spine joint's it commands,
         ``(W, N, M + 1)`` rad/s."""
@@ -700,9 +717,7 @@ class Environment:
     def _observations(self) -> torch.Tensor:
         current_command = None
         if self.settings.observe_current_command:
-            current_command = torch.as_tensor(
-                self._command(), device=self.device
-            ).expand(self.world_count)
+            current_command = self._world_command()
         return self.observation_builder.build(
             self.simulation.physical_state,
             self.last_action,

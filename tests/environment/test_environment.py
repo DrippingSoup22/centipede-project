@@ -14,6 +14,7 @@ import pytest
 import torch
 
 from centipede.diagnostics_category import WindowSummary
+from centipede.environment.command_relay import CommandRelay
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
 from centipede.environment.footprints import Footprints
@@ -379,6 +380,22 @@ def test_the_script_lays_each_sides_next_foothold_a_stride_on_along_the_line():
     later = leader.next_footholds(torch.tensor([[False, True]]), line)
     torch.testing.assert_close(later[0, 0], first[0, 0])
     torch.testing.assert_close(later[0, 1], torch.tensor([0.03, -0.015, 5e-4]))
+
+
+def test_each_walker_holds_its_leaders_command_one_step_later():
+    """Unit 1 takes the leader's command a step later, every other walker
+    its leader's, unchanged; each average follows the command the unit
+    holds."""
+    relay = CommandRelay(1, 3, averaging_rate=0.5, device="cpu")
+    relay.restart(
+        torch.ones(1, dtype=torch.bool), torch.full((1,), 50.0), torch.zeros(1)
+    )
+    held = []
+    for command in (60.0, 70.0, 80.0):
+        relay.step(torch.full((1,), command))
+        held.append(relay.held[0].tolist())
+    assert held == [[50, 50, 50], [60, 50, 50], [70, 60, 50]]
+    assert relay.averaged[0].tolist() == pytest.approx([56.25, 48.75, 43.75])
 
 
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():
@@ -1084,10 +1101,12 @@ def test_following_footsteps_unit_1_aims_ahead_and_a_lost_walker_restarts():
             "stagger_first_episodes": False,
             "line_angle_range_deg": 0.0,
             "footsteps": {"enabled": True, "lost_s": 0.04},
+            "reward": {"commanded_speed_mm_per_s": 67.0},
         }
     )
     environment = Environment(settings)
     environment.reset(seed=0)
+    torch.testing.assert_close(environment.relay.held, torch.full((2, 10), 67.0))
     distances = environment.mark_distances
     spacing = environment.body.unit_spacing_m
     feet = environment.simulation.physical_state.foot_position
