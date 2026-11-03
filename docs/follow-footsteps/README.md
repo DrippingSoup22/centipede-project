@@ -97,8 +97,6 @@ chose.
   foothold and what counts as one.
 - **Motors that lift the first few units**, as real centipedes lift their
   front, may come later (the user, 2026-11-02).
-- **The numbers the ledger sets** before the first run: the marks' price
-  and scale, the script's stride, the restart distance ([reward.md](reward.md#the-ledger)).
 
 ## Later: the antennae
 

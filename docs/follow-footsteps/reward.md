@@ -21,7 +21,7 @@ own_i  = − carry_i  −  p_f · F_i
 | c | The energy's price: 0.4 at first, rising to 2 over 128 cycles once the walk holds its command | follow-line's ramp, its gate now on the speed |
 | carry_i | Each foot's load averaged over 1 s beyond a quarter either way of half the unit's weight, at 50 mm/s for each unit weight | follow-line's carry per leg (from its run 14) |
 | F_i | The marks: the mean, over its two feet, of 1 − e^(−d/σ_f) for each foot on the ground (touching it, as a print is read), d the foot's distance across the ground to the nearer of its marks on its side (0 for a foot in the air) | New |
-| p_f, σ_f | The marks' price and scale | Set by the ledger (below) |
+| p_f, σ_f | The marks' price and scale: 30 mm/s and 4 mm | Set by the ledger (below) |
 
 The constant 67 keeps the pay where follow-line's stage 3 kept it: a stop
 pays as much as walking at the command, and only the gap is charged.
@@ -76,13 +76,48 @@ head = progress toward its target  +  arriving  −  p_h · failed footholds
 
 ## The ledger
 
-Before the first run, on the built code and scripted walks (follow-line's
-`Training/analysis/ledger.py`, re-aimed at the marks): the scripted wave
-whose lag matches the unit spacing over its stride lands every foot on the
-print ahead and must beat standing still, a unit dragged by its leader, legs
-in random phase, the wave run backward, steps of the wrong length and
-stepping in place. The same measurements set p_f, σ_f, the script's stride
-and the distance at which a world restarts.
+Before the first run, on the built code and scripted walks: the scripted
+wave whose lag matches the unit spacing over its stride lands every foot on
+the print ahead and must beat every fault. Run on 2026-11-03 with the
+study's `Training/analysis/footsteps_ledger.py` (follow-line's scripted
+centipede, re-aimed at the marks; its output in
+`results/follow-footsteps/ledger_stage_a.txt`): 8 worlds, each case 6 s
+after a 3 s warm-up, the configured own weight (1) and 4, the ramped costs
+in full and at their start. Unit 1's footholds were laid a stride ahead of
+its own landings, since the scripted body cannot aim; training's script
+lays them along the line.
+
+**The good walk**: 3.5 steps a second, each unit 0.316 of a cycle behind
+the unit ahead (the unit spacing, 6.6 mm, over the stride), 69 mm/s, a
+stride of 20 mm. Every unit's touchdowns land 1.2 to 1.8 mm from the
+nearer mark (the median; at most 2.5 mm at the 90th percentile).
+
+**The numbers it set:**
+
+| Number | Value | Why |
+| --- | --- | --- |
+| σ_f | 4 mm | A good landing (1.4 mm) pays 0.30 of the price, a miss by the unit spacing 0.81, by half a stride 0.92 |
+| p_f | 30 mm/s | At 10, follow-line's 9-unit wave at the good walk's speed, 30% cheaper in energy, lost by only 1.5 mm/s; at 30 by 6.1, while the good walk pays 3.7 mm/s for its marks |
+| The script's stride | 20 mm | The good walk's, 19.7 to 20.9 mm |
+| A swing (`swing_steps`) | 4 steps | Feet flicker off the ground for 1 to 3 steps; real swings last 6 steps or more, 8 the median |
+| The restart distance | A foot's reach, 17.7 mm | A good walker's mean distance peaks at 12.4 mm, a foot mid-swing |
+
+**At these, every fault pays less than the good walk**, on straight lines
+and on curves at the tightest level (a body length's radius). The
+closest, the culprits' change in mm/s at own weight 1, straight | curved:
+
+| Case | Change |
+| --- | --- |
+| follow-line's wave, at the good walk's speed | −6.1 \| −6.7 |
+| the backward wave, at the good walk's speed | −9.8 \| −9.1 |
+| steps half as long, at the same speed (twice the rate) | −17.9 \| −17.6 |
+| legs in random phase | −28.9 \| −22.0 |
+| unit 5 dragged by its leader | −36.2 \| −36.2 |
+| everyone standing | −76.8 \| −76.3 |
+
+A foot in the air pays no marks, so a unit that lifts a leg or hangs limp
+pays less for them than the good walk (unit 5 dragged: 1.3 mm/s against
+3.4); its carry costs it far more (follow-line's carry, kept for this).
 
 ## Sources
 
