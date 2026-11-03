@@ -246,6 +246,31 @@ def test_a_run_is_trained_continued_and_evaluated_without_changing_it(tmp_path):
             assert record["episodes"]["duration"] == pytest.approx(0.06)
 
 
+def test_stage_a_trains_end_to_end_following_footsteps(tmp_path):
+    """follow-footsteps' stage A, tiny: v6's headless tester, every walker
+    on its marks, each unit commanding the spine joint ahead, the marks
+    priced, three update cycles. Every agent learns from 65 values; unit 1
+    commands eight motors, the others nine."""
+    text = TRAINING_FILE.replace(
+        'model_path = "models/assembly_v5_headless.xml"',
+        'model_path = "models/assembly_v6_headless.xml"\nspine_joint_ahead = true',
+    ).replace(
+        "max_episode_steps = 3\n",
+        "max_episode_steps = 3\nline_angle_range_deg = 0.0\n"
+        "[environment.footsteps]\nenabled = true\n"
+        "[environment.reward]\ncommanded_speed_mm_per_s = 67.0\n"
+        "energy_with_leader = true\nmarks_price_mm_per_s = 30.0\n",
+    )
+    folder = run_file(tmp_path, text, NAME="footsteps")
+
+    assert [record["cycle"] for record in training_log(folder)] == [1, 2, 3]
+    checkpoint = torch.load(folder / "checkpoints/cycle_0003.pt", weights_only=True)
+    agents = checkpoint["agents"]
+    assert agents["segment_action_sizes"] == [8] + [9] * 9
+    actor = agents["segment_agents"][0]["ppo"]["actor_network"]
+    assert actor["mean_network.0.weight"].shape[1] == 65
+
+
 def test_a_new_run_can_start_from_another_runs_agents(tmp_path):
     parent = run_file(tmp_path, TRAINING_FILE, NAME="easy")
     wider_file = TRAINING_FILE.replace(

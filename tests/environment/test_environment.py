@@ -38,6 +38,7 @@ from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.speeds import Speeds
 from centipede.environment.tow import Tow
+from centipede.environment.walker_observations import walker_observations
 from centipede.settings_section import SettingsError
 
 BODY = BodyMeasures(
@@ -944,6 +945,44 @@ def test_a_block_holds_what_the_unit_senses_then_come_the_trail_and_the_tow():
     )
 
 
+def test_a_walker_sees_its_next_marks_and_its_leaders_feet_in_its_own_frame():
+    """65 values. Unit 1, facing +x, sees its next left mark 20 mm ahead and
+    10 mm to its left, and no leader; unit 2, turned to face +y, sees its
+    leader's left foot, 10 mm along +x and +y from its centre, 10 mm ahead
+    and 10 mm to its right, and its leader's energy."""
+    state = resting_state(1)
+    state.body_quaternion[0, 1] = turned(math.pi / 2)
+    state.foot_position[0, 0, 0] = torch.tensor([0.0, 0.01, 0.0])
+    marks = torch.zeros(1, SEGMENTS, 2, 2, 3)
+    marks[0, 0, 0, 1] = torch.tensor([0.02, 0.01, 0.0])
+    energy = torch.tensor([[3.0, 1.0, 1.0, 1.0, 1.0]])
+    zeros = torch.zeros(1, SEGMENTS)
+
+    observations = walker_observations(
+        state,
+        marks,
+        torch.zeros(1, SEGMENTS, 2),
+        torch.ones(1, SEGMENTS, 2),
+        zeros,
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, 8),
+        energy,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.zeros(1),
+        1e-3,
+    )
+
+    assert observations.shape == (1, SEGMENTS, 65)
+    first, second = observations[0, 0], observations[0, 1]
+    torch.testing.assert_close(first[18:21], torch.tensor([0.0, 0.0, -1.0]))
+    torch.testing.assert_close(first[23:26], torch.tensor([0.02, 0.01, 0.0]))
+    assert not first[36:45].any()
+    assert second[36] == 3.0
+    torch.testing.assert_close(second[37:40], torch.tensor([0.01, -0.01, 0.0]))
+    assert second[43:45].tolist() == [1.0, 1.0]
+
+
 def test_the_tow_pushes_less_as_each_unit_walks_faster():
     """A help speed of 10 mm/s and a tow of 0.4: a unit at rest is pushed
     fully, one at 5 mm/s by half, one at 10 mm/s or faster not at all, and
@@ -1157,7 +1196,9 @@ def test_following_footsteps_unit_1_aims_ahead_and_a_lost_walker_restarts():
         }
     )
     environment = Environment(settings)
-    environment.reset(seed=0)
+    observations = environment.reset(seed=0)
+    assert observations.shape == (2, 10, 65) and torch.isfinite(observations).all()
+    assert not environment.behind_observation_entries.any()
     torch.testing.assert_close(environment.relay.held, torch.full((2, 10), 67.0))
     distances = environment.mark_distances
     spacing = environment.body.unit_spacing_m

@@ -9,13 +9,15 @@ from centipede.experiment.progress import (
 )
 
 # Step facts of two units, as the log holds them: the line pays 0.4 and 0.2 mm
-# a 20 ms step, they go 0.4 and 0.2 mm along it, 1 and 3 mm from it; one foot
+# a 20 ms step, they go 0.4 and 0.2 mm along it, 1 and 3 mm from it, their
+# feet 2 and 4 mm from their marks; one foot
 # in ten lifts off each step; the feet lag those ahead by 0.5 rad, and the
 # two sides alternate.
 STEP_FACTS = {
     "reward_parts": [[0.4, -0.1], [0.2, -0.1]],
     "segment_progress": [0.0004, 0.0002],
     "off_line": [0.001, 0.003],
+    "marks_missed": [0.002, 0.004],
     "lift_off": [[0.1, 0.0], [0.0, 0.1]],
     "contact_flags": [[1, 1, 0.5, 0], [1, 1, 0.0, 0]],
     "neighbour_lag": [[0.5, 0.5]],
@@ -24,7 +26,7 @@ STEP_FACTS = {
     "left_right_lag_consistency": [0.5, 0.5],
 }
 RESULTS = [
-    *("15.0", "mm/s", "15.0", "mm/s", "2.0", "25%"),
+    *("15.0", "mm/s", "15.0", "mm/s", "2.0", "3.0", "25%"),
     *("+29", "1.00", "+180", "0.50", "2.5", "25%"),
 ]
 

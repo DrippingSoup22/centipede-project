@@ -38,6 +38,10 @@ from centipede.environment.simulation import PhysicsSimulation
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 from centipede.environment.speeds import CHANGE_WINDOW_S, Speeds
 from centipede.environment.tow import GROUPS, Tow
+from centipede.environment.walker_observations import (
+    walker_observation_size,
+    walker_observations,
+)
 
 # A start's turns drawn at once, of which the first that faces ground for a
 # whole episode is kept; from the outer corner of the terrain park's corner
@@ -173,6 +177,13 @@ class Environment:
         )
         self.observation_size = self.observation_builder.observation_size
         self.behind_observation_entries = self.observation_builder.behind_entries
+        if self.footprints is not None:
+            # Following footsteps a walker sees itself, its leader, its marks
+            # and its command (walker_observations), nothing behind it.
+            self.observation_size = walker_observation_size(legs)
+            self.behind_observation_entries = torch.zeros(
+                self.observation_size, dtype=torch.bool, device=self.device
+            )
         self.tow = Tow(
             settings.tow,
             world_count,
@@ -581,6 +592,8 @@ class Environment:
             truncated,
             self.averaged_command,
         )
+        if self.footprints is not None:
+            self.diagnostics.step.marks_missed.copy_(self.mark_distances.mean(dim=-1))
         self.tow.record(self.diagnostics.step)
 
         self.last_action.copy_(joint_action)
@@ -660,6 +673,7 @@ class Environment:
                 world_mask, self.line, feet[:, 0, :, 2].mean(dim=1)
             )
             self.footprints.restart(world_mask, feet, first)
+            self.feet_down[world_mask] = self._feet_on_ground()[world_mask].float()
             self.mark_distances.copy_(self.footprints.mark_distances(feet))
         self.forces.restart(world_mask, state)
         self.tow.restart(world_mask)
@@ -697,9 +711,7 @@ class Environment:
         if self.footprints is None:
             return None
         feet = state.foot_position
-        down = torch.stack(
-            (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
-        )
+        down = self._feet_on_ground()
         self.feet_down.copy_(down)
         touchdown = self.footprints.update(feet, down)
         given = touchdown[:, 0]
@@ -708,6 +720,14 @@ class Environment:
         )
         self.mark_distances.copy_(self.footprints.mark_distances(feet))
         return self.footprints.lost(self.mark_distances)
+
+    def _feet_on_ground(self) -> torch.Tensor:
+        """Whether each foot touches the ground, left then right, ``(W, N,
+        2)``."""
+        state = self.simulation.physical_state
+        return torch.stack(
+            (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
+        )
 
     def _command(self) -> torch.Tensor | float:
         """Each world's command on this step, mm/s: the speeds' schedule's or
@@ -734,6 +754,21 @@ class Environment:
         )
 
     def _observations(self) -> torch.Tensor:
+        if self.footprints is not None:
+            return walker_observations(
+                self.simulation.physical_state,
+                self.footprints.marks(),
+                self.mark_distances,
+                self.feet_down,
+                self.relay.held,
+                self.relay.averaged,
+                self.averaged_unit_speed,
+                self.forces.values,
+                self.averaged_energy,
+                self.last_action,
+                self.tow.levels(),
+                self.body.unit_weight_n,
+            )
         current_command = None
         if self.settings.observe_current_command:
             current_command = self._world_command()

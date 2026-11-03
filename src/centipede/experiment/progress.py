@@ -32,17 +32,20 @@ from centipede.experiment.report import STEP_SECONDS
 BAR_WIDTH = 20
 SETTINGS_LINE_WIDTH = 100
 TRAINING_COLUMNS = (
-    "{cycle}  {took:>6}  |  {line:>9}  {speed:>9}  {off:>6}  {strayed:>7}"
-    "  {wave:>9}  {left_right:>10}  {steps:>6}  {body_down:>9}  |  {left:>6}"
+    "{cycle}  {took:>6}  |  {line:>9}  {speed:>9}  {off:>6}  {marks:>6}"
+    "  {strayed:>7}  {wave:>9}  {left_right:>10}  {steps:>6}  {body_down:>9}"
+    "  |  {left:>6}"
 )
 EVALUATION_COLUMNS = (
     "{number}  {actor:<26}  {took:>6}  |  {line:>9}  {speed:>9}  {off:>6}"
-    "  {strayed:>7}  {wave:>9}  {left_right:>10}  {steps:>6}  {body_down:>9}"
+    "  {marks:>6}  {strayed:>7}  {wave:>9}  {left_right:>10}  {steps:>6}"
+    "  {body_down:>9}"
 )
 COLUMN_NAMES = {
     "line": "line",
     "speed": "speed",
     "off": "off",
+    "marks": "marks",
     "strayed": "strayed",
     "wave": "wave",
     "left_right": "left-right",
@@ -51,12 +54,13 @@ COLUMN_NAMES = {
 }
 LEGEND = (
     "line: the line paid, the units' mean; speed: how fast they went along it;"
-    " off: their\ndistance from it, in mm; strayed: share of the episodes that"
-    " ended because the body\nlost the line. wave: each foot's lag behind the"
-    " same-side foot ahead, in degrees,\nthen its consistency from 0 (none) to 1;"
-    " left-right: the same between a unit's two\nfeet, 180 when they alternate."
-    " steps: each foot's lift-offs a second. body down:\nshare of steps with a"
-    " body on the ground."
+    " off: their\ndistance from it, in mm; marks: following footsteps, their"
+    " feet's distance to the\nnearer of their marks, in mm; strayed: share of"
+    " the episodes that ended because the\nbody lost the line or a walker its"
+    " marks. wave: each foot's lag behind the same-side\nfoot ahead, in degrees,"
+    " then its consistency from 0 (none) to 1; left-right: the same\nbetween a"
+    " unit's two feet, 180 when they alternate. steps: each foot's lift-offs a"
+    "\nsecond. body down: share of steps with a body on the ground."
 )
 # Where the body-on-ground flag sits among a unit's contact flags.
 BODY_ON_GROUND = 2
@@ -178,6 +182,7 @@ def _behaviour(step: dict[str, Any], episodes: dict[str, Any]) -> dict[str, str]
     line = sum(parts[LINE_PART] for parts in step["reward_parts"]) / units
     speed = sum(step["segment_progress"]) / units
     off = sum(step["off_line"]) / units
+    marks = sum(step["marks_missed"]) / units
     steps = sum(sum(feet) for feet in step["lift_off"]) / (2 * units)
     flags = step["contact_flags"]
     body_down = sum(unit[BODY_ON_GROUND] for unit in flags) / units
@@ -186,6 +191,7 @@ def _behaviour(step: dict[str, Any], episodes: dict[str, Any]) -> dict[str, str]
         "line": f"{line / STEP_SECONDS:.1f} mm/s",
         "speed": f"{speed * 1000 / STEP_SECONDS:.1f} mm/s",
         "off": f"{off * 1000:.1f}",
+        "marks": f"{marks * 1000:.1f}" if marks else "-",
         "strayed": "-" if strayed is None else f"{strayed:.0%}",
         "wave": _lag(step["neighbour_lag"], step["neighbour_lag_consistency"]),
         "left_right": _lag(step["left_right_lag"], step["left_right_lag_consistency"]),

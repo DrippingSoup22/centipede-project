@@ -97,11 +97,17 @@ class StepFacts:
         parts=ENERGY_PARTS,
     )
     spine_bend: torch.Tensor = measure(
-        "Angle of the spine joint behind the unit, either way; 0 for the rear, (W, N)",
+        "Angle of the spine joint in the unit's entries (behind it, or ahead with"
+        " spine_joint_ahead), either way; 0 for the unit without one, (W, N)",
         "rad",
     )
     off_line: torch.Tensor = measure(
         "Distance from the unit's centre to the line, (W, N)", "m"
+    )
+    marks_missed: torch.Tensor = measure(
+        "Following footsteps, the unit's feet's mean distance to the nearer of"
+        " their marks, (W, N); 0 without footsteps",
+        "m",
     )
     line_angle: torch.Tensor = measure(
         "Angle between the unit's body and the line's direction, either way, (W, N)",
@@ -346,6 +352,7 @@ class EnvironmentDiagnostics:
             own_energy=zeros(segment_count, len(ENERGY_PARTS)),
             spine_bend=zeros(segment_count),
             off_line=zeros(segment_count),
+            marks_missed=zeros(segment_count),
             line_angle=zeros(segment_count),
             line_bend=zeros(segment_count),
             commanded_speed=zeros(),
