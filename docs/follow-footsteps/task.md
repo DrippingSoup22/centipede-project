@@ -19,11 +19,15 @@ the head; in stage A, a script.
 - **A walker's marks** on each side are its leader's last two prints on
   that side. When the leader lands its next step, the follower is usually
   still standing on the earlier print, so both count.
-- **Unit 1's marks** are the leader's footholds on each side: the one it
-  was given when its foot last touched down, frozen at that moment, and the
-  live one, where its next step on that side should land. The leader may
-  move the live one at any time, as an antenna's touch re-aims a stick
-  insect's front leg in its swing (Schütz & Dürr 2011).
+- **Unit 1's marks** are its leader's footholds. Each time one of its
+  feet touches down, the leader gives that side's next foothold, which
+  stays where it is until that foot touches down again: a mark never moves
+  while the foot goes for it (the user, 2026-11-03). Unit 1's marks on each
+  side are the foothold its foot went for and the next one, as a walker's
+  are its leader's last two prints. A foot that misses its foothold still
+  gets the next one at its touchdown: it pays for the miss
+  ([reward.md](reward.md)), and the unit behind steps where it really
+  landed.
 - **The speed** passes back along the body. Unit 1 holds its leader's
   command one step later, and every other walker holds its leader's
   command one step later, unchanged: 20 ms a unit, 0.2 s at the rear. Each
@@ -37,8 +41,9 @@ the head; in stage A, a script.
   follow-line's curved lines, piece by piece with bounded curvature, at
   levels that rise as the walk forms ([follow-line's task](../follow-line/task.md#the-curves-stage-2)).
   Nobody sees the path; it only places the footholds.
-- **Its footholds.** Each side's next foothold lies one stride s along the
-  path beyond that side's previous foothold, at the foot's natural reach
+- **Its footholds.** Each side's next foothold, given when that side's
+  foot touches down, lies one stride s along the path beyond that side's
+  previous foothold, at the foot's natural reach
   to the side of the path, the left and right sides half a stride apart. A
   foothold follows the one the script gave, not where the foot landed, so a
   missed step does not bend the path.
@@ -62,15 +67,16 @@ al. 2018).
 
 ## Stage B, later
 
-The head, an agent of its own on v6's half, chooses unit 1's footholds and
-the speed, toward a target that only it senses, over one height field with
-holes, bumps and obstacles. It takes over from the script in a growing
-share of worlds, so that the walkers' task looks the same before and after.
-Its design is settled before stage B.
+The head, an agent of its own on v6's half, leads toward a target that
+only it senses, over one height field with holes, bumps and obstacles. At
+each touchdown of unit 1's foot it gives that side's next foothold, chosen
+on the ground its grid of heights shows, and at every step it sets the
+speed. It takes over from the script in a growing share of worlds, so that
+the walkers' task looks the same before and after. What it sees, does and
+is paid for: [observations.md](observations.md#the-head-stage-b),
+[actions.md](actions.md#the-head-stage-b), [reward.md](reward.md#the-head-stage-b).
 
 ## Sources
 
-- Schütz, C. & Dürr, V. (2011), Active tactile exploration for adaptive
-  locomotion in the stick insect, Phil. Trans. R. Soc. B 366, 2996–3005.
 - Pardo, F., Tavakoli, A., Levdik, V. & Kormushev, P. (2018), Time limits
   in reinforcement learning, ICML.

@@ -57,11 +57,22 @@ spine no longer places the follower, [actions.md](actions.md)).
 
 ## The head (stage B)
 
-As agreed, to be settled before stage B: progress toward its target and
-arriving; its body hitting an obstacle (its antennae touching anything is
-free); its own energy; and each failed foothold of unit 1, wherever the
-foot lands: it slips, drops into a hole or carries nothing. No carry rule:
-the head holds itself up only if feeling the ground pays.
+Agreed with the user on 2026-11-03: one account, its own.
+
+```text
+head = progress toward its target  +  arriving  −  p_h · failed footholds
+```
+
+- **Progress**: the body's speed toward the target, mm/s, and a bonus on
+  arriving.
+- **A failed foothold**: one unit 1's foot reached but could not stand on:
+  it carried nothing, or slid off it (a hole, an edge). The head chose it,
+  so the head pays. A foot that misses a good foothold is unit 1's miss and
+  only unit 1 pays, through its marks. What counts as reaching, carrying
+  and sliding, and p_h, are set before stage B.
+- **Left out**: its collisions (a head driving into an obstacle stops
+  making progress, which already costs), its energy (it commands no motor)
+  and a carry rule (its neck is held straight, unit 1 carries it).
 
 ## The ledger
 

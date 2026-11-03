@@ -20,6 +20,12 @@ but for what the critics see.
 - **Local** in the constraints' sense: an agent's actor and critic receive
   only what its radius holds, its leader one hop away.
 
+## The head (stage B)
+
+One critic for its one account ([reward.md](reward.md#the-head-stage-b)),
+seeing what its actor sees ([observations.md](observations.md#the-head-stage-b)),
+with the walkers' settings.
+
 ## Settings
 
 As follow-line's: networks of 2 × 64; each critic's returns standardised

@@ -22,4 +22,19 @@ Agreed with the user on 2026-11-02.
   `docs/model.md`, "Target motors"). A spine target spans its joint's ±15°.
 - Commands are a Gaussian squashed by tanh, never clipped.
 - **Every 20 ms**, 50 decisions a second, as in follow-line.
-- **The neck** is passive in v6: no agent commands it ([README.md](README.md#open)).
+- **The neck**: no agent commands it. v6's neck motors, at their zero
+  command, hold it straight ([README.md](README.md#the-bodies)).
+
+## The head (stage B): 5
+
+Agreed with the user on 2026-11-03.
+
+| Action | Values | Read |
+| --- | ---: | --- |
+| The next foothold on each side: forward and sideways, a step from where that foot just touched down, in unit 1's frame | 4 | Only at that foot's touchdown ([task.md](task.md#prints-marks-and-the-speed)) |
+| The speed command | 1 | At every step; unit 1 holds it one step later |
+
+Between touchdowns a foothold action changes nothing, so a mark never moves
+under a swinging foot. A step's range, and the speed's (stops included, as
+in follow-line's schedule), are set before stage B. Like every command, each
+is a Gaussian squashed by tanh into its range.

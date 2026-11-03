@@ -49,7 +49,7 @@ holding the speed, saving energy. The head learns where to lead.
 | Stage | Body | The leader | Ground |
 | --- | --- | --- | --- |
 | **A**, the baseline | v6 headless | A script gives unit 1 its footholds and the speed ([task.md](task.md)) | Flat |
-| **B** | v6 half, its head on a passive neck | The head, an agent of its own, in a growing share of worlds | Holes, bumps and obstacles in one height field, and targets only the head senses |
+| **B** | v6 half, its neck held straight | The head, an agent of its own, in a growing share of worlds | Holes, bumps and obstacles in one height field, and targets only the head senses |
 | Later | v6 full | | Basins |
 
 Because the marks set the wave's direction, the ground need not be final
@@ -61,21 +61,21 @@ from the first cycle, as it had to be in follow-line: stage A stays flat.
 | --- | --- | --- |
 | Task | [task.md](task.md) | Prints, marks and the relayed speed; stage A's script; episodes |
 | Reward | [reward.md](reward.md) | One function for every walker, the marks' cost its only new term; the head's terms for stage B |
-| Observations | [observations.md](observations.md) | 65 values: the unit itself, its leader's feet, its marks and its command |
-| Actions | [actions.md](actions.md) | Eight leg motors and the spine joint ahead |
+| Observations | [observations.md](observations.md) | 65 values: the unit itself, its leader's feet, its marks and its command; the head's grid of heights |
+| Actions | [actions.md](actions.md) | Eight leg motors and the spine joint ahead; the head's footholds and speed |
 | Critic and learning | [critic.md](critic.md) | follow-line's, each critic seeing what its actor sees |
 
 ## The bodies
 
 Model v6 (`docs/model.md`, "Model v6"): stage A trains on its headless
-tester, stage B on its half, whose head is its own body on a passive neck.
-The head's antennae will need two root joints each, sideways 0 to 90° from
-the head's axis and up and down −15° to +40° (rough angles from photos of
-*S. heros* and *S. subspinipes*), in a later model. Measured on v6's half
-standing, an antenna's root is 8.9 mm above the floor and the antenna 30.4
-mm long: across that range its tip reaches the floor with its root about 7°
-below the head's plane, and rises to about 22 mm at the top, so the head
-can feel the ground and some height without moving its neck.
+tester, stage B on its half, whose head is its own body on a neck with a
+motor on each hinge. Here no agent commands the neck: its motors' zero
+command holds it straight, bent about 1° under the head standing and 0.6 to
+1.5° on the scripted walk. The antennae are drawn shapes that touch
+nothing. The head senses the ground through a grid of heights over the
+places unit 1's feet can step ([observations.md](observations.md#the-head-stage-b)),
+the simplest stand-in, as follow-line's front unit's view of the ground
+was (the user, 2026-11-03).
 
 ## Kept from follow-line
 
@@ -86,20 +86,39 @@ observation and value normalisation, and the PPO settings.
 ## Left out
 
 The line and its curves (stage A's script lays its own path), the line's
-costs, the front unit's view of the ground (the head's antennae take its
-place in stage B), and the neighbours' last actions, values another agent
+costs, the front unit's view of the ground (the head's grid of heights
+takes its place in stage B), and the neighbours' last actions, values another agent
 chose.
 
 ## Open
 
-- **The neck** is passive for now (the user, 2026-11-02): no measured range
-  or strength of a centipede's neck was found. An active neck, or motors
-  that lift the first few units as real centipedes lift their front, may
-  come later.
-- **The head's inputs and reward** are sketched for stage B and settled
-  before it.
+- **The head's numbers**, set before stage B from the scripted walk: the
+  grid's reach and spacing, a foothold step's range, the price of a failed
+  foothold and what counts as one.
+- **Motors that lift the first few units**, as real centipedes lift their
+  front, may come later (the user, 2026-11-02).
 - **The numbers the ledger sets** before the first run: the marks' price
   and scale, the script's stride, the restart distance ([reward.md](reward.md#the-ledger)).
+
+## Later: the antennae
+
+Antennae are worth adding only as sensing organs, which this baseline does
+not need (the user, 2026-11-03). Two ways were weighed and set aside: real
+antennae, flexible and touching along their whole length (many contacts on
+every step, which may slow the simulation, and which MuJoCo Warp may not
+support), and rigid antennae that record only where they touch the ground
+(they miss every hole they do not cross).
+
+The user's idea, the starting point of that study, is a **torch**: each
+antenna senses all the ground within a radius of its shape, as a torch
+lights what is near it. It needs no contacts: the ground's heights at
+points inside each antenna's capsule, read from the terrain as the grid's
+are, so the code that reads the grid reads the torch too. It asks the head
+for two things the grid does not: aiming its antennae with its neck (v6's
+neck motors, unused here), and remembering what they sensed, since their
+tips reach 44 mm ahead of unit 1's feet, about 0.6 s of walking
+(`docs/model.md`, "Validation of v6"). Stick insects use their antennae
+this way, actively, to place their front legs (Schütz & Dürr 2011).
 
 ## Sources
 
@@ -108,4 +127,6 @@ chose.
 - Yasui, Takano, Kano & Ishiguro, Frontiers in Robotics and AI 2022: each
   leg following the contact point of the leg ahead
   ([doi 10.3389/frobt.2022.797566](https://www.frontiersin.org/articles/10.3389/frobt.2022.797566/full)).
+- Schütz, C. & Dürr, V. (2011), Active tactile exploration for adaptive
+  locomotion in the stick insect, Phil. Trans. R. Soc. B 366, 2996–3005.
 - Everything else as in [follow-line's research](../follow-line/research.md).
