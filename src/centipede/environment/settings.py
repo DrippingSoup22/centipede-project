@@ -82,6 +82,18 @@ class RewardSettings:
     rises from the next cycle. With ``ramp_shape`` "adaptive" the weight
     follows the untowed mean-action worlds instead, from ``ramp_start``,
     after each of the tow's windows (``adapted_ramp_weight``).
+
+    From 2026-11-03 (follow-footsteps, docs/follow-footsteps/reward.md),
+    following footsteps: each walker's team account is paid
+    ``commanded_speed_mm_per_s`` - |v - c| mm a second, v its own speed
+    along its heading and c the command it holds, each averaged over
+    ``averaging_s``; with ``energy_with_leader`` it is charged the mean
+    energy of itself and its leader, the unit ahead (the front unit its
+    own), instead of the units' mean or its neighbourhood's; and its own
+    account is charged ``marks_price_mm_per_s`` mm a second times the mean,
+    over its two feet, of 1 - exp(-d / ``marks_distance_scale_mm``) for each
+    foot on the ground, d its distance across the ground to the nearer of
+    its marks.
     """
 
     line_speed_cap_mm_per_s: float
@@ -118,6 +130,9 @@ class RewardSettings:
     ramp_band_mm_per_s: tuple[float, float]
     ramp_factor: float
     ramp_after_line_share: float
+    energy_with_leader: bool = False
+    marks_price_mm_per_s: float = 0.0
+    marks_distance_scale_mm: float = 4.0
 
     @classmethod
     def from_section(cls, values: dict) -> "RewardSettings":
@@ -186,6 +201,13 @@ class RewardSettings:
             ramp_factor=section.number("ramp_factor", default=1.1, minimum=1.0),
             ramp_after_line_share=section.number(
                 "ramp_after_line_share", default=0.0, minimum=0.0, maximum=1.0
+            ),
+            energy_with_leader=section.boolean("energy_with_leader", default=False),
+            marks_price_mm_per_s=section.number(
+                "marks_price_mm_per_s", default=0.0, minimum=0.0
+            ),
+            marks_distance_scale_mm=section.positive_number(
+                "marks_distance_scale_mm", default=4.0
             ),
         )
         section.reject_unknown_keys()

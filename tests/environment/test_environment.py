@@ -635,6 +635,58 @@ def test_the_team_is_paid_near_a_commanded_speed_and_charged_its_neighbours_ener
         )
 
 
+def test_following_footsteps_each_walker_is_paid_its_speed_less_its_marks():
+    """Each walker is paid 67 - |v - c| mm a second on its own: 60 mm/s
+    under a command of 67 pays 60, 67 under 50 pays 50. Each is charged the
+    mean energy of itself and its leader: unit 0's 2 mJ costs it 2 and unit
+    1 one. A foot down 4 mm from its mark costs 1 - 1/e of the marks' price,
+    halved over the unit's two feet; a foot in the air nothing."""
+    settings = RewardSettings.from_section(
+        {
+            "commanded_speed_mm_per_s": 67.0,
+            "energy_with_leader": True,
+            "mm_per_mj": 0.4,
+            "marks_price_mm_per_s": 10.0,
+            "marks_distance_scale_mm": 4.0,
+        }
+    )
+    reward = RewardFunction(settings, BODY, torch.ones(SEGMENTS, LEGS + 1), 0.005, 2)
+    state = resting_state(1)
+    state.motor_positive_work[0, 0] = 2e-3
+    zeros = torch.zeros(1, SEGMENTS)
+    distances = torch.zeros(1, SEGMENTS, 2)
+    distances[0, 2] = 4e-3
+    down = torch.ones(1, SEGMENTS, 2)
+    down[0, 2, 1] = 0.0
+
+    _, parts, _ = reward.compute(
+        state,
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, 8),
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        zeros,
+        zeros,
+        torch.zeros(1, SEGMENTS, LEGS + 1),
+        torch.full((1,), 67.0),
+        unit_speed=torch.tensor([[60.0, 67.0, 67.0, 67.0, 67.0]]),
+        unit_command=torch.tensor([[67.0, 50.0, 67.0, 67.0, 67.0]]),
+        mark_distances=distances,
+        feet_down=down,
+    )
+
+    by_name = dict(zip(PART_NAMES, parts[0].unbind(dim=-1), strict=True))
+    paid = torch.tensor([60.0, 50.0, 67.0, 67.0, 67.0])
+    torch.testing.assert_close(by_name["line"], 0.02 * paid)
+    torch.testing.assert_close(by_name["pushing"], -torch.tensor([2.0, 1, 0, 0, 0]))
+    missed = 0.2 * (1 - math.exp(-1)) / 2
+    torch.testing.assert_close(by_name["marks"], -torch.tensor([0, 0, missed, 0, 0]))
+
+
 def test_with_the_line_priced_each_unit_pays_for_itself_and_the_units_it_places():
     """With match_plain_speed the forward line is the plain step, whatever
     the unit's distance or angle. The line priced at 10 mm/s on a 4 mm scale:

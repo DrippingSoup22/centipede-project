@@ -20,7 +20,7 @@ own_i  = − carry_i  −  p_f · F_i
 | Ē_i | The mean muscle energy spent on the step by itself and its leader, mJ/s; for unit 1, whose leader is the head, its own | follow-line's energy, its neighbourhood the leader |
 | c | The energy's price: 0.4 at first, rising to 2 over 128 cycles once the walk holds its command | follow-line's ramp, its gate now on the speed |
 | carry_i | Each foot's load averaged over 1 s beyond a quarter either way of half the unit's weight, at 50 mm/s for each unit weight | follow-line's carry per leg (from its run 14) |
-| F_i | The marks: the mean, over its two feet, of 1 − e^(−d/σ_f) for each foot that carries weight, d the foot's distance across the ground to the nearer of its marks on its side (0 for a foot in the air) | New |
+| F_i | The marks: the mean, over its two feet, of 1 − e^(−d/σ_f) for each foot on the ground (touching it, as a print is read), d the foot's distance across the ground to the nearer of its marks on its side (0 for a foot in the air) | New |
 | p_f, σ_f | The marks' price and scale | Set by the ledger (below) |
 
 The constant 67 keeps the pay where follow-line's stage 3 kept it: a stop

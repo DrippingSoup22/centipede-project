@@ -117,9 +117,15 @@ class Environment:
                 world_count, footsteps.stride_mm * 1e-3, body.foot_reach_m, self.device
             )
             # Each foot's distance across the ground to its nearer mark after
-            # the last step, m.
+            # the last step, m, and whether it is on the ground.
             self.mark_distances = torch.zeros(
                 (world_count, segment_count, 2), device=self.device
+            )
+            self.feet_down = torch.zeros_like(self.mark_distances)
+            # Each walker's speed along its heading, mm/s, averaged as the
+            # forces are, from 0 at an episode's start (the body at rest).
+            self.averaged_unit_speed = torch.zeros(
+                (world_count, segment_count), device=self.device
             )
             self.relay = CommandRelay(
                 world_count,
@@ -457,7 +463,7 @@ class Environment:
             else motor_command[:, :-1, legs]
         )
         self.simulation.step(motor_command[..., :legs], spine_command, body_forces)
-        if self.tow.started:
+        if self.tow.started or self.footprints is not None:
             moved = state.body_planar_position - before
             self.forward_speed.copy_(
                 (moved * forward_axis(state)).sum(dim=-1) / ACTION_DURATION_S
@@ -479,8 +485,18 @@ class Environment:
         self.averaged_command += self.forces.averaging_rate * (
             self._command() - self.averaged_command
         )
+        footsteps = {}
         if self.relay is not None:
             self.relay.step(self._world_command())
+            self.averaged_unit_speed += self.forces.averaging_rate * (
+                self.forward_speed * 1e3 - self.averaged_unit_speed
+            )
+            footsteps = {
+                "unit_speed": self.averaged_unit_speed,
+                "unit_command": self.relay.averaged,
+                "mark_distances": self.mark_distances,
+                "feet_down": self.feet_down,
+            }
         self.averaged_forward_line += self.forces.averaging_rate * (
             forward_line / ACTION_DURATION_S - self.averaged_forward_line
         )
@@ -508,6 +524,7 @@ class Environment:
             self.averaged_energy,
             force_change,
             self.averaged_command,
+            **footsteps,
         )
         # A world restarts when its body strays from the line, or, following
         # footsteps, when a walker loses its marks.
@@ -670,6 +687,7 @@ class Environment:
         )
         if self.relay is not None:
             self.relay.restart(world_mask, self._world_command(), self.averaged_command)
+            self.averaged_unit_speed.masked_fill_(world_mask[:, None], 0.0)
 
     def _follow_footsteps(self, state) -> torch.Tensor | None:
         """Following footsteps, record the step's prints, give unit 1 the
@@ -682,6 +700,7 @@ class Environment:
         down = torch.stack(
             (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
         )
+        self.feet_down.copy_(down)
         touchdown = self.footprints.update(feet, down)
         given = touchdown[:, 0]
         self.footprints.give_footholds(

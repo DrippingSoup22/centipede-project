@@ -9,10 +9,12 @@ from centipede.environment.simulation import PhysicalState
 from centipede.environment.simulation.body_measures import BodyMeasures
 from centipede.environment.simulation.constants import ACTION_DURATION_S
 
-# The reward's parts, signed, each in its own unit: the line, the squeeze, the
-# motion, the accelerations, the energy's share, the force share, the carry
-# and being off the line in millimetres, the rest in millijoules. The team
-# account adds the first TEAM_PART_COUNT, each unit's own account the rest.
+# The reward's parts, signed, each in its own unit: the line (following
+# footsteps, each walker's speed against its command), the squeeze, the
+# motion, the accelerations, the energy's share, the force share, the carry,
+# being off the line and missing the marks in millimetres, the rest in
+# millijoules. The team account adds the first TEAM_PART_COUNT, each unit's
+# own account the rest.
 PART_NAMES = (
     "line",
     "squeeze",
@@ -28,6 +30,7 @@ PART_NAMES = (
     "hanging",
     "carry",
     "off_line",
+    "marks",
 )
 TEAM_PART_COUNT = 9
 MILLIJOULE_PARTS = ("pushing", "braking", "force", "switching", "pain", "hanging")
@@ -125,8 +128,10 @@ class RewardFunction:
         self.acceleration_price_mm = settings.acceleration_price * ACTION_DURATION_S
         # Millimetres for a step of a unit weight its feet do not carry.
         self.carry_price_mm = settings.carry_price * ACTION_DURATION_S
-        # Millimetres for a step at the full cost of being off the line.
+        # Millimetres for a step at the full cost of being off the line, and
+        # of missing the marks.
         self.line_price_mm = settings.line_price_mm_per_s * ACTION_DURATION_S
+        self.marks_price_mm = settings.marks_price_mm_per_s * ACTION_DURATION_S
         self.unit_weight_n = body.unit_weight_n
         # Each unit may take from its neighbours, for free, the weight it
         # carries beyond the others' mean, such as a head; none on the
@@ -154,6 +159,12 @@ class RewardFunction:
             seen = (behind.abs() <= observation_radius).float()
             seen[behind > 0] *= settings.energy_weight_behind
             self.neighbourhoods = seen / seen.sum(dim=1, keepdim=True)
+        # With energy_with_leader, each unit's mean with the unit ahead.
+        if settings.energy_with_leader:
+            count = len(commanded_joints)
+            with_leader = torch.eye(count, device=device)
+            with_leader[1:, :-1] += torch.eye(count - 1, device=device)
+            self.neighbourhoods = with_leader / with_leader.sum(dim=1, keepdim=True)
         # The units each unit answers for being off the line: itself and those
         # behind it within observation_radius, which the spine joint behind
         # it places; row i weighs them alike.
@@ -226,9 +237,24 @@ class RewardFunction:
         averaged_energy: torch.Tensor,
         force_change: torch.Tensor,
         averaged_command: torch.Tensor,
+        *,
+        unit_speed: torch.Tensor | None = None,
+        unit_command: torch.Tensor | None = None,
+        mark_distances: torch.Tensor | None = None,
+        feet_down: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 14)``
+        """The rewards ``(W, N, 2)``, team and own, their parts ``(W, N, 15)``
         in PART_NAMES' order, and each unit's own ``energy`` ``(W, N, 4)`` mJ.
+
+        Following footsteps, ``unit_speed`` ``(W, N)`` is each walker's speed
+        along its heading and ``unit_command`` ``(W, N)`` the command it
+        holds, each averaged, mm/s, and the team pays each walker v* - |v -
+        c| a second on its own instead of the body's; ``mark_distances``
+        ``(W, N, 2)`` is each foot's distance to the nearer of its marks, m,
+        and ``feet_down`` ``(W, N, 2)`` whether it is on the ground: each
+        walker's marks part is the mean, over its feet, of 1 - exp(-d /
+        ``marks_distance_scale_mm``) for each foot down, at
+        ``marks_price_mm_per_s``.
 
         ``force_change`` ``(W, N, M + 1)`` is how much each motor's force
         changed since the step before; ``averaged_command`` ``(W,)`` each
@@ -296,7 +322,10 @@ class RewardFunction:
         forward = paid * self._seen(distance, angle)
         line = forward + step_mm.clamp(max=0.0)
         target = self.settings.commanded_speed_mm_per_s
-        if target:
+        if unit_speed is not None:
+            gap = (unit_speed - unit_command).abs()
+            team_line = (target - gap) * ACTION_DURATION_S
+        elif target:
             body_speed = averaged_forward_line.mean(dim=1, keepdim=True)
             command = averaged_command[:, None]
             team_line = (target - (body_speed - command).abs()) * ACTION_DURATION_S
@@ -362,6 +391,11 @@ class RewardFunction:
 
         lost = 1 - torch.exp(-distance * 1e3 / self.settings.line_distance_scale_mm)
         off_line = self.line_price_mm * lost @ self.placed_units.T
+        marks = torch.zeros_like(off_line)
+        if mark_distances is not None:
+            scale_mm = self.settings.marks_distance_scale_mm
+            missed = 1 - torch.exp(-mark_distances * 1e3 / scale_mm)
+            marks = self.marks_price_mm * (missed * feet_down).mean(dim=-1)
 
         units = line.shape[1]
         team = torch.cat(
@@ -385,6 +419,7 @@ class RewardFunction:
                 -self.hanging_price_mj * hanging,
                 -carry,
                 -off_line,
+                -marks,
             ),
             dim=-1,
         )
