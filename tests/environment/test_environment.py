@@ -25,6 +25,7 @@ from centipede.environment.reward_function import (
     PART_NAMES,
     RewardFunction,
 )
+from centipede.environment.scripted_leader import ScriptedLeader
 from centipede.environment.settings import (
     CurveSettings,
     EnvironmentSettings,
@@ -350,7 +351,9 @@ def test_each_walker_steps_on_its_leaders_prints_and_unit_1_on_its_footholds():
     footprints.give_footholds(touchdown[:, 0], later)
     marks = footprints.marks()
     torch.testing.assert_close(marks[0, 0, 0], torch.stack((first[0, 0], later[0, 0])))
-    torch.testing.assert_close(marks[0, 0, 1], torch.stack((feet[0, 0, 1], first[0, 1])))
+    torch.testing.assert_close(
+        marks[0, 0, 1], torch.stack((feet[0, 0, 1], first[0, 1]))
+    )
 
     distances = footprints.mark_distances(landed)
     torch.testing.assert_close(
@@ -358,6 +361,24 @@ def test_each_walker_steps_on_its_leaders_prints_and_unit_1_on_its_footholds():
     )
     assert footprints.lost(distances).tolist() == [False]
     assert footprints.lost(distances).tolist() == [True]
+
+
+def test_the_script_lays_each_sides_next_foothold_a_stride_on_along_the_line():
+    """The first footholds lie a stride beyond unit 1's centre on the left,
+    half a stride on the right, a foot's reach to each side of the line, at
+    the feet's height; a side whose foot touched down moves a stride on."""
+    line = Line(1, SEGMENTS, 0.01, 0.025, "cpu")
+    line.restart(torch.ones(1, dtype=torch.bool), resting_state(1), torch.zeros(1))
+    leader = ScriptedLeader(1, stride_m=0.02, reach_m=0.015, device="cpu")
+    first = leader.restart(
+        torch.ones(1, dtype=torch.bool), line, torch.full((1,), 5e-4)
+    )
+    torch.testing.assert_close(
+        first[0], torch.tensor([[0.02, 0.015, 5e-4], [0.01, -0.015, 5e-4]])
+    )
+    later = leader.next_footholds(torch.tensor([[False, True]]), line)
+    torch.testing.assert_close(later[0, 0], first[0, 0])
+    torch.testing.assert_close(later[0, 1], torch.tensor([0.03, -0.015, 5e-4]))
 
 
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():
@@ -1047,6 +1068,42 @@ def test_with_the_spine_joint_ahead_every_unit_but_the_front_commands_it():
     action[..., -1] = torch.linspace(0.1, 1.0, 10)
     environment.step(action)
     torch.testing.assert_close(spine_commands[0], 0.35 * action[:, 1:, -1])
+
+
+def test_following_footsteps_unit_1_aims_ahead_and_a_lost_walker_restarts():
+    """On v6's headless tester following footsteps, unit 1 starts on the
+    first of its marks, its next a stride ahead on the left and half a
+    stride on the right; every other walker a unit spacing behind its
+    leader's prints. World 1's
+    prints moved 30 mm aside leave its walkers lost: after lost_s it
+    restarts, its marks again where its feet stand; world 0 goes on."""
+    settings = EnvironmentSettings.from_section(
+        {
+            "simulation": HEADLESS
+            | {"model_path": str(Path("models/assembly_v6_headless.xml").resolve())},
+            "stagger_first_episodes": False,
+            "line_angle_range_deg": 0.0,
+            "footsteps": {"enabled": True, "lost_s": 0.04},
+        }
+    )
+    environment = Environment(settings)
+    environment.reset(seed=0)
+    distances = environment.mark_distances
+    spacing = environment.body.unit_spacing_m
+    feet = environment.simulation.physical_state.foot_position
+    ahead = environment.footprints.marks()[:, 0, :, 1, :2] - feet[:, 0, :, :2]
+    torch.testing.assert_close(
+        ahead.norm(dim=-1), torch.tensor([[0.02, 0.01]] * 2), atol=1e-3, rtol=0
+    )
+    assert not distances[:, 0].any()
+    assert distances[:, 1:] == pytest.approx(spacing, abs=1e-3)
+
+    environment.footprints.prints[1, ..., 1] += 0.03
+    action = torch.zeros(2, 10, 9)
+    for expected in ([False, False], [False, True]):
+        _, rewards, _, truncated, _ = environment.step(action)
+        assert truncated.tolist() == expected and torch.isfinite(rewards).all()
+    assert environment.mark_distances[1, 1:] == pytest.approx(spacing, abs=1e-3)
 
 
 def test_episodes_start_in_the_weighted_areas_and_the_front_unit_sees_ahead(tmp_path):

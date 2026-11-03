@@ -490,7 +490,9 @@ def test_with_the_spine_joint_ahead_both_backends_move_the_spine_entries():
         return state.spine_yaw_position, state.motor_force[..., -1]
 
     for expected, actual in zip(
-        spine_entries(cpu.physical_state), spine_entries(gpu.physical_state)
+        spine_entries(cpu.physical_state),
+        spine_entries(gpu.physical_state),
+        strict=True,
     ):
         # Joints 2 to 4 bent, on segments 3 to 5; the front segment has none.
         assert expected[0, 3:6].abs().min() > 0 and not expected[0, 0]

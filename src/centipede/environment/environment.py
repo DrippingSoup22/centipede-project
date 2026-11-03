@@ -22,6 +22,7 @@ import math
 import torch
 
 from centipede.environment.diagnostics import EnvironmentDiagnostics
+from centipede.environment.footprints import Footprints
 from centipede.environment.ground_view import ground_view
 from centipede.environment.line import Line, forward_axis
 from centipede.environment.observation_builder import ObservationBuilder
@@ -30,6 +31,7 @@ from centipede.environment.reward_function import (
     AveragedForces,
     RewardFunction,
 )
+from centipede.environment.scripted_leader import ScriptedLeader
 from centipede.environment.settings import EnvironmentSettings
 from centipede.environment.simulation import PhysicsSimulation
 from centipede.environment.simulation.constants import ACTION_DURATION_S
@@ -52,11 +54,14 @@ class Environment:
     the front the joint ahead of it: ``segment_action_sizes`` lists each
     unit's actions and ``action_size`` is the width of the joint action, the
     last column of the unit without a spine joint going to no motor. Each
-    spine motor receives ``spine_action_scale`` times its command. Rewards have two accounts, team and own, ``(W, N, 2)``. An
-    episode never terminates: it is cut, and the agents value what would have
+    spine motor receives ``spine_action_scale`` times its command. Rewards
+    have two accounts, team and own, ``(W, N, 2)``. An episode never
+    terminates: it is cut, and the agents value what would have
     followed, at the time limit, when the units' mean distance from the line
     passes their sight radius, or when the physics restarted the world; the
-    world then restarts on a new line.
+    world then restarts on a new line. Following footsteps
+    (``settings.footsteps``), a walker that lost its marks takes the place
+    of a body that strayed from the line.
     """
 
     def __init__(self, settings: EnvironmentSettings) -> None:
@@ -93,6 +98,28 @@ class Environment:
             self.device,
             settings.curves if settings.line_shape == "curved" else None,
         )
+        # Follow-footsteps: the prints and marks, and stage A's scripted
+        # leader laying unit 1's footholds along the line, which then only
+        # places them.
+        self.footprints = self.leader = None
+        footsteps = settings.footsteps
+        if footsteps.enabled:
+            self.footprints = Footprints(
+                world_count,
+                segment_count,
+                footsteps.swing_steps,
+                footsteps.lost_distance_reaches * body.foot_reach_m,
+                round(footsteps.lost_s / ACTION_DURATION_S),
+                self.device,
+            )
+            self.leader = ScriptedLeader(
+                world_count, footsteps.stride_mm * 1e-3, body.foot_reach_m, self.device
+            )
+            # Each foot's distance across the ground to its nearer mark after
+            # the last step, m.
+            self.mark_distances = torch.zeros(
+                (world_count, segment_count, 2), device=self.device
+            )
         # With a start, the lines stay straight until the wave starts forming.
         if settings.line_shape == "curved" and settings.curves.start_speed_mm_per_s:
             self.line.set_level(-1)
@@ -431,6 +458,7 @@ class Environment:
         self.episode_steps += 1
 
         progress = self.line.update(state)
+        lost_marks = self._follow_footsteps(state)
         averaged_forces = self.forces.update(state)
         velocity = self._joint_velocity()
         joint_acceleration = (velocity - self.joint_velocity) / ACTION_DURATION_S
@@ -472,7 +500,13 @@ class Environment:
             force_change,
             self.averaged_command,
         )
-        strayed = self.line.distance.mean(dim=1) > self.sight_radius_m
+        # A world restarts when its body strays from the line, or, following
+        # footsteps, when a walker loses its marks.
+        strayed = (
+            self.line.distance.mean(dim=1) > self.sight_radius_m
+            if lost_marks is None
+            else lost_marks
+        )
         if self.line.level_count and self.tow.worlds_per_group:
             untowed = self.tow.groups[GROUPS.index("without tow")]
             judged = untowed * (self.line.world_levels == self.line.level)
@@ -594,6 +628,13 @@ class Environment:
         )
         turn = (2 * draw - 1) * math.radians(self.settings.line_angle_range_deg)
         self.line.restart(world_mask, state, turn, self.generator)
+        if self.footprints is not None:
+            feet = state.foot_position
+            first = self.leader.restart(
+                world_mask, self.line, feet[:, 0, :, 2].mean(dim=1)
+            )
+            self.footprints.restart(world_mask, feet, first)
+            self.mark_distances.copy_(self.footprints.mark_distances(feet))
         self.forces.restart(world_mask, state)
         self.tow.restart(world_mask)
         self.diagnostics.restart(world_mask)
@@ -618,6 +659,25 @@ class Environment:
                 world_mask[:, None, None], self._joint_velocity(), self.joint_velocity
             )
         )
+
+    def _follow_footsteps(self, state) -> torch.Tensor | None:
+        """Following footsteps, record the step's prints, give unit 1 the
+        next foothold on each side its foot touched down, and measure every
+        foot to its marks; return the worlds where a walker lost them,
+        ``(W,)``, or None without footsteps."""
+        if self.footprints is None:
+            return None
+        feet = state.foot_position
+        down = torch.stack(
+            (state.left_foot_ground_contact, state.right_foot_ground_contact), dim=-1
+        )
+        touchdown = self.footprints.update(feet, down)
+        given = touchdown[:, 0]
+        self.footprints.give_footholds(
+            given, self.leader.next_footholds(given, self.line)
+        )
+        self.mark_distances.copy_(self.footprints.mark_distances(feet))
+        return self.footprints.lost(self.mark_distances)
 
     def _command(self) -> torch.Tensor | float:
         """Each world's command on this step, mm/s: the speeds' schedule's or

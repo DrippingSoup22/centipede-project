@@ -491,6 +491,43 @@ class SpeedSettings:
 
 
 @dataclass(frozen=True)
+class FootstepsSettings:
+    """The [environment.footsteps] section (follow-footsteps,
+    docs/follow-footsteps/task.md). With ``enabled`` every walker steps on
+    its marks: its leader's prints, unit 1's footholds, which stage A's
+    script lays ``stride_mm`` apart along each world's line, the line
+    itself unseen and unpaid. A print needs ``swing_steps`` steps in the air
+    before its touchdown. A world restarts when a walker's feet stay farther
+    from their marks, on average, than ``lost_distance_reaches`` times a
+    foot's reach to the side, for ``lost_s``, instead of when the body
+    strays from the line. The stride, the swing and the distance are
+    provisional until the ledger sets them. Off by default: follow-line's
+    line.
+    """
+
+    enabled: bool = False
+    stride_mm: float = 20.0
+    swing_steps: int = 2
+    lost_distance_reaches: float = 1.0
+    lost_s: float = 1.0
+
+    @classmethod
+    def from_section(cls, values: dict) -> "FootstepsSettings":
+        section = SettingsSection(values, "environment.footsteps")
+        settings = cls(
+            enabled=section.boolean("enabled", default=False),
+            stride_mm=section.positive_number("stride_mm", default=20.0),
+            swing_steps=section.positive_integer("swing_steps", default=2),
+            lost_distance_reaches=section.positive_number(
+                "lost_distance_reaches", default=1.0
+            ),
+            lost_s=section.positive_number("lost_s", default=1.0),
+        )
+        section.reject_unknown_keys()
+        return settings
+
+
+@dataclass(frozen=True)
 class EnvironmentSettings:
     """The [environment] section, with its nested sections (docs/follow-line/).
 
@@ -524,6 +561,9 @@ class EnvironmentSettings:
     ``observe_ground_ahead`` the front unit sees the ground ahead of it
     (``GROUND_VIEW_VALUES`` heights, ``environment.ground_view``); the
     others see zeros there.
+
+    From 2026-11-03 (follow-footsteps): ``footsteps``, the walkers' marks
+    in place of the line (``FootstepsSettings``).
     """
 
     max_episode_steps: int
@@ -545,6 +585,7 @@ class EnvironmentSettings:
     speeds: SpeedSettings
     observe_ground_ahead: bool = False
     start_area_weights: dict[str, float] = field(default_factory=dict)
+    footsteps: FootstepsSettings = field(default_factory=FootstepsSettings)
 
     @classmethod
     def from_section(cls, values: dict) -> "EnvironmentSettings":
@@ -590,6 +631,7 @@ class EnvironmentSettings:
             speeds=SpeedSettings.from_section(section.table("speeds")),
             observe_ground_ahead=section.boolean("observe_ground_ahead", default=False),
             start_area_weights=_weights(section.table("start_area_weights")),
+            footsteps=FootstepsSettings.from_section(section.table("footsteps")),
         )
         section.reject_unknown_keys()
         if settings.speeds.level_hold_s and not (

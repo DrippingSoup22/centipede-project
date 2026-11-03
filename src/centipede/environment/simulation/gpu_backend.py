@@ -532,9 +532,9 @@ def _add_segment_effort(
     One thread per (world, segment), after ``_add_contact_forces``: the
     segment's pressed total adds ``scale`` times itself and its square, then
     starts again from zero; each of its leg motors and the spine motor behind
-    it (ahead, with a ``spine_offset`` of 1) adds torque times speed times ``timestep`` to its pushing work where
-    positive, to its braking work where negative, and ``scale`` times its
-    force to its force.
+    it (ahead, with a ``spine_offset`` of 1) adds torque times speed times
+    ``timestep`` to its pushing work where positive, to its braking work
+    where negative, and ``scale`` times its force to its force.
     """
     world_index, segment_index = wp.tid()
     if not world_mask[world_index]:

@@ -55,7 +55,7 @@ the head; in stage A, a script.
 
 | Setting | Value | Why |
 | --- | --- | --- |
-| Start | The model's pose, each leg angle moved a little at random (main's reset). Each walker's first prints are where its feet stand, the script's first footholds one stride ahead of unit 1's | Every unit starts on its marks |
+| Start | The model's pose, each leg angle moved a little at random (main's reset). Each walker's first prints are where its feet stand; unit 1's first footholds lie a stride ahead on the left, half a stride on the right | Unit 1 stands on its first marks; every other walker a unit spacing behind its leader's prints, a gap its first step closes |
 | Episode | 20 s, 1,000 decisions | As follow-line |
 | A walker loses its marks | The world restarts when a walker's feet stay farther from their marks than a foot's reach for 1 s | No batch fills with steps where the marks pay nothing; the distance is set by the ledger |
 | The tow | follow-line's: a force each unit feels, fading as the walk forms, zero in every evaluation | Lets fresh networks move before they can walk |
