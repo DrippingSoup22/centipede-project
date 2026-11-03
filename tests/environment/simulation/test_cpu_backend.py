@@ -234,6 +234,12 @@ def test_physical_state_matches_mujoco(model, mapping):
                 if segment == 0
                 else data.xanchor[model.joint(f"segment_{segment:02d}_yaw").id, :2]
             )
+            expected["foot_position"] = data.geom_xpos[
+                [
+                    model.geom(f"segment_{segment:02d}_{side}_foot").id
+                    for side in ("left", "right")
+                ]
+            ]
             for field, value in expected.items():
                 actual = getattr(state, field)[row].numpy()
                 assert np.allclose(actual, value, rtol=1e-6, atol=1e-7), field

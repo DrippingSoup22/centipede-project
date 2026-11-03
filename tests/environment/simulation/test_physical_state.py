@@ -25,6 +25,7 @@ EXPECTED_FIELDS = [
     ("spine_yaw_position", (12,), torch.float32),
     ("spine_yaw_velocity", (12,), torch.float32),
     ("front_end_position", (12, 2), torch.float32),
+    ("foot_position", (12, 2, 3), torch.float32),
     ("foot_vertical_force", (12, 2), torch.float32),
     ("foot_forward_force", (12, 2), torch.float32),
     ("belly_vertical_force", (12,), torch.float32),

@@ -16,6 +16,7 @@ import torch
 from centipede.diagnostics_category import WindowSummary
 from centipede.environment.diagnostics import EnvironmentDiagnostics
 from centipede.environment.environment import Environment
+from centipede.environment.footprints import Footprints
 from centipede.environment.ground_view import GROUND_VIEW_VALUES
 from centipede.environment.line import TRAIL_VALUES, Line, heading
 from centipede.environment.observation_builder import ObservationBuilder
@@ -311,6 +312,52 @@ def test_the_speeds_hold_each_draw_and_rise_only_on_an_economical_walk():
     assert environment.speed_judgement["energy_per_mm"] == pytest.approx(0.08)
     environment.speed_sums.copy_(torch.tensor([1800, 300, 0, 0, 40, 1000, 0.0]))
     assert environment.adjust_speed_level() and environment.speeds.level == 1
+
+
+def test_each_walker_steps_on_its_leaders_prints_and_unit_1_on_its_footholds():
+    """A foot that touches down after its swing leaves a print where it
+    lands, one that only flickers off the ground none; each walker's marks
+    are its leader's last two prints, unit 1's its footholds, the next given
+    at that foot's touchdown; each foot is measured across the ground to the
+    nearer mark; walkers far from their marks long enough have lost them."""
+    footprints = Footprints(
+        1, 3, swing_steps=2, lost_distance_m=0.004, lost_steps=2, device="cpu"
+    )
+    feet = torch.zeros(1, 3, 2, 3)
+    feet[0, :, :, 0] = torch.tensor([0.02, 0.01, 0.0])[:, None]
+    feet[0, :, :, 1] = torch.tensor([0.005, -0.005])
+    first = feet[:, 0] + torch.tensor([0.01, 0.0, 0.0])
+    footprints.restart(torch.tensor([True]), feet, first)
+    marks = footprints.marks()
+    torch.testing.assert_close(marks[0, 0], torch.stack((feet[0, 0], first[0]), dim=1))
+    torch.testing.assert_close(marks[0, 2], feet[0, 1, :, None].expand(2, 2, 3))
+
+    down = torch.ones(1, 3, 2, dtype=torch.bool)
+    lifted = down.clone()
+    lifted[0, 0, 0] = False
+    footprints.update(feet, lifted)
+    assert not footprints.update(feet, down).any()
+    footprints.update(feet, lifted)
+    footprints.update(feet, lifted)
+    landed = feet.clone()
+    landed[0, 0, 0, 0] = 0.03
+    touchdown = footprints.update(landed, down)
+    assert touchdown.tolist() == [[[True, False], [False, False], [False, False]]]
+    torch.testing.assert_close(
+        footprints.marks()[0, 1, 0], torch.stack((feet[0, 0, 0], landed[0, 0, 0]))
+    )
+    later = first + torch.tensor([0.01, 0.0, 0.0])
+    footprints.give_footholds(touchdown[:, 0], later)
+    marks = footprints.marks()
+    torch.testing.assert_close(marks[0, 0, 0], torch.stack((first[0, 0], later[0, 0])))
+    torch.testing.assert_close(marks[0, 0, 1], torch.stack((feet[0, 0, 1], first[0, 1])))
+
+    distances = footprints.mark_distances(landed)
+    torch.testing.assert_close(
+        distances[0], torch.tensor([[0.0, 0.0], [0.01, 0.01], [0.01, 0.01]])
+    )
+    assert footprints.lost(distances).tolist() == [False]
+    assert footprints.lost(distances).tolist() == [True]
 
 
 def test_the_reward_pays_the_line_and_charges_the_team_and_each_unit_its_costs():

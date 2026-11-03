@@ -53,6 +53,9 @@ class PhysicalState:
     # Each segment's front end in the plane, world x and y: the head's tip,
     # then each segment's joint with the segment ahead.
     front_end_position: torch.Tensor  # (W, N, 2)
+    # Each foot's centre, left then right, world position (follow-footsteps:
+    # where a foot lands is its print).
+    foot_position: torch.Tensor  # (W, N, 2, 3)
     # The effort of the last step, measured after each of its physics steps
     # when the simulation is asked to (``measure_effort``), zeros otherwise:
     # forces are means over the step, in newtons, work is added up, in joules.
@@ -116,6 +119,7 @@ class PhysicalState:
             spine_yaw_position=zeros(n),
             spine_yaw_velocity=zeros(n),
             front_end_position=zeros(n, 2),
+            foot_position=zeros(n, 2, 3),
             foot_vertical_force=zeros(n, 2),
             foot_forward_force=zeros(n, 2),
             belly_vertical_force=zeros(n),

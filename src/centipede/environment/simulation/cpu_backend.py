@@ -14,6 +14,7 @@ from centipede.environment.simulation.model_mapping import (
     LEFT_FOOT_CATEGORY,
     RIGHT_FOOT_CATEGORY,
     ModelMapping,
+    foot_shape_ids,
     spine_joint_force_bodies,
 )
 from centipede.environment.simulation.physical_state import (
@@ -70,6 +71,7 @@ class CPUBackend:
         self.spine_rows = slice(1, None) if spine_joint_ahead else slice(None, -1)
         # The spine's yaw joints, from the head back: the joints its motors drive.
         self.spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
+        self.foot_shape_ids = foot_shape_ids(mapping)
         self._joint_force_bodies, self._joint_force_signs = spine_joint_force_bodies(
             model, mapping.body_ids
         )
@@ -105,6 +107,7 @@ class CPUBackend:
             name: getattr(self.physical_state, name).numpy() for name in EFFORT_FIELDS
         }
         self._front_end_position = self.physical_state.front_end_position.numpy()
+        self._foot_position = self.physical_state.foot_position.numpy()
         self._front_joint_force = self.physical_state.front_joint_force.numpy()
         self._net_joint_force = self.physical_state.net_joint_force.numpy()
         self.diagnostics = SimulationDiagnostics.allocate(world_count, model.nq, "cpu")
@@ -404,6 +407,7 @@ class CPUBackend:
         self._front_end_position[world_index, 1:] = data.xanchor[
             self.spine_joint_ids, :2
         ]
+        self._foot_position[world_index] = data.geom_xpos[self.foot_shape_ids]
         # Each segment's joint behind it (or ahead); the rear's (the front's)
         # entry stays zero.
         self._spine_yaw_position[world_index, self.spine_rows] = data.qpos[

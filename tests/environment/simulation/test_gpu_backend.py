@@ -287,6 +287,12 @@ def test_physical_state_matches_cpu_mujoco(model_path):
                 if segment_index == 0
                 else data.xanchor[spine_joint_ids[segment_index - 1], :2]
             )
+            expected["foot_position"] = data.geom_xpos[
+                [
+                    model.geom(f"segment_{segment_index:02d}_{side}_foot").id
+                    for side in ("left", "right")
+                ]
+            ]
             for field, value in expected.items():
                 actual = getattr(state, field)[world_index, segment_index]
                 assert np.allclose(actual.cpu().numpy(), value, atol=1e-5), field

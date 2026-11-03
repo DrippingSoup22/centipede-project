@@ -342,6 +342,16 @@ def _find_root_joint(model: mujoco.MjModel, body_ids: np.ndarray) -> int:
     return int(model.jnt_qposadr[model.body_jntadr[roots[0]]])
 
 
+def foot_shape_ids(mapping: ModelMapping) -> np.ndarray:
+    """Each segment's left and right foot shapes, ``(N, 2)`` ids; the
+    contract gives every segment exactly one of each."""
+    ids = np.zeros((mapping.segment_count, 2), dtype=np.int32)
+    for side, category in enumerate((LEFT_FOOT_CATEGORY, RIGHT_FOOT_CATEGORY)):
+        shapes = np.flatnonzero(mapping.geom_categories == category)
+        ids[mapping.geom_owner_indices[shapes], side] = shapes
+    return ids
+
+
 def spine_joint_force_bodies(
     model: mujoco.MjModel, body_ids: np.ndarray
 ) -> tuple[np.ndarray, np.ndarray]:

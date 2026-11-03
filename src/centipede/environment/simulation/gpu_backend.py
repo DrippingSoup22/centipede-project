@@ -27,6 +27,7 @@ from centipede.environment.simulation.model_mapping import (
     LEFT_FOOT_CATEGORY,
     RIGHT_FOOT_CATEGORY,
     ModelMapping,
+    foot_shape_ids,
     spine_joint_force_bodies,
 )
 from centipede.environment.simulation.physical_state import (
@@ -204,6 +205,7 @@ def _read_segment_state(
     spine_qpos_addresses: wp.array1d[int],
     spine_dof_addresses: wp.array1d[int],
     spine_joint_ids: wp.array1d[int],
+    foot_shape_ids: wp.array2d[int],
     head_tip_site_id: int,
     spine_offset: int,
     # In: model
@@ -218,6 +220,7 @@ def _read_segment_state(
     qvel: wp.array2d[float],
     cvel: wp.array2d[wp.spatial_vector],
     subtree_com: wp.array2d[wp.vec3],
+    geom_xpos: wp.array2d[wp.vec3],
     # Out
     body_height: wp.array2d[float],
     body_planar_position: wp.array2d[wp.vec2],
@@ -230,6 +233,7 @@ def _read_segment_state(
     spine_yaw_position: wp.array2d[float],
     spine_yaw_velocity: wp.array2d[float],
     front_end_position: wp.array2d[wp.vec2],
+    foot_position: wp.array3d[wp.vec3],
 ) -> None:
     """Copy each segment's position, orientation, joints and velocity.
 
@@ -262,6 +266,10 @@ def _read_segment_state(
         ]
         leg_joint_velocity[world_index, segment_index, leg_joint_index] = qvel[
             world_index, dof_address
+        ]
+    for side in range(2):
+        foot_position[world_index, segment_index, side] = geom_xpos[
+            world_index, foot_shape_ids[segment_index, side]
         ]
     spine_index = segment_index - spine_offset
     if spine_index >= 0 and spine_index < spine_qpos_addresses.shape[0]:
@@ -727,6 +735,7 @@ class GPUBackend:
             joint_force_signs, dtype=float, device=self.device
         )
         self.center_site_ids = to_gpu(mapping.center_site_ids)
+        self.foot_shape_ids = to_gpu(foot_shape_ids(mapping))
         self.geom_owner_indices = to_gpu(mapping.geom_owner_indices)
         self.geom_categories = to_gpu(mapping.geom_categories)
         self.head_tip_site_id = mapping.head_tip_site_id
@@ -762,6 +771,7 @@ class GPUBackend:
         self._front_end_position = wp.from_torch(
             state.front_end_position, dtype=wp.vec2
         )
+        self._foot_position = wp.from_torch(state.foot_position, dtype=wp.vec3)
         # Each segment's legs pressed by others during one physics step.
         self._leg_leg_pressed = wp.zeros(
             (world_count, self.segment_count), dtype=float, device=self.device
@@ -1181,6 +1191,7 @@ class GPUBackend:
                 self.spine_qpos_addresses,
                 self.spine_dof_addresses,
                 self.spine_joint_ids,
+                self.foot_shape_ids,
                 self.head_tip_site_id,
                 self.spine_offset,
                 self.gpu_model.site_bodyid,
@@ -1193,6 +1204,7 @@ class GPUBackend:
                 self.gpu_data.qvel,
                 self.gpu_data.cvel,
                 self.gpu_data.subtree_com,
+                self.gpu_data.geom_xpos,
             ],
             outputs=[
                 self._body_height,
@@ -1206,6 +1218,7 @@ class GPUBackend:
                 self._spine_yaw_position,
                 self._spine_yaw_velocity,
                 self._front_end_position,
+                self._foot_position,
             ],
             device=self.device,
         )
