@@ -205,6 +205,7 @@ def _read_segment_state(
     spine_dof_addresses: wp.array1d[int],
     spine_joint_ids: wp.array1d[int],
     head_tip_site_id: int,
+    spine_offset: int,
     # In: model
     site_bodyid: wp.array1d[int],
     body_rootid: wp.array1d[int],
@@ -238,7 +239,8 @@ def _read_segment_state(
     velocity at a shared reference point (the centre of mass of its whole
     tree), so it is first moved to the site, then turned into site axes.
     The spine joint read is the one behind the segment; the rear segment has
-    none, and its entries stay zero. The front end is the head's tip, and
+    none, and its entries stay zero. With a ``spine_offset`` of 1 it is the
+    joint ahead, and the front segment has none. The front end is the head's tip, and
     for every other segment its spine joint with the segment ahead.
     """
     world_index, segment_index = wp.tid()
@@ -261,12 +263,13 @@ def _read_segment_state(
         leg_joint_velocity[world_index, segment_index, leg_joint_index] = qvel[
             world_index, dof_address
         ]
-    if segment_index < spine_qpos_addresses.shape[0]:
+    spine_index = segment_index - spine_offset
+    if spine_index >= 0 and spine_index < spine_qpos_addresses.shape[0]:
         spine_yaw_position[world_index, segment_index] = qpos[
-            world_index, spine_qpos_addresses[segment_index]
+            world_index, spine_qpos_addresses[spine_index]
         ]
         spine_yaw_velocity[world_index, segment_index] = qvel[
-            world_index, spine_dof_addresses[segment_index]
+            world_index, spine_dof_addresses[spine_index]
         ]
 
     # The site's body velocity, stored at its tree's centre of mass in world axes.
@@ -507,6 +510,7 @@ def _add_segment_effort(
     world_mask: wp.array1d[wp.bool],
     scale: float,
     timestep: float,
+    spine_offset: int,
     # In and out
     leg_leg_pressed: wp.array2d[float],
     leg_leg_force: wp.array2d[float],
@@ -520,7 +524,7 @@ def _add_segment_effort(
     One thread per (world, segment), after ``_add_contact_forces``: the
     segment's pressed total adds ``scale`` times itself and its square, then
     starts again from zero; each of its leg motors and the spine motor behind
-    it adds torque times speed times ``timestep`` to its pushing work where
+    it (ahead, with a ``spine_offset`` of 1) adds torque times speed times ``timestep`` to its pushing work where
     positive, to its braking work where negative, and ``scale`` times its
     force to its force.
     """
@@ -549,14 +553,15 @@ def _add_segment_effort(
             motor_positive_work,
             motor_negative_work,
         )
-    if segment_index < spine_actuator_ids.shape[0]:
+    spine_index = segment_index - spine_offset
+    if spine_index >= 0 and spine_index < spine_actuator_ids.shape[0]:
         motor_force[world_index, segment_index, leg_actuator_ids.shape[1]] += (
-            scale * actuator_force[world_index, spine_actuator_ids[segment_index]]
+            scale * actuator_force[world_index, spine_actuator_ids[spine_index]]
         )
         _add_motor_work(
             actuator_force,
             actuator_velocity,
-            spine_actuator_ids[segment_index],
+            spine_actuator_ids[spine_index],
             world_index,
             segment_index,
             timestep,
@@ -643,6 +648,7 @@ class GPUBackend:
         measure_effort: bool = False,
         measure_joint_forces: bool = False,
         max_restarted_worlds_per_action: int = 0,
+        spine_joint_ahead: bool = False,
     ) -> None:
         """Copy the model to the GPU and allocate everything the worlds need.
 
@@ -659,7 +665,8 @@ class GPUBackend:
         forces between bodies after every solve.
         Up to ``max_restarted_worlds_per_action`` worlds made non-finite in one
         action are put back to its start instead of stopping the run
-        (``_check_worlds``).
+        (``_check_worlds``). With ``spine_joint_ahead`` each segment's spine
+        entries are the joint ahead of it (``PhysicalState``).
         Each physical-state tensor is also kept as a Warp view sharing its
         memory, so kernels writing a view fill the tensor directly.
         """
@@ -689,6 +696,8 @@ class GPUBackend:
         self.measure_effort = measure_effort
         self.measure_joint_forces = measure_joint_forces
         self.max_restarted_worlds_per_action = max_restarted_worlds_per_action
+        # 1 when each segment's spine entries are the joint ahead of it.
+        self.spine_offset = int(spine_joint_ahead)
         self.timestep = float(model.opt.timestep)
         self.root_quaternion_address = mapping.root_qpos_address + 3
 
@@ -1052,6 +1061,7 @@ class GPUBackend:
                 world_mask,
                 scale,
                 self.timestep,
+                self.spine_offset,
             ],
             outputs=[self._leg_leg_pressed, leg_leg, leg_leg_squared, *motors],
             device=self.device,
@@ -1172,6 +1182,7 @@ class GPUBackend:
                 self.spine_dof_addresses,
                 self.spine_joint_ids,
                 self.head_tip_site_id,
+                self.spine_offset,
                 self.gpu_model.site_bodyid,
                 self.gpu_model.body_rootid,
                 self.gpu_data.site_xpos,

@@ -22,6 +22,11 @@ class SimulationSettings:
     ``terrain_path`` (from 2026-10-24) names a terrain file, whose ground
     replaces the model's flat floor (``simulation.model_spec``). Without it,
     the default, the body stands on the model's own floor.
+
+    ``spine_joint_ahead`` (follow-footsteps, 2026-11-03): each segment's
+    spine fields in the physical state, and the spine motor its unit
+    commands, are the joint ahead of it instead of the joint behind; the
+    front segment then has none, the rear segment one. Off by default.
     """
 
     model_path: Path
@@ -33,6 +38,7 @@ class SimulationSettings:
     start_heading_range_deg: float
     max_restarted_worlds_per_action: int
     terrain_path: Path | None = None
+    spine_joint_ahead: bool = False
 
     @classmethod
     def from_section(cls, values: dict) -> "SimulationSettings":
@@ -56,6 +62,7 @@ class SimulationSettings:
                 "max_restarted_worlds_per_action", default=0, minimum=0
             ),
             terrain_path=section.path("terrain_path", default=None),
+            spine_joint_ahead=section.boolean("spine_joint_ahead", default=False),
         )
         section.reject_unknown_keys()
         return settings

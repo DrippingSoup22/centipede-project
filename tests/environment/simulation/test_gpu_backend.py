@@ -443,6 +443,54 @@ def test_gpu_effort_matches_cpu_effort():
         )
 
 
+def test_with_the_spine_joint_ahead_both_backends_move_the_spine_entries():
+    """From the same settled state, with three spine joints bent and each
+    segment's spine entries the joint ahead of it, both backends put each
+    joint's angle and motor force on the same segment, the one behind it."""
+    cpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    cpu_model.opt.solver = SOLVERS[SOLVER]
+    mapping = ModelMapping.from_model(cpu_model)
+    segment_count = mapping.segment_count
+    cpu = CPUBackend(
+        cpu_model, mapping, 1, STEPS, measure_effort=True, spine_joint_ahead=True
+    )
+    cpu.reset(seed=0)
+    for _ in range(25):
+        cpu.step(torch.zeros(1, segment_count, 6))
+    gpu_model = mujoco.MjModel.from_xml_path("models/assembly_v3.xml")
+    gpu = GPUBackend(
+        gpu_model,
+        mapping,
+        1,
+        STEPS,
+        SOLVER,
+        128,
+        512,
+        measure_effort=True,
+        spine_joint_ahead=True,
+    )
+    gpu.reset(seed=0)
+    wp.to_torch(gpu.gpu_data.qpos)[0] = torch.from_numpy(cpu.world_data[0].qpos)
+    wp.to_torch(gpu.gpu_data.qvel)[0] = torch.from_numpy(cpu.world_data[0].qvel)
+    mjw.forward(gpu.gpu_model, gpu.gpu_data)
+
+    spine = torch.zeros(1, segment_count - 1)
+    spine[0, 2:5] = 0.6
+    for _ in range(2):
+        cpu.step(torch.zeros(1, segment_count, 6), spine)
+        gpu.step(torch.zeros(1, segment_count, 6).cuda(), spine.cuda())
+
+    def spine_entries(state):
+        return state.spine_yaw_position, state.motor_force[..., -1]
+
+    for expected, actual in zip(
+        spine_entries(cpu.physical_state), spine_entries(gpu.physical_state)
+    ):
+        # Joints 2 to 4 bent, on segments 3 to 5; the front segment has none.
+        assert expected[0, 3:6].abs().min() > 0 and not expected[0, 0]
+        assert torch.allclose(actual.cpu(), expected, atol=0.05 * expected.abs().max())
+
+
 TILTED_GROUND = """<mujoco>
   <worldbody>
     <geom name="ground" type="plane" size="1 1 0.01" euler="0 -20 0" />

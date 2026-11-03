@@ -26,7 +26,9 @@ class PhysicalState:
     The first ten fields form each segment's observation block, in order; the
     next two are used only for rewards and targets. The spine fields describe,
     for each segment, the yaw joint that joins it to the segment behind; the
-    rear segment has none, and its entries stay zero.
+    rear segment has none, and its entries stay zero. With the simulation's
+    ``spine_joint_ahead`` they describe the joint ahead of it instead, and
+    the front segment's entries stay zero.
 
     The tensors are created once and overwritten in place by every ``step()``
     and ``reset()``. After either returns, they describe the current state of

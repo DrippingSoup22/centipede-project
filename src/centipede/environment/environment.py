@@ -48,10 +48,11 @@ class Environment:
 
     Every tensor passed in or out has the worlds as its first dimension.
     Every unit commands its leg motors and, but the rear, the spine joint
-    behind it: ``segment_action_sizes`` lists each unit's actions and
-    ``action_size`` is the width of the joint action, the rear's last column
-    going to no motor. Each spine motor receives ``spine_action_scale`` times
-    its command. Rewards have two accounts, team and own, ``(W, N, 2)``. An
+    behind it, or with the simulation's ``spine_joint_ahead`` every unit but
+    the front the joint ahead of it: ``segment_action_sizes`` lists each
+    unit's actions and ``action_size`` is the width of the joint action, the
+    last column of the unit without a spine joint going to no motor. Each
+    spine motor receives ``spine_action_scale`` times its command. Rewards have two accounts, team and own, ``(W, N, 2)``. An
     episode never terminates: it is cut, and the agents value what would have
     followed, at the time limit, when the units' mean distance from the line
     passes their sight radius, or when the physics restarted the world; the
@@ -72,10 +73,14 @@ class Environment:
         self.body = body = self.simulation.body_measures
         self.sight_radius_m = settings.sight_radius_spacings * body.unit_spacing_m
 
-        self.segment_action_sizes = [legs + 1] * (segment_count - 1) + [legs]
+        # The unit that commands no spine joint: the rear, or the front.
+        self.spine_joint_ahead = settings.simulation.spine_joint_ahead
+        unit_without_spine = 0 if self.spine_joint_ahead else segment_count - 1
+        self.segment_action_sizes = [legs + 1] * segment_count
+        self.segment_action_sizes[unit_without_spine] = legs
         self.action_size = legs + 1
         commanded_joints = torch.ones((segment_count, legs + 1), device=self.device)
-        commanded_joints[-1, -1] = 0.0
+        commanded_joints[unit_without_spine, -1] = 0.0
         # What each motor receives for a command of 1: the spine's scaled.
         self.motor_scale = torch.ones(legs + 1, device=self.device)
         self.motor_scale[-1] = settings.spine_action_scale
@@ -410,9 +415,14 @@ class Environment:
             if self.tow.started
             else None
         )
-        self.simulation.step(
-            motor_command[..., :legs], motor_command[:, :-1, legs], body_forces
+        # Spine joint i, between units i and i + 1, is commanded by unit i,
+        # or with spine_joint_ahead by unit i + 1.
+        spine_command = (
+            motor_command[:, 1:, legs]
+            if self.spine_joint_ahead
+            else motor_command[:, :-1, legs]
         )
+        self.simulation.step(motor_command[..., :legs], spine_command, body_forces)
         if self.tow.started:
             moved = state.body_planar_position - before
             self.forward_speed.copy_(
@@ -620,7 +630,7 @@ class Environment:
         return command
 
     def _joint_velocity(self) -> torch.Tensor:
-        """Each unit's leg joints' speeds and the spine joint's behind it,
+        """Each unit's leg joints' speeds and the spine joint's it commands,
         ``(W, N, M + 1)`` rad/s."""
         state = self.simulation.physical_state
         return torch.cat(

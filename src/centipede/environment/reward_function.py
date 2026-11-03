@@ -316,7 +316,7 @@ class RewardFunction:
         else:
             team_energy = self.neighbourhoods @ own_energy
 
-        # The rear unit has no spine joint behind it.
+        # The unit that commands no spine joint has none to count.
         squared_speeds = state.leg_joint_velocity.square().sum(dim=-1)
         squared_speeds += (
             state.spine_yaw_velocity.square() * self.commanded_joints[:, -1]

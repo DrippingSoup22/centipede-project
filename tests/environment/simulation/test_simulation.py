@@ -39,6 +39,33 @@ def test_builds_from_settings_and_forwards_reset_and_step():
     assert torch.equal(state.leg_joint_position[1], moved[1])
 
 
+def test_with_the_spine_joint_ahead_each_segment_reports_the_joint_ahead():
+    """The same physics, its spine entries moved one segment back: each
+    segment's are the joint ahead of it, the front segment's zero, and each
+    spine motor's work moves with them."""
+    states = {}
+    for ahead in (False, True):
+        simulation = PhysicsSimulation(
+            settings(spine_joint_ahead=ahead), measure_effort=True
+        )
+        simulation.reset(seed=1)
+        simulation.step(torch.zeros(1, 8, 6), torch.full((1, 7), 0.5))
+        states[ahead] = simulation.physical_state
+    behind, ahead = states[False], states[True]
+
+    for field in ("spine_yaw_position", "spine_yaw_velocity"):
+        assert torch.equal(getattr(ahead, field)[:, 1:], getattr(behind, field)[:, :-1])
+        assert not getattr(ahead, field)[:, 0].any()
+    spine_force = ahead.motor_force[..., -1]
+    assert spine_force.abs().sum() > 0 and not spine_force[:, 0].any()
+    assert torch.equal(spine_force[:, 1:], behind.motor_force[:, :-1, -1])
+    for field in ("motor_positive_work", "motor_negative_work"):
+        assert not torch.equal(getattr(ahead, field), getattr(behind, field))
+        assert getattr(ahead, field).sum().item() == pytest.approx(
+            getattr(behind, field).sum().item()
+        )
+
+
 def test_a_timestep_that_does_not_fit_the_action_is_rejected(tmp_path):
     xml = Path("models/assembly_v3.xml").read_text(encoding="utf-8")
     uneven = tmp_path / "uneven_timestep.xml"

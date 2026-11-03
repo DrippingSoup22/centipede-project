@@ -39,8 +39,12 @@ class CPUBackend:
         start_heading_range_rad: float = 0.0,
         measure_effort: bool = False,
         measure_joint_forces: bool = False,
+        spine_joint_ahead: bool = False,
     ) -> None:
         """Create the worlds, their reset generators, and the physical state.
+
+        With ``spine_joint_ahead`` each segment's spine entries are the joint
+        ahead of it, the front segment's staying zero (``PhysicalState``).
 
         ``physics_steps_per_action`` is how many of the model's timesteps make
         one 20 ms action, and ``start_heading_range_rad`` how far a reset may
@@ -60,6 +64,10 @@ class CPUBackend:
         self.start_heading_range_rad = start_heading_range_rad
         self.measure_effort = measure_effort
         self.measure_joint_forces = measure_joint_forces
+        # The segments whose spine entries the spine joints, from the head
+        # back, fill: each joint's segment ahead, or with spine_joint_ahead
+        # its segment behind.
+        self.spine_rows = slice(1, None) if spine_joint_ahead else slice(None, -1)
         # The spine's yaw joints, from the head back: the joints its motors drive.
         self.spine_joint_ids = model.actuator_trnid[mapping.spine_actuator_ids, 0]
         self._joint_force_bodies, self._joint_force_signs = spine_joint_force_bodies(
@@ -260,13 +268,13 @@ class CPUBackend:
             (mapping.segment_count, mapping.leg_actuator_ids.shape[1] + 1)
         )
         segment_work[:, :-1] = motor_work[mapping.leg_actuator_ids]
-        segment_work[:-1, -1] = motor_work[mapping.spine_actuator_ids]
+        segment_work[self.spine_rows, -1] = motor_work[mapping.spine_actuator_ids]
         effort["motor_positive_work"] += np.maximum(segment_work, 0.0).sum(axis=1)
         effort["motor_negative_work"] += np.maximum(-segment_work, 0.0).sum(axis=1)
         effort["motor_force"][:, :-1] += (
             scale * data.actuator_force[mapping.leg_actuator_ids]
         )
-        effort["motor_force"][:-1, -1] += (
+        effort["motor_force"][self.spine_rows, -1] += (
             scale * data.actuator_force[mapping.spine_actuator_ids]
         )
 
@@ -396,11 +404,12 @@ class CPUBackend:
         self._front_end_position[world_index, 1:] = data.xanchor[
             self.spine_joint_ids, :2
         ]
-        # Each segment's joint behind it; the rear segment's entry stays zero.
-        self._spine_yaw_position[world_index, :-1] = data.qpos[
+        # Each segment's joint behind it (or ahead); the rear's (the front's)
+        # entry stays zero.
+        self._spine_yaw_position[world_index, self.spine_rows] = data.qpos[
             mapping.spine_qpos_addresses
         ]
-        self._spine_yaw_velocity[world_index, :-1] = data.qvel[
+        self._spine_yaw_velocity[world_index, self.spine_rows] = data.qvel[
             mapping.spine_dof_addresses
         ]
 

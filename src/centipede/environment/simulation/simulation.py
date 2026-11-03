@@ -148,6 +148,7 @@ class PhysicsSimulation:
                 start_heading_range_rad,
                 measure_effort,
                 measure_joint_forces,
+                settings.spine_joint_ahead,
             )
         else:
             # Imported here so that a CPU-only installation, without the
@@ -166,6 +167,7 @@ class PhysicsSimulation:
                 measure_effort,
                 measure_joint_forces,
                 settings.max_restarted_worlds_per_action,
+                settings.spine_joint_ahead,
             )
 
         self.segment_count = mapping.segment_count

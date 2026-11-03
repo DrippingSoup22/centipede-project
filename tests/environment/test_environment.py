@@ -978,6 +978,30 @@ def test_the_headless_tester_follows_its_line_and_a_world_that_loses_it_restarts
     assert not environment.adjust_curve_level()
 
 
+def test_with_the_spine_joint_ahead_every_unit_but_the_front_commands_it():
+    """Each unit's last command drives the spine joint ahead of it, and its
+    energy counts that joint; the front unit has none to command."""
+    settings = EnvironmentSettings.from_section(
+        {"simulation": HEADLESS | {"spine_joint_ahead": True}}
+    )
+    environment = Environment(settings)
+    assert environment.segment_action_sizes == [8] + [9] * 9
+    assert environment.reward.commanded_joints[:, -1].tolist() == [0.0] + [1.0] * 9
+    environment.reset(seed=0)
+    spine_commands = []
+    step = environment.simulation.step
+
+    def recorded_step(legs, spine, body_forces):
+        spine_commands.append(spine.clone())
+        step(legs, spine, body_forces)
+
+    environment.simulation.step = recorded_step
+    action = torch.zeros(2, 10, 9)
+    action[..., -1] = torch.linspace(0.1, 1.0, 10)
+    environment.step(action)
+    torch.testing.assert_close(spine_commands[0], 0.35 * action[:, 1:, -1])
+
+
 def test_episodes_start_in_the_weighted_areas_and_the_front_unit_sees_ahead(tmp_path):
     """On a ramp rising 50 mm a metre along x: every world starts in the only
     weighted area, and the front unit, facing +x, sees the ground rise ahead
